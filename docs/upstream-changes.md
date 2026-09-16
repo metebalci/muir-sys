@@ -134,7 +134,7 @@ while its row is blank.
 | b30b74f | analyze.lisp | `MAKE-AREA` ran twice *[imported file]* | + |
 | c7aa8f0 | analyze.lisp | wrong data-type constant scanning FEFs *[imported file]* | n/a |
 | b6e3469 | login.lisp | hard error when the home directory is absent *[imported file]* | + |
-| ad3ced8 | maksys.lisp | `CANONICALIZE-PATHNAME` unspecified type *[imported file]* | decide |
+| ad3ced8 | maksys.lisp | `CANONICALIZE-PATHNAME` unspecified type *[imported file]* | - |
 | ef01571, c55eac6 | maksys.lisp | CWARNS file name collision *[imported file]* | + |
 
 ### io/, io1/
@@ -160,7 +160,7 @@ while its row is blank.
 | 9f3c0e9 | peekch.lisp | host lookup for address 0 | + |
 | a59f26c | peekch.lisp | `HOSTAT-FORMAT-ANS` argument order | + |
 | 3a4a2f9, 7ca0409 | --- | HOSTS TEXT moved to `SYS: SITE;` | + |
-| fc0d7c4, 9de205d | chsncp.lisp | retransmission TIME variable scope *[imported file]* | decide |
+| fc0d7c4, 9de205d | chsncp.lisp | retransmission TIME variable scope *[imported file]* | - |
 | ffa42f2, 29726be | host.lisp | ZWEI host wrongly used as `ASSOCIATED-MACHINE` *[imported file]* | - |
 | c594ed8 | host.lisp | two fixes in one: `CLI:SOME` absent in the cold load, and a true-return bug. Split when applying *[imported file]* | - |
 
@@ -172,7 +172,7 @@ while its row is blank.
 | 2fc7825 | tscrol.lisp | `:SETUP` typo | + |
 | 0300fb4 | shwarm.lisp | Control-N motion bug | + |
 | 66438e6 | shwarm.lisp | `SI::VIDEO-BOARD-TYPE` undefined | n/a |
-| a0a0ef2 | wholin.lisp | prints NIL state | decide |
+| a0a0ef2 | wholin.lisp | prints NIL state | 1001 |
 | c2f1469, a8511d6 | --- | run-light initialisation on the CADR | + |
 | ef8bf89 | mouse.lisp | CADR mouse registers | n/a |
 | b3afdfd | tvdefs.lisp | `:VOLATILITY` to `MAKE-AREA` | n/a |
@@ -232,7 +232,7 @@ found by reading the neighbouring code.
 system is for the CADR.
 
 Rows marked **decide** need a ruling that is not mechanical; **asked** means a
-question is with the maintainer; **later** means deferred with a reason; and
+question is with the maintainer; **later** means deferred with a reason; **1001** means taken, but as new work for the next release; and
 **n/a** means System 100 does not contain the fault --- the code is already
 correct, or exists in 304 only because of an import.
 
