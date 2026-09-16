@@ -979,7 +979,8 @@ The keyword arguments are:
 		    (LET ((NAME (SUBSTRING LINE SP LEN)))
 		      (OR LIST (SETQ LIST (NCONS NAME)))
 		      (PUSH NAME (GET LIST :HOST-NAMES))))
-		   ((:SYSTEM-TYPE MACHINE-TYPE)
+		   ;; MACHINE-TYPE was unkeyworded, so that clause never matched.
+		   ((:SYSTEM-TYPE :MACHINE-TYPE)
 		    (PUTPROP LIST (INTERN (SUBSTRING LINE SP LEN) "") PROP))
 		   (OTHERWISE
 		    (LET ((FUNCTION (GET PROP 'HOST-ADDRESS-PARSER)))
