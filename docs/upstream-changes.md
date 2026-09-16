@@ -161,8 +161,8 @@ while its row is blank.
 | a59f26c | peekch.lisp | `HOSTAT-FORMAT-ANS` argument order | + |
 | 3a4a2f9, 7ca0409 | --- | HOSTS TEXT moved to `SYS: SITE;` | + |
 | fc0d7c4, 9de205d | chsncp.lisp | retransmission TIME variable scope *[imported file]* | decide |
-| ffa42f2, 29726be | host.lisp | ZWEI host wrongly used as `ASSOCIATED-MACHINE` *[imported file]* | decide |
-| c594ed8 | host.lisp | two fixes in one: `CLI:SOME` absent in the cold load, and a true-return bug. Split when applying *[imported file]* | decide |
+| ffa42f2, 29726be | host.lisp | ZWEI host wrongly used as `ASSOCIATED-MACHINE` *[imported file]* | - |
+| c594ed8 | host.lisp | two fixes in one: `CLI:SOME` absent in the cold load, and a true-return bug. Split when applying *[imported file]* | - |
 
 ### window/ --- every one on an imported file
 
@@ -173,12 +173,12 @@ while its row is blank.
 | 0300fb4 | shwarm.lisp | Control-N motion bug | + |
 | 66438e6 | shwarm.lisp | `SI::VIDEO-BOARD-TYPE` undefined | n/a |
 | a0a0ef2 | wholin.lisp | prints NIL state | decide |
-| c2f1469, a8511d6 | --- | run-light initialisation on the CADR | decide |
+| c2f1469, a8511d6 | --- | run-light initialisation on the CADR | + |
 | ef8bf89 | mouse.lisp | CADR mouse registers | n/a |
 | b3afdfd | tvdefs.lisp | `:VOLATILITY` to `MAKE-AREA` | n/a |
 | ca35ad6 | inspct.lisp | `EH:ABORT-OBJECT` | n/a |
 | 6f5c43f, 2b90b70, a027152 | --- | bogus `SYS:DOWNWARD-FUNCTION` declarations | n/a |
-| 19607ec | cold.lisp | restores the old CADR keyboard decoder and comments out the LMI Explorer path | decide |
+| 19607ec | cold.lisp | restores the old CADR keyboard decoder and comments out the LMI Explorer path | see #17 |
 | fc010ae | rh.lisp | Control-Shift-A | n/a |
 
 ### zwei/ --- every one on an imported file
