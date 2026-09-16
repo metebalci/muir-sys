@@ -118,7 +118,7 @@ while its row is blank.
 | ade79f7, 3175b7b | qmisc.lisp | `ARRAY-POP` typo | + |
 | f44580b | genric.lisp | `KEY-FETCH`, wrong LAMBDA optimisation | + |
 | ff43599 | qcfile.lisp | `COMPILE-FILE` keyword name not Common Lisp's | + |
-| 96d031e | ltop.lisp | `LISP-REINITIALIZE` typo | asked |
+| 96d031e | ltop.lisp | the boot-work block ran on user calls instead of at boot | + |
 | d607c71 | eval.lisp | `LETF`/`LETF*`, stray parens round `WITH-STACK-LIST` | + |
 | 405f037 | qcopt.lisp | typo in a warning string | + |
 
