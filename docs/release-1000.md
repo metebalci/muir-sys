@@ -19,6 +19,16 @@ repository for anything that turns out to be wanted.
   its disk-formatting microcode, `dcfu.uload`, that had strayed into `cc/`.
 - **The Xerox Press and Dover printing binaries.**
 - **`cold/minisr`**, the PDP-10 MINI server, whose work ozd does.
+- **Files nothing names and nothing needs:** the old evaluator and package
+  system (`sys/qev.lisp`, `sys/pack4.lisp`), which `eval` and `clpack` replaced;
+  an alternate network window front end and a TELNET scrap in `window/`; Dover
+  and Versatec printing code (`io1/dplt`, `io1/rfontx`, `demo/versat`); MacLisp
+  leftovers (`sys2/condit`, `sys2/cmany`, `ucadr/cadldb`); an unused access
+  interface, mail server, reader comparer and error-handler stub
+  (`file/fsname`, `zmail/lmcsrv`, `io/rcomp`, `eh/ehsys`); and two microcode
+  fragments nothing assembles (`ucadr/mmtest`, `ucadr/uc-array-cache`).
+- **`distribution/`**, LMI's tools for copying the system to another host or
+  to tape for shipping to a site.
 - **`ucadr/obsolete-cold-load-maker.lisp`**, the old loader that pushed a cold-load
   file into a CADR from a second machine; `MAKE-COLD` replaced it.
 - **`file2/`**, the older LMFILE file computer, except `file2/pathnm.lisp`,
@@ -83,6 +93,7 @@ repository for anything that turns out to be wanted.
 
 - **MagTape, ITS-Tape and VMS-Tape** (`file/fs.lisp`, `sys/sysdcl.lisp`).
 - **LFS, LMFILE-Server and LMFILE-Remote** (`sys/sysdcl.lisp`).
+- **Distribution** (`file/fs.lisp`).
 - **PRESS**, printing to a Xerox Dover (`io1/press.lisp` and `io1/rfontw.lisp`
   deleted; `sys/sysdcl.lisp`). Six files still name the PRESS package in their
   hardcopy paths (#14).
@@ -101,7 +112,7 @@ records, and checked against these files before they were applied.
   (`genric`).
 - **`sys2/`:** `ADVISE-FIND-SLOT`'s misspelled argument (`advise`); the
   `DEFRESOURCE` deinitializer test (`resour`); a paren inside a `SETF` place
-  (`defsel`); an uncommented attribute line (`cmany`); a ZWEI call guarded for
+  (`defsel`); a ZWEI call guarded for
   bands without ZWEI (`flavor`); `DEFVAR` so reloading makes no second area
   (`analyze`); warnings files named after their system (`maksys`); login
   without a home directory no longer enters the debugger (`login`).

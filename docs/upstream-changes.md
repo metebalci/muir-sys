@@ -129,7 +129,7 @@ while its row is blank.
 | 453f571 | advise.lisp | `ADVISE-FIND-SLOT` typo | + |
 | 4190c02 | resour.lisp | `DEFRESOURCE` deinitializer typo | + |
 | cd210c8 | defsel.lisp | `DEFSELECT-INTERNAL` `SETF` typo | + |
-| d1ca3e1 | cmany.lisp | missing `;` on the attribute line | + |
+| d1ca3e1 | cmany.lisp | missing `;` on the attribute line | n/a — the file is no longer carried |
 | 94c738c | flavor.lisp | guard `ZWEI:SORT-COMPLETION-AARRAY` | + |
 | b30b74f | analyze.lisp | `MAKE-AREA` ran twice *[imported file]* | + |
 | c7aa8f0 | analyze.lisp | wrong data-type constant scanning FEFs *[imported file]* | n/a |
