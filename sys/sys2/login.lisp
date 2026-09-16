@@ -54,10 +54,16 @@ the local file system if one is loaded."
 	;;(FS:SET-DEFAULT-PATHNAME (FS:USER-HOMEDIR) FS:LOAD-PATHNAME-DEFAULTS)
 	(SETQ WIN-P T)
 	(WHEN LOAD-INIT-FILE-P
-	  (LOAD (FS:INIT-FILE-PATHNAME "LISPM" HOST)
-		:PACKAGE "USER"
-		:IF-DOES-NOT-EXIST NIL
-		:SET-DEFAULT-PATHNAME NIL)))	;already done explicity above
+	  ;; :IF-DOES-NOT-EXIST NIL covers a missing file but not a missing
+	  ;; directory, so logging in as a user with no home directory landed in
+	  ;; the debugger.
+	  (CONDITION-CASE ()
+	      (LOAD (FS:INIT-FILE-PATHNAME "LISPM" HOST)
+		    :PACKAGE "USER"
+		    :IF-DOES-NOT-EXIST NIL
+		    :SET-DEFAULT-PATHNAME NIL)
+	    (FS:DIRECTORY-NOT-FOUND-ERROR
+	      (FORMAT T "~&No home directory for ~A; init file not loaded.~%" USER-ID)))))	;already done explicity above
       (UNLESS WIN-P
 	;; If user aborts during login, particularly if he types Abort when
 	;; being asked for his password, log him out so he can try again.  But

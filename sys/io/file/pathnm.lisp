@@ -1233,7 +1233,10 @@ In this normal case, we must swap in the first arg but not the second."
 
 (DEFUN DEFAULT-HOST (DEFAULTS &AUX ELEM)
   "Return the default host to use from defaults-list or pathname DEFAULTS."
-  (OR DEFAULTS (SETQ DEFAULTS *DEFAULT-PATHNAME-DEFAULTS*))
+  ;; (NIL) and ((NIL)) are defaults lists holding no default, which is
+  ;; what there is before anyone has logged in; take the globals then too.
+  (WHEN (OR (NULL DEFAULTS) (EQUAL DEFAULTS '(NIL)) (EQUAL DEFAULTS '((NIL))))
+    (SETQ DEFAULTS *DEFAULT-PATHNAME-DEFAULTS*))
   (COND ((AND DEFAULTS (ATOM DEFAULTS))
 	 (PATHNAME-RAW-HOST (PARSE-PATHNAME DEFAULTS)))
 	(T
@@ -1242,8 +1245,12 @@ In this normal case, we must swap in the first arg but not the second."
 			       (AND (CDR DEFAULT) (RETURN DEFAULT))))))
 	 ;; If none better found, take the one for the login machine
 	 (OR (CDR ELEM)
-	     (SETQ ELEM (OR (ASSQ USER-LOGIN-MACHINE DEFAULTS)
-			    (NCONS USER-LOGIN-MACHINE))))
+	     ;; before login USER-LOGIN-MACHINE is NIL, and this made a
+	     ;; default for no machine at all.  Fall back to the machine this one
+	     ;; is associated with (NETWORK; HOST:521).
+	     (LET ((MACHINE (OR USER-LOGIN-MACHINE SI::ASSOCIATED-MACHINE)))
+	       (SETQ ELEM (OR (ASSQ MACHINE DEFAULTS)
+			      (NCONS MACHINE)))))
 	 ;; If there isn't one already, build a pathname from the host of this one
 	 (OR (CAR ELEM) (PATHNAME-HOST (CDR ELEM))))))
 
@@ -1254,7 +1261,10 @@ In this normal case, we must swap in the first arg but not the second."
 (DEFUN DEFAULT-PATHNAME (&OPTIONAL DEFAULTS HOST DEFAULT-TYPE DEFAULT-VERSION INTERNAL-P
 			 &AUX ELEM PATHNAME HOST-TO-USE CTYPE OTYPE)
   (AND HOST (SETQ HOST (GET-PATHNAME-HOST HOST)))
-  (OR DEFAULTS (SETQ DEFAULTS *DEFAULT-PATHNAME-DEFAULTS*))
+  ;; (NIL) and ((NIL)) are defaults lists holding no default, which is
+  ;; what there is before anyone has logged in; take the globals then too.
+  (WHEN (OR (NULL DEFAULTS) (EQUAL DEFAULTS '(NIL)) (EQUAL DEFAULTS '((NIL))))
+    (SETQ DEFAULTS *DEFAULT-PATHNAME-DEFAULTS*))
   (COND ((AND DEFAULTS (ATOM DEFAULTS))
 	 (SETQ PATHNAME (PARSE-PATHNAME DEFAULTS)))
 	(T
@@ -1264,8 +1274,12 @@ In this normal case, we must swap in the first arg but not the second."
 			       (AND (CDR DEFAULT) (RETURN DEFAULT))))))
 	 ;; If none better found, take the one for the login machine
 	 (OR (CDR ELEM)
-	     (SETQ ELEM (OR (ASSQ USER-LOGIN-MACHINE DEFAULTS)
-			    (NCONS USER-LOGIN-MACHINE))))
+	     ;; before login USER-LOGIN-MACHINE is NIL, and this made a
+	     ;; default for no machine at all.  Fall back to the machine this one
+	     ;; is associated with (NETWORK; HOST:521).
+	     (LET ((MACHINE (OR USER-LOGIN-MACHINE SI::ASSOCIATED-MACHINE)))
+	       (SETQ ELEM (OR (ASSQ MACHINE DEFAULTS)
+			      (NCONS MACHINE)))))
 	 ;; If there isn't one already, build a pathname from the host of this one
 	 (SETQ HOST-TO-USE (OR HOST (CAR ELEM) (PATHNAME-HOST (CDR ELEM))))
 	 (COND ((SETQ PATHNAME (CDR ELEM)))

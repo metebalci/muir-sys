@@ -1586,10 +1586,11 @@ NIL says that no completion was possible."
       (let ((position (string-search-set '(#/space #/. #/-) name)))
 	(if position (setq name (substring name 0 position))))
       (setq name (string-append name "*"))
-      (let ((temp-pathname (fs:parse-pathname name (send pathname :host))))
-	(setq directory-pathname (send pathname
+      ;; the name is used as it stands.  Parsing it and taking :NAME back out
+      ;; changes its case for a Unix host, and completion then matched nothing.
+      (setq directory-pathname (send pathname
 				     :new-pathname
-				     :name (send temp-pathname :name) :version :wild)))))
+				     :name name :version :wild))))
   ;; now get directory-list
   (setq directory-list (send directory-pathname :DIRECTORY-LIST options))
   (if (errorp directory-list)
