@@ -198,6 +198,10 @@
 		(MINI-SEND-STS))		; an old pkt due to lost STS
 	   ))))
 
+;;; the two OTHERWISE clauses below print the operation with ~S.  They
+;;; passed OP to MINI-BARF already, but its format string had no directive for
+;;; it, so a cold load stopped at "Unknown stream operation" without naming the
+;;; operation, which is the one fact needed to fix such a stop.
 ;;; Stream which does only 16-bit binary input
 (DEFUN MINI-BINARY-STREAM (OP &OPTIONAL ARG1 ARG2)
   (CASE OP
@@ -229,7 +233,7 @@
     (:GENERIC-PATHNAME 'MINI-PLIST-RECEIVER)
     (:INFO MINI-FILE-ID)
     (:CLOSE (DO () (MINI-EOF-SEEN) (MINI-BINARY-STREAM :TYI)))
-    (OTHERWISE (MINI-BARF "Unknown stream operation" OP))))
+    (OTHERWISE (MINI-BARF "Unknown stream operation ~S" OP))))
 
 ;;; stream which does only character input
 (DEFUN MINI-ASCII-STREAM (OP &OPTIONAL ARG1 ARG2)
@@ -265,7 +269,7 @@
     (:GENERIC-PATHNAME 'MINI-PLIST-RECEIVER)
     (:INFO MINI-FILE-ID)
     (:CLOSE (DO () (MINI-EOF-SEEN) (MINI-ASCII-STREAM :TYI)))
-    (OTHERWISE (MINI-BARF "Unknown stream operation" OP))))
+    (OTHERWISE (MINI-BARF "Unknown stream operation ~S" OP))))
 
 (DEFUN MINI-BARF (&REST ARGS)
   (SETQ MINI-OPEN-P NIL)			;Force re-open of connection
