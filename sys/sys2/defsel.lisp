@@ -142,7 +142,8 @@ FSPEC is either a symbol, or a list of a function spec
   (do ((method method-list (cdr method))
        (sublist new-alist (cdr sublist)))
       ((null method))
-    (setf (car sublist (cons (car method) 'select-method-undefined-message)))
+    ;; the closing paren sat inside the SETF place, so this stored nothing.
+    (setf (car sublist) (cons (car method) 'select-method-undefined-message))
     (if (setq tem (assq-careful (car method) old-alist))
 	(setf (cdr (car sublist)) (cdr tem))))
   (setq tem (%make-pointer dtp-select-method new-alist))

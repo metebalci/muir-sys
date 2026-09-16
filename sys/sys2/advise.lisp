@@ -103,7 +103,8 @@ If given no arguments, ADVISE returns a list of functions which are presently ad
 (defun advise-find-slot (function-spec class &aux body)
   (uncompile function-spec t)
   (setq body (encapsulation-body (fdefinition function-spec)))
-  (nthcdr (ecase classs
+  ;; CLASSS was a misspelling of the CLASS argument.
+  (nthcdr (ecase class
 	    (:before 1)
 	    (:after 2)
 	    (:around 3))
