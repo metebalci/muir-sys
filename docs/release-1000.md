@@ -15,16 +15,33 @@ repository for anything that turns out to be wanted.
 - **`tape/`**, and the MagTape code that lived in `file/`: `mtdefs`, `mtstr`,
   `mtaux`, `odump`. No machine this system targets has a tape drive.
 - **`doc/`**, bug mail and bboard archives that nothing loads.
-- **`ubin/`**, which the micro assembler writes from `ucadr/`.
+- **`ubin/`**, which the micro assembler writes from `ucadr/`, and the copy of
+  its disk-formatting microcode, `dcfu.uload`, that had strayed into `cc/`.
 - **The Xerox Press and Dover printing binaries.**
 - **`cold/minisr`**, the PDP-10 MINI server, whose work ozd does.
+- **`ucadr/obsolete-cold-load-maker.lisp`**, the old loader that pushed a cold-load
+  file into a CADR from a second machine; `MAKE-COLD` replaced it.
 - **`file2/`**, the older LMFILE file computer, except `file2/pathnm.lisp`,
   which System loads for LMFILE pathnames.
 - **Every patch file and every patch directory except System's own.** This system makes
   releases, never patches.
 - **The `-read-.-this-` directory notes** and two scratch files in `cc/`.
+- **`zwei/.comnd.text`**, a generated ZMacs command list whose name carried a
+  Control-V byte, ITS's quote character for file names.
+- **Renamed rather than left out:** four notes in `man/` had the same Control-V
+  at the front of their names, which Unix tools mishandle. They are imported
+  as `bug.lmman`, `dlw.wordab`, `forma.text` and `machn.compar`.
+- **The BUG-ZWEI and BUG-ZMAIL mail archives** in `zwei/` and `zmail/`, 1982-84,
+  about 2.7 MB of saved mailing-list traffic, and three files misnamed
+  `.text`: the PDP-10 DOOR server's source (`io1/door.text`), old MacLisp
+  code (`io1/mouse.text`), and a stray binary (`ucadr/ucadlr.text`).
+- **Kept as reference:** `man/` and `wind/`, the Lisp Machine Manual and the
+  Window System manual in Bolio source, which describe this system but which
+  nothing here formats.
 - **Generated output**: compiler warning databases, tag tables, mail indexes,
-  and every QFASL except the fonts and `demo/tvbgar`, which have no source.
+  and every QFASL except three that nothing here can make again: the fonts,
+  `demo/tvbgar`, and `sys/ucinit.qfasl`, which records the functions
+  microcompiled into the microcode and was written once, by hand, at MIT.
 
 ## The release's identity
 
