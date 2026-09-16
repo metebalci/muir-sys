@@ -1,0 +1,8 @@
+;		    Z54 Host Table	-*-Mode: TEXT; NoFill: T-*-
+;
+; The hosts of the Z54 site, on Chaosnet subnet 376.
+; Format: HOST name, address, status, system type, machine type, [nicknames]
+; Addresses are octal.
+
+HOST OZ,		CHAOS 177201,SERVER,UNIX,UNIX
+HOST LISPM-1,		CHAOS 177202,USER,LISPM,CADR

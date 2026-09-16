@@ -1,0 +1,20 @@
+;;;-*- Mode:LISP; Package:FS; Base:10 -*-
+
+;;; SYS: at the Z54 site. OZ serves the sources at /sys and this site's own
+;;; files at /site. Targets are host-less: the physical host is OZ.
+;;;
+;;; Every slash is doubled, and this file names no readtable, on purpose.
+;;; A cold load reads it with MINI-READFILE (SYS: COLD; MINI), which does not
+;;; look at a file's attribute list, so the file is read in the traditional
+;;; readtable whatever the attribute line says. There a slash escapes the next
+;;; character: with single slashes the strings below run together, a string is
+;;; left unterminated, and the cold load stops with "End of file ... in the
+;;; middle of the list". MIT's own site file never met this, its translation
+;;; targets being TOPS-20 paths with no slashes in them.
+
+(SET-LOGICAL-PATHNAME-HOST "SYS"
+  :PHYSICAL-HOST "OZ"
+  :TRANSLATIONS '(("SITE;" "//site//")
+                  ("*; *; *;" "//sys//*//*//*//")
+                  ("*; *;" "//sys//*//*//")
+                  ("*;" "//sys//*//")))
