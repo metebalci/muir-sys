@@ -1,0 +1,34 @@
+# The development pack: the disk image muir boots and writes to.
+/pack.img
+
+# Compiled output. The Lisp compiler's QFASL files, and the whole of sys/ubin/,
+# which the micro assembler writes from sys/ucadr/ --- the microcode from the
+# uc-*.lisp files listed in ucadr/ucode.lisp, and the boot PROM from
+# ucadr/promh.text.
+*.qfasl
+/sys/ubin/
+
+# Three exceptions, none of which anything here can make again. The fonts have
+# no source form here (docs/fonts.md); demo/tvbgar holds saved arrays rather
+# than compiled code; and sys/ucinit records the functions microcompiled into
+# the microcode, written once by hand (sys/mlap.lisp, whose writer has no caller).
+!/sys/fonts/*.qfasl
+!/sys/demo/tvbgar.qfasl
+!/sys/sys/ucinit.qfasl
+
+# Output the build writes beside the sources: compiler warning databases, the
+# editor's tag tables, and the mail reader's index files.
+*cwarns*.lisp
+*.tags
+*.idx
+
+# Working notes for Claude Code: local paths and hosts, not for the repository.
+/CLAUDE.md
+
+# Local copies of material the repository does not carry, each with a README of
+# its own: LM-3's releases in full, to copy from when something turns out to be
+# wanted (lm3-99.32/, lm3-100/, lm3-304/), and
+# the MIT font sources recovered by the ITS reconstruction project (lmfont/).
+# docs/fonts.md has the rest.
+/lm3-*/
+/lmfont/
