@@ -118,7 +118,13 @@ COLD-BOOT is T if this is for a cold boot."
 			;;					     in case ucode grows.
 			:AREA PERMANENT-STORAGE-AREA)))
 
-  (UNLESS (NOT CALLED-BY-USER)
+;;; this block is boot work --- unloading microcompiled definitions,
+;;; setting up the TV sync program before anything reads the TV buffer, the
+;;; run-light location, and clearing the screen after a cold boot --- and the
+;;; test ran it in the other case.  LISP-REINITIALIZE takes CALLED-BY-USER as
+;;; T by default and the boot path calls it with NIL (:71), so (UNLESS (NOT
+;;; CALLED-BY-USER) ...) skipped all of it at boot and did it on a user call.
+  (UNLESS CALLED-BY-USER
      (IF (FBOUNDP 'COMPILER::MA-RESET)	;Unload microcompiled defs, because they are gone!
 	 (COMPILER::MA-RESET))		; Hopefully manage to do this before any gets called.
      ;; Set up the TV sync program as soon as possible; until it is set up
