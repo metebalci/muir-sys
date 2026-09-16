@@ -57,8 +57,23 @@ hand instead, in the order SYSTEM's own ALLDEFS module lists them
 **Then the systems**, with the version left where it is:
 
 ```lisp
-(make-system 'system :recompile :noload :noconfirm :defaulted-batch :no-increment-patch)
+(make-system 'system :recompile :noload :noconfirm :nowarn :no-increment-patch)
 ```
+
+**`:NOWARN` rather than `:DEFAULTED-BATCH`.** Both stop the build asking
+questions, but they are not the same thing. `:NOWARN` (`sys2/maksys.lisp:474`)
+sets four variables and opens no file: `INHIBIT-FDEFINE-WARNINGS` to
+`:JUST-WARN`, more-processing off, batch mode on, and `*QUERY-TYPE*` to
+`:NOCONFIRM`. `:DEFAULTED-BATCH` (`:482`) does all that *and* writes a compiler
+warnings database to the login user's home directory on the file server ---
+`/lispm/cwarns.lisp` for user LISPM. If the server has no such directory to
+write into, the build stops at once with "Access to file denied", which is what
+happened here on the first attempt; a server that reports it differently says
+"Directory not found" instead. `:BATCH` implies `:NOWARN` (`:1564`), not the
+other way round.
+
+So either give the server a writable home directory for the user, or ask for
+`:NOWARN` and do without the database --- which this repository ignores anyway.
 
 ## The stages
 
