@@ -1,0 +1,913 @@
+.c -*-Mode:Bolio; Lowercase: Yes-*-
+
+.chapter Frames
+.setq frame-chapter chapter-number
+.setq frames section-page
+.cindex frame
+.cindex pane
+
+A 2frame* is a window that is divided into sub-windows, using the
+hierarchical structure of the window system (discussed in
+(window-hierarchy)).  The sub-windows are called 2panes*.  The panes
+are the inferiors of the frame, and the frame is the superior of each
+pane.  Several heavily-used systems programs use frames.  For example,
+inspector windows are frames.  The default inspector window has six
+panes: the interaction pane on top, the history pane and command menu
+pane below it, and three inspect panes below that.  The window debugger
+and Zmacs also use frames.  In Zmacs, each new editor window is a pane
+of the Zmacs Frame.  ZMail uses several different frames, even frames
+within other frames.
+
+From these examples, you can see some of the things that frames are good
+for.  In general, by using a frame as a user interface to an interactive
+subsystem, you get a convenient way to put many different things on the
+screen, each in its own place.  Generally you can split up the frame
+into areas in which you can display text or graphics, areas where you
+can put menus or other mouse-sensitive input areas, and areas to
+interact with, in which keyboard input is echoed or otherwise
+acknowledged.
+
+It is usually best for a frame and its panes to be treated as a unit by
+the system menu 3Select* menu and by the 3Terminal* and 3System*
+keys.  The mixins 3tv:inferiors-not-in-select-menu-mixin*
+((select-menu)) and 3tv:alias-for-inferiors-mixin*
+((previously-selected-windows-section)), respectively, in the frame's
+flavor bring this about.  Then selection of panes within the frame is
+done by making the chosen pane the selection substitute of the frame
+((selection-substitutes)).  The program managing the frame can maintain
+a "selected pane within the frame" this way, while letting the user decide
+when to select the frame as a whole.
+
+It is also common for all of the panes to use the same input buffer so
+that the program can always do its input in the same fashion and collect
+keyboard and mouse input from all the panes.  See (shared-input-buffers).
+
+It is also possible to have frames with less coupling between their
+panes.  For example, the frame you get from requesting a frame in the
+system menu 3Split Screen* option does make its panes share an input buffer,
+and allows them to be individually represented in the 3Select* menu
+and for 3Terminal* and 3System* commands.  It also lets the panes
+be selected in their own right and not as substitutes for the frame.
+This is done because typically each window in the split screen frame
+is managed by its own process.
+
+One kind of frame is the 2constraint frame*, which adjusts the shapes
+of its panes automatically as its own shape is changed.  These frames
+are described first since they are a ready-to-use facility.  More basic
+frame flavors can be built upon to create frames which manage their
+panes' exposure and shapes in other ways.  The editor, for example, does this.
+
+.defflavor tv:basic-frame
+All frame flavors are built on this one.  3tv:frame-forwarding-mixin*
+(see (tv:frame-forwarding-mixin-flavor)) mixed with this provides
+a non-constraint frame to which you need only add code to decide when
+to expose the panes and how big to make them.
+
+.setq frame-flavor-components page
+3tv:basic-frame* is nearly the same as 3tv:minimum-window*; it does
+2not* have all the mixins that go into the 3tv:window* flavor.  In
+particular, it does not provide for borders or a label, and it cannot be
+the selected window.  It also has 3tv:delay-notification-mixin* (see
+(tv:delay-notification-mixin-flavor)) as a component.
+.end_defflavor
+
+.section Constraint Frames
+.cindex constraint frames
+.setq constraint-frames section-page
+
+If you use 3Edit Screen* to change the shape of an inspector or
+debugger window frame, the shapes of the panes are all changed so that
+the proportions come out looking as they are supposed to.  If you play
+around with 3Edit Screen* enough, you can even see the menus reformat
+themselves (changing their numbers of rows and columns) in order to keep
+all of their items visible.  The way all this works is that the
+positions and shapes of the panes, instead of being explicitly specified
+in units of pixels, are specified symbolically.  When the window changes
+shape, the symbolic description is elaborated again in light of the new
+shape, and the panes are reshaped appropriately.
+
+This set of symbolic descriptions is called a set of constraints.
+When you make a constraint frame, you specify the configuration of panes
+within the frame by creating list structure to represent the layout.
+The format of this list structure is called the constraint language.  It
+lets you say things like "give this pane one third of the remaining
+room, then give that pane 17 pixels, and then divide what remains
+between these two panes, evenly." The constraint language is fairly
+complex, and is described in full detail later.  In general, a frame can
+have many different 2configurations*.  Each configuration is described in
+the constraint language, and each specifies one way of splitting up the
+frame.  While the program is running, it can switch a frame from one
+configuration to another.  Some panes may appear in more than one
+configuration, but other panes may be left out of one configuration, and
+may only be visible when the frame is switched to another configuration.
+For example, in ZMail, when you click on 3Profile*, the frame
+changes to a new configuration whose panes include a profile editor window
+and another frame, the profile button frame.
+
+.subsection Constraint Frame Flavors
+
+The processing of constraints is actually implemented by a frame mixin
+called 3tv:basic-constraint-frame*.
+
+The flavor of the frame itself might be any of several flavors.  The
+simplest thing for it to be is 3tv:constraint-frame*.
+
+.defflavor tv:constraint-frame
+This flavor is the basic kind of constraint frame.  The rest of this
+section describes its behavior in detail.  This flavor, like
+3tv:basic-frame*, does not provide for borders, a label, or for being
+selected.
+.end_defflavor
+
+.defflavor tv:bordered-constraint-frame
+This flavor is just 3tv:constraint-frame* with 3tv:borders-mixin*
+(see (tv:borders-mixin-flavor)) mixed in at the right place.  It will
+have a border around the edge.  By default (using the
+3:default-init-plist* option of the flavor system), the
+3:border-margin-width* is zero, so the panes at the edges of the frame
+are right next to the border itself.
+.end_defflavor
+
+Bordered constraint frames are used most often.  Usually, each of the
+panes has borders, and the frame does too.  A reason for this is that
+when two of the panes are right next to each other, which they usually
+are, their borders are side by side, and so look like a double-thick
+line.  In order to make the edges of the panes that are at the edge of
+the frame (rather than up against another pane) look like they are the
+same thickness, the frame has a border itself.
+
+A convenient way to make all the panes of a constraint frame use the
+same input buffer is to use one of the following flavors:
+
+.defflavor tv:constraint-frame-with-shared-io-buffer
+This is like 3tv:constraint-frame*, but all the panes
+of the frame share the same input buffer used by the frame itself.
+See (shared-input-buffers).
+.end_defflavor
+
+.defflavor tv:bordered-constraint-frame-with-shared-io-buffer
+This is just like 3tv:constraint-frame-with-shared-io-buffer* except
+that it has 3tv:borders-mixin* mixed into it at the right place, so
+that the frame has a border around it.
+.end_defflavor
+
+.definitoption tv:constraint-frame-with-shared-io-buffer :io-buffer io-buffer
+If this option is present, 2io-buffer* is used as the input buffer for
+the frame and the panes.  Otherwise, a default input buffer is created.
+(See (io-buffer) for a discussion of I/O buffers.)
+.end_definitoption
+
+.subsection Examples of Specifications of Panes and Constraints
+
+The full description of how to use constraint frames, including the full
+constraint language, is rather complicated.  The complete specifications
+are given in the next section; this section gives some common examples,
+in order to show the general idea of how the specifications work.
+
+The following form creates a constraint frame with two panes, one on top
+of the other, each of which takes up half of the frame.
+.lisp
+(make-instance 'tv:constraint-frame
+	       ':panes
+		  '((top-pane tv:window)
+		    (bottom-pane tv:window))
+	       ':constraints
+		  '((main . ((top-pane bottom-pane)
+			     ((top-pane 0.5))
+			     ((bottom-pane :even))))))
+.end_lisp
+Two initialization options were given to the 3tv:constraint-frame*
+flavor: the 3:panes* option and the 3:constraints* option.  The
+meaning of the 3:panes* specification is: "This frame is made of the
+following panes.  Call the first one 3top-pane*; its flavor is
+3tv:window*.  Call the second one 3bottom-pane*; its flavor is
+3tv:window*".  The meaning of the 3:constraints* specification is:
+"There is just one configuration defined for this pane; call it
+3main*.  In this configuration, the panes that appear are, in order
+from top to bottom, 3top-pane* and 3bottom-pane*.  3top-pane*
+should use up 30.5* of the room.  3bottom-pane* should use up all the
+rest of the room."
+
+This example demonstrates some more features:
+.lisp
+(make-instance 
+  'tv:bordered-constraint-frame
+  ':panes
+    '((graphics-pane tv:window
+	 :label nil :blinker-p nil)
+      (message-pane tv:window
+         :label "Message Pane" :blinker-p nil)
+      (interaction-pane tv:window))
+  ':constraints
+    '((main . ((interaction-pane graphics-pane message-pane)
+	       ((message-pane 4 :lines))
+	       ((graphics-pane 400))
+	       ((interaction-pane :even))))))
+.end_lisp
+This frame has a border around the edges (because of the flavor of the
+frame itself), and it has three panes.  The panes are given some
+initialization options themselves.  The topmost pane is
+3interaction-pane*, 3graphics-pane* is in the middle, and
+3message-pane* is on the bottom.  3message-pane* is four lines high,
+3graphics-pane* is 3400* pixels high, and 3interaction-pane* uses
+up all remaining space.
+
+Here is a window that has two possible configurations.  In the first
+one, there are three little windows across the top of the frame and a
+big window beneath them; in the second one, the same big window is at
+the top of the frame, and underneath it is a strip split between a menu
+and another window.
+.lisp
+(make-instance
+ 'tv:bordered-constraint-frame
+ ':panes
+   '((huey tv:window)
+     (dewey tv:window)
+     (louie tv:window)
+     (main-pane tv:window)
+     (random-pane tv:window)
+     (menu tv:command-menu
+	   :item-list ("Foo" "Bar" "Baz")))
+   ':constraints
+     '((first-config . ((top-strip main-pane)
+			((top-strip :horizontal (.3)
+			  (huey dewey louie)
+			  ((huey :even)
+			   (dewey :even)
+			   (louie :even))))
+			((main-pane :even))))
+       (second-config . ((main-pane bottom-strip)
+			 ((bottom-strip :horizontal (.2)
+			   (random-pane menu)
+			   ((menu :ask :pane-size))
+			   ((random-pane :even))))
+			 ((main-pane :even))))))
+.end_lisp
+In this example, the frame has two different configurations.  When the
+frame is first created, it is in the first of the configurations
+listed, namely 3first-config*.  In this configuration, the top
+three-tenths of the frame are split equally, horizontally, between three
+windows, and the rest of the frame is occupied by 3main-pane*.  The
+frame can be switched to a new configuration using the
+3:set-configuration* message (see
+(tv:basic-constraint-frame-set-configuration-method)).  If we switch it
+to 3second-config*, then 3main-frame* will appear on top of a strip
+one-fifth of the height of the window.  This strip will contain a menu
+on the right that is just wide enough to display the strings in the
+menu's item list, and another pane using up the rest of the strip.  When
+the configuration of the window is switched, 3main-pane* must be
+reshaped.
+
+Another thing to notice is that the list of items in the menu was
+present in the 3:panes* option, rather than a form to be evaluated.
+If the list had been in a variable, it would have been necessary to write
+the 3:panes* option using backquote, like this:
+.lisp
+  ':panes
+     `((huey tv:window)
+       (dewey tv:window)
+       (louie tv:window)
+       (main-pane tv:window)
+       (random-pane tv:window)
+       (menu tv:command-menu 
+	     :item-list ,the-list-of-items))
+.end_lisp
+Menus and how to use them are explained later; see (menu).
+
+In this example, the window is divided into two windows, side by side.
+.lisp
+(make-instance
+  'tv:bordered-constraint-frame
+  ':edges '(100 100 600 600)
+  ':panes
+    '((left tv:window)
+      (right tv:window))
+  ':constraints
+    '((main . ((whole-thing)
+	       ((whole-thing :horizontal (:even)
+			     (left right)
+			     ((left :even) 
+			      (right :even))))))))
+.end_lisp
+This example also points out that constraint frames are windows too, and
+you can use init-options acceptable to 3tv:minimum-window* with them.
+In this case, we give the edges of the frame as a whole, in absolute
+numbers.  Remember that frames are 2not* built out of 3tv:window*;
+see (frame-flavor-components).
+
+In actual practice, panes are usually made out of more interesting
+flavors than 3tv:window*.
+
+.subsection Specifying Panes and Constraints
+
+This section gives the complete rules for specifying the panes of a
+constraint frame, and for the constraint language.  It should help
+explain any of the above examples that were unclear, and tell you all
+the things you can do with the constraint language.
+
+When you create a constraint frame, you must supply two initialization
+options.  The 3:panes* option specifies what panes you want the frame
+to have, and the 3:constraints* option specifies the set of
+constraints for each of the configurations that the window may assume.
+For the purposes of these two options, windows are given internal names,
+which are Lisp symbols, used only by the flavors and methods that deal
+with constraint frames.  These names are not used as the actual names of
+the windows (as in the 3:name* message (see
+(windows-name-method)).
+
+.definitoption tv:constraint-frame :panes pane-descriptions
+This initialization option is required for all flavors of constraint
+frames.  The argument, 2pane-descriptions*, is a list of pane
+descriptions.  Every pane description looks like this:
+.lisp
+(2name* 2flavor* . 2options*)
+.end_lisp
+2name* is the internal name (a symbol).  2flavor* is the flavor of
+which the pane should be an instance.  2options* is a list to be
+appended to the initialization plist for the pane when it is created.
+When the frame is first created, it will create all of its panes, using
+2flavor* and 2options*.  The frame will add some of its own
+options to control the position and shape of the window; you should not
+pass any such options in the 2options* list.
+.end_definitoption
+
+.definitoption tv:constraint-frame :constraints configuration-description-list
+This initialization option is required for all flavors of constraint
+frames.  The argument, 2configuration-description-list*, is a list of
+configuration descriptions.  The format of configuration descriptions is
+explained below.
+.end_definitoption
+
+Both init options work by initializing instance variables which are
+then looked at by the 3:init* methods of constraint frames.  Instead
+of using the init options, you can set the instance variables yourself
+in a 3:before* 3:init* method.
+
+.definstvar tv:constraint-frame tv:panes
+.definstvar1 tv:constraint-frame tv:constraints
+The instance variables in which the constraint frame mechanism
+looks to find the lists of panes and constraints.
+.end_definstvar
+
+A configuration-description-list is a list of
+configuration-descriptions.  There is one configuration-description in
+the list for each of the possible configurations that the frame can
+assume.  Each configuration is named by a symbol, called the
+configuration-name.  A configuration-description-list is an alist that
+associates the configuration-descriptions with the names.  It looks like
+this:
+.lisp
+((2configuration-name-1* . 2configuration-description-1*)
+ (2configuration-name-2* . 2configuration-description-2*)
+ ...)
+.end_lisp
+
+.setq configuration-description page
+
+Each configuration-description describes the layout of the panes in a
+single configuration.  The description has two parts.  The first part
+specifies the order in which the windows appear, and the second part
+specifies how the sizes are computed.  Actually, in addition to windows,
+there can also be 2dummies* in the configuration-descriptor.  A dummy
+is used either to hold empty space that is not used by any window, or it
+can reserve a region of space to be divided up by another
+configuration-description.
+
+.cindex sections, in constraint frames
+.cindex stacking, in constraint frames
+
+A configuration-description splits up one of the dimensions of a
+rectangular area into many parts.  Such an area is called a 2section*.
+Which of the two dimensions is being split up is determined by the
+2stacking*.  If the stacking is 3:vertical* then the section is
+being split up vertically; that is, the parts are stacked on top of each
+other.  If the stacking is 3:horizontal* then the section is being
+split up horizontally; that is, the parts are side-by-side.  The
+stacking of the top-level configuration-descriptions in the
+3:constraints* option is always 3:vertical*, but there can be more
+configuration-descriptions nested inside of them, and these can have
+either stacking.
+
+Each part has a name, represented as a symbol.  A part may hold either
+an actual pane, or other things; in the latter case, it is called
+a 2dummy* part.  Dummy parts can be further
+subdivided into more panes and dummies using another
+constraint-description, or their pixels can be blank or filled with
+some pattern.
+
+A configuration-description looks like this:
+.lisp
+(2ordering* . 2description-groups*)
+.end_lisp
+
+2ordering* is a list of names of panes and of dummies, each represented
+by a symbol; the order of this list is the order that the panes and
+dummies appear in the space being split up by the
+configuration-description.  For vertical stacking the list goes top to bottom.
+For horizontal stacking the list goes left to right.
+A 2description-group* is a list of
+2descriptions*.  Each description describes either exactly one pane or one
+dummy.  A configuration-description must have one description for each
+element of the 2ordering* list.
+
+All of the descriptions in a description-group are processed together
+("in parallel"); each of the description-groups is processed in turn,
+starting with the first one.  By grouping the descriptions this way, you
+can control which constraints are elaborated together and which are
+elaborated at different times; when two constraints are elaborated at different
+times you can control which one is elaborated first.  The reason that the ordering-list in the
+configuration-description is separate from the description-groups is so
+that the order in which the panes and dummies appear in the frame can be
+independent of the order in which their constraints are elaborated.
+
+Each description describes one pane or one dummy.  We'll get back to
+dummies later.  A description that describes a pane looks like this:
+.lisp
+(2pane-name* . 2constraint*)
+.end_lisp
+2pane-name* is the name of the pane being described;
+2constraint* is the constraint that describes the pane.  We will return
+later to what descriptions of dummies look like.  The constraint will
+be elaborated, and will yield a size in pixels; this size will be used
+for the width or height being computed.
+
+Finally we get to constraints themselves.  The basic form of a constraint
+is as follows:
+.lisp
+(2key* 2arg-1* 2arg-2* ...)
+.end_lisp
+2key* may be a fixnum, a flonum, or one of various keyword symbols.  Each
+type of constraint may take arguments, whose meaning depends on which
+kind of constraint this argument is passed to.
+
+While descriptions of panes do not have the same format as descriptions
+of dummies, the same kind of constraints are used in both of them.  So
+all the formats given below may be used inside the descriptions of either
+panes or dummies.
+
+'kindex :limit "constraint frames"
+Any constraint may, optionally, be preceded by a 3:limit* clause.  If
+a constraint has a 3:limit* clause, the constraint looks like:
+.lisp
+(:limit 2limit-specification* 2key* 2arg-1* 2arg-2* ...)
+.end_lisp
+
+The 3:limit* clause lets you set a minimum and a maximum value that
+will be applied to the size computed by the constraint.  If the
+constraint returns a value smaller than the minimum, then the minimum
+value will be used; if it returns a value larger than the maximum, then
+the maximum value will be used.  The 2limit-specification* is normally
+a two-element list, whose elements are fixnums giving the minimum and
+maximum values in pixels.  If the list has a third element, it should be
+one of the symbols 3:lines* or 3:characters*, and it means that the
+fixnums are in units of lines or characters, computed by multiplying by
+the line-height or char-width of the pane (see (char-width-and-line-height)).  If
+there is a fourth element, it should be the name of a pane, and that
+pane's line-height or char-width is used instead of that of the pane
+being constrained.  (If this constraint applies to a dummy instead of a pane, and
+the third element of the list is present, then the fourth must be
+present as well, since dummies do not have their own line-height nor
+char-width.)
+
+The following Lisp objects may be used as values of 2key* in a
+constraint.  Note: the 3:funcall* and 3:eval*
+constraints are rarely used and you probably don't need to worry about
+them.  The other kinds are used frequently.
+
+.table 3
+.item 2fixnum*
+This lets you specify the absolute size.  The value computed by the
+constraint is simply this fixnum.  Optionally, an argument may be given:
+it may be the symbol 3:lines* or the symbol 3:characters*, meaning
+that the fixnum is in units of lines or characters, and should be
+computed by multiplying by the line-height or char-width of the window.
+If a second argument is also present, it should be the name of a pane, and
+that pane's line-height or char-width is used instead of that of the
+pane being constrained.  (If this constraint applies to a dummy instead of a pane,
+and the first argument is given, then the second must be present as
+well, since dummies do not have their own line-height nor char-width.)
+
+.item 2flonum*
+This lets you specify that a certain fraction of the remaining space
+should be taken up by this window.  Optionally, an argument may be
+given: it may be 3:lines* or 3:characters*, and it means to round
+down the size of the pane to the nearest multiple of the pane's
+line-height or char-width.  A second argument may be given; it is just
+like the second argument when 2key* is a fixnum (see above).
+
+The distinction between descriptors in the same group and descriptors in
+different groups is important when you use this kind of constraint.  If
+you have one descriptor group with two descriptors, each of which
+requests .2 of the remaining space, then both panes will get the
+same amount of space.  However, if you have the same two descriptors but
+put them in successive descriptor groups, then the first one will
+get .2 of the remaining space, and then the second one will get .2
+of what remains after the first one was allocated; thus the second pane
+will be smaller than the first.  In other words, the amount of
+space remaining is recomputed at the end of each descriptor group,
+but not at the end of each descriptor.
+
+.xitem :even "constraint frames"
+This constraint has a special restriction: you can only use it for
+descriptors in the last descriptor group of a configuration.
+Furthermore, if any of the descriptors in that group use 3:even*, then
+2all* of the descriptors in the group 2must* use 3:even*.  The
+meaning is that all of the panes in the last descriptor group evenly
+divide all of the remaining space.
+
+It is usually a good idea to use 3:even* for at least one pane in every configuration, so
+that the entire frame will be taken up by panes that all fit together
+and extend to the borders of the frame.  3:even* is careful to choose
+exactly the right number of pixels to fill the frame completely,
+avoiding roundoff errors that might cause an unsightly line of one or a
+few extra pixels somewhere.
+
+Remember that just because the 3:even*s must be in the last descriptor
+group does not mean that the panes that they apply to must be at the bottom
+or right-hand end
+of the frame!  The ordering of the panes in the frame is controlled by the
+ordering list, not by the order in which the descriptors appear.
+
+.xitem :ask "constraint frames"
+This constraint lets you ask the window how much space it would like
+to take up.  The format of a constraint using 3:ask* is as follows:
+.lisp
+(:ask 2operation* 2arg-1* 2arg-2* 2...*)
+.end_lisp
+A message with operation 2operation* and arguments composed of
+some extra arguments passed by the constraint mechanism followed by
+2arg-1*, 2arg-2*, etc. is sent to the pane; its answer says how much
+space the pane should take up.  Note that 2arg-1*, etc., are not
+forms: they are the values of the arguments themselves (i.e. they are
+not evaluated; if you want to compute them, you must build the
+constraint language description at run-time.  This is usually written
+using a backquoted list).
+
+The arguments that are actually sent along with the message are the same
+as the arguments passed when you use the 3:funcall* option except that
+the 2constraint-node* is not passed; see below.
+
+Various different flavors of windows accept some messages suitable for
+use with 3:ask*.  By convention, several kinds of windows, such as
+menus, accept a message called 3:pane-size*.  For example, the
+3:pane-size* method for menus figures out how much space in the
+dimension controlled by the 3:ask* constraint is needed to display all
+the items of the menu, given the amount of space available in the other
+dimension.  No arguments are specified in the constraint.  Other
+useful operations, handled by all windows, are 3:square-pane-size* (also
+with no additional arguments), which makes the window take up enough room to be
+square including its borders, and 3:square-pane-inside-size*, which
+makes the window be square inside its borders.
+
+.xitem :ask-window "constraint frames"
+This constraint is a variation on 3:ask*.  Its format is:
+.lisp
+(:ask-window 2pane-name* 2message-name* 2arg-1* 2arg-2* 2...*)
+.end_lisp
+It works like 3:ask* except that the message is sent to the pane named
+2pane-name* instead of the pane being described.  This is primarily
+used for dummies, when the size of a dummy wants to be controlled by
+the needs of a pane inside it.
+
+.setq :ask-arguments page
+.xitem :funcall "constraint frames"
+This constraint lets you supply a function to be called, which should compute
+the amount of space to use.  The format is:
+.lisp
+(:funcall 2function* 2arg-1* 2arg-2* 2...*)
+.end_lisp
+The specified 2function* is called.  It is first passed six arguments
+from inside the workings of constraint frames, and then the 2arg-1*,
+2arg-2*, etc. values.  The six arguments are:
+.table 2 0 1200
+.item constraint-node
+This is an internal data structure.  [Not yet documented; you should
+not need to look at this anyway.]
+.item remaining-width
+The amount of width remaining to be used up at the time this description
+is elaborated, after all of the panes in previous description groups
+and all of the earlier panes in this description group are allocated.
+.item remaining-height
+Like 2remaining-width*, but in the height direction.
+.item total-width
+The amount of width remaining to be used up by all of the parts of this
+description group.  This is the amount of room left after all of the
+panes in previous description groups have been allocated but none of the
+panes in this description group have been allocated.
+.item total-height
+Like 2total-width*, but in the height direction.
+.item stacking
+Either 3:vertical* or 3:horizontal*, depending on the current stacking.
+.end_table
+
+.xitem :eval "constraint frames"
+This is like 3:funcall*, but instead of providing a function and arguments,
+you provide a form.  The format is:
+.lisp
+(:eval 2form*)
+.end_lisp
+The six special values that are passed as arguments when the
+3:funcall* constraint-type is used can be accessed by 2form* as the
+values of the following special variables:  
+'vindex tv:**constraint-node**
+'vindex tv:**constraint-remaining-width**
+'vindex tv:**constraint-remaining-height**
+'vindex tv:**constraint-total-width**
+'vindex tv:**constraint-total-height**
+'vindex tv:**constraint-stacking**
+.lisp
+tv:**constraint-node**
+tv:**constraint-remaining-width**
+tv:**constraint-remaining-height**
+tv:**constraint-total-width**
+tv:**constraint-total-height**
+tv:**constraint-stacking**
+.end_lisp
+.end_table
+
+This finishes the discussion of descriptions of panes.  Descriptions of
+dummies are different; they may be in any of several formats,
+identified by the following keywords:
+
+.table 3
+.xitem :blank "constraint frames"
+This description is used if you want this part of the section to be filled
+up with some constant pattern.  The format of the description is:
+.lisp
+(2dummy-name* :blank 2pattern* . 2constraint*)
+.end_lisp
+The 2constraint* is used to figure out the size of the part of the section,
+in the usual way.  2pattern* may be any of the following:
+.table 3
+.xitem :white "constraint frames"
+The part is filled with zeroes.
+
+.xitem :black "constraint frames"
+The part is filled with the maximum value that the pixels can hold (if the
+pixels are one bit wide, as on a black-and-white TV, this value is 1).
+
+.item 2an array*
+The part is filled with the contents of the array, using the 3bitblt*
+function (see (bitblt-fun)).
+
+.item 2a symbol*
+The symbol should be the name of a function of six arguments.  The function
+is expected to fill up the rectangle that has been allocated to this part
+of the section with some pattern.  The following
+values are passed to the function:
+
+.table 2 0 1200
+.item constraint-node
+This is an internal data structure.  [Not yet documented; you should
+not need to look at this anyway.]
+.item x-position
+.item1 y-position
+.item1 width
+.item1 height
+These four arguments tell the function the position and size of the rectangle
+that it should fill.
+.item screen-array
+This is a two-dimensional array into which the function should write the
+pattern it wants to put into the window.
+.end_table
+
+.item 2a list*
+This is similar to the case in which 2pattern* is a symbol, but it lets
+you pass extra arguments.  The first element of the list is the function
+to be called, and that function is passed all of the objects in the
+rest of the list, after the six arguments enumerated above.
+.end_table
+
+'kindex :horizontal "constraint frames"
+'kindex :vertical "constraint frames"
+.item :horizontal 2or * :vertical
+This description is used if you want to subdivide the part into more
+panes and dummies, using a configuration-description.  If you use
+3:vertical*, it will be split up with vertical stacking, and if you
+use 3:horizontal*, it will be split up with horizontal stacking.
+[Currently, you are required to use the opposite kind of stacking from
+the kind currently happening; that is, successive levels of
+configuration-description must use alternating kinds of stacking.
+This restriction may be lifted in the future.]  The format is as
+follows:
+.lisp
+(2dummy-name* :horizontal 2constraint* . 2configuration-description*)
+2or*
+(2dummy-name* :vertical 2constraint* . 2configuration-description*)
+.end_lisp
+2constraint*, as usual, specifies the size of this part; it can be in
+any of the formats given above.  Note that in this format, 2constraint*
+appears as an element of a list rather than as the tail of a list,
+and so the printed representation of the list will include a pair
+of parentheses around the constraint.  2configuration-description*
+tells how this part is subdivided into parts of its own.
+.end_table
+
+.defmetamethod windows :pane-size remaining-width remaining-height total-width total-height stacking
+This operation is invoked by constraints of the form 3(:ask :pane-size)*.
+It should return the size in pixels to give the pane, in the current stacking direction.
+The meanings of the arguments as they will be passed by the constraint manager
+are described above under the 3:funcall* constraint (see (:ask-arguments)).
+.end_defmetamethod
+
+.defmetamethod windows :square-pane-size remaining-width remaining-height total-width total-height stacking
+.defmetamethod1 windows :square-pane-inside-size remaining-width remaining-height total-width total-height stacking
+These operations are invoked by constraints of the form 3(:ask
+:square-pane-size)* and 3(:ask :square-pane-inside-size)*.  They
+return the size required to make the pane square.  For horizontal
+stacking, they returns a width equal to the specified height; for
+vertical stacking, they returns a height equal to the available width.
+
+The difference between the two operations is that 3:square-pane-size* makes
+the outside size of the window square, whereas 3:square-pane-inside-size* makes
+the inside of the window (not including the borders) square.
+.end_defmetamethod
+
+.subsection Constraint Frame Operations
+
+.defmethod tv:basic-constraint-frame :get-pane pane-name
+Returns the pane (the inferior window itself) that was named by the
+symbol 2pane-name* in the 3:panes* specification of this frame.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :pane-name pane
+Returns the symbol that was used to name 2pane* in the 3:panes*
+specification of this frame.  If 2pane* is not one of the panes,
+return 3nil*.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :create-pane name flavor &rest options
+Creates and returns a window, to serve as a pane of this frame,
+made from flavor 2flavor* and init options 2options*.
+2name* is the pane name to be used.  By default, it is not used here.
+
+The panes of the frame are created from their specification using this
+operation, the arguments being taken from the elements of the
+specification.  It may be useful to redefine this operation.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :send-pane pane-name message &rest arguments
+Sends the specified 2message* with the specified 2arguments* to
+the pane that was named by the
+symbol 2pane-name* in the 3:panes* specification of this frame.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :send-all-panes message &rest arguments
+Sends the specified 2message* with the specified 2arguments* to
+all of the panes of this frame, including the non-exposed ones.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :send-all-exposed-panes message &rest arguments
+Sends the specified 2message* with the specified 2arguments* to
+all of the exposed panes of this frame.
+.end_defmethod
+
+.definitoption tv:basic-constraint-frame :configuration configuration-name
+Makes the initial configuration of the frame be the one named by the
+symbol 2configuration-name*.
+.end_definitoption
+
+.defmethod tv:basic-constraint-frame :configuration
+Returns the symbol naming the current configuration of the frame.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :set-configuration configuration-name
+Sets the configuration of the frame to the one named by the symbol
+2configuration-name*.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :get-configuration configuration-name
+Returns the internal ("parsed") data structure that describes what is specified
+for configuration 2configuration-name*.  This describes which windows
+are supposed to be included, and the constraints for them.
+.end_defmethod
+
+.defmethod tv:basic-constraint-frame :redefine-configuration config-name new-config &optional (parsed-p 3t*)
+Redefines the meaning of configuration 2config-name* according to
+2new-config*.  If 2parsed-p* is 3t*, 2new-config* is expected to
+be in parsed form, such as the value returned by the
+3:get-configuration* operation.  If 2parsed-p* is 3nil*,
+2new-config* is treated as a configuration-description such as you
+would use to define the configuration when initially specifying the
+constraints of the frame (see (configuration-description)).
+.end_defmethod
+
+.section Pane-Frame Interaction
+
+Several fundamental window operations actually ask the window's superior
+what to do.  This has no effect for a top-level window but becomes
+important when the window's superior is a frame.  The superior can
+decide whether the operations should actually go ahead as requested.
+These operations are 3:expose*, 3:deexpose*, 3:bury*, 3:select*
+and 3:set-edges*.  Here is how they are handled:
+.table 3
+.item :expose, :deexpose, :bury, :select
+These operations first send a message to the superior with operation
+3:inferior-expose*, 3:inferior-deexpose*, 3:inferior-bury* or
+3:inferior-select*.  The pane itself is passed as the argument.
+
+If the message sent to the superior returns non-3nil*, the operation
+is performed on the pane as usual.  Otherwise, it is skipped.
+
+.item :set-edges
+An 3:inferior-set-edges* message is sent to the superior, its arguments
+being the pane followed by the arguments of the 3:set-edges* message.
+If the operation's first value is non-3nil*, the pane's edges are
+changed as requested.  Otherwise, the pane's edges are not changed, and
+the remaining values from the 3:inferior-set-edges* operation are
+returned from the 3:set-edges*.
+
+Of course, the frame can change the pane's edges in some other way and
+then return 3nil*.
+.end_table
+
+3tv:basic-frame* defines only the 3:inferior-select* operation to
+do anything nontrivial; it makes the pane be the frame's selection
+substitute and then sends a 3:select* to the frame.  The others
+operations do nothing but return non-3nil*.  Thus, there is minimal
+interaction between the frame and its inferiors.
+3tv:frame-forwarding-mixin* defines 3:inferior-expose*,
+3:inferior-deexpose* and 3:inferior-bury* so that the frame and
+panes are all exposed together.
+
+.defflavor tv:frame-forwarding-mixin
+Defines 3:inferior-expose*, 3:inferior-deexpose*, and 3:inferior-bury*
+methods for a frame that normally cause
+3:expose*, 3:deexpose* or 3:bury* operations on panes to expose,
+deexpose or bury the frame rather than the pane.
+
+An 3:inferior-set-edges* method is also defined, for internal reasons
+only.  Its purpose is to avoid a user-visible change in behavior rather
+than to provide one.
+
+This flavor is part of 3tv:constraint-frame* and the other standard
+instantiable flavors of constraint frame.
+.end_defflavor
+
+3tv:basic-frame* has an instance variable 3tv:recursion* which
+is used to distinguish between 3:expose*, etc. operations sent by the
+frame's code to its panes, and those sent by other programs.
+When an outside program sends a 3:expose*, 3:deexpose*, or 3:bury*
+message to one of the panes, the 3:inferior-expose*, etc. operation
+on the frame simply exposes, deexpose or buries the frame itself,
+and does not allow the operation on the pane to proceed.
+When the frame's code itself exposes a pane, it does so with
+3tv:recursion* temporarily non-3nil* so that when the
+3:inferior-expose* is done it will return 3t* and let the pane be exposed.
+
+.defmetamethod frames :pane-types-alist
+This should return a menu item list to be used for the handling of the
+3Create* item in the screen editor, when editing the panes of this frame.
+The value of the menu item should be a flavor of window to create, or a
+list to be evaluated to return a flavor.
+
+The menu item's value (or the result of evaluating it) can also be
+3t*, which directs the screen editor to read a flavor name from the
+user.
+.end_defmetamethod
+
+.subsection The Selected Pane
+.cindex selected pane
+
+A frames is normally operated with one of its inferiors as a selection
+substitute.  The selection substitute of a frame is also called the
+"selected pane", as this feature used to be available only in frames.
+Unless you mix 3tv:select-mixin* into your frame flavor, the frame
+itself cannot be the selected window.  Therefore, it is important to
+provide a selection substitute when the frame is created.  This can be
+done by doing 3:set-selection-substitute* in an 3:after :init*
+method:
+.lisp
+(defmethod (my-frame :after :init) (ignore)
+  (send self ':set-selection-substitute
+	(send self ':get-pane 'interaction-pane)))
+.end_lisp
+
+Explicitly selecting a pane with the 3:select* operation actually
+works by setting the frame's selection substitute, by means of the
+forwarding mechanism described above.
+
+In a constraint frame, or any other frame which has 3tv:frame-forwarding-mixin*,
+you should not attempt to select a pane which is not already exposed,
+because of the effects of forwarding on the 3:expose* operation.
+
+.definitoption tv:basic-constraint-frame :selected-pane pane-name
+In a constraint frame, you can initialize the selected pane with this
+handy init option.  Instead of fishing out the pane, just give its name.
+.end_definitoption
+
+.defmethod tv:basic-frame :select-pane inferior-window
+This is another, older name for the 3:set-selection-substitute* operation,
+before it was generalized to apply to windows other than frames.
+.end_defmethod
+
+.defmethod tv:basic-frame :selected-pane
+This is another, older name for the 3:selection-substitute* operation,
+before it was generalized to apply to windows other than frames.
+.end_defmethod
+
+.defflavor tv:interaction-pane (3tv:preemptable-read-any-tyi-mixin* 3tv:notification-mixin* 3tv:autoexposing-more-mixin* 3tv:window*)
+This flavor is often useful for a pane for reading and echoing
+multi-character commands in a system which uses a frame.  This pane
+would typically be the selected pane.
+.end_defflavor

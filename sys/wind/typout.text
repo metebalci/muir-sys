@@ -1,0 +1,334 @@
+.c -*- Bolio -*-
+
+.chapter Typeout Windows
+.cindex typeout windows
+.setq typeout-window-chapter chapter-number
+.setq typeout-windows section-page
+.setq windows-with-typeout section-page
+
+2Typeout windows* are a facility provided to make it easier for a program
+that normally displays a single updating picture to print a stream of
+unrelated output from time to time.
+
+For example, Zmacs windows normally present a continuously updated display of an
+editor buffer.  But some editor commands are designed to print output,
+such as a directory listing from 3Control-X Control-D* or a list of
+buffers from 3Control-X Control-B*.  This output cannot conveniently
+be printed on the editor window itself, since that window is set up to
+maintain its standard display of an editor buffer and is no longer suitable
+for displaying anything else.  Instead, the output is printed on a special
+kind of window called a typeout window, which exists as an inferior
+of the editor window.  Other programs that maintain updating displays, such
+as the inspector and Peek, also use typeout windows for this purpose.
+
+A typeout window is an inferior of another window such as the editor or
+Peek display window, and "grows" over its superior as output is done on
+it.  The output starts at the top of the typeout window, which is also
+the top of its superior, and proceeds downward.  The typeout window
+always keeps track of how far down output has proceeded, so that the
+superior window can eventually find out how much of its permanent
+display has been clobbered by the typeout window and therefore needs to
+be redisplayed.  A horizontal line or "window shade" appears just below
+the point of lowest output, to enable the user to separate the typeout
+from the remains of the permanent display.  If output to the typeout
+window proceeds far enough, it wraps around to the top of the screen.
+Then the typeout window records that the entire superior has been
+clobbered and no longer displays any horizontal line.
+
+.defflavor tv:basic-typeout-window
+This is the base flavor for all kinds of typeout windows.
+It is actually just a mixin, not instantiable by itself.
+.end_defflavor
+
+.defflavor tv:typeout-window (3tv:basic-typeout-window* 3tv:notification-mixin* 3tv:window*)
+This is the flavor normally used for actual typeout windows.
+.end_defflavor
+
+.defflavor tv:typeout-window-with-mouse-sensitive-items (3tv:basic-mouse-sensitive-items* 3tv:typeout-window*)
+This flavor of typeout window also provides the 3:item* operation,
+for including mouse-sensitive rectangles among the typeout.
+See (tv:basic-mouse-sensitive-items-flavor).
+.end_defflavor
+
+.defmethod tv:basic-typeout-window :bottom-reached
+Returns the greatest 2y*-position clobbered by the typeout window.
+This is a cursor position, relative to the typeout window.  The
+horizontal line (typeout window border), when enabled, appears at this
+position, provided it is not zero or equal to the inside bottom of the
+window.
+
+The value is 3nil* when the typeout window is not active.
+
+The typeout window has an instance variable 3tv:bottom-reached*,
+but this method does not simply return the value of the instance variable.
+.end_defmethod
+
+.defvar tv:*enable-typeout-window-borders*
+When this variable is non-3nil*, a horizontal line is used to indicate
+the bottom of the area used by the typeout window.  No line appears when the
+typeout window has used its entire area (if it has wrapped around or done a
+3:clear-screen*).
+When this variable is 3nil*, the horizontal line does not appear.
+The default value is 3t*.
+.end_defvar
+
+.section Activation and Deactivation
+
+A typeout window is deactivated when not in use.  Any attempt
+to output to it automatically activates and exposes it because
+its deexposed-typeout-action is 3(:expose-for-typeout)*.
+
+.defmethod tv:basic-typeout-window :expose-for-typeout
+Sent in order to prepare the typeout window to be typed out on.  The
+typeout window marks itself "exposed" while leaving the bits of its
+superior on the screen.  It initializes itself as "empty" and its
+bottom-reached as zero.  It also finds a suitable ancestor and makes
+itself that ancestor's selection substitute.  In normal use, this
+typically causes the typeout window to become selected.
+.end_defmethod
+
+.defmethod tv:basic-typeout-window :active-p
+Returns non-3nil* if the typeout window is active, which is the case
+if and only if typeout is currently visible in it.
+.end_defmethod
+
+Exposing the typeout window automatically causes it to become the
+selection substitute of one of its ancestors (see
+(selection-substitutes)).  Just which ancestor is determined according
+to the situation; it is the nearest ancestor in the existing path of
+selection substitutes.  This is the nearest ancestor that can be used
+for the purpose and actually make the typeout window be selected.  It is
+the typeout window's direct superior only if that superior is selected.
+For example, if you type 3Meta-X* in Zmacs and then type 3Help*, the
+help message will print on the main editor window's typeout window, but
+that editor window is not selected (the minibuffer is).  So the typeout
+window will substitute for the editor frame rather than for the
+nonselected editor window immediately above it.
+
+When the program wants to make the typeout go away and put back its
+standard display, it must first deactivate the typeout window
+with the 3:deactivate* operation.
+
+When the typeout window is deactivated, it sends a
+3:remove-selection-substitute* message to whichever ancestor it had
+decided to substitute for.  As a result, if the typeout window is still
+that ancestor's selection substitute, the substitute is set back to what
+it had been before the typeout window was exposed.  If the ancestor's
+substitute has been changed since then, it is left alone.
+
+The purpose of making the typeout window a selection substitute is
+primarily to make its cursor blinker blink.  A typeout window by
+default shares the input buffer of its superior, so which of them is
+selected has no effect on reading keyboard input.  A separate feature
+of typeout windows turns the superior's blinkers off completely while
+the typeout is exposed.
+
+.section Superiors of Typeout Windows
+
+To make a window possess an inferior typeout window, include the flavor
+3tv:essential-window-with-typeout-mixin* in it.  This causes a typeout
+window to be created and provides the methods to handle communication
+with the typeout window.
+
+.defflavor tv:essential-window-with-typeout-mixin
+This is the basic mixin that gives a window the ability to manage a typeout
+window as its inferior.
+.end_defflavor
+
+.defflavor tv:window-with-typeout-mixin (3tv:no-screen-managing-mixin* 3tv:essential-window-with-typeout-mixin*)
+This is what you typically use, rather than
+3tv:essential-window-with-typeout-mixin*, because it prevents screen
+management of this window's inferiors from getting in the way of the
+operation of the typeout window.
+.end_defflavor
+
+.definstvar tv:essential-window-with-typeout-mixin tv:typeout-window
+This window's typeout window.
+.end_definstvar
+
+.defmethod tv:essential-window-with-typeout-mixin :typeout-window
+Returns the value of the instance variable 3tv:typeout-window*, which is the
+typeout window associated with this window.
+.end_defmethod
+
+.definitoption tv:essential-window-with-typeout-mixin :typeout-window (flavor-name options...)
+This init option specifies what kind of typeout window to create.  The
+car of the value is the name of flavor of typeout window to use, and the
+cdr is a list of alternating options and values to pass to
+3make-instance*.
+
+If the option is not specified, or is 3nil*, no typeout window is actually created.
+.end_definitoption
+
+The 3tv:basic-typeout-window* flavor provides for daemons and wrappers
+that cause the 3:mouse-moves* and 3:mouse-buttons* messages to get
+passed either to the typeout window or to its superior, depending on
+whether the typeout window has grown down to where the mouse is.
+
+.defmethod tv:essential-window-with-typeout-mixin :turn-on-blinkers-for-typeout
+Sent to the superior of a typeout window when the mouse moves into
+an area that the typeout window is not using,
+this operation should make visible any blinkers that are associated
+with the use of the mouse.  The definition actually provided
+by the flavor 3tv:essential-window-with-typeout-mixin* does nothing;
+this operation exists so that you can add daemons to it.
+.end_defmethod
+
+.defmethod tv:essential-window-with-typeout-mixin :turn-off-blinkers-for-typeout
+Sent to the superior of a typeout window when the mouse moves into the
+area used by the typeout window, this operation should turn off any
+blinkers that were turned on by 3:turn-on-blinkers-for-typeout*.  The
+definition actually provided by the flavor
+3tv:essential-window-with-typeout-mixin* does nothing; this operation
+exists so that you can add daemons to it.
+.end_defmethod
+
+A typeout window does 7**MORE*** processing if and only if that is
+enabled for its superior.  The usual motivation for using a typeout
+window is that the superior is to be used for something other than
+sequential output; therefore, 7**MORE*** processing is usually not
+desired on the superior.  However, it is not desirable to simply disable
+7**MORE*** processing for the superior because this disables it for
+the typeout window as well and because the user could reenable it for
+both windows with 3Terminal M*.
+
+.defmethod tv:basic-typeout-window :more-p
+.defmethod1 tv:basic-typeout-window :set-more-p new-more-p
+These operations are passed along to the superior, so that the user who
+types the 3Terminal M* command need not be aware of the distinction
+between the typeout window and its superior.
+.end_defmethod
+
+.defflavor tv:intrinsic-no-more-mixin
+This mixin, intended for use in superiors of typeout windows,
+prevents 7**MORE*** processing unconditionally without saying that
+it is "disabled".  Programs and the user can think they can enable and disable
+7**MORE*** processing for the window using the the 3:more-p* and
+3:set-more-p* operations, and the 3Terminal M* command, but only
+the typeout window is affected.
+
+An alternative way to accomplish this is as follows:
+
+.lisp
+(defmethod (my-display-window-with-typeout-window
+             :more-exception)
+	   ()
+  (setf (tv:sheet-more-flag) 0))
+.end_lisp
+.end_defflavor
+
+.section Delaying Redisplay After Typeout
+
+The typeout window superior must know how to check
+before redisplaying to find out whether part of its last display
+has been overwritten by the typeout window and therefore must be
+redisplayed.  To find out how much screen height the typeout window
+has used, use the 3:bottom-reached* operation on it.
+The typeout window must also be deactivated so that more typeout,
+happening after the redisplay, will work properly.
+
+Here is an example which is how general scroll windows do this:
+.lisp
+(defmethod (tv:scroll-window-with-typeout-mixin
+	     :before :redisplay)
+	   (&rest ignore)
+  (when (funcall tv:typeout-window ':active-p)
+    (let ((br (min tv:screen-lines
+		   (1+ (truncate (send tv:typeout-window
+				       ':bottom-reached)
+				 tv:line-height)))))
+      1;; 3br* is the number of lines of our display*
+      1;; that were clobbered by typeout.*
+      (funcall tv:typeout-window ':deactivate)
+      (dotimes (l br)
+	;; Mark lines as clobbered
+	(aset nil tv:screen-image l 0)
+	(aset -1 tv:screen-image l 1)
+	(aset -1 tv:screen-image l 2))
+      1;; Erase the clobbered area.*
+      (send self ':draw-rectangle
+	    (tv:sheet-inside-width)
+	    (* br tv:line-height)
+	    0 0
+	    tv:alu-andca))))
+.end_lisp
+
+The editor normally updates its display after each command.
+But after a command that prints typeout, it is important not
+to update the permanent display right away, because that would
+make the typeout disappear almost as soon as it appeared.
+The same consideration applies to other programs that use typeout windows.
+
+The convention in this situation is that after a command that has
+produced typeout, redisplay should be delayed until the user types
+another input character.  If that character is a space, it is discarded.
+Otherwise, it is interpreted as a command.
+
+The way the program should decide whether to wait before redisplaying
+is to invoke the 3:incomplete-p* operation on typeout window.
+This reads a flag that is set whenever output is done on the typeout
+window and can be cleared by the program's command loop between commands.
+Thus, the flag indicates whether the typeout window was used during the
+last command.
+
+Here is a sample piece of code that illustrates this technique:
+.lisp
+(let ((standard-output typeout-window))
+  (do-forever
+    1;; Clear the flag.*
+    (send standard-output ':make-complete)
+
+    1;; Read and execute one command.*
+    (process-command (send standard-input ':tyi))
+
+    (when (send standard-output ':incomplete-p)
+      1;; If this command printed some typeout,*
+      1;; delay redisplay by waiting for next input char.*
+      (let ((ch (send standard-input ':tyi)))
+	(unless (eq ch #\sp)
+	  1;; Anything but 3Space*, execute as a command.*
+	  1;; Since 3Space* is not untyi'd, it allows*
+	  1;; immediate redisplay.*
+	  (send standard-input ':untyi ch))))
+
+    1;; Here is where we redisplay after each command.*
+    (unless (send standard-input ':listen)
+      1;; Normal redisplay must deactivate the typeout window;*
+      1;; see the previous example.*
+      (redisplay-normal-display))))
+.end_lisp
+Note that this command loop follows the editor's practice
+of not redisplaying when there is input available.
+As a result, when the character read is not a 3Space*,
+the 3:untyi* causes redisplay to be prevented by the
+presence of input.  Then the same character is read again
+at the top of the loop and processed as a command.
+If this command too prints typeout, its typeout will
+add on to that already on the typeout window.
+If this command does not print typeout, the old typeout
+will be erased after it is done.
+
+.defmethod tv:basic-typeout-window :incomplete-p
+Returns the window's incomplete-flag: 3t* if the command loop should
+wait for the next character before deactivating the typeout window.
+.end_defmethod
+
+.definstvar tv:basic-typeout-window tv:incomplete-p
+The window's incomplete-flag: 3t* if the command loop should wait for
+the next character before deactivating the typeout window.
+.end_definstvar
+
+.defmethod tv:basic-typeout-window :make-complete
+Clears the incomplete-flag.  The command loop can use this to clear
+the flag after examining it.
+
+Certain functions such as 3fquery* perform this operation on the I/O
+stream to tell the program not to wait before redisplaying, as it
+normally would do.  The idea is that the 3fquery* question is not
+worth preserving on the screen once the user has answered it.
+.end_defmethod
+
+.defmethod tv:basic-typeout-window :make-incomplete
+Sets the incomplete-flag.
+All the standard output stream operations also do this.
+.end_defmethod

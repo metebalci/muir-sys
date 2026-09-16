@@ -1,0 +1,669 @@
+.c -*-Mode:Bolio; Lowercase:Yes-*-
+
+.chapter Margins, Borders, and Labels
+.setq margins section-page
+.cindex margins
+.cindex inside
+.setq inside-size page
+
+In previous sections, we have mentioned the distinction between the
+inside and outside parts of the window.  The part of the window that is
+not the inside part is called the 2margins*.  There are four margins,
+one for each edge.  The margins sometimes contain a 2border*, which is
+a rectangular box drawn around the outside of the window.  Borders help
+the user see what part of the screen is occupied by which window.  The
+margins also sometimes contain a 2label*, which is a text string.
+Labels help the user see what a window is for.
+
+.cindex margin item
+
+A label can be inside the borders or outside the borders (usually it is
+inside).  In general, there can be lots of things in the margins; each
+one is called a 2margin item*.  Borders and labels are two kinds of
+margin items.  In any flavor of window, one of the margin items is the
+innermost; it is right next to the inside part of the window.  Each
+successive margin item is outside the previous one; the last one is just
+inside the edges of the window.  Each margin item is created by a
+flavor's being mixed in.  You can control which margin items your window
+has by which flavors you mix in, and you can control their order by the
+order in which you mix in the flavors.  Margin item flavors closer to
+the front of the component flavor list are further toward the outside of the
+margins.  The 3tv:window* flavor has as components 3tv:borders-mixin*
+and 3tv:label-mixin*, in that order, and so the label is inside the
+border.  The scroll bar, in windows that have one, is also a margin item
+(see (scroll-bar)).
+
+.defmetamethod windows :margins
+Returns four values: the sizes of the left, top, right, and bottom
+margins, respectively.  Each value includes the contributions of
+borders, labels, and anything else, to that one margin.
+For a window with no margins, all four values are zero.
+.end_defmetamethod
+
+.defmetamethod windows :left-margin-size
+.defmetamethod1 windows :top-margin-size
+.defmetamethod1 windows :right-margin-size
+.defmetamethod1 windows :bottom-margin-size
+Return the size of one of the margins.
+.end_defmetamethod
+
+.defmetainstvar windows tv:left-margin-size
+.defmetainstvar1 windows tv:top-margin-size
+.defmetainstvar1 windows tv:right-margin-size
+.defmetainstvar1 windows tv:bottom-margin-size
+These hold the four values returned by the 3:margins* operation.
+There are no operations to set these variables or init options
+to initialize them, because the margin sizes are always supposed
+to be computed from the labels, borders and other margin items
+as described below.
+.end_defmetainstvar
+
+.defun tv:sheet-left-margin-size window
+.defun1 tv:sheet-top-margin-size window
+.defun1 tv:sheet-right-margin-size window
+.defun1 tv:sheet-bottom-margin-size window
+Return the value of the corresponding instance variable of 2window*.
+These are accessor defsubsts created by the
+3:outside-accessible-instance-variables* option of 3defflavor*.
+.end_defun
+
+.defun tv:sheet-inside-left &optional (window 3self*)
+.defun1 tv:sheet-inside-top &optional (window 3self*)
+.defun1 tv:sheet-inside-right &optional (window 3self*)
+.defun1 tv:sheet-inside-bottom &optional (window 3self*)
+Return the positions of the inside edges, relative to
+the top left outside corner of the window.
+If used with no argument, these defsubsts expand into
+direct references to instance variables, and therefore
+may be used only within methods or 3(declare (:self-flavor ...))* functions.
+.end_defun
+
+.section Borders
+.cindex borders
+.setq borders section-page
+
+.defflavor tv:borders-mixin
+The 3tv:borders-mixin* margin item creates the borders around windows that you often see
+when using the Lisp Machine.  You can control the thickness of each of
+the four borders separately, or of all of them together.  You can also
+specify your own function to draw the borders, if you want something
+more elaborate than simple lines.
+
+.cindex border margin width
+
+The borders also include some whitespace left between the borders and
+the inside of the window.  The thickness of this white space is called
+the 2border margin width*.  The space is there so that characters and
+graphics that are up against the edge of the inside of the window, or
+the next-innermost margin item, do not "merge" with the border. 
+.end_defflavor
+
+.definitoption tv:borders-mixin :borders argument
+This option initializes the parameters of the borders.  2argument*
+may have any of the following values:
+.table 1
+.item 3nil*
+There are no borders at all.
+.item a symbol or a number
+A specification (see below) that applies to each of the four borders.
+.item a list 3(2left top right bottom*)*
+Specifications (see below) for each of the borders at the four edges of the window.
+'kindex :left borders
+'kindex :top borders
+'kindex :right borders
+'kindex :bottom borders
+.item a list 3(2keyword1 spec1 keyword2 spec2*...)*
+Specifications (see below) for the borders at the edges selected by the keywords,
+which may be among 3:left*, 3:top*, 3:right*, 3:bottom*.
+.end_table
+
+Each specification for a particular border may be one of the following.
+It specifies how thick the border is and the function to draw it. 
+.table 1
+.item 3nil*
+This edge should not have any border.
+.item 3t*
+The border at this edge should be drawn by the default function with
+the default thickness.
+.item a number
+The border at this edge should be drawn by the default function with
+the specified thickness.
+.item a symbol
+The border at this edge should be drawn by the specified function with
+the default thickness for that function.
+.item a cons 3(2function* . 2thickness*)*
+The border at this edge should be drawn by the specified function with
+the specified thickness.
+.end_table
+
+The default (and currently only) border function is
+3tv:draw-rectangular-border*.  Its default width is 1. 
+
+To define your own border function, you should create a Lisp function
+that takes six arguments: the window on which to draw the label, the "alu
+function" (see (aluf)) with which to draw it, and the left,
+top, right, and bottom edges of the area that the border should occupy.
+The returned value is ignored.  The function runs inside a
+3tv:sheet-force-access* (see (tv:sheet-force-access-fun)).
+You should place a
+3tv:default-border-size* property on the name of the function, whose
+value is the default thickness of the border; it will be used when
+a specification is a non-3nil* symbol.
+
+Note that setting border specifications to ask for a border width of
+zero is not the same thing as giving 3nil* as the argument to this
+option, because in the former case the space for the border margin width
+'c (see (tv:borders-mixin-border-margin-width-init-option))
+(see the previous page)
+is allocated, whereas in the latter case it is not.
+.end_definitoption
+
+.defmethod tv:borders-mixin :set-borders new-borders
+Redefines the borders.  2new-borders* can be any of the things that can be used
+for the 3:borders* init option (see above). 
+.end_defmethod
+
+.definitoption tv:borders-mixin :border-margin-width n-pixels
+Sets the width of the white space in the margins between the borders and the inside
+of the window.  The default is 1.  If some edge does not have any border
+(the specification for that border was 3nil*) then that border won't
+have any border margin either, regardless of the value of this option; that
+is the difference between border specifications of 0 and 3nil*.
+.end_definitoption
+
+.defmethod tv:borders-mixin :border-margin-width
+.defmethod1 tv:borders-mixin :set-border-margin-width new-width
+Return or set the value of the border margin width.
+.end_defmethod
+
+.definstvar tv:borders-mixin tv:border-margin-width
+The current border margin width.
+.end_definstvar
+
+.definstvar tv:borders-mixin tv:borders
+A description of the currently specified borders.
+It is 3nil* for no borders.  Otherwise its format is complicated
+and internal in nature.
+.end_definstvar
+
+.defflavor tv:full-screen-hack-mixin
+This mixin is included in many system flavors, such as Lisp listeners, Supdup,
+and Zmacs frames.  It offers the user the option of requesting that these
+windows have no borders when they occupy the full screen.
+.end_defflavor
+
+.defun tv:flush-full-screen-borders flush-p
+With an argument of 3t*, eliminates the borders of all windows which
+are full-screen-sized and have 3tv:full-screen-hack-mixin*.
+
+With an argument of 3nil*, reinstates the normal borders of all such windows.
+.end_defun
+
+.section Labels
+.setq labels section-page
+.cindex label
+
+.defflavor tv:label-mixin
+The 3tv:label-mixin* margin item creates the labels in the corners of
+windows that you often see when using the Lisp Machine.  You can control
+the text of the label, the font in which it is displayed, and whether it
+appears at the top of the window or the bottom. 
+.end_defflavor
+
+.defmetainitoption windows :name
+The value is the name of the window, which should be a symbol.  All windows
+have names; note that this is an init option of 3tv:minimum-window*.  It
+is mentioned here because the main use of the name is as the default string
+for the label, if there is a label (see below).
+.end_defmetainitoption
+
+.defmetamethod windows :name
+Returns the name of the window, which is a symbol.  See above.
+.end_defmetamethod
+
+.definitoption tv:label-mixin :label specification
+Sets the string displayed as the label, the font in which the label is
+displayed, and whether the label is at the top or the bottom of the
+window.  Anything you don't specify will default; by default, the string
+is the same as the name of the window, the font is the screen's standard
+font for the purpose 3:label* (see (font-purposes)), and the label is
+at the bottom of the window.
+
+2specification* may be any of:
+.table 1
+.item 3nil*
+There is no label at all.
+.item 3t*
+The label is given all the default characteristics.
+'kindex :top labels
+.item 3:top*
+The label is put at the top of the window.
+'kindex :bottom labels
+.item 3:bottom*
+The label is put at the bottom of the window.
+.item a string
+The text displayed in the label is this string.
+.item a font
+The label is displayed in the specified font.
+.item a list 3(2keyword1 arg1 keyword2 ...*)*
+The attributes corresponding to the keywords are set; the rest of the
+attributes default.  Some keywords take arguments and some do not.
+The following keywords may be given:
+.table 3
+.item :top
+The label is put at the top of the window.
+.item :bottom
+The label is put at the bottom of the window.
+'kindex :centered labels
+.item :centered
+The label is printed horizontally centered, rather than starting at the left edge.
+'kindex :string labels
+.item :string 2string*
+The text displayed in the label is 2string*.
+'kindex :font labels
+.item :font 2font-specifier*
+The label is displayed in the specified font.  2font-specifier* may be any
+font specifier (see (font-specifier)).
+'kindex :vsp labels
+.item :vsp 2vsp*
+If the label is multiple lines, lines will be separated by
+2vsp* rows of pixels.
+.end_table
+.end_table
+.end_definitoption
+
+.defmethod tv:label-mixin :label-size
+Returns the width and height of the area occupied by the label.
+.end_defmethod
+
+.defmethod tv:label-mixin :set-label specification
+Changes some attributes of the label.  2specification* can be anything
+accepted by the 3:label* init option.  Any attribute that 2specification*
+doesn't mention retains its old value.
+.end_defmethod
+
+.definstvar tv:label-mixin tv:label
+The value of this variable describes the label of the window.  It is
+either 3nil* for no label or a list of length eight, whose elements
+are
+.ftable 3 
+.item tv:label-left
+.item1 tv:label-top
+.item1 tv:label-right
+.item1 tv:label-bottom
+The rectangle allocated to the label.  All four edges are relative
+to the window's outside upper left corner.
+.item tv:label-font
+The font to use for the label.
+.item tv:label-string
+The string to display in the label.
+.item tv:label-vsp
+The separation between lines in the label.
+.item tv:label-centered
+Non-3nil* if the label text should be horizontally centered.
+.end_table
+.end_definstvar
+
+.defflavor tv:top-label-mixin
+Causes the label to appear in the top margin of the window by default
+instead of at the bottom.  The mixin does not override an explicit
+specification of the label position.
+.end_defflavor
+
+.defflavor tv:box-label-mixin
+Makes the label appear to be in a box, by drawing a line just on the
+inside of the label.  This combines with the window's borders, which
+surround the other three sides of the label, to make a box.  The extra
+line is present only if the label is turned on.  Menus use this mixin,
+so from any menu that has a label, such as the one you get from 3Split
+Screen* in the system menu, you can see what it looks like.
+.end_defflavor
+
+.definitoption tv:box-label-mixin :label-box-p t-or-nil
+If this option is 3nil*, the box around the label is inhibited.
+.end_definitoption
+
+.defflavor tv:centered-label-mixin
+Makes the label string appear by default horizontally centered in the
+width of the window.
+.end_defflavor
+
+.defflavor tv:delayed-redisplay-label-mixin
+This flavor adds the 3:delayed-set-label* and 3:update-label* operations
+to your window.  You send a 3:delayed-set-label* message to change the
+label in such a way that it will not actually be displayed until you
+send an 3:update-label* message.  This is especially useful for programs
+that suppress redisplay when there is typeahead; the user's commands may change
+the label several times, and you may want to suppress the redisplay of the
+changes in the label until there isn't any typeahead.
+.end_defflavor
+
+.defmethod tv:delayed-redisplay-label-mixin :delayed-set-label specification
+This is like the 3:set-label* method, except that nothing actually happens
+until an 3:update-label* is done.
+.end_defmethod
+
+.defmethod tv:delayed-redisplay-label-mixin :update-label
+Actually does the 3:set-label* operation on the 2specification* given
+by the most recent 3:delayed-set-label* operation.
+.end_defmethod
+
+.definstvar tv:delayed-redisplay-label-mixin tv:label-needs-updating
+Non-3nil* if a 3:delayed-set-label* has been done but not displayed yet.
+.end_definstvar
+
+.section Margin Regions
+.setq margin-regions section-page
+.cindex margin regions
+
+Margin regions are a general facility for allocating space in a window's
+margin for specific purposes.  Each region can display text or graphics
+and can be mouse sensitive.  Margin choices (see (margin-choice)) are
+implemented using margin regions.
+
+.defflavor tv:margin-region-mixin
+This mixin gives a window the ability to have margin regions.
+.end_defflavor
+
+.definstvar tv:margin-region-mixin tv:region-list
+A list of margin region descriptors.
+Each descriptor specifies one margin region and is a list of this form:
+.lisp
+(2function* 2margin* 2size* 2left* 2top* 2right* 2bottom*)
+.end_lisp
+The list may be longer than seven.  The meaning of the extra elements
+is up to you.
+Here is what the seven standard elements mean.  We list the names of the defsubsts
+provided to access them.
+.ftable 3
+.item tv:margin-region-function
+A function to handle various operations on the margin region.
+It is called with an operation name as the first argument,
+so it could be a flavor instance, but no flavors are predefined
+for the purpose and usually the function is a 3defselect*.
+The margin region descriptor itself is always one of the arguments,
+to identify the region being operated on.
+.item tv:margin-region-margin
+The name of the margin that this region lives in;
+either 3:left*, 3:top*, 3:right* or 3:bottom*.
+.item tv:margin-region-size
+The thickness in pixels of the margin region, perpendicular to the
+edge it is next to.  (The other dimension is controlled by the
+size of the window, possibly diminished by space already reserved for
+other margin items.)
+.item tv:margin-region-left
+.item1 tv:margin-region-top
+.item1 tv:margin-region-right
+.item1 tv:margin-region-bottom
+The edges of the rectangle assigned to the margin region.
+If positive, they are
+relative to the outside upper left corner of the window.
+If negative, they are relative to the outside lower right corner.
+
+You do not specify these; they are computed by the 3:redefine-margins*
+operation which divides up the margin space, and recorded here
+so that the margin region can be displayed and found by the mouse.
+.end_table
+The margin region descriptor may be longer than seven.
+Additional elements are not used by 3tv:margin-region-mixin* itself
+and therefore may be used by higher-level facilities to record
+their own information with each margin region.
+.end_definstvar
+
+.defmethod tv:margin-region-mixin :set-region-list new-region-list
+Sets the list of margin regions.  The new list should be a list of
+margin region descriptors as described above, but only the first
+three elements of each descriptor need be filled in.  The rest
+will be set up automatically.
+.end_defmethod
+
+These are the operations that the 2function* of a margin region
+is expected to handle:
+.table 3
+'kindex :refresh "margin region functions"
+.item :refresh 2descriptor*
+This operation should draw this region on the screen
+in the position specified by the margin region descriptor.
+'kindex :mouse-enters-region "margin region functions"
+.item :mouse-enters-region 2descriptor*
+This operation is invoked whenever the mouse moves into this region.
+'kindex :mouse-leaves-region "margin region functions"
+.item :mouse-leaves-region 2descriptor*
+This operation is invoked whenever the mouse moves out of this region.
+'kindex :mouse-moves "margin region functions"
+.item :mouse-moves 2x* 2y* 2descriptor*
+This operation is invoked when the mouse moves within a region.
+It is also invoked, following the 3:mouse-enters-region* operation,
+when the mouse moves into a region.
+2x* and 2y* are the new mouse position, relative to the outside of
+the window.
+'kindex :mouse-click "margin region functions"
+.item :mouse-click 2x* 2y* 2descriptor* 2mouse-char*
+This operation is invoked when the mouse is clicked on this region,
+except for double click right.  If the operation does nothing,
+the mouse click has no effect.  The argument 2mouse-char* is like
+that of the 3:mouse-click* window operation
+((windows-mouse-click-method)).
+'kindex :who-line-documentation-string "margin region functions"
+.item :who-line-documentation-string 2descriptor*
+This operation is invoked to get who line documentation to be used when
+the mouse is in this region.  It should return a string describing the
+meaning of mouse clicks on the region.
+.end_table
+
+.defun tv:margin-region-area descriptor
+Returns the four edges of the rectangle allocated to 2descriptor*'s
+margin region, all relative to the window's outside upper left corner.
+This may only be used inside of methods of the window whose margin
+region is being operated on.
+.end_defun
+
+.subsection Margin Region Example
+
+This is a simplification of the function used to handle the margin
+regions made by 3tv:margin-scroll-mixin*.  These regions display
+strings such as 3"More above"* and respond to a mouse click by scrolling a
+full page.  The margin regions used
+have additional nonstandard elements beyond the seventh:
+.table 3
+.item tv:margin-scroll-region-more-p
+Non-3nil* if there is more text to scroll to past this edge.
+.item tv:margin-scroll-region-empty-msg
+The string to display when there is no more to scroll to past this edge.
+.item tv:margin-scroll-region-more-msg
+The string to display when there is more to scroll to.
+.item tv:margin-scroll-region-msg-font
+The font to display the strings in.
+.end_table
+
+.lisp
+(declare-flavor-instance-variables (tv:margin-scroll-mixin)
+(defselect margin-scroll-region
+  (:refresh (region &optional old-valid
+		    &aux more-p left top right bottom)
+   (multiple-value (left top right bottom)
+     (tv:margin-region-area region))
+   1;; Is there anything more to scroll to past this edge?*
+   (setq more-p 
+	 (send self
+	       (if (eq (tv:margin-region-margin region) ':top)
+		   ':scroll-more-above ':scroll-more-below)))
+   1;; Redisplay string in the region unless already right.*
+   (when (or (not old-valid) 
+	     (neq more-p (margin-scroll-region-more-p region)))
+     (setf (margin-scroll-region-more-p region) more-p)
+     (tv:sheet-force-access (self)
+       1;; Erase the region.  Sheet has just been prepared.*
+       (tv:%draw-rectangle (- right left) (- bottom top)
+			   left top tv:erase-aluf self)
+       1;; Print the string.*
+       (send self ':string-out-centered-explicit
+	     (if more-p (margin-scroll-region-more-msg region)
+	       (margin-scroll-region-empty-msg region))
+	     left top right nil
+	     (margin-scroll-region-msg-font region) tv:char-aluf
+	     0 nil nil))))
+.end_lisp
+.nopara
+.lisp
+  ((:mouse-enters-region :mouse-leaves-region :mouse-moves)
+   (&rest ignore))
+  (:mouse-click (ignore ignore region ignore)
+   (if (margin-scroll-region-more-p region)
+       (let ((from (tv:margin-region-margin region)))
+	 (send self ':scroll-relative
+	       from (if (eq from ':top) ':bottom ':top)))
+       (beep)))
+  (:who-line-documentation-string (ignore)
+    "Any button to scroll one page.")))
+.end_lisp
+
+.section Defining Margin Item Flavors
+
+Let us assume that you want to define a thing called a 2mumble* that
+goes in a window's margins, the way labels and borders do.  You
+create a flavor 3mumble-margin-mixin* that implements the feature.
+
+This flavor should have certain instance variables,
+which will be used only by the methods of 3mumble-margin-mixin*
+so their precise format is up to you.
+.table 3
+.item current-mumbles
+Some sort of specification of what mumbles this window should have.
+It might record text to display for the mumbles, a font to use, etc.
+
+.item mumble-margin-area
+Records the rectangle within the window where the mumbles should go.
+Everything that deals with the location of the mumbles on the screen
+should act based on the value of this variable.
+
+It is recommended to use a list of four values: the left, top,
+right and bottom edges of the rectangle, all relative to the upper left
+outside corner of the window.
+.end_table
+
+Some margin mixins have just a single variable whose value is a
+list containing both the contents and the position of the margin item.
+
+.lisp
+.exdent 96 Example:
+(defflavor mumble-margin-mixin 
+	   ((current-mumbles nil) mumble-margin-area)
+	   ()
+  (:required-flavors tv:minimum-window)
+  (:inittable-instance-variables current-mumbles))
+
+(defmethod (mumble-margin-mixin :before :init) (ignore)
+  (setq current-mumbles 
+	(canonicalize-and-validate-mumble-spec 
+	  current-mumbles)))
+.end_lisp
+
+Now you must at the minimum create methods for two standard operations
+for margin computation and display, to interface 3mumble-margin-mixin*
+to the rest of the system.  These operations are 3:compute-margins*
+and 3:refresh-margins*.
+
+.defmetamethod windows :compute-margins lm tm rm bm
+3:compute-margins* is used by the system to find out how much space is
+needed in each margin of the window by borders, labels, and anything
+else.  Each flavor that implements a kind of margin item must define a
+method for it.  This operation uses 3:pass-on* method combination, so
+that the values from one method become the arguments to the next.  These
+arguments are interpreted as the amount of space allocated so far in
+each margin.  Each method increments one or more of them by the amount
+of space needed by that mixin.
+.end_defmetamethod
+
+.defmetamethod windows :refresh-margins
+Redraws all the contents of the window's margins.
+Each flavor of margin item must add a daemon method to this operation.
+The method may assume that its own margin area is completely erased to
+begin with.
+.end_defmetamethod
+
+For example:
+.lisp
+(defmethod (mumble-margin-mixin :compute-margins) 
+	   (lm tm rm bm)
+  (let ((wid (mumble-margin-width current-mumbles)))
+    (setq mumble-margin-area
+	  (list lm tm (+ lm wid) (- tv:height bm)))
+    (values (+ lm wid) tm rm bm)))
+.end_lisp
+
+Here we assume that the mumbles always go in the left margin.  So it is
+always the left margin's width that is incremented, and the others are
+returned just as they were passed.  We also assume that
+3mumble-margin-width* is a function you have defined that computes the
+width of space that the mumbles need.
+
+In addition to returning modified versions of its arguments, the method
+also sets up the value of 3mumble-margin-area*.  This is the only
+place it is necessary to set that variable.  By recording the position
+of each margin item this way, we take into account how one margin item
+affects the position of the others.  For example, the mumbles might come
+inside the borders, and then the 2lm*, 2tm*, 2rm* and 2bm*
+values will already contain the width of the borders.  Then
+3margin-mumble-area* will describe a rectangle that is within the
+borders.
+
+Usually an additional mixin-specific operation is introduced into this
+method, as follows:
+.lisp
+(defmethod (mumble-margin-mixin :compute-margins)
+	   (lm tm rm bm)
+  (send self ':recalculate-mumble-margins lm tm rm bm))
+
+(defmethod (mumble-margin-mixin :recalculate-mumble-margins) 
+	   (lm tm rm bm)
+  (let ((wid (mumble-margin-width current-mumbles)))
+    (setq mumble-margin-area
+	  (list lm tm (+ lm wid) (- tv:height bm)))
+    (values (+ lm wid) tm rm bm)))
+.end_lisp
+This way, other mixins can be defined to modify where the mumbles go
+by replacing the 3:recalculate-mumble-margins* method.
+
+The one other thing you must do is provide a method for
+3:refresh-margins*, to draw the mumbles in the rectangle recorded:
+You can assume that that rectangle is clear to start with.
+.lisp
+(defmethod (mumble-margin-mixin :after :refresh-margins) ()
+  (tv:sheet-force-access (self)
+    (draw-mumbles current-mumbles mumble-margin-area)))
+.end_lisp
+
+You may wish to provide the user with an operation to change the
+window's mumbles.  This operation should use the 3:redefine-margins*
+operation.
+
+.defmetamethod windows :redefine-margins
+This operation recomputes how much margin space is needed for all of the
+margin items, by invoking the 3:compute-margins* operation, and then
+actually changes the window margin sizes if necessary.
+
+If the margin sizes have changed, then the window is erased and
+3:refresh-margins* is done; the instance variable
+3tv:restored-bits-p* (present in all windows) is left set to 3nil*.
+If the margin sizes have not changed, no output whatever is done, and
+3tv:restored-bits-p* is left set to 3t*.  All this is done
+using the 3:refresh* operation.
+.end_defmetamethod
+
+Here is an example of how to use it:
+.lisp
+(defmethod (mumble-margin-mixin :set-mumbles) (new-mumbles)
+  (setq current-mumbles
+	(canonicalize-and-validate-mumble-spec new-mumbles))
+  (send self ':redefine-margins)
+  (when tv:restored-bits-p
+    (tv:sheet-force-access (self)
+      (erase-mumble-area mumble-margin-area)
+      (draw-mumbles current-mumbles mumble-margin-area))))
+.end_lisp
+
+The explicit erasure and drawing of the mumbles is done in the case
+where the total sizes of the margins have not changed (and therefore no
+screen updating has been done), in case the 2contents* of the mumbles
+have changed.

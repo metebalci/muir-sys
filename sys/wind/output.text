@@ -1,0 +1,1024 @@
+.c -*-Mode:Bolio; Lowercase:Yes-*-
+
+.chapter Output of Text
+.setq output section-page
+.setq output-chapter chapter-number
+.cindex output of text
+
+All windows can function as output streams, displaying the output as
+if on the screen of an ordinary display terminal.  The flavor
+3tv:minimum-window* implements the operations of the Lisp Machine
+output stream protocol (see (stream-protocol)), as well as many
+additional output operations such as 3:insert-line*.  Every window
+has a current 2cursor position*; its main use is to say where to put
+characters that are drawn.  The way a window handles the operations
+asking it to type out is by drawing that character at the cursor
+position, and moving the cursor position forward past the just-drawn
+character.
+
+Cursor position arguments to stream operations are always expressed in
+"inside" coordinates (see (inside-size)); that is, coordinates
+relative to the top-left corner of the inside part of the window, so
+the margins don't count in cursor positioning.  The cursor position
+always stays in the inside portion of the window--never in the
+margins.  The point (0,0) is at the top-left corner of the
+window; increasing 2x* coordinates are further to the right and
+increasing 2y* coordinates are further towards the bottom.  (Note
+that 2y* increases in the down direction, not the up direction!)
+
+.defmetainstvar windows tv:cursor-x
+.defmetainstvar1 windows tv:cursor-y
+The window's current cursor position.  Note that these variables
+use "outside" coordinates, unlike the arguments to stream operations.
+.end_defmetainstvar
+
+The 2x* cursor position is the position of the left edge of the
+character box of the next character output.  (The leftmost nonzero
+pixels of the character may be either left or right of the edge of the
+character box, according to the left-kern of the character; see
+(font-left-kern)).
+
+The 2y* cursor position is the position of the top of the vertical
+extent for the line being output.  If only a single font is in use, the
+top of the character box is at this vertical position.
+
+In fact, characters are positioned so that their baselines come out on
+the baseline of the line.  This way, characters of different fonts
+juxtaposed in one line come out with baselines aligned rather than with
+their top edges aligned.  The position of the character's baseline is a
+property of its font.  The window's baseline is computed from the set of
+fonts in use, to provide enough space above the baseline for any of the
+fonts (see (windows-tv:baseline-instvar)).
+
+.cindex alu function
+.cindex char-aluf
+.setq char-aluf page
+.cindex overstriking
+
+When a character is drawn, it is combined with the existing contents
+of the pixels of the window according to an 2alu function*.  The
+different alu functions are described in (aluf).  When characters are
+drawn, the value of the window's 2char-aluf* is the alu function
+used.  Normally, the 2char-aluf* says that the bits of the character
+should be bit-wise logically 2or*ed with the existing contents of
+the window (3tv:alu-ior*).  This means that if you type a character,
+then set the cursor position back to where it was and type out a
+second character, the two characters will both appear, 2or*ed
+together one on top of the other.  This is called overstriking.
+Erasure is also done using an alu function which the window can
+specify, called the 2erase-aluf*.  Normally this is an alu function
+which 2and*s the old pixel value with the complement of the area
+erased (3tv:alu-andca*).
+
+.defmetainstvar windows tv:char-aluf
+.defmetainstvar1 windows tv:erase-aluf
+The window's 2char-aluf* and 2erase-aluf*.
+.end_defmetainstvar
+
+Reverse-video windows work by interchanging the normal values of the 2char-aluf* and 2erase-aluf*, so that erasing an area sets it to one
+while drawing a character clears the character's pixels to zero.
+
+.cindex font map
+.cindex current font
+.cindex character width
+.cindex line height
+.setq char-width-and-line-height page
+.setq vsp page
+.cindex vsp
+.cindex vertical spacing (vsp)
+
+Every window has a 2font map*.  A font map is an array of fonts in
+which characters on the window can be typed.  At any time, one of these
+is the window's 2current font*; the operations that type out
+characters always type in the current font.  Details of fonts and the
+font map appear below (see (font-section)).  For now, we describe fonts
+only enough to explain the
+2character-width* and 2line-height* of the window; these two
+units are used by many of the operations documented in this section.
+The character-width is the 2char-width* attribute--the width of a
+"typical" character--of the first font in the font map.  The line-height
+is the sum of the 2vsp* of the window and the maximum of the
+2char-height*s of all the fonts.  The 2vsp* is an attribute of the
+window that controls how much vertical spacing there is between
+successive lines of text.  That is, each line is as tall as the tallest
+font is, and you can add vertical spacing between lines by
+controlling the 2vsp* of the window.  Operations for controlling the
+2vsp* are documented on (vsp-operations).  There is no instance
+variable holding the 2vsp*, but the system can recompute it from the
+line-height and the font map.
+
+.defmetainstvar windows tv:char-width
+.defmetainstvar1 windows tv:line-height
+The character-width and line-height of the window.  The line height is
+actually used for outputting a 3#\return* character.  The character
+width is not used at all for ordinary output, since each font determines
+its own widths.  Both are used for interpreting cursor positions expressed
+in characters or lines.
+.end_defmetainstvar
+
+Every window has a 2current font*, which the operations use to
+figure out what font to type in.  If you are not interested in fonts,
+you can ignore this and something reasonable will happen.  In some
+fonts, all characters have the same width; these are called
+2fixed-width fonts*.  The default font is an example.  In other
+fonts, each character has its own width; these are called
+2variable-width fonts*.  With variable-width fonts, it is not fully
+meaningful to express horizontal positions in numbers of characters,
+since different characters have different widths.  Some of the
+functions below do use numbers of characters to designate widths;
+there are warnings along with each such use explaining that the
+results may not be meaningful if the current font has variable width.
+
+.defun tv:sheet-cursor-x window
+.defun1 tv:sheet-cursor-y window
+.defun1 tv:sheet-char-aluf window
+.defun1 tv:sheet-erase-aluf window
+.defun1 tv:sheet-char-width window
+.defun1 tv:sheet-line-height window
+Accessor defsubsts for the corresponding instance variables.
+It may be reasonable to 3setf* the first four of them.
+.end_defun
+
+.section How A Character Is Printed
+
+Typing out a character does more than just drawing the character on the
+screen.  The cursor position is moved to the right place; non-printing
+characters are dealt with reasonably; if there is an attempt to move off
+the right or bottom edges of the screen, the typeout wraps around
+appropriately; 2more* breaks are caused at the right time if 2more
+processing* is enabled.  Here is the complete explanation of what typing
+out a character does.  You may want to remind yourself how the Lisp
+Machine character set works; see (character-set).  You don't have to
+worry much about the details here, but in case you ever need to know,
+here they are.  If you aren't interested, skip ahead to the definitions
+of the operations.
+
+First, any output exceptions that are present are dealt with, and made
+to go away.  See (output-exceptions), for an explanation of this.
+
+When all exceptions have been dealt with, the character finally gets typed
+out.  If it is a printing character, it is typed in the current font at the
+cursor position and the cursor position is moved to the right by the width
+of the character.  If it is one of the format effectors 3#\return*,
+3#\tab*, and 3#\backspace*, it is handled in a special way to be
+described in a moment.  All other special characters have their names typed
+out in tiny letters surrounded by a lozenge, and the cursor position is
+moved right by the width of the lozenge.  If an undefined character code is
+typed out, it is treated like a special character; its code number is
+displayed in a lozenge.
+
+3#\tab* moves the cursor position to the right to the next tab stop,
+moving at least one character-width.  Tab stops are equally spaced across
+the window.  The distance between tab stops is 2tab-nchars* times the
+2character-width* of the window.  2tab-nchars* defaults to 8 but
+can be changed (see (windows-tab-nchars-init-option)).
+
+Normally 3#\return* moves the cursor position to the inside left edge of
+the window and down by one line-height, and clears the line (see
+(windows-clear-eol-method)).  It also deals with more processing and
+the end-of-page condition as described above.  However, if the window's
+2cr-not-newline-flag* is on, the 3#\return* character is not regarded
+as a format effector and is displayed as "3return*" in a lozenge, like
+other special characters.
+
+.setq backspace-not-overprinting-flag-blurb page
+
+If the character being typed out is a 3#\backspace*, the result depends
+on the value of the window's 2backspace-not-overprinting-flag*.  If the
+flag is 30*, as is the default, the cursor position is moved left by one
+character-width (or to the inside left edge, whichever is closer).  If the
+flag is 31*, 3#\backspace*s are treated like all other special
+characters.
+
+.section Stream Output Operations
+
+.defmetamethod windows :tyo ch &optional font
+Type 2ch* on the window, as described above.  Basically, type the character
+2ch* in 2font* or the current font at the cursor position, and advance
+the cursor position.
+.end_defmetamethod
+
+.defmetamethod windows :string-out string &optional (start 30*) (end 3nil*)
+Type 2string* on the window, starting at the character 2start* and
+ending with the character 2end*.  If 2end* is 3nil*, continue to
+the end of the string; if neither optional argument is given, the entire
+string is typed.  This behaves exactly as if each character in the string
+(or the specified substring) were printed with the 3:tyo*
+operation, but it is much faster.
+.end_defmetamethod
+
+.defmetamethod windows :fat-string-out string &optional (start 30*) (end 3nil*)
+Type the fat string 2string* on the window.  This is like 3:string-out*
+except that the 3%%ch-font* field of each character is used as the font
+to draw that character in.  The window's current font is not used.
+.end_defmetamethod
+
+.defmetamethod windows :line-out string &optional (start 30*) (end 3nil*)
+Do the same thing as 3:string-out*, and then advance to the next line
+(like typing a 3#\return* character).  The main reason that this operation
+exists is so that the 3stream-copy-until-eof* function
+(see (stream-copy-until-eof-fun)) can, under some conditions, move whole lines
+from one stream to another; this is more efficient than moving
+characters singly.  The behavior of this operation is not affected
+by the 3:cr-not-newline-flag* init-option
+(see (windows-cr-not-newline-flag-init-option)).
+.end_defmetamethod
+
+.defmetamethod windows :string-out-centered string left right y-pos
+Output 2string* (or the portion from 2start* to 2end*), centered
+between 2x* positions 2left* and 2right*, at 2y* position
+2y-pos* (which defaults to the current cursor position).  The cursor
+is left at the end of the string.  If the string is multiple lines, the
+entire rectangular shape it occupies is centered as a unit.  To center
+lines individually, output each line individually with this operation.
+.end_defmetamethod
+
+.defmetamethod windows :fresh-line
+Get the cursor position to the beginning of a blank line.  Do this
+in one of two ways.  If the cursor is already at the beginning of a
+line (that is, at the inside left edge of the window), clear the line
+to make sure it is blank and leave the cursor where it was.
+Otherwise, advance the cursor to the next line and clear the line
+just as if a 3#\return* had been output. The behavior of this operation is not affected
+by the 3:cr-not-newline-flag* init-option
+(see (windows-cr-not-newline-flag-init-option)).
+.end_defmetamethod
+
+.defmetamethod windows :beep &optional beep-type
+Attempt to attract the user's attention, by
+either making a sound with the keyboard or flashing the screen into and out
+of inverse video or both.
+
+If 3beep*'s value is 3nil*, both are done.  If the value is 3:beep*,
+only the sound is made.  If it is 3:flash*, only flashing the screen is done.
+
+No standard meanings have been assigned to 2beep-type* yet.
+.end_defmetamethod
+
+.defun beep &optional 2beep-type* (stream 3standard-output*)
+Beeps by sending a 3:beep* message to 2stream*, passing
+2beep-type* as an argument.  If the stream does not handle the
+3:beep* operation, a sound is made on the keyboard instead.
+.end_defun
+
+.defmetamethod windows :display-lozenged-string string
+Output 2string* in a lozenge.  This is how special characters are echoed.
+.end_defmetamethod
+
+.defun tv:sheet-line-out sheet string start end set-xpos set-ypos dwidth
+This is a complicated primitive whose interface is arranged to do
+exactly what the editor needs for buffer display, to make the editor as
+fast as possible.
+
+It outputs part of 2string* on 2sheet* like the 3:fat-string-out*
+operation, but stops if it reaches the right margin (outputting a right margin
+character if any output remains, if the window calls for that).
+
+If 2set-xpos* and 2set-ypos* are non-3nil*, the cursor is moved
+there and a 3:clear-eol* is done, before output starts.  If one of
+these arguments is 3nil*, that dimension of cursor position is not
+changed.  If both are 3nil*, the cursor is not moved and nothing is cleared.
+
+If 2dwidth* is non-3nil*, it should be a positive number.  Output
+actually starts at index 3(1- 2start*)* in the string, and at 2x*
+position 2dwidth* less that the cursor position (as found or as set by
+2set-xpos*).  However, if a 3:clear-eol* is done, it starts at
+2set-xpos*.  Non-3nil* 2dwidth* is to be used if the previous
+character of the string is in an italic font, and is already present
+on the screen before the output now being done.  It causes that character
+to be output again, presumably overprinting itself, in case a corner of
+it was erased accidentally because it protrudes to the right of its
+allocated space.
+
+Returns two values, the final index in the string and the final 2x* cursor position.
+The window's cursor is not guaranteed to be moved there; it is undefined
+on exit from this function.  But the value will be correct.
+.end_defun
+
+.section Output Exceptions
+.setq output-exceptions section-page
+
+Before doing output to a window, various exceptional conditions are
+checked for.  If an exceptional condition is discovered, a standard
+operation is invoked to handle it.  Redefining or adding daemons to
+these operations can change the handling of exceptions.  For example,
+output with the cursor too close to the right margin causes an end of
+line exception; the handling of this exception is what moves the cursor
+to the next line, or truncates the line, or whatever the window's flavor
+arranges for.
+
+The exceptions are actually indicated by flags, bits, set in the
+window.  The operation to handle the exception should do nothing if it
+is invoked when the corresponding flag is not set, and should not
+return with the flag still set (or an error will be signaled).  The
+end-of-page and more flags are set and cleared automatically by
+moving the cursor; as long as things are done properly, they will be
+set if and only if the cursor is in the right place for them.  So the
+exception handler need only make sure to move the cursor to a good
+place.  The output hold exception handler usually just waits for or
+brings about a situation in which the reason for the output hold is
+gone (usually because the window has been exposed).
+
+.defmetamethod windows :handle-exceptions
+Performs the exception processing described by all the rest of this section.
+Exceptions are processed in this order:
+.break
+Output Hold, End-of-Page, 7**MORE***, and End-of-Line.
+.end_defmetamethod
+
+.subsection Output Hold and End of Page Exceptions
+
+First, if the window's output hold flag is set, an output hold exception
+happens.  The operation 3:output-hold-exception* is invoked to handle
+it.
+
+.defun tv:sheet-output-hold-flag window
+Returns the output hold flag of 2window*, which is 1 if there is a
+hold and 0 if not.  This is a 3setf*'able accessor defsubst.
+.end_defun
+
+.defmetamethod windows :output-hold-exception
+This operation should not return until the output hold is gone.
+It may wait for the output hold flag to be cleared, or try
+to cause it to be cleared.  The default handler acts based
+according to the window's deexposed typeout action (see
+(deexposed-typeout-action)).
+.end_defmetamethod
+
+Next, if the end-of-page flag is set (normally the case if the
+2y*-position of the cursor is less than one line-height above the
+inside bottom edge of the window), the 3:end-of-page-exception*
+operation is invoked.
+
+.defun tv:sheet-end-page-flag window
+Returns the end-of-page flag of 2window*, which is 1 if the next
+output operation should wrap and 0 otherwise.  This is a 3setf*'able
+accessor defsubst.
+.end_defun
+
+.defmetamethod windows :end-of-page-exception
+This operation is invoked to handle the end-of-page exception when
+present.  It should do nothing if invoked when the flag is zero.
+
+The default definition is simply to move the cursor to the top line,
+clear that line, and set the vertical position for the next
+7**MORE*** if more-processing is enabled.
+.end_defmetamethod
+
+.subsection **MORE** Exceptions
+
+.setq more-processing page
+.setq more-flag page
+
+Next, if the window's 2more flag* is set, a 2more exception* happens.
+The more flag gets set when the cursor is moved to a new line
+(e.g. when a 3#\return* is typed) and the cursor
+position is thus made to be below the 2more vpos* of the window.  (If
+3tv:more-processing-global-enable* is 3nil*, this exception is
+suppressed and the more flag is turned off.)  The
+3:more-exception* operation is invoked to handle the exception.
+
+.defun tv:sheet-more-flag window
+Returns the more flag, which is 1 if the next output operation should
+do a 7**MORE***, and 0 otherwise.
+This is a 3setf*'able accessor defsubst.
+.end_defun
+
+.defmetainstvar windows tv:more-vpos
+The vertical position at which the next 7**MORE*** should
+happen in output on the window.
+.end_defmetainstvar
+
+.defmetamethod windows :more-vpos
+Returns the window's 3tv:more-vpos*.
+.end_defmetamethod
+
+.defun tv:sheet-more-vpos window
+Accessor defsubst for the preceding instance variable.
+.end_defun
+
+.defvar tv:more-processing-global-enable
+7**MORE*** processing does not happen if this variable is 3nil*
+during the output operation in which the 7**MORE*** would have happened.
+.end_defvar
+
+.defmetamethod windows :more-exception
+The 3:more-exception* handler in the 3tv:minimum-window* flavor does
+a 3:clear-eol* operation, types out 7**MORE***, reads a character
+using the 3:more-tyi* operation, restores the cursor position to where
+it originally was when the 3:more-exception* was detected, does
+another 3:clear-eol* to wipe out the 7**MORE***, and resets the
+more vpos.  The character read in is ignored.
+
+This operation works by calling a subroutine, 3tv:sheet-more-handler*,
+if the more flag is set.  It
+should do nothing if the flag is zero.  It is safe to redefine it to
+call that function with different arguments, or to do other things as
+well.  It is very risky to write a new definition from scratch, as
+3tv:sheet-more-handler* is tricky.
+.end_defmetamethod
+
+.defun tv:sheet-more-handler &optional (operation 3':tyi*) (more-string 7"**3MORE***"*)
+Implements the standard handling of 2more* exceptions, described
+above, using 2operation* to read the input and 2more-string* as the
+output to be printed and then erased.
+.end_defun
+
+Note that the more flag is set only when the cursor moves to the next
+line, because a 3#\return* is typed out, after a 3:line-out*, or by the
+3:end-of-line-exception* handler described below.  It is not set when the
+cursor position of the window is explicitly set (e.g. with
+3:set-cursorpos*); in fact, explicitly setting the cursor position clears
+the more flag.  The idea is that when typeout is being streamed out
+sequentially to the window, 2more*-exceptions happen at the right times
+to give the user a pause in which to read the text that is being typed, but
+when cursor positioning is being used the system cannot guess what order
+the user is reading things in and when (if ever) is the right time to stop.
+In this case it is up to the application program to provide any necessary
+pauses.
+
+The algorithm for setting the more vpos is too complicated to go
+into here in all its detail, and you don't need to know exactly how it
+works, anyway.  It is careful never to overwrite something before you
+have had a chance to read it, and it tries to do a 7**MORE*** only if
+a lot of output is happening.  But if output starts happening near the
+bottom of the window, there is no way to tell whether it will just be a
+little output or a lot of output.  If there's just a little, you would
+not want to be bothered by a 7**MORE***.  So it doesn't do one
+immediately.  This may make it necessary to cause a 7**MORE*** break
+somewhere other than at the bottom of the window.  But as more output
+happens, the position of successive 7**MORE***s is migrated and
+eventually it ends up at the bottom.
+
+.defflavor tv:autoexposing-more-mixin
+If you mix in this flavor, when a 3:more-exception* happens, the
+window will be exposed (an 3:expose* message will be sent to it).  This
+is intended to be used in conjunction with having a deexposed typeout
+action of 3:permit* (see (deexposed-permit)), so that a process can
+type out on a deexposed window and then have the window expose itself
+when a 7**MORE*** break happens.
+.end_defflavor
+
+.subsection End of Line Exceptions
+
+.setq right-margin-character-flag-blurb page
+
+Finally, if the cursor is at or near the end of the line so that there
+is no room to output the next character, an end-of-line exception
+happens.  The 3:end-of-line-exception* operation is invoked to
+handle it.  A flag is not used to trigger this exception since the
+condition depends on the width of the character to be output.
+
+.defmetamethod windows :end-of-line-exception
+This operation is defined by default to advance the cursor to the next
+line, just as typing a 3#\return* character does normally (see
+below).  Doing so may, in turn, cause an 3:end-of-page-exception* or
+a 3:more-exception* to happen.  Furthermore, if the 2right margin
+character flag* is on (see
+(windows-right-margin-character-flag-init-option)), then before going
+to the next line, an exclamation point in font zero is typed at the
+cursor position.  When this flag is on, end-of-line exceptions are
+caused a little bit earlier, to make room for the exclamation point.
+.end_defmetamethod
+
+.defmetamethod windows :tyo-right-margin-character
+If a right-margin character is to be printed, this operation is invoked
+to print it.  It can simply 3:tyo* the character.
+.end_defmetamethod
+
+.cindex continuation of lines
+.cindex wraparound, horizontal
+.cindex horizontal wraparound
+.setq continuation page
+.setq wraparound page
+
+The way the cursor position goes to the next line when it reaches the
+right edge of the window is called 2horizontal wraparound* or
+2continuation*.  You can make windows
+that truncate lines instead of wrapping them around by using
+3tv:line-truncating-mixin*.
+
+.cindex truncation of lines
+
+.defflavor tv:line-truncating-mixin
+This mixin gives a window the ability to truncate lines at the right
+margin instead of continuing output onto the next line as usual (see
+continuation, (continuation)).  Truncation is performed if the window's
+truncate-line-out flag is set.  When the cursor position is near the
+right-hand edge of the window and there is an attempt to type out a
+character, the character simply will not be typed out.
+.end_defflavor
+
+.definitoption tv:line-truncating-mixin :truncate-line-out-flag flag
+Initializes the truncate-line-out flag of the window to 2flag*.
+One means truncate and zero means do not.
+.end_definitoption
+
+.defun tv:sheet-truncate-line-out-flag window
+Returns the truncate-line-out flag of the window, which is zero or one.
+One means truncate and zero means do not; however, the flag matters only
+if 3tv:line-truncating-mixin* is in use.  This is a defsubst which
+may be 3setf*'d.
+.end_defun
+
+.defflavor tv:truncating-window
+This flavor is built on 3tv:window* with 3tv:line-truncating-mixin*
+mixed in.  If you instantiate a window of this flavor, it will be like
+regular windows of flavor 3tv:window* except that lines will be
+truncated instead of wrapping around.
+.end_defflavor
+
+.section Cursor Motion
+
+The window's cursor position is where the upper left corner of the
+next output character will appear, with a vertical offset if necessary
+to match up the baselines of various fonts (see (font-baseline)).
+Recall that cursor position arguments and values of stream operations
+are relative to the inside upper left corner of the window.
+
+.defmetamethod windows :read-cursorpos &optional (units 3':pixel*)
+Return two values: the 2x* and 2y* coordinates of the cursor
+position.  These coordinates are in pixels by
+default, but if 2units* is 3:character*, the coordinates are given
+in character-widths and line-heights.  (Note that character-widths
+don't mean much when you are using variable-width fonts.)
+.end_defmetamethod
+
+.defmetamethod windows :increment-cursorpos x y &optional (units 3':pixel*)
+Advances the cursor position the specified amount in each coordinate.
+The units may be specified as with 3:read-cursorpos*.  This operation
+is considered to be sequential motion of the cursor through a variable
+amount of space, rather than instantaneous jumping of the cursor.  What
+this means is that exceptions happen, just as if output were being done.
+So the cursor wraps around at the margins (or does whatever this window does
+for 3:end-of-line-exception* and 3:end-of-page-exception*), and 
+7**MORE*** processing happens at the appropriate place.
+.end_defmetamethod
+
+The following few operations do cursor 2motion* rather than
+2advancing* the cursor.  The end-of-page, 2more* and end-of-line
+exception flags will be set if the cursor is moved to a position where
+they ought to be on, and can be cleared if they were previously on and
+the cursor is moved to a place where they ought to be off.  Exception
+handling does not take place.
+
+.defmetamethod windows :set-cursorpos x y &optional (units 3':pixel*)
+Moves the cursor position to the specified coordinates.  The units may
+be specified as with 3:read-cursorpos*.  If the coordinates are
+outside the window, move the cursor position to the nearest place
+to the specified coordinates that is in the window. 
+.end_defmetamethod
+
+.defmetamethod windows :home-cursor
+Moves the cursor to the upper left corner of the window.
+.end_defmetamethod
+
+.defmetamethod windows :home-down
+Moves the cursor to the lower left corner of the window.
+.end_defmetamethod
+
+.defmetamethod windows :forward-char &optional char
+Moves the cursor forward one character position, or the width of 2char*
+in the current font if 2char* is specified.  Exceptions are processed,
+so this is like outputting a space which has the appropriate width.
+.end_defmetamethod
+
+.defmetamethod windows :backward-char &optional char
+Moves the cursor backward one character position, or the width of
+2char* in the current font if 2char* is specified.  Exceptions are
+processed, but there is no reverse-wraparound.  At the left margin, the
+cursor does not move.
+.end_defmetamethod
+
+.defmetamethod windows :size-in-characters
+Returns two values, the dimensions of the window, in units of
+character-widths and line-heights.  (Note that character-widths don't
+mean much when you are using variable-width fonts.)
+.end_defmetamethod
+
+.defmetamethod windows :set-size-in-characters width-spec height-spec &optional option
+Sets the inside size of the window, according to the two specifications,
+without changing the position of the upper-left corner.  2width-spec*
+and 2height-spec* are interpreted the same way as arguments to the
+3:character-width* and 3:character-height* init-options,
+respectively.  2option* is passed along to 3:set-edges* ((windows-set-edges-method)).
+.end_defmetamethod
+
+.section Erasing
+
+All the erasing operations operate on the window pixels by drawing the
+area to be erased using the window's 2erase-aluf* as the alu function
+(see (windows-tv:erase-aluf-instvar)).  This is by default
+3tv:alu-andca*, which clears the screen bits of the screen area drawn.
+
+.defmetamethod windows :clear-char &optional char
+Erases the
+character at the current cursor position.  When using variable-width
+fonts, you tell it the character code of the character you are erasing,
+so that it will know how wide the character is (it assumes the character
+is in the current font).  If you don't pass the 2char* argument, it simply
+erases a character-width, which is fine for fixed-width fonts.
+.end_defmetamethod
+
+.defmetamethod windows :clear-string string &optional start end
+Erases enough space, starting at the cursor, to contain 2string* (or
+the portion of 2string* from 2start* to 2end*), printed in the
+current font.  The entire height of the line is erased, so it does not
+matter whether the text on the screen is 2string* or something else.
+2string* determines only how far to erase.  If a fixed-width font is
+in use, this is equivalent to doing 3:clear-char* once for each
+character in 2string*.  This operation becomes desirable because of
+variable-width fonts.
+.end_defmetamethod
+
+.defmetamethod windows :clear-eol 
+Erases from the current cursor position to the end of the current
+line; that is, erases a rectangle horizontally from the cursor position
+to the inside right edge of the window, and vertically from the cursor
+position to one line-height below the cursor position. 
+.end_defmetamethod
+
+.defmetamethod windows :clear-eof
+Erases from the current cursor position to the bottom of the window.  
+In more detail, first does a 3:clear-eol*, and then
+clears all of the window past the current line.
+.end_defmetamethod
+
+.defmetamethod windows :clear-screen
+Erases the whole window and moves the cursor position to the upper
+left corner of the window.
+.end_defmetamethod
+
+.defmetamethod windows :clear-between-cursorposes start-x start-y end-x end-y
+Erases an area starting at cursor position 2start-x* and 2start-y*,
+wrapping around if necessary at the end of the line or the page, until
+2end-x* and 2end-y* are reached.
+
+Though the arguments are expressed as cursor positions, the cursor
+position of the window is not changed.
+.end_defmetamethod
+
+.section Inserting and Deleting Lines and Characters
+
+Inserting a character means printing it at the cursor but pushing the
+rest of the text on the line toward the right margin.  Similarly,
+deleting a character means pulling the following text on the line back
+toward the left so that the position occupied by the character is closed
+up.  Inserting and deleting lines work the same way vertically, moving
+the lines below the cursor down or up.
+
+The operations that take a numeric argument specifying the amount of
+space to insert or delete also take an argument specifying the unit
+(either 3:pixel* or 3:character*) in which the space has been
+measured.  The unit argument's meaning is the same as in the
+3:read-cursorpos* operation
+((windows-read-cursorpos-method)) but the default is
+3:character* rather than 3:pixel*.
+
+.defmetamethod windows :delete-char &optional (n 31*) (unit 3':character*)
+Without an argument, deletes the character at the current cursor
+position.  Otherwise, deletes 2n* characters (or 2n* pixels if
+2unit* is 3:pixel*), starting at the cursor position.  Move the
+display of the part of the current line that is to the right of the
+deleted section leftwards to close the resultant gap.  (If 2unit* is
+3:character*, this assumes all characters are one character-width
+wide, and so will not do anything useful with variable-width fonts.)
+.end_defmetamethod
+
+.defmetamethod windows :delete-string string &optional (start 30*) (end 3nil*)
+This is for deleting specific strings in the current font.
+It is one of the things to use when dealing with variable-width fonts.
+
+If 2string* is a string, excise a region exactly as wide as that string,
+or a substring specified by 2start* and 2end*, and
+moves the display of the part of the current line that is
+to the right of the excised region leftwards to close the gap.
+
+If 2string* is a number, it is considered to be a character code.
+The single character is treated like a string containing that character.
+.end_defmetamethod
+
+.defmetamethod windows :delete-line &optional (n 31*) (unit 3':character*)
+Without an argument, deletes the line that the cursor is on.  Otherwise
+deletes 2n* lines, or 2n* rows of pixels if 2unit* is 3:pixel*,
+starting with the one the cursor is on.  Moves the display below the
+deleted section up to close the resulting gap.
+.end_defmetamethod
+
+.defmetamethod windows :insert-char &optional (n 31*) (unit 3':character*)
+Opens up a space the width of 2n* characters (or 2n* pixels if
+2unit* is 3:pixel*) in the current line at the current cursor
+position.  Shifts the characters to the right of the cursor further to
+the right to make room.  Characters pushed past the right-hand edge of
+the window are lost.  (If 2unit* is 3:character*, this assumes all
+characters are one character-width wide, and so will not do anything
+useful with variable-width fonts.)
+.end_defmetamethod
+
+.defmetamethod windows :insert-string string &optional (start 30*) (end 3nil*) (type-too 3t*)
+Inserts a string at the current cursor position, moving
+the rest of the line to the right to make room for it.
+
+The string to insert is specified by 2string*; a substring thereof may
+be specified with 2start* and 2end*, as with 3:string-out*.
+
+2string* may also be a number, in which case the character with that
+code is inserted.
+
+If 2type-too* is specified as 3nil*, the string is not actually
+printed.  The space opened up is big enough for the string, but is
+left blank.
+.end_defmetamethod
+
+.defmetamethod windows :insert-line &optional (n 31*) (unit 3':character*)
+Takes the line containing the cursor and all the lines below it, and
+moves them down one line.  The line containing the cursor is moved in
+its entirety, not broken, no matter where the cursor is on the line.
+A blank line is created at the cursor.  If an argument 2n* is given,
+opens up 2n* blank lines, or 2n* rows of pixels if 2unit* is
+3:pixel*.  Lines pushed off the bottom of the window are lost.
+.end_defmetamethod
+
+.section Anticipating the Effect of Output
+
+The following operations do not output, but provide information about
+what would happen to the cursor and the screen if output were done.
+
+.defmetamethod windows :character-width char &optional (font 3tv:current-font*)
+Returns the width of the character 2char*, in pixels.  The current
+font is used if 2font* is not specified.
+If 2char* is a 3Backspace*, 3:character-width* can return a negative number.
+For 3Tab*, the number returned depends on the current cursor position.
+If 2char* is 3Return*, the result is defined to be zero.
+.end_defmetamethod
+
+.defmetamethod windows :compute-motion string &optional (start 30*) (end 3nil*) (x 3tv:cursor-x*) (y 3tv:cursor-y*) (cr-at-end-p 3nil*) (stop-x 30*) stop-y bottom-limit right-limit font line-height tab-width
+This is used to figure out where the cursor would end up if you were to output
+2string* using 3:string-out*.  It does the right thing if you give it
+just the string as an argument.  2start* and 2end* can be used to specify 
+a substring as with 3:string-out*.  2x* and 2y* can be used to start
+your imaginary cursor at some point other than the present position of the real cursor.
+If you specify 2cr-at-end-p* as 3t*, it pretends to do a 3:line-out*
+instead of a 3:string-out*; a 3Return* is output after the specified
+portion of the string.
+
+2stop-x* and 2stop-y* define the size of the imaginary window in
+which the string is being printed; the printing stops if the cursor
+becomes simultaneously 3* both of them.  The imaginary printing stops
+2after* the character which goes past the stop point.  Note that this
+is not the same as the meaning of the 3stop-x* argument to the
+3:string-length* operation!  The stop coordinates default to the lower
+left-hand corner of the window.  (This corner is reached before the
+lower right-hand one, since output goes from left to right on each
+line.)
+
+2bottom-limit* and 2right-limit* are vertical and horizontal
+positions at which to wrap around; they default to the inside height
+and width of the window.  They differ from the 2stop-x* and 2stop-y*
+in that these act independently when the cursor reaches either one,
+and they cause the cursor position to change rather than terminating
+processing.
+
+The computation normally uses 2font*, or the window's current font if
+2font* is 3nil*.  However, if 2string* is of type
+3art-fat-string*, each character's 3%%ch-font* field is used as
+an index in the window's font map to find the font for that character,
+and 2font* is ignored except possibly for defaulting the 2tab-width*.
+
+For vertical spacing, 2line-height* is used.
+The default for 2line-height* is 2font*'s line height if 2font* is
+non-3nil*, else the window's line-height.
+
+2tab-width* specifies the distance between tab stops, in pixels.  If it is omitted,
+the default is 3(tv:sheet-tab-width self)* if no font is specified, or
+3(* (tv:sheet-tab-nchars self) (tv:font-char-width 2font*))* if a font
+is specified.
+
+Four values are returned:
+.table 2
+.item final-x
+.item1 final-y
+The positions at which output stopped.
+
+.item final-index
+3nil* if the entire imaginary output was completed without reaching or
+passing the stop point; or the index in 2string* of just after the
+character that reached or passed the stop point; or 3t* if an implicit
+3Return* was requested and it reached or passed the stop point.
+
+.item maximum-x
+The largest 2x* position value reached during processing.
+.end_table
+
+All coordinates for this operation are cursor positions, relative to
+the window's inside edges.  However, if you specify all the arguments
+you can use any origin of coordinate system you like, as long as you
+interpret the values in the same coordinate system.
+.end_defmetamethod
+
+.defmetamethod windows :string-length string &optional (start 30*) (end 3nil*) stop-x (font 3current-font*) (start-x 30*) tab-width
+This is very much like 3:compute-motion*, but works in only one dimension.
+It tells you how far the cursor would move if 2string* were to be displayed
+in the current font starting at the left margin, or at 2start-x* if that is specified.
+2start* and 2end* work as with 3:string-out* to
+specify a substring of 2string*.  If 2stop-x* is not specified or 3nil*, the window
+is assumed to have infinite width; otherwise the simulated display will stop
+2before* any character which would move the cursor past 2stop-x* pixels
+from the left edge.  If a character exactly reaches 2stop-x*, it can fit.
+Note that this is not the same as the handling of 2stop-x* in the
+3:compute-motion* operation.
+
+The computation normally uses 2font*, or the window's current font if
+2font* is 3nil*.  However, if 2string* is of type
+3art-fat-string*, each character's 3%%ch-font* field is used as
+an index in the window's font map to find the font for that character,
+and 2font* is ignored except possibly for defaulting the 2tab-width*.
+
+2tab-width* specifies the distance between tab stops, in pixels.  If it is omitted,
+the default is 3(tv:sheet-tab-width self)* if no font is specified, or
+3(* (tv:sheet-tab-nchars self) (tv:font-char-width 2font*))* if a font
+is specified.
+
+3:string-length* returns three values:
+.table 2
+.item final-x
+Where the imaginary cursor ended up.
+.item final-index
+The index of the next character in the string (the length of the string if
+the whole string was processed, or the index of the character which would
+have moved the cursor past 2stop-x*),
+.item maximum-x
+The maximum 2x* coordinate reached by the cursor (this is the same
+as the first value unless there are 3Return* or 3Backspace* characters in the string).
+.end_table
+.end_defmetamethod
+
+.section Explicit (Non-Cursor) Output
+
+A window includes some state information which changes as output is
+done.  These include the cursor position, the current font, alu
+function, and exception flags.  The presence of this information makes
+the window behave coherently as a stream, so that the output from one
+operation follows that of the previous operation.  But sometimes this is
+not desirable.  The "explicit" output operations use a window only for
+its position and size, with all additional information passed by
+the caller explicitly.  This way, multiple streams of output to the same
+window can exist, which do not interfere with each other by trying to
+use a single cursor.
+
+The 2x* and 2y* position arguments used by these operations are
+relative to the outside edges of the window.  This is different from the
+stream and higher-level operations.  It is because these operations are
+frequently used for drawing parts of the margins, such as labels and
+margin regions.
+
+.defmetamethod windows :string-out-explicit string start-x start-y x-limit y-limit font alu &optional (start 30*) end multi-line-line-height
+Outputs 2string* (or the portion from 2start* to 2end*) onto the
+window starting at 2start-x* and 2start-y*, neither using nor moving
+the window's cursor position.  If 2x-limit* or 2y-limit* is
+non-2nil*, output stops if it reaches that position.
+
+Output is done in 2font* using alu function 2alu*.  The window's
+current font and alu function are not used or set.  If there are
+3Return* characters in the output, and 2multi-line-line-height* is
+3nil*, they are printed as "Return" in a lozenge.  If
+2multi-line-line-height* is a number, that number is used as the
+line height, ignoring the window's line height, and the horizontal
+output position moves to 2start-x* rather than the left margin for
+the next line of output.
+
+Note that the arguments of 3tv:sheet-string-out-explicit* are in a different order.
+The argument order of this operation was cleaned up.
+
+The operation returns three values: the final 2x* position, the final
+2y* position, and the final index in the string.  You can use these to
+do multiple operations in consecutive places on the screen.
+.end_defmetamethod
+
+.defmetamethod windows :string-out-centered-explicit string &optional left y-pos right y-limit font alu (start 30*) end multi-line-line-height
+Outputs 2string* (or the portion from 2start* to 2end*) centered
+between 2x* positions 2left* and 2right*, at 2y* position
+2y-pos*.  If 2y-limit* is reached, output stops.  2left* and
+2right* default to the inside edges of the window.
+
+Output is done in 2font* and 2alu*, which default to the ones
+current for the window, and lines are separated by
+2multi-line-line-height* (which defaults to the window's line height).
+.end_defmetamethod
+
+.defmetamethod windows :string-out-x-y-centered-explicit string &optional left top right bottom font alu start end multi-line-line-height
+Displays 2string* (or the portion from 2start* to 2end*) with the
+rectangle it occupies centered both horizontally and vertically.
+Horizontally it is centered between 2left* and 2right*, and
+vertically between 2top* and 2bottom*.  The defaults for these
+arguments are the inside edges of the window.
+
+Output is done in 2font* and 2alu*, which default to the ones
+current for the window, and lines are separated by
+2multi-line-line-height* (which defaults to the window's line height).
+.end_defmetamethod
+
+.section Window Parameters Affecting Output
+
+The following operations and initialization options initialize, get, and set
+various window attributes which are relevant to the typing out of
+characters.  (See also the operations to manipulate the current font, on
+(windows-set-current-font-method).)
+
+.defmetainitoption windows :more-p t-or-nil
+Initializes whether the window should have more processing.  It
+defaults to 3t*.
+.end_defmetainitoption
+
+.defmetamethod windows :more-p
+Returns 3t* if more processing (see (more-processing))
+is enabled; otherwise, return 3nil*.
+.end_defmetamethod
+
+.defmetamethod windows :set-more-p more-p
+If 2more-p* is 3nil*, turns off more processing (see
+(more-processing)); otherwise turns it on.
+.end_defmetamethod
+
+.setq vsp-operations page
+
+.defmetainitoption windows :vsp n-pixels
+Initializes the window's 2vsp*.  It defaults to 2.
+.end_defmetainitoption
+
+.defmetamethod windows :vsp
+Returns the value of 2vsp* for this window (see (vsp)).
+.end_defmetamethod
+
+.defmetamethod windows :set-vsp new-vsp
+Sets the value of 2vsp* for this window (see (vsp)) to 2new-vsp*.
+.end_defmetamethod
+
+.defmetamethod windows :reverse-video-p
+Returns 3nil* normally or 3t* if the window displays in white on
+black rather than black on white.  This is separate from the whole
+screen's inverse video mode, which is what 3Terminal C* sets.
+.end_defmetamethod
+
+.defmetamethod windows :set-reverse-video-p t-or-nil
+Enables or disables reverse-video display.  Changing this mode inverts all
+of the bits in the window.
+.end_defmetamethod
+
+.defmetainitoption windows :reverse-video-p t-or-nil
+Initializes the use of reverse-video display.
+.end_defmetainitoption
+
+.defmetainitoption windows :right-margin-character-flag x
+If 2x* is 1, the window should print an exclamation point in the
+right margin when 3:end-of-line-exception* happens; if 2x* is 0,
+it should not.  The default is 0.  See
+(right-margin-character-flag-blurb).
+.end_defmetainitoption
+
+.defun tv:sheet-right-margin-character-flag &optional (window 3self*)
+Returns the flag which controls printing of characters at the right
+margin on wrap-around on 2window*.  This is a 3setf*'able accessor
+macro.
+.end_defun
+
+.defmetainitoption windows :backspace-not-overprinting-flag x
+If 2x* is 0, output of 3#\backspace* will move the cursor position
+backward; if it is 1, it will display "overstrike" in a lozenge (that
+is, 3#\backspace* will be just like other special characters).  The
+default is 0.  See (backspace-not-overprinting-flag-blurb).
+.end_defmetainitoption
+
+.defun tv:sheet-backspace-not-overprinting-flag &optional (window 3self*)
+Returns the flag which controls how 3Backspace* prints
+on 2window*.  This is a 3setf*'able accessor macro.
+.end_defun
+
+.defmetainitoption windows :cr-not-newline-flag x
+If 2x* is 0, output of 3#\return* will move the cursor position to
+the beginning of the next line and clear that line; if it is 1, it
+will display "return" in a lozenge (that is, 3#\return* will be just
+like other special characters).  The default is 0.  This flag does not
+affect the behavior of the 3:line-out* nor the 3:fresh-line*
+operations.
+.end_defmetainitoption
+
+.defun tv:sheet-cr-not-newline-flag &optional (window 3self*)
+Returns the flag which controls how 3Return* prints
+on 2window*.  This is a 3setf*'able accessor macro.
+.end_defun
+
+.defmetainitoption windows :tab-nchars n
+2n* is the separation of tab stops on this window, in units of the
+window's 3char-width*.  This controls how the 3#\tab* character
+prints.  2n* defaults to 8.
+.end_defmetainitoption
+
+.defun tv:sheet-tab-nchars &optional (window 3self*)
+Returns the distance between tab stops, measured in units of
+2window*'s 3char-width*.
+.end_defun
+
+.defun tv:sheet-tab-width &optional (window 3self*)
+Returns the distance between tab stops, measured in pixels.
+.end_defun

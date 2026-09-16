@@ -1,0 +1,1198 @@
+.c -*-Bolio-*-
+
+.chapter Text Scroll Windows
+.setq text-scroll-window-chapter chapter-number
+.setq text-scroll-windows section-page
+.cindex text scroll windows
+.cindex items, in text scroll windows
+
+Text scroll windows provide a simple means of maintaining a display of a
+number of lines of the same type with scrolling.  For example, they are
+used by the inspector to display the slots of a structure.  (See
+(scroll-windows) for a more general kind of scroll window.)
+
+.defflavor tv:text-scroll-window
+This is the base flavor for all kinds of text scroll windows.
+It is not instantiable by itself.
+.end_defflavor
+
+A text scroll window updates its display based on a sequence of
+2items*.  Each item generates one line of display.  An item can be any
+Lisp object, and how it displays is controlled by how you define the
+3:print-item* operation.  For example, you could define this operation
+to do a 3:string-out*; then the items would have to be strings.  By
+default, 3:print-item* uses the function 3prin1*, so each item is a
+Lisp object to be printed.
+
+.defmethod tv:text-scroll-window :print-item item line-no index
+Displays 2item*, which should be the 2index*th item of those
+currently displayed, at the current cursor position in the window, which
+should be on line number 2line-no* of the window.
+
+This operation is the primitive used by all other text scroll window
+operations to do output of items.  As defined by
+3tv:text-scroll-window*, it just does 3prin1* of 2item*,
+ignoring the other arguments.  Other flavors built on
+3tv:text-scroll-window* are expected to redefine this operation.
+
+In any case, no item may print out as more than one line.
+This is enforced by truncating output at the margin.
+.end_defmethod
+
+.section Specifying the Item List
+
+In simple use, you specify an array of items to be displayed, or a list
+of items (which is converted into an array).  Items are referred to
+sometimes by their indices in the array.  A more sophisticated technique
+is to specify an 2item generator*, which is a function that simulates
+the effect of a possibly very large array of items without requiring you
+to actually create the array.
+
+.definstvar tv:text-scroll-window tv:items
+The array whose elements are the items to be scrolled through.
+The index of an item in this array is called the index of the item.
+This array contains the entire set of items to be scrolled through,
+not just those that are on the screen at any time.
+.end_definstvar
+
+.definstvar tv:text-scroll-window tv:top-item
+The index of the first item currently being displayed (on the first line
+of the window).  This is how the current scroll position is remembered.
+.end_definstvar
+
+.need 1500
+.nopara
+The flavor 3tv:text-scroll-window* provides these operations:
+
+.defmethod tv:text-scroll-window :items
+Returns the window's array of items.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :set-items new-items
+Sets a new array of items.  2new-items* may be a suitable array (it
+should have a fill pointer), or a list of items (an array is made from
+it), or a number of items (the array is made that long, but
+initially empty).
+
+The item-generator of the window is set to 3nil*, turning off that feature,
+so that the array of items will actually be used.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :top-item
+.defmethod1 tv:text-scroll-window :set-top-item new-top-item
+The top-item is the index of the item to be displayed on the first
+line of the window.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :number-of-items
+Returns the number of items this window is currently scrolling through.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :number-of-item item
+Returns the item number (index) of 2item*.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :item-of-number index
+Returns the item at index 2index*.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :last-item
+Returns the value of the last item to be scrolled through
+(that is, the one whose index is one less than the number of items).
+.end_defmethod
+
+.defmethod tv:text-scroll-window :put-item-in-window item
+.defmethod1 tv:text-scroll-window :put-last-item-in-window
+Scroll the window so that the specified item, or the last item, appears
+on the screen.  The argument 2item* is an item value, not an index.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :delete-item index
+Modifies the list of displayable items, removing the item at 2index*,
+and updates the screen if that index is within the portion currently displayed.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :insert-item index item
+.defmethod1 tv:text-scroll-window :append-item item
+Add a new item 2item* to the list of items to be displayed, either at
+index 2index* (before the item currently at that index) or at the end.
+.end_defmethod
+
+The following auxiliary operations are also defined.
+
+.defmethod tv:text-scroll-window :redisplay start end
+This is the internal function that causes a 3:print-item* message to get sent
+for each line in the range 2start* to 2end*, which are screen line indices.
+It should not be redefined, but daemons may be placed on it to note changes in the
+screen layout.
+.end_defmethod
+
+.defmethod tv:text-scroll-window :scroll-redisplay new-top delta
+This is the internal scrolling function that causes partial redisplay with bitblting
+and then sends a 3:redisplay* message for the rest.  2new-top* is the new
+3tv:top-item*, and 2delta* the number of lines actually to be scrolled.
+This operation should not be redefined, but daemons may be placed on it.
+.end_defmethod
+
+The operations 3:scroll-bar-p*, 3:scroll-position*, 3:scroll-to*,
+and 3:new-scroll-position* are also defined for interface with the scroll bar.
+Other scrolling commands can also use them.
+
+.section Bells and Whistles
+
+Function text scroll windows provide for you to change dynamically the
+function used to display items.  These windows have an instance
+variable which holds the function to be used.  The inspector uses this
+feature so that each data type you can inspect can be handled in
+an independent manner, with its own conventions for what an item means.
+
+.defflavor tv:function-text-scroll-window (3tv:text-scroll-window*)
+An instantiable function text scroll window.
+.end_defflavor
+
+.definstvar tv:function-text-scroll-window tv:print-function
+This is the function to be called to display an item.
+See (print-function-example) for an example of a print function,
+taken from the inspector.
+.end_definstvar
+
+.definstvar tv:function-text-scroll-window tv:print-function-arg
+This is an additional argument to be passed to the print function.
+The print-function's complete list of arguments are
+the item itself, the value of 3tv:print-function-arg*, the window,
+and the item number.
+.end_definstvar
+
+.definitoption tv:function-text-scroll-window :print-function function
+.definitoption1 tv:function-text-scroll-window :print-function-arg arg
+Initialize the corresponding instance variable.
+.end_definitoption
+
+.defmethod tv:function-text-scroll-window :print-function
+.defmethod1 tv:function-text-scroll-window :print-function-arg
+.defmethod1 tv:function-text-scroll-window :set-print-function function
+.defmethod1 tv:function-text-scroll-window :set-print-function-arg arg
+Get or set the corresponding instance variable.
+.end_defmethod
+
+.defmethod tv:function-text-scroll-window :setup list
+2list* is a list of the form
+.lisp
+(2print-function* 2print-function-arg*
+ (2item*...)
+ 2top-item-number*
+ 2label*
+ 2item-generator*)
+.end_lisp
+As you can see, it specifies everything relevant to telling the window
+what items to display and how to display them.
+2label* is passed to the 3:set-label* operation.
+
+It is not useful to specify both a list of items and a non-3nil*
+2item-generator*, since the list of items is not used if the
+item-generator is non-3nil*.
+
+The display is updated by this operation.
+.end_defmethod
+
+Since a text scroll window updates a display according to a fixed
+pattern, it is often useful for it to have an inferior which is a
+typeout window, for the sake of occasional output that is not part of
+the standard display (such as, the output for 3Help* in the inspector).
+
+.defflavor tv:text-scroll-window-typeout-mixin (3tv:window-with-typeout-mixin*)
+This can be added to a flavor containing 3tv:text-scroll-window* and
+provides a typeout window.  It also arranges for proper interaction with
+the typeout window and partial redisplay over the area it clobbers.
+.end_defflavor
+
+.defmethod tv:text-scroll-window-typeout-mixin :flush-typeout
+If the typeout window is active, this deexposes it, and makes sure that redisplay knows
+that the lines have been clobbered.
+.end_defmethod
+
+.defflavor tv:text-scroll-window-empty-gray-hack
+This is a mixin that goes with 3tv:text-scroll-window*.
+When windows of this type have an empty array for 3tv:items*,
+or an item generator that says the number of items is zero,
+the interior of the window becomes gray.
+
+This is used in some panes of the window-based debugger frame.
+.end_defflavor
+
+.section Item Generators
+.setq item-generators section-page
+.cindex item generators
+
+The item generator feature is how the inspector can scroll through the
+elements of a large array without having to cons up another equally
+large array of items.
+
+.definstvar tv:text-scroll-window tv:item-generator
+The item generator function, or 3nil* if no item generator is in use.
+The item generator is a function which simulates the effect of an array
+of items.  It overrides any explicit array of items; the value of
+3tv:items* will still be an array, but it will not affect the display.
+.end_definstvar
+
+.defmethod tv:text-scroll-window :item-generator
+.defmethod1 tv:text-scroll-window :set-item-generator new-item-generator
+Get or set the window's item-generator.
+.end_defmethod
+
+The 3:set-items* operation sets the item generator to 3nil*, since if you
+want to use an explicit list of items, you must not want the item generator
+to cause them to be ignored.
+
+The item generator function should expect its first argument to
+be an item generator operation keyword.  These are the keywords defined:
+.table 3
+.xitem :number-of-items item-generator
+Returns the number of items to scroll through
+(the equivalent of the fill pointer in an actual array of items).
+
+.item :number-of-item 2item*
+'kindex :number-of-item item-generator
+Returns the index of the specified item.
+If an actual array were in use, this would be the index in the array
+where 2item* is found.
+
+.item :item-of-number 2index*
+'kindex :item-of-number item-generator
+Returns the item at index 2index*.  If an actual array were being used,
+this would be the 2index*'th element of the array.
+
+.item :insert-item 2index* 2item*
+'kindex :insert-item item-generator
+Insert a new item 2item*, before the one at index 2index*.
+If an actual array were in use, this would be done by
+moving the following elements down.
+The item generator need support this only if you wish to use the
+3:insert-item* or 3:append-item* operation on the window.
+
+.item :delete-item 2index*
+'kindex :delete-item item-generator
+Delete the item at index 2index*.  The following items move to lesser
+indices.  The item generator need support this only if you wish to use
+the 3:delete-item* operation on the window.
+.end_table
+
+The inspector uses an item generator to display the elements of an array,
+so that it does not have to create another array of items as big as the
+array being displayed.
+If 2l* is the length of the array's leader, then item numbers 0 through
+2l*-1 correspond to the leader, and item number 2l*+2i* corresponds
+to array element 2i* (multidimensional arrays being treated as one-dimensional).
+
+The value of the item at item number 2n* is just 2n*.  In other
+words, the virtual array of items that the item generator simulates is
+an array of consecutive integers, independent of the data being
+displayed.  This may seem to be a weird way of doing things, but
+consider this: we do not want the line for the 2i*th element to print
+out as simply that element.  We want it to contain the number 2i* as
+well.  So the item value is simply 2l*+2i*, and the
+3:print-item* operation is redefined to "print" such a number by
+printing 2i* followed by the 2i*th array element.
+
+Here is a simplified version of the item generator used by the inspector.
+Note that the array whose elements are being displayed is found as
+3(car print-function-arg)*, and 3(cadr print-function-arg)* is non-3nil*
+if the leader should be displayed.  3tv:print-function-arg* is an instance variable
+from the flavor 3tv:function-text-scroll-window*; see (tv:function-text-scroll-window-tv:print-function-arg-instvar).
+.lisp
+(defselect inspect-array-item-generator
+  (:number-of-items ()
+    (declare (:self-flavor tv:basic-inspect))
+    (+ (if (cadr tv:print-function-arg)
+	   (or (array-leader-length (car tv:print-function-arg)) 0)
+	 0)
+       (array-length (car tv:print-function-arg))))
+  (:number-of-item (item)
+    item)	1;; The item's number is the item!*
+  (:item-of-number (number)
+    number))	1;; The number's item is the number!*
+.end_lisp
+
+3:insert-item* and 3:delete-item* are not supported, since the inspector
+does not try to insert or delete items.
+
+.setq print-function-example page
+The inspector uses a 3tv:function-text-scroll-window* (see
+(tv:function-text-scroll-window-flavor)) so 3:print-object* is
+handled by calling a dynamically changeable 2print-function*.  Here is
+a simplified version of the 2print-function* used by the inspector
+when displaying an array. 
+.lisp
+(defun inspect-array-printer
+       (item arg window
+	&aux (array (car arg))
+	(leader-length-to-mention
+	  (or (and (cadr arg) (array-leader-length array)) 0)))
+  1;; 3arg* is the value of 3tv:print-function-arg*.*
+  1;; 3(car 2arg*)* is the array.*
+  1;; 3(cadr 2arg*)* is 3t* to display the leader.*
+  1;; 2item* is a number, as described above.*
+  (cond ((< item leader-length-to-mention)
+	 (format window "Leader ~D" item)
+	 (format window ":~12T ")
+	 (tv:print-item-concisely
+	   (array-leader array item) window))
+	(t
+	 (let ((item (- item leader-length-to-mention))
+	       (rank (array-rank array))
+	       indices)
+	   (or (= rank 1)
+	       (setq indices 
+		     (array-indices-from-index array item)))
+	   (format window "Elt ~D" 
+		   (if (= rank 1) item indices))
+	   (format window ":~9T ")
+	   (tv:print-item-concisely 
+	     (ar-1-force obj item) window)))))
+.end_lisp
+
+.section Mouse Sensitive Text Scroll Windows
+
+.defflavor tv:mouse-sensitive-text-scroll-window
+Windows of this flavor allow the lines to contain mouse-sensitive items
+just like those of 3tv:basic-mouse-sensitive-items* (see
+(tv:basic-mouse-sensitive-items-flavor)) though the implementation is
+different.
+
+Note that the word "item" in "mouse-sensitive item" is completely
+unrelated in meaning to the items of the text scroll window itself.
+.end_defflavor
+
+.defmethod tv:mouse-sensitive-text-scroll-window :item type item &rest format-args
+All output to text scroll windows is done with the 3:print-item*
+operation, which is responsible for printing a single item.  This operation can
+include mouse-sensitive items in the output by using the 3:item* operation,
+which is compatible with that of 3tv:basic-mouse-sensitive-items* (see
+(tv:basic-mouse-sensitive-items-item-method)).
+
+Note that the 2item* argument here is the datum to identify the mouse-sensitive item,
+not the text scroll window item being displayed on this line.
+.end_defmethod
+
+The 3:item-list* and 3:primitive-item* operations are not provided,
+since in this context they are not really useful.
+
+.defmethod tv:mouse-sensitive-text-scroll-window :item1 item type print-function &rest args
+This is another way of outputting a mouse-sensitive item.
+2item* and 2type* have the same meanings as for the 3:item* operation,
+but the output is done by calling 2print-function* with
+2item*, the window, and the elements of 2args* as arguments.
+
+The 3:item* operation used to do this, but it was changed for compatibility,
+and the old functionality renamed to 3:item1*.
+.end_defmethod
+
+In a typical 3tv:basic-mouse-sensitive-items* window, mouse-sensitive items
+are output on specific occasions, and only because they are supposed to be
+present and mouse-sensitive at that time.  In a text scroll window, typically
+a single display is maintained at all times, but the parts that should be sensitive
+to the mouse may need to depend on other things.  For example, in the inspector,
+normally the values of slots are sensitive, but when you are specifying a slot
+to store into, the names of the slots are sensitive instead.
+
+.definstvar tv:mouse-sensitive-text-scroll-window tv:sensitive-item-types
+The list of sensitive item types.  A mouse sensitive item
+is sensitive to the mouse if its 2type* (as specified in the 3:item*
+operation) is a member of this list.
+
+3t* can also be used instead of a list; then all mouse sensitive items
+actually are sensitive.  3t* is the default value, so that this feature
+does not get in the way if you do not use it.
+.end_definstvar
+
+.defmethod tv:mouse-sensitive-text-scroll-window :sensitive-item-types
+.defmethod1 tv:mouse-sensitive-text-scroll-window :set-sensitive-item-types new-item-types
+Get or set the list of sensitive item types.
+.end_defmethod
+
+.definitoption tv:mouse-sensitive-text-scroll-window :sensitive-item-types item-types
+Initializes the set of sensitive item types.
+.end_definitoption
+
+The inspector's print function shown in the previous section really does its output
+using the 3:item1* operation so that the output becomes mouse-sensitive.
+Here is the real code for the 3cond*-clause that handles leader elements:
+.lisp
+	((< item leader-length-to-mention)
+	 (funcall window ':item1 item 'leader-slot
+		  #'(lambda (item window)
+		      (format window "Leader ~D" item)))
+	 (format window ":~12T ")
+	 (funcall window ':item1 (array-leader array item)
+		  ':value #'tv:print-item-concisely))
+.end_lisp
+3leader-slot* and 3:value* are item types which the inspector
+makes mouse sensitive at various times.
+
+When the mouse is clicked on a mouse sensitive item, a blip is placed in the window's input buffer.  The blip looks like
+'cindex blip types
+.lisp
+(2type* 2item* 2window* 2mouse-character*)
+.end_lisp
+2type* is the item type, such as 3leader-slot* or 3:value*, and
+2item* is the actual item value specified in the 3:item* or 3:item1* operation.
+2window* is the text scroll window itself.  (This is how the inspector can tell
+which inspect pane you click on.)  2mouse-character* is a character whose
+3%%kbd-mouse* bit is 1.  It tells the program which button was clicked.
+
+.c [[ This should be changed to put in a :typeout-execute blip, perhaps? ]]
+
+.defflavor tv:line-area-text-scroll-mixin
+This mixin, when added to 3tv:text-scroll-window*,
+creates a "line area" near the left edge where the mouse cursor
+changes to a rightward arrow and a click means something different.
+The line area is an additional part of the left margin and does not overlap
+the space used for displaying the items.
+
+You must also include the flavor 3tv:margin-region-mixin* in the
+flavor combination you instantiate.
+
+A mouse click in the line area puts a blip into the input buffer that looks like this:
+'cindex blip types
+'kindex :line-area "blip type"
+.lisp
+(:line-area 2item* 2window* 2button-mask*)
+.end_lisp
+2button-mask* is a mask of bits corresponding to mouse buttons;
+see 3tv:mouse-last-buttons*, (tv:mouse-last-buttons-var), for
+how to interpret it.
+.end_defflavor
+
+.definitoption tv:line-area-text-scroll-mixin :line-area-width number
+Specifies the width of the line area in pixels as 2number*.
+.end_definitoption
+
+.defmethod tv:line-area-text-scroll-mixin :line-area-mouse-documentation
+This operation should return a string to display in the mouse documentation line
+while the cursor is in the line area.
+.end_defmethod
+
+.defflavor tv:line-area-mouse-sensitive-text-scroll-mixin
+This flavor should be used instead of 3tv:line-area-text-scroll-mixin*
+if 3tv:mouse-sensitive-text-scroll-window* is in use.
+.end_defflavor
+
+.defflavor tv:current-item-mixin
+This flavor, when added to 3tv:line-area-text-scroll-mixin*,
+identifies one of the items with an arrow in the line-area.
+.end_defflavor
+
+.definstvar tv:current-item-mixin tv:current-item
+The item to be marked with an arrow, or 3nil* if none.
+An arrow will mark this item if it is on the screen,
+no matter where it scrolls to.
+.end_definstvar
+
+.defmethod tv:current-item-mixin :current-item
+.defmethod1 tv:current-item-mixin :set-current-item item
+Get or set the value of 3tv:current-item*.
+.end_defmethod
+
+.need 1500
+.nopara
+These flavors are part of the implementation of 3tv:mouse-sensitive-text-scroll-window*.
+
+.defflavor tv:mouse-sensitive-text-scroll-window-without-click
+This is a component of 3tv:mouse-sensitive-text-scroll-window* that
+provides everything but the 3:mouse-click* method.  Since this
+operation uses 3:or* method-combination, it is not possible to
+override a method once it is present.
+.end_defflavor
+
+.defflavor tv:displayed-items-text-scroll-window
+This flavor records additional information about the items that are
+actually displayed.  It provides an instance variable,
+3tv:displayed-items*, which is an array indexed by line number.
+In this array, the 3:print-item* operation can store any relevant
+information about what was displayed on the line.
+
+The meaning of elements of the array is not defined by this flavor.  The
+3:print-item* operation is responsible for storing whatever
+information is useful into the appropriate slot of the array.
+However, this flavor does move elements of the array when scrolling is done,
+and set them to 3nil* when parts of the window are cleared,
+or when they are about to be redisplayed.
+
+This flavor is essentially a subroutine of
+3tv:mouse-sensitive-text-scroll-window*, which uses each element of
+3tv:displayed-items* to hold information on the mouse-sensitive items for the line.
+.end_defflavor
+
+.definstvar tv:displayed-items-text-scroll-window tv:displayed-items
+The array of information about lines on the screen.
+.end_definstvar
+
+Despite all this hair, no window yet devised is as mouse-sensitive
+as my mother.
+
+.chapter General Scroll Windows
+.cindex scroll windows
+.cindex items, in scroll windows
+.cindex entries, in scroll windows
+.setq scroll-window-chapter chapter-number
+.setq scroll-windows section-page
+
+General scroll windows are used to put up a continuously-maintained
+display of items, each of which can vary in size.  They are used by
+Peek.  General scroll windows (from now on called simply
+scroll windows) are not a generalization or a building block of text
+scroll windows, but rather an independent facility.
+
+The scroll window's display is made up of items.  These items are not
+the same as items in text scroll windows; the same term is used because
+they fit in a similar place in the scheme of things.
+
+An item in a scroll window always occupies an entire line or several
+entire lines.  An item can be composed of sub-items which are juxtaposed
+vertically, each sub-item occupying and filling up some number of lines.
+The sub-items can in turn be composed of more items.
+New sub-items can be dynamically added or deleted at any level, and the
+display is updated automatically to match by moving lines around on the
+screen.
+
+Eventually this process of subdivision must come to an end, with
+2lowest-level* items made up of 2entries*, which are juxtaposed
+in a horizontal sequence.
+
+An entry displays a single string or quantity, updating its display if
+the value changes.  The entry must record how to obtain a value to
+display, how to tell when the value has changed since the screen was
+updated, and how to output the new value.  A single entry can wrap
+around at the right margin just like ordinary output.  Entries can be
+added to and removed from an item dynamically.
+
+In Peek's Active Processes display, there is a single item that displays
+the entire set of processes.  It is composed of sub-items, one for each
+process.  If a new process appears, a new sub-item is created to display
+it.  The sub-item for a single process is a lowest-level item.  Each of
+the things displayed about a process--its name, its run state, its
+priority, its percentage use of the cpu--is displayed by a single entry
+in that item.
+
+The line of column headings at the top of the display is also a
+lowest-level item; its entries display constant strings.
+
+Every character displayed on a scroll window comes from an entry.
+The items serve only to group entries, and to control the
+automatic insertion and deletion of entries.
+
+Entries can be either fixed or variable width.  A variable width entry
+takes up as much space as is needed to print its data; this can change
+when the window is redisplayed.  When that happens, the remaining
+entries in the item all have to move left or right.  A fixed width entry
+specifies an amount of horizontal space and always occupies that much
+space.  As a result, it can be redisplayed without redisplaying the rest
+of the item afterward.  The entries used in the Active Processes display
+are all fixed-width so that they will line up in columns
+
+3Note: if the entry specifies a fixed width and the printing of its
+contents goes past that width, the window redisplay algorithm will be
+confused.*
+
+The data structure that represents an item is either a list or an array.
+If it is a list, its cdr is a list of component items, and its car
+contains information on how to update the list (add or remove component items).
+Then the item is displayed simply as the concatenation of its components.
+If it is an array, then it is a lowest-level single-line item,
+and the elements of the array represent entries on the line.
+The array also has leader slots whose meanings are described below.
+
+.section Specifying Items and Entries
+
+You do not generally create an array item or an entry yourself.  They are
+made by calling the function 3tv:scroll-parse-item*, which is given a
+descriptive data structure made out of lists.  Examples of its use
+are at the end of this section.
+
+The arguments to 3tv:scroll-parse-item* are 2entry descriptors*,
+each of which specifies how to create one entry.  The entries thus
+specified all go together into one item.
+
+Here are the possible kinds of entry descriptors:
+
+.table 3
+.item 1a string* 2string*
+.item1 1a list* (:string 2string* [2width*])
+'kindex :string "scroll window entries"
+The entry is displayed by printing 2string*.  A string entry never
+varies, since it always displays precisely the specified string, and
+is always fixed width.  The width can be specified as a means of
+controlling the position of the following entry; otherwise, the actual
+width needed to print the string is the width of the item.
+
+Example: either 3(:string "Foobar" 10.)* or 3"Foobar    "*
+specifies an entry that prints as 7Foobar* followed by 4 spaces.
+
+.item 1a list* (:symeval 2symbol* [2width-or-nil*] [2format-string*])
+'kindex :symeval "scroll window entries"
+The entry is displayed by printing the value of 2symbol*,
+by passing it to 3format* together with 2format-string*.
+If 2format-string* is omitted, the value is printed with 3princ*.
+This type of entry is automatically updated when the value of 2symbol*
+changes.
+
+2width-or-nil* may be a number of pixels, to specify a fixed-width entry, or
+3nil* to specify a variable-width entry.
+
+Example:
+.lisp
+(:symeval base nil " ~D. ")
+.end_lisp
+specifies an entry that prints the value of 3base* in decimal with
+a following period and a space in front and in back.  It is variable-width
+so the space it takes up is three plus however many digits are needed to
+print the value of 3base*.
+
+'kindex :function "scroll window entries"
+.item 1a list* (:function 2function* 2list-of-args* [2width-or-nil*] [2format-string*])
+The value to display is obtained by applying
+2function* to 2list-of-args*.  If this value has changed since the
+last time it was checked, it is displayed by passing it to 3format*
+together with 2format-string*.  If 2format-string* is 3nil*,
+the value is simply 3princ*'d.
+
+2width-or-nil* may be a number of pixels, to specify a fixed-width entry, or
+3nil* to specify a variable-width entry.
+
+Example:
+.lisp
+`(:function si:process-quantum-remaining 
+  (,process) 5. ("~4D//"))
+.end_lisp
+is an expression that creates an entry descriptor which specifies an entry
+that will call 3si:process-quantum-remaining* on some process
+and print the result in decimal, followed by a slash, in a field 5 characters wide.
+
+.item 1an interpreted function* (lambda ...)
+.item1 1an interpreted function* (named-lambda ...)
+.item1 1a compiled function*
+An entry descriptor which is either a compiled function (a FEF) or a
+list starting with 3lambda* or 3named-lambda* is considered a
+function.  It is treated as an abbreviation for 3(:function 2function*)*,
+which specifies no arguments, variable width, and no format string (the value is
+printed with 3princ*).
+
+'kindex :value "scroll window entries"
+.item 1a list* (:value 2index* [2width-or-nil*] [2format-string*])
+The value to be displayed is found at 2index* in the window's
+2value-array*.
+.end_table
+
+Two other keywords can be used in an entry descriptor to make the entry mouse sensitive.
+They can be used only in scroll windows which have
+3tv:essential-scroll-mouse-mixin* (see (scroll-window-mouse)).
+To use these keywords, first you construct an entry descriptor to
+specify how the entry should print, according to the preceding table.
+Then you add one of these keywords and a value to go with it
+at the front of the list.  The mouse keyword gives the entry mouse sensitivity
+but has no effect on how the entry appears on the screen.
+
+.table 3
+'kindex :mouse "scroll window entries"
+.item :mouse
+The keyword 3:mouse* is used in an entry descriptor that looks like
+.lisp
+(:mouse 2mouse-data* . 2another-entry-descriptor*)
+.end_lisp
+Such an entry descriptor is handled by creating an entry from
+2another-entry-descriptor*, and then modifying it by recording
+2mouse-data* as the mouse sensitivity of the entry.  The resulting
+entry will print according to 2another-entry-descriptor* but will be
+mouse sensitive as well.
+
+'kindex :mouse-item "scroll window entries"
+.item :mouse-item
+The keyword 3:mouse* is used in an entry descriptor that looks like
+.lisp
+(:mouse-item 2mouse-data* . 2another-entry-descriptor*)
+.end_lisp
+3:mouse-item* is like 3:mouse* except that the symbol 3tv:item*
+is replaced throughout 2mouse-data* with 2item*, the item this entry
+is going to become part of.  2mouse-data* better be a list.
+
+There is no way to cause the entry itself to be inserted into its own
+mouse sensitivity datum because this is not useful when scroll windows
+are used in the intended manner.
+.end_table
+
+.defun tv:scroll-parse-item &rest keyword-args-and-entry-descriptors
+Creates and returns an array item containing entries constructed according
+to 2keyword-args-and-entry-descriptors*.
+
+2keyword-args-and-entry-descriptors* begins optionally with some
+alternating keywords and values.  They are followed by entry
+descriptors, one for each entry you want in the item.  The keywords
+and values at the beginning specify information that applies to the
+item as a whole.  Keywords and entry descriptors are distinguished by
+the fact that an entry descriptor is never a symbol.
+
+The keywords defined are
+.table 3
+.kitem :mouse
+The value is stored as the mouse-sensitivity of the entire item.
+This is meaningful only if the window flavor includes
+3tv:essential-scroll-mouse-mixin* (see (scroll-window-mouse)).
+
+.kitem :mouse-self
+The value is stored as the mouse-sensitivity of the entire item,
+but first the symbol 3self* is replaced wherever it appears
+by the item itself (the array that this function is constructing).
+This is meaningful only if the window flavor includes
+3tv:essential-scroll-mouse-mixin* (see (scroll-window-mouse)).
+
+.kitem :leader
+This keyword requests extra slots to be allocated in the array leader of
+the item array.  It is either a number, the number of extra slots
+desired, or a list, whose length is the number of extra slots and whose
+contents are used to initialize them.
+.end_table
+.end_defun
+
+.defun tv:scroll-interpret-entry entry-descriptor item
+Creates and returns an entry according to 2entry-descriptor* for use in the
+array item 2item*.  You do not normally call this function yourself;
+it is used as a subroutine of 3tv:scroll-parse-item*.
+.end_defun
+
+.defun tv:scroll-string-item-with-embedded-newlines string
+Returns an item that will display the string 2string*.  This item is
+composed of one item for each line making up 2string*.
+.end_defun
+
+Here is an example taken from Peek; it makes the item for
+a process (the value of 3process*) in Active Processes mode.
+The entries that use the process as a function work
+because the process is a flavor object; the argument given
+to the process is a flavor operation.  Note that 3tv:peek-process-menu*
+is a function in Peek which asks for a choice with a momentary menu.
+.lisp
+(tv:scroll-parse-item
+  1;; The first entry is mouse-sensitive.*
+  `(:mouse-item
+     (nil :eval (peek-process-menu ',process 'item 0)
+	  :documentation
+	  "Menu of useful things to do to this process.")
+     :string ,(process-name process) 30.)
+  `(:function ,#'peek-whostate ,(ncons process) 25.)
+  `(:function ,process (:priority) 5. ("~D."))
+  `(:function ,process (:quantum-remaining) 5. ("~4D//"))
+  2more entries...*)
+.end_lisp
+
+.section Using a Scroll Window
+
+.defflavor tv:basic-scroll-window
+All flavors of scroll window are built on this flavor, which provides
+all the facilities specific to scroll windows.  It is not instantiable
+by itself.
+.end_defflavor
+
+.defflavor tv:scroll-window (3tv:flashy-scrolling-mixin* 3tv:basic-scroll-window* 3tv:borders-mixin* 3tv:basic-scroll-bar* 3tv:window*)
+This is an instantiable scroll window flavor.  It provides for a scroll
+bar and margin scrolling, and for borders and labels.
+.end_defflavor
+
+In addition to being able to create a tree of items and entries, you
+must tell the scroll window to display them.  At the highest level, the
+entire display is grouped into a single item, the 2root item*.
+Switching modes in Peek works by switching to a new root item.
+
+.definstvar tv:basic-scroll-window tv:display-item
+The root item of the window.  The window's display is precisely whatever
+comes from this item, and nothing more.  Usually the root item contains
+some number of subitems which do the real work.
+.end_definstvar
+
+.defmethod tv:basic-scroll-window :display-item
+.defmethod1 tv:basic-scroll-window :set-display-item item
+Get or set the root item of the window.
+Setting the root item redisplays the window.
+.end_defmethod
+
+.definitoption tv:basic-scroll-window :display-item item
+Initializes the root item.
+.end_definitoption
+
+.definstvar tv:basic-scroll-window tv:truncation
+If this is 3nil*, entries can wrap around at the right margin.
+Otherwise, each item can occupy only one line.
+.end_definstvar
+
+.defmethod tv:basic-scroll-window :truncation
+.defmethod1 tv:basic-scroll-window :set-truncation flag
+Get or set the truncation flag.
+Setting the flag redisplays the window.
+.end_defmethod
+
+.definitoption tv:basic-scroll-window :truncation flag
+Initializes the truncation flag.
+.end_definitoption
+
+.cindex value array of a scroll window
+.setq value-array page
+.need 1500
+.nopara
+A scroll window has a 2value array* whose elements may be used to
+hold arbitrary data to be displayed by entries using the keyword
+3:value*.  Such an entry specifies the index of a slot in the value
+array whose contents are the data to display.  Putting appropriate
+data in the value array is up to you.  One technique is to have an
+automatically updating item whose update function stores data into the
+value array, and have entries in the item look in those slots.  There
+can be many such items, all using the same value array slots.  See
+(automatically-updating-items).
+
+.definstvar tv:basic-scroll-window tv:value-array
+The window's value array.
+.end_definstvar
+
+.defmethod tv:basic-scroll-window :value-array
+Returns the window's value array.
+.end_defmethod
+
+.definitoption tv:basic-scroll-window :value-array array-or-length
+Initializes the window's value array, or specify how long to make it.
+.end_definitoption
+
+The 3:redisplay* operation updates the display based on the current
+root item, automatically reprinting the entries whose contents have
+changed.  3:redisplay* will be done automatically by the window system
+at certain times (such as when the window size is changed, or the screen
+is refreshed), but if you want it to happen simply because some of the
+displayed data has changed, you must send a 3:redisplay* message
+yourself.
+
+3:redisplay-selected-items* is another way to request display
+updating, which allows you to control which items will be checked.
+
+.defmethod tv:basic-scroll-window :redisplay &optional full-p force-p
+Redisplays the contents of the scroll window.  If 2full-p* is 3nil*,
+the window assumes that its screen bits contain the result of the last
+redisplay that was done, and only items and entries whose contents are
+different from last time are actually output.  If 2full-p* is
+non-3nil*, everything that is supposed to be on the screen is redrawn.
+
+2force-p* non-3nil* means update the contents of the window even if
+it is not exposed.  Normally, this operation will wait if the window is
+not exposed.
+.end_defmethod
+
+.defmethod tv:basic-scroll-window :redisplay-selected-items list-of-items
+Redisplays the items in 2list-of-items*, if they are present on
+the screen.  Other items in the current item hierarchy are not even
+considered for redisplay.
+.end_defmethod
+
+Since a scroll window shows a constantly updated display, it is often
+useful to have a typeout window in it for occasional output that is not
+part of the display that is usually shown.
+
+.defflavor tv:scroll-window-with-typeout-mixin
+This mixin should be used in addition to
+3tv:window-with-typeout-mixin* on any scroll window that is to have a
+typeout window.  It handles interfacing between typeout window output
+and redisplay of the scroll window.
+.end_defflavor
+
+.defflavor tv:scroll-window-with-typeout
+A scroll window that has an inferior typeout window.
+See (windows-with-typeout).
+.end_defflavor
+
+.section Inserting and Deleting Items
+
+Scroll windows provide operations for replacing, inserting and deleting
+items explicitly.  Since the items form a multilevel hierarchy, the
+position at which to replace, insert, or delete the item must be
+specified as a list of numbers.  For example, 3(1 3 0)* as a position
+means item number 0 within item number 3 within item number 1 (within
+the root item, 3tv:display-item*).  3nil* as a position refers to
+the root item itself.
+
+.defmethod tv:basic-scroll-window :get-item position
+Returns the item at 2position*.
+.end_defmethod
+
+.defmethod tv:basic-scroll-window :set-item position item
+Stores 2item* into the hierarchy at 2position*.
+.end_defmethod
+
+.defmethod tv:basic-scroll-window :insert-item position item
+Inserts 2item* at 2position*, before the item that was at
+2position*.
+.end_defmethod
+
+.defmethod tv:basic-scroll-window :delete-item position
+Deletes the item at 2position*, so that the following item moves to
+that position.
+.end_defmethod
+
+These operations also update the window on the screen as necessary.
+
+.section Automatically Updating Items
+.setq automatically-updating-items section-page
+
+Just as an entry automatically updates the value it displays, sometimes
+one wants an item to update automatically the list of items it contains.
+For example, the Active Processes display contains one item that
+displays a list of all active processes.  This item contains a list of
+component items, one item per process.  Just before the displayed
+entries for each process are updated if necessary, additional items
+should be created and inserted in the list if there are any newly active
+processes, and items should be removed if processes have become
+inactive.
+
+The first element of an item that is a list is used to store the data
+of a property list for the item.  Two properties are given standard
+meanings:
+.table 3
+.xitem :pre-process-function "scroll items"
+The value of this property is a function to be called whenever it is
+time to display this item.  Its sole argument is the item itself.  The
+function can modify the item.  The value it returns is ignored.
+
+.xitem :function "scroll items"
+The value of this property is a function to update an individual
+component of this item.  This function is called each time any component
+item is about to be displayed or otherwise thought about.
+
+The arguments given to the function are the component item,
+the reverse of the 2position* of that item (a list of integers),
+and the location of the property list of the containing item,
+the same property list on which this 3:function* property appears
+(this can be passed directly to 3get*).  To repeat, the second
+argument is the 3reverse* of the position as would be passed to the
+3:get-item* operation or related operations.  This is because it is
+easier to implement that way without consing.
+
+The function should return an updated component item, perhaps the same
+one as it was passed, perhaps a new one.
+.end_table
+
+Other properties can be used for any purpose.  Some of the commonly used
+pre-process functions use other properties for their internal state
+information and additional parameters.
+
+.defun tv:scroll-maintain-list init-fun item-fun &optional per-elt-fun stepper compact-p pre-proc-fun
+Returns an item which maintains a list of component items, one for each
+element of a driving list.  The item updates automatically so that
+component items appear and disappear as elements of the driving list do.
+
+2init-fun* should be a function of no arguments that returns the
+current value of the driving list.  2item-fun* should be a function
+that, given an element of the list, returns a component item to use to
+display for that element.  2item-fun* is called each time a new
+element appears in the driving list.  The item created starts out with
+no component items.  The appropriate set of component items is created
+by adding them one by one in this way, the first time the item is
+updated.
+
+This item works because it is given a suitable pre-process function.
+The other arguments to 3tv:scroll-maintain-list* are also
+stored on the property list of the item created.  In particular,
+2per-elt-fun* becomes the 3:function* property.  (That is all
+2per-elt-fun* is used for.)
+
+Normally the value from 2init-fun* is a list, and the objects that the
+items are made from are the elements of this list, but it is possible to
+extract the objects in other ways.  If 2stepper* is not 3nil*,
+it should be a function to step through a "kind of list".
+2stepper* is called with one argument, a "kind of list", and returns three values:
+.table 1
+.item the first element extracted from it
+.item1 a "kind of list" of the remaining elements
+.item1 non-3nil* to say there are no more elements
+3nil* as the "kind of list" is always recognized as being empty,
+regardless of the third value.
+.end_table
+2stepper* is first called with the value returned by 2init-fun*.
+The first value goes (if it is new) to the 2item-fun*; the second is
+fed back to 2stepper* unless either it is 3nil* or the third value is
+non-3nil*.
+
+A 2stepper* function that could step through the properties in a
+property list might be:
+.lisp
+(defun plist-stepper (plist-tail)
+  (values (car plist-tail) (cddr plist-tail)))
+.end_lisp
+
+2compact-p* non-3nil* says to recopy the list each time an element
+is inserted or deleted, so that the list remains compact and localized.
+.end_defun
+
+Here is how Peek, in Window Hierarchy mode, recursively creates a tree
+of automatically updating items:
+.lisp
+1;; Make an item to describe the entire window hierarchy.*
+(defun peek-window-hierarchy (ignore)
+  (tv:scroll-maintain-list
+    1;; The 2init-fun*.  When called, it returns a current list of screens.*
+    #'(lambda () tv:all-the-screens)
+    1;; The 2item-fun*, which makes an item for a screen.*
+    #'(lambda (screen)
+	(list ()
+	      (tv:scroll-parse-item 
+		(format nil "Screen ~A" screen))
+	      (peek-window-inferiors screen 2)
+	      (tv:scroll-parse-item "")))))
+1;; No 2per-elt-fun* is needed.  Also, the default 2stepper* works*
+1;; because our "list" really is a list.*
+
+1;; Make an item to describe 2window* and its inferiors.*
+1;; 2indent* is an indentation to print with.*
+(defun peek-window-inferiors (window indent)
+  (declare (special window indent))
+  (tv:scroll-maintain-list
+    (closure '(window) #'(lambda () (tv:sheet-inferiors window)))
+    (closure '(indent)
+      #'(lambda (sheet)
+	  1;; Make an item with two subitems*
+	  (list ()
+		1;; One for this window,*
+		(tv:scroll-parse-item
+		  (format nil "~VX" indent)
+		  `(:mouse
+		    (nil :eval (peek-window-menu ',sheet)
+		     :documentation
+		     "Menu of useful things to do to this window.")
+		    :string ,(send sheet ':name)))
+		1;; and one with subitems for its inferiors.*
+		(peek-window-inferiors sheet (+ indent 4)))))))
+.end_lisp
+
+.need 4000
+And here is how it makes the item that displays a chaosnet connection's packets.
+.lisp
+(tv:scroll-maintain-list
+  `(lambda () (chaos:read-pkts ',conn))
+  `(lambda (x)
+     (peek-chaos-packet-item x ,(+ indent 2)))
+  nil
+  #'(lambda (state)
+      (values state (chaos:pkt-link state)
+	      (null (chaos:pkt-link state)))))
+.end_lisp
+Note that instead of a list of packets there is a chain, with each
+packet pointing to the next one.  Therefore, an explicit 2stepper*
+is required.  3chaos:pkt-link* is the function which, given one packet,
+returns the next one in the chain (or 3nil* at the end).
+
+.defun tv:scroll-maintain-list-unordered init-fun item-fun &optional per-elt-fun stepper
+Returns an item which maintains an unordered list of component items,
+one for each element of a driving list.  The item updates automatically
+so that component items appear and disappear as elements of the list do.
+
+This function is very much like 3tv:scroll-maintain-list*.  The
+difference is that new component items are always added at the front of
+the combined item, no matter where they appear in the driving list.
+Changes in the order of that list have no effect at all.  This is why
+this function is called "unordered".
+.end_defun
+
+.defun tv:scroll-maintain-list-update-states elements window &optional item
+Redisplays some of the component items of 2item*, an item of the sort
+created by 3tv:scroll-maintain-list* or
+3tv:scroll-maintain-list-unordered*.  
+
+2elements* is a list that specifies which component items to update.
+If the element of the driving list from which a component item was made
+is 3memq* of 2elements*, then the component item is updated.
+.end_defun
+
+.section Representation of Items
+
+An item is either a list or an array.  A list item contains other items,
+while an array item contains entries.
+
+List items have these accessor functions:
+.ftable 3
+.item tv:scroll-item-component-items
+Returns the list of component items of this item.
+.item tv:scroll-item-plist
+Returns the contents of the property list of this item.
+.end_table
+
+Array items have these accessor functions, which refer to array leader slots.
+(The array elements themselves hold the entries in the item.)
+.ftable 3
+.item tv:scroll-item-size
+Returns the number of entries in the item.
+.item tv:scroll-item-mouse-items
+Returns a list of mouse-sensitive areas of entries in this item.
+.item tv:scroll-item-line-sensitivity
+Returns what was specified for mouse sensitivity of the item as a whole
+(using the 3:mouse* or 3:mouse-self* keyword in
+3tv:scroll-parse-item*).
+.end_table
+
+.defvar tv:scroll-item-leader-offset
+The number of standardly-defined slots in an item's array leader.  The
+slot with this number and beyond can be used by applications for their
+own purposes.
+.end_defvar
+
+Entries are also arrays.  They have a lot of components, all managed
+internally, and users should probably not access them directly.
+Peek never needs to do so.
+
+.section Mouse Sensitive Scroll Windows
+.setq scroll-window-mouse section-page
+
+.defflavor tv:essential-scroll-mouse-mixin
+This mixin gives a scroll window the ability to make either items or
+entries mouse sensitive.
+.end_defflavor
+
+.defflavor tv:scroll-mouse-mixin
+This mixin in addition defines the 3:execute* operation
+to be the same as on menus.
+.end_defflavor
+
+3tv:scroll-parse-item* provides syntax, described above, for
+associating a mouse sensitivity to any item or entry.  The mouse
+sensitivity is a list whose purpose is to identify which mouse-sensitive
+area was clicked on, and also specify what to do when that happens.
+
+If the car of the mouse sensitivity is 3nil*, then the mouse
+sensitivity is interpreted as a menu item.  When the sensitive area is
+clicked on, the menu item is executed by means of the
+3:execute* operation--but this is done in the mouse process.
+Unfortunately, there is no way to avoid this, since mouse clicks on
+scroll windows are expected to be able to happen "at any time", and no
+other process has expressed its willingness to handle them with a
+3:choose* operation.
+
+If the car of the mouse sensitivity is non-3nil*, a click is handled
+by putting a blip into the scroll window's
+input buffer.  The blip has the form
+'cindex blip types
+.lisp
+(2blip-type* 2sensitivity* 2window* 2mouse-character*)
+.end_lisp
+2sensitivity* is the mouse sensitivity list.  2blip-type* is the car
+of that list.  2window* is the scroll window itself, and
+2mouse-character* is a character such as 3#\mouse-l-1* which
+indicates which button was clicked.
+
+The reason that the 2blip-type* is extracted and put at the front is
+that programs that use scroll windows may need to handle blips from many
+sources.  By specifying the car of each mouse sensitivity, the program
+can arrange to distinguish these blips from blips coming from menus,
+typeout windows, etc. and process each one in the correct fashion.
+
+.c the type-alist feature seems to be unused, and seems ill-thought-out,
+.c so it is not mentioned.
+
+Often a scroll window displays many similar items that describe
+different data objects.  These items will all have the same patterns of
+mouse sensitivity.  One way for the program to tell which item the user
+clicked on is to set up the mouse sensitivity using the 3:mouse-self*
+keyword (for an item) or 3:mouse-item* (for an entry).  This inserts
+the item itself into the sensitivity in place of the symbol 3self* or
+3tv:item*, respectively.

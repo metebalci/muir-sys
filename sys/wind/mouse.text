@@ -1,0 +1,1051 @@
+.c -*-Mode:Bolio; Lowercase: Yes-*-
+
+.Chapter The Mouse
+.setq mouse section-page
+.setq mouse-chapter chapter-number
+.cindex mouse
+
+Programs and windows can use the mouse as an input device.  The
+functions, variables, and flavors described below allow you to use the
+mouse to do some simple things.  To get advanced mouse behavior in
+your own programs, like the way the editor gets the mouse to put a box
+around the character being pointed at, you have to define new methods
+for various window operations described in this chapter.
+Alternatively, you can invoke the built-in choice facilities, such as
+menus and multiple-choice windows; these high-level facilities are
+described later.
+
+At any time the mouse is considered to be indicating a certain
+position on the screen, called the 2mouse cursor
+position*.  The mouse cursor is a conceptual entity which we
+think of as what moves, inside the machine, when the user moves the mouse.
+
+The mouse cursor position is indicated on the screen by a blinker
+called the mouse blinker, an actual Lisp object of the sort
+described in the chapter on blinkers.  Different blinkers can be
+the mouse blinker at different times, since each window can
+decide what to use as the mouse blinker when that window owns the mouse.
+
+There can be more than one screen, but the mouse cursor position
+is limited to one screen, called the 2mouse
+sheet* (it does not 2have* to be a screen, but it normally is).
+Mouse cursor positions are usually
+represented relative to the outside of the mouse sheet, though in
+operations on windows they are sometimes represented relative to the
+particular window.  The 3Terminal * command can be used to set the
+mouse sheet to another screen if your Lisp Machine has more than one
+screen; there is also a system menu option for this.
+
+.defvar tv:mouse-x
+.defvar1 tv:mouse-y
+These variables give the position of the mouse, in pixels, measured
+from the outside upper-left corner of the mouse sheet.  They are
+maintained by the process handling the mouse, normally the mouse
+process.
+.end_defvar
+
+.defun tv:mouse-set-sheet sheet
+Makes 2sheet* be the mouse sheet, the one on which the mouse cursor
+moves.  Only inferiors of the mouse sheet (to any number of levels) can
+own the mouse.
+.end_defun
+
+.defvar tv:mouse-sheet
+The mouse sheet.
+.end_defvar
+
+.defun tv:mouse-set-sheet-then-call sheet function &rest args
+Applies 2function* to 2args* with 2sheet* as the mouse-sheet.
+.end_defun
+
+.cindex warping the mouse
+.setq warp page
+
+Usually the mouse cursor moves only if the user moves the mouse.
+However, the program can move the mouse cursor, and change the logical
+position of the mouse, at any time.  This is called 2warping* the
+mouse.  For example, double-click-left in the editor warps the mouse
+to where the editor cursor is currently located.
+Since there is no fixed association between positions of
+physical mouse on the table and spots on the screen, warping the mouse
+does not result in any inconsistency.
+
+.defun tv:mouse-warp x y
+Warps the mouse to be at positions 2x*, 2y* with respect to the mouse sheet.
+.end_defun
+
+.setq mouse-process page
+.cindex mouse process
+.cindex owning the mouse
+.cindex tracking the mouse
+
+2Tracking* the mouse means examining the hardware
+mouse interface, noting how the mouse is moving, and adjusting the
+mouse cursor position and the mouse blinker accordingly.
+Mouse tracking is done by microcode within a window, and by
+a process called the 2mouse process* when moving between windows.
+The mouse process also keeps track of which window
+2owns* the mouse at any time.  For example, when the mouse enters an
+editor window, the editor window becomes the owner, and to indicate
+this, the blinker changes to a northeast arrow instead of a northwest
+arrow; this is all done by the mouse process.
+
+In general, the mouse process decides how to handle the mouse based on
+the flavor of the window that owns the mouse.  Some flavors handle the
+mouse themselves, running in the mouse process, in order to be able to
+put little boxes and such around things, usually to indicate what would
+happen if you were to click a button.  The editor, the inspector, menus,
+and other system facilities do this.  The flavor of the window owning
+the mouse is also what usually controls the effect of clicking the mouse
+buttons.
+
+.section Encoding Mouse Clicks as Characters
+
+.cindex encoding of mouse clicks
+.cindex clicks, mouse, encoding of
+
+Clicks on the mouse are sometimes 2encoded* into characters.  Such
+characters are normally forced into input buffers of windows (see
+(tv:stream-mixin-force-kbd-input-method)), and so they are
+distinguished from regular keyboard characters by having the
+3%%kbd-mouse* bit turned on.  Encoding of clicks is done with
+3tv:mouse-button-encode* (see (tv:mouse-button-encode-fun)).  See
+(characters) for full information the fields of such a character.
+
+Note that "mouse clicks" can also be done on the keyboard.  See the
+variables 3tv:use-kbd-buttons* and
+3tv:*mouse-incrementing-keystates**, in (mouse-parameters).
+
+These standard mixins handle mouse clicks by forcing keyboard input describing the click:
+
+.defflavor tv:kbd-mouse-buttons-mixin
+Handles mouse clicks by encoding them as characters which are forced
+into the window's input buffer.  In more detail: if it is a double-click
+on the right button, the system menu is called forth.  Otherwise, the
+encoded character representation of the click is forced into the input
+buffer of the window.  Furthermore, if it is a single-click on the left
+button, the window is selected.
+
+The state of the 3Control*, 3Meta*, 3Super* and 3Hyper* keys at
+the time of the click is included in the character, in the
+3%%kbd-control*, etc., fields (see (%%kbd-control-var)).
+.end_defflavor
+
+.setq mouse-blip page
+.defflavor tv:list-mouse-buttons-mixin
+This is just like 3tv:kbd-mouse-buttons-mixin* except that a blip
+goes in the input buffer rather than just an encoded click.  The blip
+looks like:
+'kindex :mouse-button "blip type"
+.lisp
+  (:mouse-button 2encoded-click* 2window* 2x* 2y*)
+.end_lisp
+This is more useful than just the encoded click: it tells you where
+the mouse was (relative to the outside part of the window), and which
+window the mouse was over (this is useful primarily if several windows
+are sharing the same input buffer).
+
+The state of the 3Control*, 3Meta*, 3Super* and 3Hyper* keys
+is included in the encoded click, in the 3%%kbd-control*, etc., fields.
+.end_defflavor
+
+The following subtle point may explain some difficulties you may have
+with the above flavors.  It is a tricky point, and you can ignore it if
+you don't understand it.  The characters (or blips) created by the
+flavors above go straight into the window's input buffer.  Under some
+circumstances they may bypass pending characters that have been typed
+ahead at the keyboard.  So if you type something and then mouse-click at
+something in rapid succession while your program is busy, the program
+may see the mouse-click before it sees the character from the keyboard.
+[This may be fixed in the future.]
+See (typeahead-explanation), for further discussion of these issues.
+
+.section Ownership of the Mouse
+.cindex owning the mouse
+
+Usually the mouse is handled according to the window that it is
+positioned over.  We say that this window 2owns the mouse*.
+The window that owns the mouse is the one that will receive the
+3:handle-mouse*, 3:mouse-moves* and 3:mouse-click* messages.
+So the usual case is that the window under the mouse owns the mouse.
+
+Since windows are arranged in a hierarchy, generally a window, its
+superior, its superior's superior, and so on, are all under the mouse at
+the same time.  So the window that owns the mouse is really the lowest
+window in the hierarchy (farthest in the hierarchy from the screen) that
+is visible (it and all its ancestors are exposed).  If you move the
+window to part of the screen occupied by a partially-visible window,
+then one of its ancestors (often the screen itself) becomes the owner.
+The screen handles single-clicking on the left button by selecting the
+window under it; this is why you can select partially-visible windows
+with the mouse.
+
+A greedy window can keep ownership of the mouse even if the mouse
+moves outside of it, by setting 3tv:window-owning-mouse* to that
+window.  This should be done only when that window has come by the
+mouse by legitimate means, inside a 3:handle-mouse* operation on
+that window or one of the other operations invoked by it.  Inferiors
+of the greedy window can still own the mouse when it is over them.
+Greediness ends when 3tv:window-owning-mouse* is set back to 3nil*
+(its normal state).  Then the mouse goes back to being owned by
+whichever window is under it.  While a window is being greedy, mouse
+tracking continues to use the methods of the owning window, but the
+way of determining the owning window is changed.
+
+The mouse can also be 2grabbed*, which means that some process has
+taken it away from all windows.  This state is represented by
+3tv:window-owning-mouse* being 3t*.  See (grabbing-mouse).
+
+2Usurping* the mouse is an even more drastic method of taking over
+control.  It turns the mouse process off, so you have to do the tracking
+yourself.  See (usurping-mouse).
+
+.defvar tv:window-owning-mouse
+If this is 3nil*, the mouse is owned by the window under it.
+If this is 3t*, the mouse is grabbed.
+If this is a window, the mouse is owned by that window.
+.end_defvar
+
+.defun tv:window-owning-mouse
+Returns the window that now owns the mouse, either because it is being
+greedy or because the mouse is over it.  If the mouse has been grabbed,
+the value is 3t*.
+.end_defun
+
+.defvar tv:mouse-window
+The window that is currently handling the mouse.
+This is the window that 3tv:window-owning-mouse* returned
+the last time the mouse process called it.
+.end_defvar
+
+.defun tv:mouse-wakeup
+Informs the mouse process that the screen layout has changed.
+Anything which may change which window is under any point where the
+mouse might be should call this function.
+.end_defun
+
+.defflavor tv:hysteretic-window-mixin
+This mixin makes a window continue to own the mouse (by being greedy) for
+a small distance beyond the edges of the window.  This distance is
+called the 2hysteresis*, and you can specify it.  This mixin
+is used by momentary menus, so that if you accidentally slip a bit outside
+the menu, the menu won't vanish; you have to get well away from it before
+it vanishes.
+.end_defflavor
+
+.definitoption tv:hysteretic-window-mixin :hysteresis n-pixels
+Sets the initial value of the hysteresis, in pixels.  It defaults to 25.
+(decimal).
+.end_definitoption
+
+.defmethod tv:hysteretic-window-mixin :hysteresis
+.defmethod1 tv:hysteretic-window-mixin :set-hysteresis new-hysteresis
+Examine or set the hysteresis of the window.
+.end_defmethod
+
+.subsection Grabbing the Mouse
+.setq grabbing-mouse section-page
+.cindex grabbing the mouse
+
+Normally mouse clicks and motion are interpreted by a window that owns
+the mouse.  Some applications, such as 3Edit Screen*, use the mouse
+for choosing a window to be operated on.  Then it is necessary to make
+sure that control of the mouse remains with the program that is doing
+this (e.g. 3Edit Screen*) rather than going to whatever window the
+user wants to choose.  This is done by 2grabbing the mouse*.
+
+When the mouse is grabbed, the mouse process gets told that no window
+owns the mouse, and it changes the mouse blinker back to the default (a
+northeast arrow).  The mouse process will continue to track the mouse,
+and your process can now watch the position and the buttons by using
+3tv:mouse-x* and 3tv:mouse-y*, and the
+variables and functions described below.
+
+.defspec tv:with-mouse-grabbed
+A 3tv:with-mouse-grabbed* special form just has a body:
+.lisp
+   (tv:with-mouse-grabbed
+      2forms*...)
+.end_lisp
+The forms inside are evaluated with the mouse grabbed.
+.end_defspec
+
+.defvar tv:mouse-last-buttons
+This variable contains a mask describing the mouse buttons, as of the last time
+the process handling the mouse looked at them.
+The numbers 1, 2, and 4 represent the left, middle, and
+right buttons respectively, and the value of 3tv:mouse-last-buttons*
+is the sum of the numbers representing the buttons that were being held
+down.
+.end_defvar
+
+.defvar tv:mouse-speed
+The speed the mouse has been moving recently, in units approximately like inches per second.
+.end_defvar
+
+
+.defun tv:mouse-wait &optional (old-mouse-x 3tv:mouse-x*) (old-mouse-y 3tv:mouse-y*) (old-mouse-buttons 3tv:mouse-last-buttons*)
+This function waits for any of the variables 3tv:mouse-x*,
+3tv:mouse-y*, or 3tv:mouse-last-buttons* to become different from
+the values passed as arguments.  To avoid timing errors, your program
+should examine the values of the variables, use them, and then pass in
+the values that it examined as arguments to 3tv:mouse-wait* when it is
+time to wait for the mouse to move again.  It is important to do things
+in this order, or else you might fail to wake up if one of the variables
+changed while you were using the old values and before you called
+3tv:mouse-wait*.
+.end_defun
+
+.defun tv:mouse-button-encode bd
+When a mouse button has been pushed, and you want to interpret this push
+as a click, call this function.  It watches the mouse button and figures
+out whether a single-click or double-click is happening.  It returns
+3nil* if no button is pushed, or an encoded character describing the click
+(see (characters)).
+
+You should call 3tv:mouse-button-encode* only when a button has just been
+pushed; that is, when you see some button down that was not down before.
+You have to pass in the argument, 2bd*, which is a bit mask saying
+which buttons were pressed down: which are down now that were not down
+"before".  The form 3(logand (logxor 2old-buttons* -1) 2new-buttons*)* will
+compute this mask, where 2old-buttons* is a mask of the buttons that
+were down before and 2new-buttons* is a mask of the ones that are
+down now.
+.end_defun
+
+.defun tv:merge-shift-keys char
+Modifies 2char* by setting the bits corresponding to all the shift keys
+currently pressed down on the keyboard.  This is useful on the result
+returned by 3tv:mouse-button-encode*, if you wish to record the
+state of the shift keys in the description of a mouse click so that
+the shift keys can alter the meaning of the click.
+.end_defun
+
+.defvar tv:who-line-mouse-grabbed-documentation
+When grabbing or usurping the mouse, you should explain
+what is going on in the mouse-documentation line at the bottom of the screen.
+3with-mouse-grabbed* and 3with-mouse-usurped* bind this
+variable to 3nil*, which makes the mouse-documentation line blank.
+Inside the body of one of these special forms, you may 3setq* this
+variable to a string, which will be displayed in the mouse-documentation line.
+If your program has "modes" which affect how the mouse acts, each part
+of the program should 3setq* this variable to its own documentation.
+.end_defvar
+
+.defun tv:window-under-mouse &optional operation active-condition x y
+Returns the window that is seen at the point where the mouse is (or at
+(2x*,2y*) in the mouse sheet, if they are non-3nil*).  This is the
+window that is partially visible at that point.  If 2operation* is
+non-3nil*, only windows that handle that operation are considered at
+all.  2active-condition* is another way of filtering among windows;
+it can be 3:active* or 3:exposed*, to select among active or exposed
+windows.
+
+This is used by the mouse process in deciding which window owns the
+mouse, and can also be used by you when you have grabbed the mouse.
+.end_defun
+
+.defun tv:mouse-specify-rectangle &optional left top right bottom (sheet 3mouse-sheet*) (minimum-width 30*) (minimum-height 30*) abortable
+Grabs the mouse and asks the user to specify a rectangle by clicking at two corners.
+This is how the system menu Create option works.
+Four values are returned, the left, top, right, and bottom of the rectangle,
+all relative to 2sheet*.
+
+2left* and 2top*, if non-3nil*, are where to position the mouse
+initially when asking for the upper left corner.  If 2right* and
+2bottom* are also non-3nil*, then when asking for the lower right
+corner the mouse is positioned initially so as to make a rectangle of
+the same size as the arguments specify.  In other words, what matters
+about the argument 2right* is how much bigger it is than 2left*.
+
+2minimum-width* and 2minimum-height* constrain the values that may be returned.
+
+If 2abortable* is non-2nil*, the user is permitted to abort
+by clicking the middle button.  Then the function returns 3nil*.
+
+It is often useful to call this function via 3tv:mouse-set-sheet-then-call*
+((tv:mouse-set-sheet-then-call-fun)).
+.end_defun
+
+.defun tv:mouse-set-window-size window &optional (move-p 3t*)
+Grabs the mouse and asks the user for new edges for 2window*, returns
+them, and (unless inhibited) sets the edges of 2window* to them as
+well.  2window*'s edges are set unless 2move-p* is 3nil*.
+
+The values are the new edges, suitable for the 3:set-edges* operation,
+or 2nil* if the user aborted.
+.end_defun
+
+.defun tv:mouse-set-window-position window &optional (move-p 3t*)
+Grabs the mouse and asks the user for a new position for 2window*.
+The new position is returned as two values, and 2window* is moved
+to that position unless 2move-p* is 3nil*.
+
+The values are the new position of the upper left corner,
+suitable for the 3:set-position* operation,
+or 3nil* if the user aborted.
+.end_defun
+
+.subsection Usurping the Mouse
+.setq usurping-mouse section-page
+.cindex usurping the mouse
+
+For high real-time performance, you can 2usurp* the mouse.  Then the
+mouse process steps aside and lets you do everything related to
+tracking the mouse until you return control of it.  The variables
+3tv:mouse-x* and 3tv:mouse-y* are not updated while the mouse is
+usurped.  The mouse blinker disappears, and if you want any visual
+indication of the mouse to appear, you have to do it yourself.
+
+.defspec tv:with-mouse-usurped
+A 3tv:with-mouse-usurped* special form just has a body:
+.lisp
+   (tv:with-mouse-usurped
+      2forms*...)
+.end_lisp
+The forms inside are evaluated with the mouse usurped.
+.end_defspec
+
+.defun tv:mouse-input &optional (wait-flag 3t*)
+Waits until something happens with the mouse, and then returns saying what
+happened.  Four values are returned.  The first two are 2delta-x* and
+2delta-y*, which are the distance that the mouse has moved since the
+last time 3tv:mouse-input* was called.  The second two are
+2buttons-newly-pushed* and 2buttons-newly-raised*, which are bit
+masks (using the bit assignment used by 3tv:mouse-last-buttons*; see
+above) saying what buttons have changed since the last time
+3tv:mouse-input* was called.
+
+You may call this function only with the mouse usurped; otherwise you
+will get in the way of the mouse process, which calls this function
+itself, and mouse tracking won't work correctly.
+
+The variables 3tv:mouse-x* and 3tv:mouse-y* are not maintained by
+this function; you must do it yourself if you want to keep track of a
+cumulative mouse position.  3tv:mouse-last-buttons* is maintained.
+
+The 2buttons-newly-pushed* value is suitable for being passed as
+an argument to 3tv:mouse-buttons-encode*, which can be used with
+the mouse usurped as well as with the mouse grabbed.
+
+If 2wait-flag* is 3nil*, then the function will not wait; it
+may return with all zeroes, indicating that nothing has changed.
+.end_defun
+
+.defun tv:mouse-buttons
+Returns the current state of the mouse buttons, in the format used by
+the 3tv:mouse-last-buttons* variable, by examining the hardware mouse
+registers.
+.end_defun
+
+.section How Windows Handle the Mouse
+
+The mouse is rarely grabbed or usurped.  Normally it is owned by a
+window (or a screen).  Then, mouse handling works through various flavor
+operations on the owning window.  There are several operations, used at
+various points in mouse handling, to give you convenient hooks for
+modifying a window's behavior.
+
+The outermost loop of mouse handling determines the owning window and
+then invokes its 3:handle-mouse* method.  When this method returns,
+the owning window is recalculated.
+
+.defmetamethod windows :handle-mouse
+This operation is invoked by the mouse process to handle the mouse while
+it is on this window.  It should return only when the mouse moves out of
+the window, or if the mouse is grabbed.
+
+The default definition is to call 3tv:mouse-standard-blinker* followed
+by 3tv:mouse-default-handler*.
+.end_defmetamethod
+
+.defun tv:mouse-default-handler window scroll-bar-p
+The guts of the 3:handle-mouse* operation.  3:handle-mouse* methods
+typically set up the desired sort of mouse blinker and then call this
+function.  2window* is the window the mouse is being handled for, and
+2scroll-bar-p* is 3t* to provide a scroll bar (see (scroll-bar)),
+if the window implements one.  Generally the 3:enable-scrolling-p*
+operation is used to compute the second argument.
+
+A second argument of 3:in* is used for handling the scroll bar itself.
+Values other than 3nil*, 3t* and 3:in* should be avoided.
+
+This function invokes the 3:mouse-moves* operation to inform the window
+about mouse motion, and the 3:mouse-buttons* operation to inform it
+about buttons going down.  They are the most convenient hooks to use
+for implementing simple new mouse behaviors.
+.end_defun
+
+.defmetamethod windows :set-mouse-cursorpos x y
+.defmetamethod1 windows :set-mouse-position x y
+Move the mouse instantaneously to the specified position.  The effect is
+as if the user had moved the mouse over to that spot, without the user
+actually touching it.  For 3:set-mouse-position*, 2x* and 2y* are
+relative to the outside edges of the window.  For
+3:set-mouse-cursorpos*, they are relative to the inside edges (as in
+the 3:set-cursorpos* operation).
+.end_defmetamethod
+
+.defmetamethod windows :mouse-moves x y
+This operation is invoked in the mouse process every time the mouse
+moves either into, within or out of this window.  2x* and 2y* are
+the current position of the mouse, relative to the outside edges of this
+window.
+
+3:mouse-moves* handlers should always call
+3tv:mouse-set-blinker-cursorpos* to make the mouse blinker move.  In
+addition, they frequently move other blinkers or turn them on or off.
+This is how menus arrange to outline the item the mouse is over.
+
+3tv:mouse-default-handler* is what invokes this operation.
+
+When this window ceases to own the mouse, for whatever reason, the
+3:mouse-moves* method will always be called one final time, so that it
+can turn off extra blinkers, etc.
+.end_defmetamethod
+
+.defun tv:mouse-set-blinker-cursorpos &rest ignore
+Moves the current mouse blinker to the current mouse position.
+3:mouse-moves* methods typically call this function.
+.end_defun
+
+.defmetamethod windows :mouse-buttons mask x y
+This operation is invoked in the mouse process when a button is pressed.
+2mask* is a mask of the buttons pressed, and 2x* and 2y* are the
+mouse position (in the mouse sheet).
+
+By default, this calls 3tv:mouse-button-encode* to check for double
+clicks, then brings up the system menu for double-click-right;
+otherwise, it invokes the 3:mouse-click* operation.
+
+3tv:mouse-default-handler* is what invokes this operation.
+.end_defmetamethod
+
+.defmetamethod windows :mouse-click mouse-char x y
+This operation is where most handling of mouse clicks actually goes
+on.  It is invoked in the mouse process.  2mouse-char* is a
+character code describing the button pressed and how many times; such
+as, 3#\mouse-l-2*.  2x* and 2y* are the position of the mouse at
+the beginning of the click.  It is preferable to use this position
+rather than the current one, because the user positioned the mouse
+accurately before clicking and motion during the click was probably
+accidental.
+
+Any window selection desired should be done in another process, using
+3process-run-function* or 3tv:mouse-select*.  It is unrobust
+to do something so error-prone in the mouse process.
+
+3:or* method combination is used, so that all the methods are run
+until one of them returns non-3nil*.  So each mixin can define a way
+of handling the mouse under certain circumstances, and it can decline to
+handle the click by returning 3nil*.  For example,
+3tv:margin-choice-mixin* defines a 3:mouse-click* method which
+handles the click if the position is inside a margin choice box, and
+returns 3nil* otherwise so that the window's primary way of handling
+clicks can be run.
+
+3tv:kbd-mouse-buttons-mixin* and 3tv:list-mouse-buttons-mixin* work
+by defining 3:mouse-click* methods.
+.end_defmetamethod
+
+.defmetamethod windows :who-line-documentation-string
+This operation should return a string describing what the mouse would do
+if clicked on this window in its current position.  For example, menus
+return a string describing the menu item that the mouse is over.
+If different buttons do different things, or if multiple clicks
+are in use, the string should describe all the possibilities.
+.end_defmetamethod
+
+.defun tv:mouse-select window
+Selects 2window*,  and safe to use in the mouse process because
+it creates a temporary process to do the work in that case.
+Used by 3:mouse-click* methods.
+.end_defun
+
+.defun tv:mouse-call-system-menu
+Brings up the system menu, and designed to be safe to use in the mouse
+process.  Used by 3:mouse-click* methods.
+.end_defun
+
+.section Mouse Blinkers
+.setq mouse-blinkers section-page
+
+At any time one blinker is the mouse blinker, which follows the motion
+of the mouse.  It is not always the same blinker.  Each window can set
+up the kind of mouse blinker it wants or change the blinker, as long as
+that window owns the mouse.
+
+The mouse blinker's sheet is the mouse sheet, not the window that owns
+the mouse and wants this blinker to be used.  This avoids problems with
+displaying the blinker at points near the edge of the owning window
+which require parts of the blinker to be outside that window.
+
+Note that mouse blinkers are not following blinkers; the mouse cursor
+position is independent of the cursor position of the owning window
+and also independent of the cursor position of the mouse sheet.
+
+The recommended way to make a window flavor use a special form of mouse
+cursor is to give the flavor a 3:mouse-standard-blinker* method which
+alters the mouse blinker using 3tv:mouse-set-blinker* or
+3tv:mouse-set-blinker-definition* (see below).
+
+Usually there is only one form of mouse blinker used for any given
+window.  If you want the mouse blinker's appearance to vary while the
+mouse remains in the same window, a good technique is to have the
+3:mouse-standard-blinker* method know how to set up whichever blinker
+appearance is right at the moment it is called, and then call
+3tv:mouse-standard-blinker* after every event that might necessitate
+changing the blinker.
+
+.defvar tv:mouse-blinker
+The blinker now following the mouse.  It should not be changed by the
+user directly.
+.end_defvar
+
+.defun tv:mouse-set-blinker blinker &optional x-offset y-offset
+Makes 2blinker* the new mouse blinker.  If 2x-offset* and 2y-offset* are non-3nil*,
+2blinker*'s offsets (see below) are also set.
+
+2blinker* can be a defined blinker type instead of a blinker.  Then
+this function is equivalent to 3tv:mouse-set-blinker-definition*
+with only three arguments specified
+((tv:mouse-set-blinker-definition-fun)).
+
+This function is typically called from 3:mouse-standard-blinker*
+methods.
+.end_defun
+
+.defun tv:mouse-standard-blinker &optional (window 3(tv:window-owning-mouse)*)
+Sets the mouse blinker to the standard kind for 2window*,
+by invoking the 3:mouse-standard-blinker* operation on it.
+This is called by the window system at appropriate times.
+.end_defun
+
+.defmetamethod windows :mouse-standard-blinker
+This should use 3tv:mouse-set-blinker* or
+3tv:mouse-set-blinker-definition* to set up the right kind of mouse
+blinker to use when the mouse is on this window.  By default, it is
+defined to pass on the message to the superior window; finally, the
+screen handles the operation by making the blinker an upward-left
+arrow.
+.end_defmetamethod
+
+.defflavor tv:mouse-blinker-mixin
+Not all blinkers can serve as mouse blinkers.
+This mixin makes a blinker suitable for use as the mouse blinker.
+
+A mouse blinker has two offsets which relate the blinker position to the
+mouse position.  Remember that the blinker position is where the upper
+left corner of the blinker is displayed.  The upper left corner is not
+always what you want to place at the precise spot the mouse is pointing
+to.  For example, if you are using a character blinker with the
+character 7X*, probably the center of the 7X* rather than its corner
+should be "the spot".
+.end_defflavor
+
+.defmethod tv:mouse-blinker-mixin :offsets
+Returns the 2x* and 2y* offsets of the blinker as two values.
+The values give the position of the mouse cursor relative to the
+blinker; that is, in order to locate the cursor within the
+area of the blinker's display, the offsets must be positive.
+.end_defmethod
+
+.defmethod tv:mouse-blinker-mixin :set-offsets x y
+Sets the offsets of the blinker.
+.end_defmethod
+
+.defflavor tv:mouse-character-blinker
+.defflavor1 tv:mouse-rectangular-blinker
+.defflavor1 tv:mouse-hollow-rectangular-blinker
+.defflavor1 tv:mouse-box-blinker
+.defflavor1 tv:mouse-box-stay-inside-blinker
+These are versions of popular blinker flavors described in
+(blinker-flavors), which can be used as the mouse blinker.
+3tv:mouse-box-stay-inside-blinker* incorporates
+3tv:stay-inside-blinker-mixin*.
+.end_defflavor
+
+The flavors 3tv:bitblt-blinker* and 3tv:magnifying-blinker*
+are already suited to be mouse blinkers.
+
+.subsection Reusable Mouse Blinker Types
+
+Normally you do not create mouse blinkers yourself.  Instead, each
+screen keeps a list of mouse blinkers of various sorts, and you reuse
+one of them.  This is done by means of 2mouse blinker type keywords*.
+A mouse blinker type keyword is given a meaning, which is a function for
+creating a blinker.  The first time someone wants a blinker of that type
+on a given screen, one is created and remembered, and reused every time
+a blinker of that type is wanted.  A blinker type keyword serves a purpose
+similar to that of a resource.
+
+Predefined type keywords include 3:character-blinker*,
+3:rectangle-blinker*, 3:box-blinker* and
+3:box-stay-inside-blinker*.
+
+You do not have to use this mechanism, but it saves creation of blinkers
+to do so.
+
+.defun tv:mouse-define-blinker-type type creation-function
+Defines 2type* as a mouse blinker type, with 2creation-function* as
+a function to create one.  The function will receive a screen as
+argument and should call 2make-blinker*.
+.end_defun
+
+.defun tv:mouse-get-blinker type sheet
+Returns a blinker of type 2type* whose sheet is 2sheet*.
+The same blinker will be automatically reused for different sheets on
+the same screen.  In fact, the blinker's sheet will be the screen,
+not 2sheet*.
+.end_defun
+
+.defun tv:mouse-set-blinker-definition type x-offset y-offset visibility operation &rest args
+Sets the mouse blinker to be a blinker of type 2type*, and sets its
+offsets and visibility as specified; then sends the blinker a message
+of 2operation* and 2args* if 2operation* is non-3nil*.
+2operation* is typically used to initialize other aspects of the
+blinker.  For example, the 3:set-character* operation is useful
+with character blinkers.
+
+This function can be used in the 3:mouse-standard-blinker* method
+of a window to specify a different appearance of the mouse blinker while
+the mouse is in that window.
+.end_defun
+
+.definstvar tv:screen tv:mouse-blinkers
+A list of mouse blinkers, examples of various reusable mouse blinker types,
+created so far for this screen.
+.end_definstvar
+
+.section Mouse Scrolling
+
+Some windows have the ability to 2scroll*.  They display only a
+portion of a virtual window which is (or may be) too big to be shown all
+at once.  Scrolling means moving the actually-shown portion up or down
+through the entire display.
+
+.subsection Scrolling Protocol
+.setq scroll-protocol section-page
+
+There are several ways the mouse can be used to scroll a window.  Each
+is implemented by a mixin.  They all communicate with the window using
+the same protocol.  For the sake of this protocol, the contents of the
+window are considered to be divided vertically into "lines".  A position
+for scrolling is expressed as the number of lines that are above the top
+of the window.  These do not have to be actual lines of text, though
+usually they are, but they must all have the same height.  Usually this
+common height is the window's line-height, but that is not required.
+
+.setq enable-scrolling-p-op page
+.defmetamethod "scrolling windows" :enable-scrolling-p
+The various mouse-scrolling features use this operation to decide
+whether they should be active at any given time.  If this operation
+returns 3nil*, the scrolling facilities do not react to the mouse.
+.end_defmetamethod
+
+.defmetamethod "scrolling windows" :scroll-position
+Returns four values: 
+.table 2
+.item top-line-num
+The line-number of the line currently at the top of the window.
+.item total-lines
+The total number of lines available to scroll through.
+.item line-height
+The height (in pixels) of a line.
+.item n-items
+The number of lines that the window has room for.
+.end_table
+.end_defmetamethod
+
+.defmetamethod "scrolling windows" :scroll-to to &optional (type 3':absolute*)
+2type* is one of:
+.table 3
+.kitem :absolute
+Places the line numbered 2to* at the top of the window.
+.kitem :relative
+Adjusts the line displayed at the top of the window by 2to* lines.
+If 2to* is positive, text moves upward on the screen.
+.end_table
+Since 2to* is not guaranteed to be legal, both types of scrolling must
+error check their arguments.
+.end_defmetamethod
+
+.defmetamethod windows :new-scroll-position
+This operation is used by the program managing the window to tell
+the mouse scrolling facilities that the contents of the window have
+changed under program control.  It should be invoked whenever either the
+total number of lines to scroll through or the line number at the top of
+the window is changed by anything except the mouse scrolling facilities.
+
+Mouse scrolling facilities put daemons on this operation in order to
+update their displays when the situation changes.
+.end_defmetamethod
+
+.subsection Scroll Bars
+.cindex scroll bar
+.setq scroll-bar section-page
+
+If you move the mouse to the left edge of an editor window from the
+inside, eventually the mouse cursor changes to a thick up-and-down
+arrow.  Simultaneously, a thin vertical line appears next to and outside
+of the left border of the window.  This is called entering the scroll
+bar, and the thin vertical line, which indicates the portion of the
+total text that is now on the screen, is the scroll bar itself.
+
+The vertical position of the top and bottom of the thin vertical line,
+as proportions of the height of the window, are the same as the
+positions of the first and last lines of text on the screen, as
+proportions of the total number of lines.
+
+While the mouse is in the scroll bar, clicks have special meanings:
+.table 2
+.item single left
+Moves this line (the one the mouse points at) to the top of the window.
+.item single right
+Moves the line at the top of the window to where the mouse points.
+
+.item double left
+Moves this line (the one the mouse points at) to the bottom of the window.
+.item double right
+Moves the line at the top of the window to where the mouse points.
+
+.item middle
+Scrolls so that the scroll bar moves to where the mouse is.
+The mouse vertical position on the window thus controls where in the
+display to scroll to; the top of the window requests the beginning of
+the available display, and the bottom requests the end.
+.end_table
+
+.defflavor tv:basic-scroll-bar
+This mixin gives a window the ability to have a scroll bar.
+It defines three instance variables:
+.table 2
+.item tv:scroll-bar
+When the window provides margin space for a scroll bar, this is a list
+describing the rectangle allocated.  Otherwise, it is 3nil*.
+
+.item tv:scroll-bar-always-displayed
+If this is non-3nil*, the bar will be displayed whenever margin space
+is provided for it, even if the mouse is not there.
+
+.item tv:scroll-bar-in
+This is non-3nil* when the mouse is actually in this window's scroll
+bar.
+.end_table
+.end_defflavor
+
+.definitoption tv:basic-scroll-bar :scroll-bar spec
+Specifies whether to have a scroll bar, how big to make it, and where.
+2spec* can be 3nil* for no scroll bar, 3t* for a default scroll
+bar, or a small positive number, which requests a scroll bar of that
+width.  The scroll bar occupies space in the margins of the window.
+.end_definitoption
+
+.defmethod tv:basic-scroll-bar :set-scroll-bar spec
+Sets whether this window has a scroll bar, or how wide it is.  2spec*
+is the same as in the 3:scroll-bar* init option.  This can change the
+inside size of the window, since it can change the amount of space
+needed in the margin.
+.end_defmethod
+
+.defmethod tv:basic-scroll-bar :enable-scrolling-p
+This mixin defines this operation to return 3t* when the window has a
+scroll bar.  See (scrolling/ windows-enable-scrolling-p-method) for a
+description of this operation.
+.end_defmethod
+
+.definitoption tv:basic-scroll-bar :scroll-bar-always-displayed t-or-nil
+Non-3nil* to say that the bar of the scroll bar should appear on the
+screen all the time, not just when the mouse is "in" it.
+.end_definitoption
+
+.defmethod tv:basic-scroll-bar :scroll-bar-always-displayed
+.defmethod1 tv:basic-scroll-bar :set-scroll-bar-always-displayed t-or-nil
+Get or set this flag in an existing window.  Setting it updates the
+screen.
+.end_defmethod
+
+.defmethod tv:basic-scroll-bar :scroll-more-above
+.defmethod1 tv:basic-scroll-bar :scroll-more-below
+3t* if there is text to scroll up (down) to.  The default definition
+uses the 3:scroll-position* operation; some flavors redefine it for
+greater efficiency.
+.end_defmethod
+
+.defmethod tv:basic-scroll-bar :mouse-buttons-scroll mouse-char x y
+This operation is invoked when the mouse is clicked in the scroll bar.
+2mouse-char* is a character with 3%%kbd-mouse* set, identifying the
+button clicked and how many times.  2x* and 2y* are the position at
+the time of the click, relative to this window's outside edges.
+The default definition provides the standard scrolling commands; you can
+redefine it.
+.end_defmethod
+
+.defmethod tv:basic-scroll-bar :scroll-relative from to
+Scrolls the window to move what is now at the 2y*-position 2from* to
+the 2y*-position 2to*.  The arguments can be numeric vertical cursor
+positions, or the symbols 3:top* or 3:bottom*.  The
+3:scroll-position* and 3:scroll-to* operations are used to
+accomplish the scrolling.
+.end_defmethod
+
+.subsection Margin Scrolling
+
+The scrolling mixins described here require that the window have
+3tv:basic-scroll-bar* as well, because they make use of operations
+defined by that flavor.  If you do not want to have a scroll bar,
+you can specify 3nil* for the 3:scroll-bar* init option.
+
+.defflavor tv:flashy-scrolling-mixin
+This mixin provides the ability to scroll the window a line at a time by
+pushing the mouse against the top or bottom edge.  The mouse blinker
+changes to a thick up or down arrow when it is in the right place to do
+this.
+
+This sort of scrolling is provided in the editor and the inspector.
+This flavor does 2not* cause the text "2more above*" to appear,
+the way it does in the inspector; that is done by
+3tv:margin-scrolling-mixin*.
+.end_defflavor
+
+.definitoption tv:flashy-scrolling-mixin :flashy-scrolling-region spec
+2spec* specifies where in the window the regions should go in which
+the mouse can cause scrolling.  It looks like this:
+.lisp
+((2top-height* 2top-left* 2top-right*)
+ (2bottom-height* 2bottom-left* 2bottom-right*))
+.end_lisp
+Each region always abuts the top or bottom edge of the window,
+overlapping the window's margin, but possibly extending into the inside
+of the window.
+Each 2height* is a number of pixels in height for the specified
+region.  Each 2left* and 2right* give the sides of the region.
+2left* and 2right* can be fixnums (positions relative to the window
+left edge), flonums (fractions of the width of the window, with zero at
+the left), or 3:left* for the left edge or 3:right* for the right edge.
+.end_definitoption
+
+.defflavor tv:margin-scroll-mixin
+This mixin (which requires 3tv:margin-region-mixin* as well)
+provides for mouse-sensitive regions in the top and bottom margins which
+say "2more below*" or "2more above*" if there is something to scroll
+to.  A mouse click on the region scrolls an entire windowfull.
+.end_defflavor
+
+.definitoption tv:margin-scroll-mixin :margin-scroll-regions region-list
+Each element of 2region-list* describes what to do with one of the two
+scrolling regions.  An element looks like
+.lisp
+(2keyword* 2at-end-message* 2more-message* 2font-specifier*)
+.end_lisp
+2keyword* is 3:top* or 3:bottom*, and says which region this
+element describes.  2at-end-message* is an expression evaluated to get
+the string to display in the region when there is no room for more
+scrolling in that direction.  If 3nil* or omitted, it defaults to
+3"Top"* or 3"Bottom"*.  2more-message* is another expression which
+is supposed to evaluate to a string to print when there is room for more
+scrolling.  3"More above"* and 3"More below"* are the defaults.
+
+Most commonly one just uses a string for the 2at-end-message* and the
+2more-message*.
+
+2font-specifier* specifies the font to use.  It defaults to 3tr10i*
+if it is 3nil* or omitted.
+.end_definitoption
+
+.defflavor tv:flashy-margin-scrolling-mixin
+This mixin provides both flashy scrolling and margin scrolling, with the
+flashy scrolling areas overlying the margin scrolling regions.  You
+don't need anything else except 3tv:basic-scroll-bar*.
+.end_defflavor
+
+.need 1500
+.nopara
+Here are two ways of controlling when margin scrolling regions appear
+or disappear:
+
+.defflavor tv:margin-scroll-region-on-and-off-with-scroll-bar-mixin
+This mixin, when combined with 3tv:margin-scroll-mixin*, makes the
+margin scroll regions disappear if the 3:scroll-bar* init option or
+the 3:set-scroll-bar* operation is used to make the scroll bar
+disappear, and reappear if a scroll bar is created again.
+.end_defflavor
+
+.defflavor tv:scroll-stuff-on-off-mixin
+This mixin provides a scroll bar, flashy scrolling and margin scrolling,
+and makes them appear or disappear according to the value returned by
+the 3:enable-scrolling-p* operation.
+.end_defflavor
+
+.defmethod tv:scroll-stuff-on-off-mixin :decide-if-scrolling-necessary
+Makes the scroll bar and margin regions appear or disappear if
+appropriate, using the 3:enable-scrolling-p* to decide whether they
+should be present.  The goal is to avoid displaying scrolling features,
+and using up screen space for them, when there is no place to scroll to.
+
+This operation is invoked automatically at certain times.  It should be
+invoked also whenever the number of lines to scroll through has been
+changed, but before doing any associated redisplay (since the redisplay
+to be done may be different after this operation finishes).
+
+If the scroll bar and margin regions must be added or removed, then
+either the inside size of the outside size of the window must change.
+The 3:adjustable-size-p* operation is used to decide which.  If it
+returns non-3nil*, the inside size is preserved and the outside size
+is changed; otherwise, the outside size is preserved.
+
+Changing the inside size may affect the window's redisplay calculations,
+and for some windows it may cause a redisplay within this operation.
+You may want to invoke it inside of a 3tv:with-sheet-deexposed*
+to avoid letting the user see gratuitous double redisplays, or to
+suppress the redisplay entirely if there is no bit-save-array.
+
+If the outside size is to be changed, and if changing the number of
+displayable items changes the height of the window, that should be done
+before invoking this operation.
+.end_defmethod
+
+.defmethod tv:scroll-stuff-on-off-mixin :adjustable-size-p
+This operation is used to decide how to adjust the window margin size.
+If it returns non-3nil*, the inside size is preserved; otherwise, the
+outside size.
+
+3tv:scroll-stuff-on-off-mixin* does not define this operation, but
+it requires users to define it.
+.end_defmethod
+
+.section Mouse Parameters
+.setq mouse-parameters section-page
+
+.defvar tv:use-kbd-buttons
+If this is non-3nil*, the Roman numeral keys I through III on the
+keyboard are treated as mouse clicks when the 3Mode-Lock* key is
+down.  The default is 3t*.
+.end_defvar
+
+.defvar tv:mouse-bounce-time
+The delay in microseconds after a change in a mouse button status
+before the system begins to look for another change.
+The default is 2000. microseconds.
+.end_defvar
+
+.defvar tv:mouse-double-click-time
+The delay in microseconds after which the system gives up checking for
+an additional mouse click.  The default is .2 seconds.
+.end_defvar
+
+.defun tv:mouse-discard-clickahead
+Clears out the microcode buffer in which the mouse-tracking microcode
+records mouse clicks.
+.end_defun
+
+.defvar tv:*mouse-incrementing-keystates*
+This is a list of keys (valid arguments for 3tv:key-state*).
+When the mouse is clicked, each of these keys that is held down
+adds one to the "number of clicks".  The default value is
+.lisp
+(:control :shift :hyper)
+.end_lisp
+Thus, if you do a single click with the 3Control* key down,
+it is treated as a double click.
+.end_defvar

@@ -1,0 +1,223 @@
+
+
+
+        	THIS IS A GUIDE FOR DEBUGGING A BROKEN CADR
+
+	If you are in the middle of a hacking session and the machine fails,
+the problem, if it is indeed a hardware failure, is likely to be a burned chip.  
+These are usually easy to find, provided you have a set of prints and the wirelists.
+	
+
+
+		but really...
+
+	If you are in the middle of a hacking session and the machine fails,
+the problem, if it is indeed a hardware failure, is likely to be a gross and disgusting
+snarlup that will take you weeks to debug, so send a bug report to bug-hardware and
+split for the beach untill someone gets around to fixing your machine.  If you want to
+go on a really long vacation, don't send us a bug report.
+
+	The wonder command you might want to use before you go is:
+(cc:salvage-editor).
+	This command salvages your buffers across the debug cable. (See below for how
+to hook the debug cable up.)
+
+
+	We encourage everyone to learn how to fix these monsters ( so we can go to the
+beach intead of you), and we offer to show you how to fix things, but please don't
+fuss with things if you don't know what you're doing.  (We always play with things 
+without knowing what we're doing, but we gotta fix what we break.)
+
+
+		So, if you're still hot to fix your cadr:
+
+	The first thing to do is to find the machine which is hooked to your debug
+interface, or to attach one. The cable goes from one of two fifty pin female connectors
+to a similar one on the other machine. On the broken machine, plug
+the cable into the connector that has a cable marked "slave" coming out of it,
+and on the other machine plug it into "master".  It is important not to daisy-chain
+the machines, because the data lines of slave and master are connected. Two machines
+may be paired, each the master for the other, but chains of machines will cause
+false errors on the diagnostics.
+
+While you're near the machine, check the PC (the LED display in the
+inside of the processor).  If the PC reads 40 (sometime 598), then the
+problem is liable to be a disk error.  If there are decimal points lit
+up, they indicate errors:
+	The dot to the far left indicates that the processor is still
+in the bootstrap prom.
+	The second from the right indicates main memory parity error.
+	Other decimal points mean different parity errors.  Check with
+the CADR prints (OLORD 2) for more details.
+
+On the master lispm, get into the CADR package
+and then into the function (cc).  You are then in a command loop from which you can
+probe and examine the registers, single-step or run the machine, set breakpoints, set up
+scope loops, and manipulate the program counter. There is documentation along with the code 
+in LMCONS; CC >. The bottom of your screen now contains the program counter, the 
+contents of the OBUS and the instruction register (This is the instruction about to
+be excecuted on the next cycle), and the status register.  
+
+
+ The most useful command is
+
+:why  	Tells you (if it knows/feels like it) what is crapped out.
+
+
+
+ Some other often used commands are:
+
+n@A/	gives you the contents of memory location n in A memory.  A line feed steps
+	you to register n+1; an up-arrow backsteps you to n-1.  As these other locations
+	are presented, they give a label rather than numeric memory location, if one
+	exists. To change the contents of a register, type the desired new contents
+	after the displayed contents and move to another register or hit return.
+
+n@M/	gives you the contents of memory location n in M memory.  It should be remembered
+	that M-memory contains a duplicate copy of the first 32 locations of A-memory.
+
+n@C/	contents of n in C memory
+
+n@G	Sets PC to n (note that this functions differently that the register examining
+                  	functions above)
+
+OPC n/	this gives you the symbolic equivalents for the eight most recent program
+	counters. It starts with OPC 0, the oldest. OPC 7 is the most recent, but
+        the machine cannot halt instantly, so the instruction which
+	got the parity error is in OPC 6.  The instruction at OPC 7 has been fetched but not
+	excecuted; it is also the one displayed at the the bottom of the screen. To view
+	the contents of the instruction register for one of the OPCs type the name of
+	the PC followed by a slash.  It is important to note that this facility does
+	not know about the NOP bit; thus if you are dealing with a jump that does not
+	excecute next or other instructions which take a NOP cycle, you should look back
+	another OPC to find the source of the error
+
+RAIDR n/ cause as many as seven registers to be constantly displayed at the bottom
+	of the screen.  If you set RAIDR 0 to MD, then the MD will be displayed until
+	you tell it to go away (by setting the RAIDR back to zero).  A common use is to
+        look at the MD, A-CURRENT-MEMORY-DATA,	and VMA while examining a failed memory 
+	test program (CC-RUN-MTEST, from LCADR;DMON), you then see what was written,
+	what came back, and what location you were at when the test failed 									      
+^P	Proceeds the machine. Halts on error or on any character typed.
+
+^N	Single steps the machine
+
+
+	The error bits displayed from the status register are a useful starting point;
+
+
+the altmode key exits you from (cc)
+
+
+	A main-memory parity error may be tracked down with two functions:
+First, do (CC-FAST-ADDRESS-TEST-MEM).  This simply checks for gross failures, such as
+entire banks dropping a bit.  Unlikely, but easy to check. Then run (CC-RUN-MTEST);
+this loads a program into the debuggee, which then exhaustively tests the main memory.
+If you get an error, there are no built in functions to describe which bit in which
+board is bad, so you go back into CC to find where the program halted.  (CC-RUN-MTEST)
+will not work past test 2 if there is more than 256K of memory.  You are free to fix this
+bug in the programming if you like.  Meanwhile, if you do have more than 256K, curse, and 
+pull out memory boards until you are down to 4.  Turn the machine off when you are pulling
+boards out, AND
+
+
+
+********* ALWAYS TURN THE DISK DRIVE OFF BEFORE YOU TURN THE MACHINE OFF************
+
+
+
+If they check out, try the next 4.
+
+	First set the machine back to the beginning of the first test in which it failed by
+altering the register M-TEST, and then typing   0@G   to reset the PC.   Then, as was
+mentioned above, set the first RAIDR s to MD,VMA, and A-CURRENT-MEMORY-DATA. Now the
+machine may be proceeded with ^P to the point where the error occurs.  By comparing MD
+with A-CURRENT-MEMORY-DATA, you can determine which bits are bad. If there is no discrepancy,
+then try replacing the parity bit (bit 42)  The VMA shows in which
+board and bank the failure is.  Each bank is 16K words, so bank 0 goes from 0 to 37777,
+bank 1 from 40000 to 77777, bank 2 from 100000 to 137777, and bank 3 from 140000 to 177777.
+Each board is of course 64k, so the boards start at multiples of 200000.  Once you have
+localized the problem, you need the Multiwire Memory Book.  If the problem is localized to
+a single bit in a single bank, you can find the corresponding chip on a board map
+at the beginning of the prints. If the problem is more extensive, you may find the scope 
+loops in LCADR;PRAID > useful; or you can construct your own from (PHYS-MEM-WRITE adr val)
+and (PHYS-MEM-READ adr).
+	Your best bet is to simply pull the offending board and send a message to 
+bug-hardware.  (You will have to reset the switches to compensate for the board you pulled)
+
+			-----PROCESSOR & ASSORTED PARITY ERRORS-------
+
+	If the problem is in the processor (any other parity errors) or if you don't 
+know what else to do, try (CC-TEST-MACHINE).  This resets the machine and runs a reasonably
+comprehensive series of tests on the processor.  The error messages give bad bits and general
+descriptions of the data path.  There are functions to read and write most registers and
+memories, of the form (CC-WRITE-FOO adr val) (CC-READ-FOO adr);  the address is ommitted
+for single registers.  LCADR;PRAID > contains scope loops of many of these functions, but
+whenever possible, it is better to use static tests: write some register and then probe it to
+see whats there.  It should be noted that the diagnostics in (CC-TEST-MACHINE) are
+hierarchically arranged, so that successive tests probe deeper into the machines data
+paths.  So always work on the first test to fail.
+
+
+			------DISK PROBLEMS---------
+
+
+	Disk problems may be handled with (DCHECK) and (CC-DISK-ANALYZE). (DCHECK) tests
+the registers in the Disk Controller, then does trial seeks between various cylinders...
+the machine can be seen to rock back and forth while its on the full range seeks, so don't
+let it stay there very long (you type a space to go to the next seek).  It then tries to
+read some headers off the disk and finally tries a write and a read.  Some apparent errors
+on the write/read are caused by bad parity in the main memory of a freshly powered-up
+machine.  This can be fixed by running the first two tests of (CC-RUN-MTEST) (just space
+to abort the other tests...that way it doesn`t take forever). (CC-DISK-ANALYZE) prints out
+the status of the Disk Controller.  
+	Hardware problems in the DC are hairy when they occur, and they occur less often
+than cableing problems and hardware lossage in the disk, so this file won`t deal with them.
+The best thing to do is to check the rest of the machine and to make sure that the cables
+are properly attached.  One should not always trust what is written on the cables...if the
+small one is backwards, then the disk won't spin-up at all.  If the larger one is reversed,
+many control and data lines will not work.  If the machine was working before with the
+cables in that arrangement, then try swapping DC boards and check the cables for continuity
+(the cables take a fair amount of abuse, so broken wires are possible).
+        If it looks like it is the disk that is flaky, try some of these goodies:
+
+(cc-print-disk-label) If you have a label, goody goody gumdrops - chances are that
+	the controller and the cables are all together.
+
+	    N.B.  The next set of disk comands do irreversable things.  If the disk
+	    is special i.e. has personal or special systems on it, maybe you should wait
+	    for someone else to look at it.
+
+(si:edit-disk-label "cc" t) Use this to see if you can read/write the label.  It is well
+	documented.  Try reading the existing label.  If it doesn't
+	work, or prints out gibberish, try initializing a new label.
+(si:copy-disk-partition) typically, you want to copy over an mcr and a lod from the debugger
+	to the debuggee.  Make sure that the mcr and lod are compatable. (Maybe even
+	use the ones that are current on the debugger's disk).  Often looks like this:
+	(si:copy-disk-partition 0 "mcr#" "cc" "mcr#")
+	(si:copy-disk-partition 0 "lod#" "cc" "lod#")	
+	This will clobber whatever was in the band you are copying onto.
+(cc:format-disk-pack)  Use this when the sector markers have been trampled.  This will
+	clobber everything on the disk irreversibly.
+
+
+
+			---------TV PROBLEMS---------
+
+
+
+	Most TV problems turn out to be monitor problems, but if the monitor will
+work on another CADR, then there are two kinds of troubleshooting you can do:
+	1. If the problem is in the video memory...dots or other cruft that won't go away
+	then use (CC-TEST-TV-MEMORY) which uses (CC-RUN-MTEST) and should be treated in
+	the same way.
+
+	2. Gross problems where the screen is a mess can be examined with a scope.  Go to
+	the prints and find HSYNC OUT, VSYNC OUT, and MECL VIDEO OUT, MECL VIDEO OUT L
+	HSYNC should be about 1000 times faster than VSYNC, and the two video signals
+	should be differential
+
+
+	If your monitor looks like its on speed and multi-color drugs, please unplug it.
+	The old monitors are particularly prone to death when the are no blanking and sync
+	signals.

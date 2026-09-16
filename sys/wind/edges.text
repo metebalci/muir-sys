@@ -1,0 +1,348 @@
+.c -*- Mode:Bolio; Lowercase: Yes -*-
+
+.chapter Sizes and Positions
+.setq sizes-chapter chapter-number
+.cindex size of window
+.cindex position of window
+.setq sizes-and-positions section-page
+.setq edges section-page
+
+This chapter is about examining and setting the sizes and positions of
+windows.  There are many different operations that let you express
+things in different forms that are convenient in varying applications.
+Usually, sizes are in units of pixels.  However, sometimes we refer to
+widths in units of characters and heights in units of lines.  The
+number of horizontal pixels in one character is called the
+character-width, and the number of vertical pixels in one line is
+called the line-height; these two quantities are explained on
+(char-width-and-line-height).
+
+A window has two parts: the inside and the margins.  The margins include
+borders, labels, and other things; the inside is used for drawing
+characters and graphics.  Some of the operations below deal with the
+outside size (including the margins) and some deal with the inside size.
+
+Since a window's size and position are usually established when the
+window is created, we will begin by discussing the init-options that let
+you specify the size and position of a new window.  To make things as
+convenient as possible, there are many ways to express what you want.
+The idea is that you specify various things, and the window figures out
+whatever you leave unspecified.  For example, you can specify the
+right-hand edge and the width, and the position of the left-hand edge
+will automatically be figured out.  If you underspecify some parameters,
+defaults are used.  Each edge defaults to being the same as the corresponding
+inside edge of the superior
+window; so, for example, if you specify the position of the left edge,
+but don't specify the width or the position of the right edge, then the
+right edge will line up with the inside right edge of the superior.  If you specify
+the width but neither edge position, the left edge will line up with
+the inside left edge of the superior; the same goes for the height and the top edge.
+
+In order for a window to be exposed, its position and size must be such
+that it fits within the 2inside* of the superior window.  If a window
+is not exposed, then there are no constraints on its position and size;
+it may overlap its superior's margins, or even be outside the superior
+window altogether.
+
+All positions are specified in pixels and are relative to the 2outside* of
+the superior window.
+
+.section Init Options for Sizes and Positions
+
+.defmetainitoption windows :left left-edge
+.defmetainitoption1 windows :x left-edge
+.defmetainitoption1 windows :top top-edge
+.defmetainitoption1 windows :y top-edge
+.defmetainitoption1 windows :position (left-edge top-edge)
+.defmetainitoption1 windows :right right-edge
+.defmetainitoption1 windows :bottom bottom-edge
+.defmetainitoption1 windows :width outside-width
+.defmetainitoption1 windows :height outside-height
+.defmetainitoption1 windows :size (outside-width outside-height)
+.defmetainitoption1 windows :inside-width inside-width
+.defmetainitoption1 windows :inside-height inside-height
+.defmetainitoption1 windows :inside-size (inside-width inside-height)
+.defmetainitoption1 windows :edges (left-edge top-edge right-edge bottom-edge)
+These options set various position and size parameters.  The size and
+position of the window are computed from the parameters provided by these
+and other options, and the set of defaults described above.  Note that all
+edge parameters are relative to the 2outside* of the superior window.
+.end_defmetainitoption
+
+.defmetainitoption windows :character-width spec
+This is another way of specifying the width.  2spec* is either a number of characters
+or a character string.  The inside width of the window is made to be wide enough to
+display those characters, or that many characters, in font zero.
+.end_defmetainitoption
+
+.defmetainitoption windows :character-height spec
+This is another way of specifying the height.  2spec* is either a number of lines
+or a character string containing a certain number of lines separated by carriage
+returns.  The inside height of the window is made to be that many lines.
+.end_defmetainitoption
+
+.defmetainitoption windows :integral-p t-or-nil
+The default is 3nil*.  If this is specified as 3t*, the inside
+dimensions of the window are made to be an integral number of characters
+wide and lines high, by making the bottom margin larger if necessary. 
+.end_defmetainitoption
+
+.defmetainitoption windows :edges-from source
+Specifies that the window is to take its edges (position and size) from 2source*,
+which can be one of:
+.table 1
+.item a list
+The elements of the list should be the four edges, 2left*, 2top*,
+2right* and 2bottom*, all relative to this window's superior.
+.item a string
+The inside-size of the window is made large enough to display the string, in font zero.
+.item a list 3(2left-edge top-edge right-edge bottom-edge*)*
+Those edges, relative to the superior, are used, exactly as if you had used
+the 3:edges* init-option (see above).
+'kindex :mouse :edges-from
+.item 3:mouse*
+The user is asked to point the mouse to where the top-left and bottom-right corners
+of the window should go.  (This is what happens when you use the 3Create*
+command in the system menu, for example.)
+.item a window
+That window's edges are copied.
+.end_table
+.end_defmetainitoption
+
+.defmetainitoption windows :minimum-width n-pixels
+.defmetainitoption1 windows :minimum-height n-pixels
+In combination with the 3:edges-from :mouse* init option, these options
+specify the minimum size of the rectangle accepted from the user.  If the user
+tries to specify a size smaller than one or both of these minima, he will
+be beeped at and prompted to start over again with a new top-left corner.
+.end_defmetainitoption
+
+The group of operations below is used to examine or change the size or
+position of a window.  Many operations that change the window's size or
+position take an argument called 2option*.  The reason that this
+argument exists is that certain new sizes or positions are not valid.
+One reason that a size may not be valid is that it may be so small that
+there is no room for the margins; for example, if the new width is
+smaller than the sum of the sizes of the left and right margins, then
+the new width is not valid.  A new setting of the edges is also
+invalid if the window is exposed and the new edges are not enclosed
+inside its superior.  In all of the operations that take the 2option*
+argument, 2option* may be either 3nil* or 3:verify*.
+3nil* means that you really want to set the edges, and if the
+new edges are not valid, an error should be signalled.
+3:verify* means that you only want to check whether the new
+edges are valid or not, and you don't really want to change the edges.
+If the edges are valid, the operation with 3:verify* returns 3t*; otherwise it
+returns two values: 3nil* and a string explaining what is wrong
+with the edges.  (Note that it is valid to set the edges of a deexposed
+inferior window in such a way that the inferior is not enclosed inside
+the superior; you just can't expose it until the situation is remedied.
+This makes it more convenient to change the edges of a window and all of
+its inferiors sequentially; you don't have to be careful about what
+order you do it in.)
+
+.section Flavor Operations for Sizes and Positions
+
+.defmetamethod windows :size
+Returns two values, the outside width and outside height.
+.end_defmetamethod
+
+.defmetamethod windows :height
+.defmetamethod1 windows :width
+Return the window's height or its width.
+.end_defmetamethod
+
+.defmetamethod windows :set-size new-width new-height &optional option
+Sets the outside width and outside height of the window to 2new-height*
+and 2new-width*, without changing the position of the upper-left corner.
+.end_defmetamethod
+
+.defmetamethod windows :inside-size
+Returns two values, the inside width and the inside height.
+.end_defmetamethod
+
+.defmetamethod windows :inside-height
+.defmetamethod1 windows :inside-width
+Return the inside height of the window or the inside width.
+.end_defmetamethod
+
+.defmetamethod windows :set-inside-size new-inside-width new-inside-height &optional option
+Set the inside width and inside height of the window to
+2new-inside-height* and 2new-inside-width*, without changing the
+position of the upper-left corner.  The margin sizes are recomputed
+according to their contents, which in simple cases means they will stay
+the same.
+.end_defmetamethod
+
+.defmetamethod windows :position
+Returns two values, the 2x* and 2y* positions of the upper-left
+corner of the window, in pixels, relative to the superior window.
+.end_defmetamethod
+
+.defmetamethod windows :set-position new-x new-y &optional option
+Sets the 2x* and 2y* position of the upper-left corner of the window,
+in pixels, relative to the superior window.
+.end_defmetamethod
+
+.defmetamethod windows :edges
+Returns four values, the left, top, right, and bottom edges,
+in pixels, relative to the superior window.
+.end_defmetamethod
+
+.defmetamethod windows :set-edges new-left new-top new-right new-bottom &optional option
+Sets the edges of the window to 2new-left*, 2new-top*, 2new-right*,
+and 2new-bottom*, in pixels, relative to the superior window.
+.end_defmetamethod
+
+.defmetamethod windows :inside-edges
+Returns four values, the left, top, right, and bottom inside edges,
+in pixels, relative to the top-left corner of this window.  This can
+be useful for clipping.  Note that this operation is 2not* analogous
+to the 3:edges* operation, which returns the outside edges relative to
+the superior window.
+.end_defmetamethod
+
+.defmetamethod windows :center-around x y
+Without changing the size of the window, positions the window so that
+its center is as close to the point (2x*,2y*) as is possible without
+hanging off an edge.  The coordinates are in pixels relative to the
+superior window.
+.end_defmetamethod
+
+.defmetamethod windows :expose-near mode &optional (warp-mouse-p 3t*)
+If the window is not exposed, changes its position according to 2mode*
+and exposes it (with the 3:expose* operation; see
+(windows/ and/ screens-expose-method)).  If it is already exposed, does
+nothing.
+
+2mode* should be a list; it may be any of the following:
+.table 3
+'kindex :point :expose-near
+.item (:point 2x y*)
+Position the window so that its center is as at the point (2x*,2y*), in
+pixels, relative to the superior window, or as close as possible without
+hanging off an edge of the superior.
+'kindex :mouse :expose-near
+.item (:mouse)
+This is like the 3:point* mode above, but the 2x* and 2y* come
+from the current mouse position instead of the caller.  This is like
+what pop-up windows do.  In addition, if 2warp-mouse-p* is
+non-3nil*, the mouse is warped (see (warp)) to the center of the
+window.  (The mouse moves only if the window is near an edge of its
+superior; otherwise the mouse is already at the center of the window.)
+.item (:rectangle 2left top right bottom*)
+The four arguments specify a rectangle, in pixels, relative to the superior
+window.  The window is positioned somewhere next to but not overlapping the
+rectangle.  In addition, if 2warp-mouse-p* is
+non-3nil*, the mouse is warped (see (warp)) to the center of the
+window.
+'kindex :window :expose-near
+.item (:window 2window-1 window-2 window-3 ...*)
+Position the window somewhere next to but not overlapping the rectangle
+that is the bounding box of all the 2window-n*s.  You must provide at
+least one 2window*.  Usually you only give one, and this means that
+the window is positioned touching one edge of that window.
+In addition, if 2warp-mouse-p* is non-3nil*, the mouse is warped
+(see (warp)) to the center of the window.
+.end_table
+.end_defmetamethod
+
+.defmetamethod windows :change-of-size-or-margins &rest options
+This is the primitive operation for changing a window's size or the size
+of its margins.  All the other operations to do so end up calling this
+one, after all error checking has been done.
+
+This operation should not be called by users; to change the size, use
+3:set-size* or another higher-level operation, and the margin sizes
+should be managed by the flavors that are responsible for computing how
+big they should be (3tv:borders-mixin*, etc.).
+
+However, this operation is a good place to add 3:after* daemons to
+recompute other data structure or change the size of inferiors according
+to the window's new size.  In the 3:after* daemon, the window's size
+and margins will already be altered to their new values.
+.end_defmetamethod
+
+.section Low Level Edges Functions
+
+.defmetainstvar windows tv:x-offset
+.defmetainstvar1 windows tv:y-offset
+The position of the window's outside left (or top) edge
+relative to the window's superior.
+.end_defmetainstvar
+
+.defmetainstvar windows tv:width
+.defmetainstvar1 windows tv:height
+The total width or height of the window.
+.end_defmetainstvar
+
+Recall that a 2sheet* is either a window or a screen.
+
+.defun tv:sheet-width window
+.defun1 tv:sheet-height window
+.defun1 tv:sheet-x-offset window
+.defun1 tv:sheet-y-offset window
+Return the value of the corresponding instance variable of 2window*.
+These are accessor defsubsts created by the
+3:outside-accessible-instance-variables* option of 3defflavor*.
+They can therefore be 3setf*'d, but doing so is usually unwise.
+.end_defun
+
+.defun tv:sheet-inside-width &optional (window 3self*)
+.defun1 tv:sheet-inside-height &optional (window 3self*)
+Return the inside width or height of the window.
+
+When used without an argument, these defsubsts refer
+directly to the instance variables, and therefore must
+be called from methods or functions which use
+3(declare (:self-flavor ...))*.
+.end_defun
+
+.defun tv:sheet-number-of-inside-lines &optional (window 3self*)
+Returns the number of lines (of height equal to 3tv:line-height*)
+that fit in the inside height of the window.
+
+When used without an argument, these defsubsts refer
+directly to the instance variables, and therefore must
+be called from methods or functions which use
+3(declare (:self-flavor ...))*.
+.end_defun
+
+.defun tv:sheet-calculate-offsets window superior
+Returns the 2x* and 2y* positions of 2window*'s upper left corner
+in 2superior* as two values.  2window* must be an indirect inferior
+of 2superior*, zero or more levels down.  If 2window* and
+2superior* are the same window, the values are zero.
+.end_defun
+
+.defun tv:sheet-overlaps-p sheet left top width height
+.defun1 tv:sheet-overlaps-edges-p sheet left top right borrom
+3t* if 2sheet* overlaps the specified rectangle.
+The edges specified are relative to 2sheet*'s superior.
+.end_defun
+
+.defun tv:sheet-overlaps-sheet-p sheet-a sheet-b
+3t* if the two sheets overlap.
+This is a geometrical test, and it does not matter where in the
+hierarchy the two sheets are.
+.end_defun
+
+.defun tv:sheet-within-p sheet left top right bottom
+3t* if 2sheet* is contained within the specified rectangle,
+given relative to 2sheet*'s superior.
+.end_defun
+
+.defun tv:sheet-within-sheet-p sheet outer-sheet
+3t* if 2sheet* is within 2outer-sheet*'s area.
+This is a geometrical test, and it does not matter where in the
+hierarchy the two sheets are.
+.end_defun
+
+.defun tv:sheet-bounds-within-sheet-p left top width height outer-sheet
+3t* if the specified rectangle is within 2outer-sheet*.
+The edges are specified relative to 2outer-sheet*'s superior.
+.end_defun
+
+.defun tv:sheet-contains-sheet-point-p sheet top-sheet x y
+3t* if 2sheet* contains the point (2x*,2y*) in 2top-sheet*.
+.end_defun

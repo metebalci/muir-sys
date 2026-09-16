@@ -1,0 +1,510 @@
+.c -*-Mode:Bolio; Lowercase:Yes-*-
+
+.chapter Blinkers
+.setq blinkers-chapter chapter-number
+.setq blinkers section-page
+.cindex blinker
+.cindex following blinker
+
+Each window can have any number of 2blinkers*.  The kind of blinker
+that you see most often is a blinking rectangle the same size as the
+characters you are typing; this blinker shows you the cursor position of
+the window.  In fact, a window can have any number of blinkers.  They
+need not follow the cursor (some do and some don't); the ones that
+do are called 2following* blinkers; the others have their position
+set by explicit operations.
+
+Blinkers are instances of flavors, like windows, but they are different
+flavors, and support a different set of standard operations.  The window
+system provides several kinds of blinkers, which differ in the way they
+appear on the screen.
+
+.defflavor tv:blinker
+All flavors of blinkers incorporate this one.
+.end_defflavor
+
+.cindex visibility of a blinker
+.cindex half-period of a blinker
+.setq blinker-visibility page
+
+Blinkers need not actually blink; for example, the mouse arrow
+does not blink.  A blinker's 2visibility* may be any of the following:
+.table 3
+.xitem :blink "blinker visibility"
+The blinker should blink on and off periodically.  The rate at which it
+blinks is called the 2half-period*, and is a fixnum giving the number
+of sixthieths of a second between when the blinker turns on and when
+it turns off.
+'kindex :on "blinker visibility"
+.item :on 1or* t
+The blinker should be visible but not blink; it should just stay on.
+'kindex :off "blinker visibility"
+.item :off 1or* nil
+The blinker should be invisible.
+.end_table
+
+Usually only the blinkers of the selected window actually blink; this is
+to show you where your type-in will go if you type on the keyboard.
+This is because the blinker's visibility is generally controlled based
+on another attribute, the 2deselected visibility*, combined with
+whether the window is selected.  While the current
+visibility is frequently changed by hand by the program that is using
+the blinker, the deselected visibility is usually fixed and says
+something about how the blinker is generally used.  Here are its
+possible values and their meanings:
+.table 3
+.item :on
+Solid when deselected, blinking when selected.
+This is the most commonly used value, and the default
+for the blinkers that show the cursor position of a window.
+.item :off
+Off when deselected, blinking when selected.
+.item :blink
+Blinking whether selected or not.
+.item t
+Solid whether selected or not.
+.item nil
+Off whether selected or not.
+.end_table
+
+When the window is deselected, each blinker's visibility is initialized
+from its deselected visibility.  When the window is selected,
+visibilities of 3:on* or 3:off* are changed to 3:blink*.
+Blinkers whose visibility is 3t* or 3nil* or 3:blink* are not
+affected.
+
+.setq open-blinkers page
+.cindex opening blinkers
+
+Blinkers are used to add visible ornaments to a window; a blinker is
+visible to the user, but while programs are examining and altering the
+contents of a window the blinkers all go away.  The way this works is
+that before characters are output or graphics are drawn, the blinker
+gets turned off; it comes back later.  This is called 2opening* the
+blinker.  3tv:prepare-sheet* ((tv:prepare-sheet-fun)) is responsible
+for doing this.  You can see this happening with the mouse blinker when you
+type at a Lisp Machine.  To make this work, blinkers are always drawn
+using exclusive ORing (see 3tv:alu-xor*, (tv:alu-xor-var)).
+
+Every blinker is associated with a particular sheet (window or screen).
+The blinker is displayed on this sheet, so that its image can appear
+only within the sheet.  When characters are output or
+graphics are drawn on a sheet, only the blinkers of that sheet and its
+ancestors are opened (since blinkers of other sheets cannot possibly be
+occupying screen space that might overlap this output or graphics).  The
+mouse blinker is free to move all over whatever screen it is on; it is
+therefore associated with the screen itself, and so must be opened
+whenever anything is drawn on any window on the screen.
+
+A blinker has a 2position* which gives the location of the blinker's
+upper left corner relative to the blinker's sheet.  The blinker's lower
+right corner is controlled by the blinker's size together with its
+position.  The blinker position is constrained to be within the sheet's
+area.  This does not force the blinker's lower right corner to be within
+the sheet's area, but if it is not, the blinker's image will probably be
+truncated and the part outside the sheet will not appear.
+
+.defmetainitoption windows :blinker-p t-or-nil
+.defmetainitoption1 windows :blinker-flavor flavor-name
+.defmetainitoption1 windows :blinker-deselected-visibility visibility
+These init options specify whether a cursor-following should be created
+for this window, and what its flavor and visibility should be.  The
+defaults are 3t*, 3tv:rectangular-blinker*, and 3:on*.
+
+Any other blinkers you want for a window must be created manually
+in an 3:init* method or elsewhere.
+.end_defmetainitoption
+
+.defmetainstvar "windows and screens" tv:blinker-list
+The list of all blinkers associated with this window or screen.
+.end_defmetainstvar
+
+.defmetamethod "windows and screens" :blinker-list
+Returns the list of blinkers associated with this window or screen.
+.end_defmetamethod
+
+.defun tv:sheet-blinker-list sheet
+Accessor defsubst for the instance variable.
+.end_defun
+
+.section Blinker Functions and Operations
+
+.defun tv:make-blinker window &optional (flavor 3'tv:rectangular-blinker*) &rest options
+Creates and returns a new blinker.  The new blinker is associated with the
+given 2window*, and is of the given 2flavor*.  Other useful flavors
+of blinker are documented below.  The 2options* are initialization-options
+to the blinker flavor.  All blinkers include the 3tv:blinker* flavor, and
+so init-options taken by 3tv:blinker* will work for any flavor of blinker.
+Other init-options may only work for particular flavors.
+.end_defun
+
+.definstvar tv:blinker tv:x-pos
+.definstvar1 tv:blinker tv:y-pos
+The current position of the blinker on its window,
+or 3nil* if the blinker should follow the window's cursor.
+.end_definstvar
+
+.definitoption tv:blinker :x-pos x
+.definitoption1 tv:blinker :y-pos y
+Set the initial position of the blinker within the window.  These init-options
+are irrelevant for blinkers that follow the cursor.  The initial position
+for non-following blinkers defaults to the current cursor position.
+.end_definitoption
+
+.defmethod tv:blinker :read-cursorpos
+Returns two values: the 2x* and 2y* components of the position
+of the blinker within the inside of the window.
+.end_defmethod
+
+.defmethod tv:blinker :set-cursorpos x y
+Sets the position of the blinker, relative to the inside of the window.
+If the blinker has been a following blinker (that is, one which
+follows the window's cursor) then it ceases to be one,
+and from this point on moves only when 3:set-cursorpos* is done.
+.end_defmethod
+
+.defmethod tv:blinker :size
+Returns the width and height of the blinker area occupied by the blinker, in
+pixels, as two values.  Each flavor of blinker implements this
+differently.
+.end_defmethod
+
+.defmethod tv:blinker :set-size new-width new-height
+Sets the size of the blinker's displayed pattern.  Not all blinker
+flavors actually do anything, but they will all allow the operation.
+For example, character blinkers have no way to change their size
+because there is no mechanism for automatically scaling fonts.
+.end_defmethod
+
+.definitoption tv:blinker :follow-p t-or-nil
+Sets whether the blinker follows the cursor; if this option is non-3nil*, it does.
+By default, this is 3nil*, and so the blinker's position gets set explicitly.
+.end_definitoption
+
+.defmethod tv:blinker :set-follow-p new-follow-p
+Sets whether the blinker follows the cursor.  If this is 3nil*, the blinker
+stops following the cursor and stays where it is until explicitly moved.
+Otherwise, the blinker starts following the cursor.
+.end_defmethod
+
+.definstvar tv:blinker tv:visibility
+The blinker's current visibility.
+.end_definstvar
+
+.defmethod tv:blinker :visibility
+.defmethod1 tv:blinker :set-visibility new-visibility
+Get or set the visibility of the blinker.
+The specified visibility should
+be one of 3:on*, 3nil*, 3:off*, 3t*, or 3:blink*; their
+meanings are described above.
+.end_defmethod
+
+.definitoption tv:blinker :visibility visibility
+Initializes the visibility.
+.end_definitoption
+
+.definstvar tv:blinker tv:deselected-visibility
+The blinker's deselected visibility.
+.end_definstvar
+
+.definitoption tv:blinker :deselected-visibility symbol
+Sets the initial deselected visibility.  By default, it is 3:on*.
+.end_definitoption
+
+.defmethod tv:blinker :deselected-visibility
+.defmethod1 tv:blinker :set-deselected-visibility new-visibility
+Examine or change the deselected visibility of the blinker.
+.end_defmethod
+
+.definstvar tv:blinker tv:half-period
+The time interval in 60ths of a second between successive blinks of
+the blinker.  This is relevant only if the visibility is 3:blink*.
+.end_definstvar
+
+.defmethod tv:blinker :half-period
+.defmethod1 tv:blinker :set-half-period new-half-period
+Get or set the half-period of the blinker.
+The argument is in 60ths of a second.
+.end_defmethod
+
+.definitoption tv:blinker :half-period half-period
+Initialize the half-period.  The default is 315*.
+.end_definitoption
+
+.definstvar tv:blinker tv:sheet
+The window or screen this blinker moves on.
+.end_definstvar
+
+.defmethod tv:blinker :sheet
+Gets the window or screen that the blinker moves on.
+.end_defmethod
+
+.defmethod tv:blinker :set-sheet new-sheet
+Sets to 2new-sheet* the window or screen on which the blinker moves.
+If the old window is an ancestor or descendant of 2new-sheet*, adjusts
+the (relative) position of the blinker so that it does not move.
+Otherwise, moves it to the point (0,0).
+.end_defmethod
+
+.definstvar tv:blinker tv:time-until-blink
+The time interval in 60ths until the next time this blinker should blink.
+For a blinking blinker, this controls the next turning on or off.
+
+A non-blinking blinker will not necessarily change its state at the
+specified time, but it will be checked at that time and displayed
+if it is supposed to be visible but is not.  This is how blinkers
+reappear after being opened so that output can be done.
+.end_definstvar
+
+.defmethod tv:blinker :defer-reappearance
+This operation is invoked whenever a blinker is opened
+in order to prepare a sheet, if the visibility is not 3:blink*
+and if the blinker is scheduled to reappear in less than 25/60 sec.
+By default, it is defined to delay the blinker's reappearance until
+1/2 sec after the present.
+.end_defmethod
+
+.definstvar tv:blinker tv:phase
+3t* when the blinker is present on the screen, 3nil* when it is not.
+.end_definstvar
+
+.defmethod tv:blinker :phase
+Returns 3t* if the blinker is now displayed on the screen.
+.end_defmethod
+
+.defmetamethod blinkers :blink
+Draws or erases the blinker.  Since the blinker is always
+drawn by xor'ing, drawing it and erasing it are usually exactly the same.
+The method can examine the instance variable 3tv:phase* to tell which
+one is happening, but usually there is no need to know.  The
+3:blink* operation may assume that the blinker's sheet is prepared for
+output.  It is always called with interrupts disabled.
+.end_defmetamethod
+
+.defspec tv:with-blinker-ready do-not-open body...
+This macro is useful in writing methods of blinkers that change the
+size, position, shape or anything else that affects how the blinker
+appears.  It executes 2body* after preparing to remove the blinker
+3self* from the screen.  If 2do-not-open* is 3nil*, the blinker is
+actually opened before 2body* is executed.
+Otherwise, 2body* may call 3tv:open-blinker* if it
+wants the blinker open.  Interrupts are disabled by this macro in any
+case, so that if the blinker is opened it remains open for the duration
+of 2body*.
+
+Once the blinker is opened, its instance variables may be set without
+special care.
+.end_defspec
+
+.defun tv:open-blinker blinker
+Clears 2blinker* off from the screen if it is currently drawn.  This
+does not change 2blinker*'s visibility.  Blinkers that are supposed to
+be visible but are not on the screen are put back on the screen by the
+scheduler, every so often.  Thus, a blinker can be relied on to
+stay open only as long as interrupts are disabled.
+.end_defun
+
+.defun tv:sheet-following-blinker window
+Returns a blinker that follows 2window*'s cursor, or 3nil* if that
+window has no such blinker.  If there is more than one, it returns the
+first one it finds (it is pretty useless to have more than one, anyway).
+.end_defun
+
+.defun tv:turn-off-sheet-blinkers window
+Sets the visibility of all blinkers on 2window* to 3:off*.
+.end_defun
+
+.section Blinker Flavors
+.setq blinker-flavors section-page
+
+All the flavors in this section depend on 3tv:blinker*.
+
+For other blinker flavors and related considerations for use
+of a blinker for mouse tracking, see the section on mouse blinkers,
+(mouse-blinkers).
+
+.defflavor tv:rectangular-blinker
+This is one of the flavors of blinker provided for your use.  A rectangular
+blinker is displayed as a solid rectangle; this is the kind of blinker
+you see in Lisp listeners and editor windows.  The width and height of the
+rectangle can be controlled.
+.end_defflavor
+
+.definitoption tv:rectangular-blinker :width n-pixels
+.definitoption1 tv:rectangular-blinker :height n-pixels
+Set the initial width and height of the blinker, in pixels.  By default,
+they are set to the 3font-blinker-height* and 3font-blinker-width*
+(see (tv:font-blinker-height-fun)) of the zeroth font of the window
+associated with the blinker. 
+.end_definitoption
+
+.defmethod tv:rectangular-blinker :set-size new-width new-height
+Sets the width and height of the blinker, in pixels.
+.end_defmethod
+
+.defmethod tv:rectangular-blinker :set-size-and-cursorpos new-width new-height x y
+Sets the width and height of the blinker, in pixels, and also its
+position, at once.  This avoids any chance that the blinker will appear
+on the screen with its old size and new position, or vice versa.
+.end_defmethod
+
+.defflavor tv:hollow-rectangular-blinker (3tv:rectangular-blinker*)
+This flavor of blinker displays as a hollow rectangle; the editor uses
+such blinkers to show you which character the mouse is pointing at.
+This flavor includes 3tv:rectangular-blinker*, and so all of
+3tv:rectangular-blinker*'s init-options and operations work on this too.
+.end_defflavor
+
+.defflavor tv:box-blinker (3tv:rectangular-blinker*)
+This flavor of blinker is like 3tv:hollow-rectangular-blinker* except
+that it draws a box two pixels thick, whereas the 3tv:hollow-rectangular-blinker*
+draws a box one pixel thick.
+This flavor includes 3tv:rectangular-blinker*, and so all of
+3tv:rectangular-blinker*'s init-options and operations work on this too.
+.end_defflavor
+
+.defflavor tv:stay-inside-blinker-mixin
+This mixin makes a rectangular blinker, or any modified version thereof,
+keep all of its corners inside the blinker's sheet.  Normally a blinker
+only makes sure that its position (its upper left corner) is within the
+sheet.  Trying to position this sort of blinker in a bad place positions
+it against the edge of the sheet, as near as possible to the requested
+place.
+.end_defflavor
+
+.defflavor tv:ibeam-blinker
+This flavor of blinker displays as an I-beam (like a capital I).  Its height
+is controllable.  The lines are two pixels wide, and the two horizontal
+lines are nine pixels wide.
+.end_defflavor
+
+.definitoption tv:ibeam-blinker :height n-pixels
+Sets the initial height of the blinker.  It defaults to the 2line-height*
+(see (char-width-and-line-height)) of the window.
+.end_definitoption
+
+.defflavor tv:character-blinker
+This flavor of blinker draws itself as a character from a font.  You can
+control which font and which character within the font it uses.
+.end_defflavor
+
+.definitoption tv:character-blinker :font font
+Sets the font in which to find the character to display.  This may
+be anything acceptable to the 3:parse-font-specifier* operation
+(see (tv:screen-parse-font-specifier-method)) of the window's screen.
+You must provide this.
+.end_definitoption
+
+.definitoption tv:character-blinker :character ch
+Sets the character of the font to display.  You must provide this.
+.end_definitoption
+
+.defmethod tv:character-blinker :character
+Returns the character that this blinker is displaying as.
+.end_defmethod
+
+.defmethod tv:character-blinker :set-character new-character &optional new-font
+Sets the character to be displayed to 2new-character*.  Also, if
+2new-font* is provided, set the font to 2new-font*.
+2new-font* may be anything acceptable to the
+3:parse-font-specifier* operation (see
+(tv:screen-parse-font-specifier-method)) of the window's screen.
+.end_defmethod
+
+.definstvar tv:character-blinker tv:character
+.definstvar1 tv:character-blinker tv:font
+The character being displayed, and the font it is displayed in.
+.end_definstvar
+
+.defflavor tv:bitblt-blinker (3tv:mouse-blinker-mixin*)
+A blinker that displays by copying a two-dimensional array of pixels onto the screen.
+The array's size must be at least the blinker's size.
+As it happens, this flavor also includes the ability to be the mouse blinker.
+.end_defflavor
+
+.definitoption tv:bitblt-blinker :array array
+This option specifies the array of pixels to be used to display the
+blinker.  Use 3make-pixel-array* to create the array.  If you do not
+specify this option, you must specify both the 3:height* and
+3:width* options, which will be used to create an array.
+.end_definitoption
+
+.definitoption tv:bitblt-blinker :width n-pixels
+.definitoption1 tv:bitblt-blinker :height n-pixels
+Set the initial width and height of the blinker, in pixels. 
+.end_definitoption
+
+.defmethod tv:bitblt-blinker :size
+Returns the width and height of the blinker.
+If this is less than the size of the blinker's array,
+then only part of the array, starting at the upper left corner, is used.
+.end_defmethod
+
+.defmethod tv:bitblt-blinker :set-size width height
+Sets the size of the blinker, making a new array if the old
+one is not as big as the new size.
+.end_defmethod
+
+.defmethod tv:bitblt-blinker :array
+.defmethod1 tv:bitblt-blinker :set-array array
+Get or set the array of pixels to be used to display the blinker.
+.end_defmethod
+
+.definstvar tv:bitblt-blinker tv:array
+.definstvar1 tv:bitblt-blinker tv:height
+.definstvar1 tv:bitblt-blinker tv:width
+These instance variables hold the special information of bitblt blinkers.
+.end_definstvar
+
+.defflavor tv:magnifying-blinker (3tv:bitblt-blinker*)
+A kind of bitblt blinker which automatically displays a "magnified"
+version of some of the dots underneath it.  A small square of screen pixels
+is magnified by replacing each pixel with an 2n* by 2n* square of
+identical pixels, where 2n* is the blinker's magnification factor.
+
+The x-offset and y-offset which the blinker has by virtue of
+3tv:mouse-blinker-mixin* (see (tv:mouse-blinker-mixin-flavor)) help
+determine the center of magnification.  The position of the magnifying
+blinker is, as always, the position of its upper left corner.  However,
+the cursor positions plus the offsets give the point which the blinker
+is indicating (this is the place where the mouse position would be, if
+this blinker were the mouse blinker).  The magnification is done so as
+to keep that point on the screen fixed.
+.end_defflavor
+
+.definitoption tv:magnifying-blinker :magnification factor
+Specifies the magnification factor of the magnifying blinker.  3 is a
+good value to use.  The height and width of the blinker should be
+multiples of the magnification.  So should the offsets.
+.end_definitoption
+
+.defmethod tv:magnifying-blinker :magnification
+.defmethod1 tv:magnifying-blinker :set-magnification factor
+Get or set the magnification factor of the blinker.
+.end_defmethod
+
+.definstvar tv:magnifying-blinker tv:magnification
+The magnification factor of the blinker.
+.end_definstvar
+
+.defflavor tv:reverse-character-blinker (3tv:bitblt-blinker*)
+This flavor of blinker appears as a solid rectangle with a character
+removed from it.  That is, a solid rectangle and the character are
+both drawn, and xor with each other.  This flavor of blinker proved
+to be very confusing in the use for which it was originally implemented,
+but there seems no point in deleting it entirely.
+
+All the operations and init options of 3tv:character-blinker* are
+provided, though this flavor does not depend on that one.
+
+The position of the blinker is at the upper left corner of the rectangle.
+The position of the upper left corner of the 2character* with respect
+to the rectangle is specified with the init options 3:character-x-offset*
+and 3:character-y-offset*.
+.end_defflavor
+
+.definitoption tv:reverse-character-blinker :character-x-offset n-pixels
+.definitoption1 tv:reverse-character-blinker :character-y-offset n-pixels
+Specify the offset of the character's upper left corner to the right and
+down from the blinker position (the rectangle's upper left corner). 
+.end_definitoption

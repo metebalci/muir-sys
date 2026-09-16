@@ -1,0 +1,52 @@
+;;; -*- Mode:Lisp;Package:SI;Base:10 -*-
+;;;
+;;; Package declaration for the Network system
+;;;
+;;; NETI has all the internal symbols
+;;; NET has the most of the defined entry points and gets locked in this file
+;;;
+
+(DEFPACKAGE NETWORK
+	    (:USE)
+	    (:SIZE 50)
+	    (:NICKNAMES "NET")
+	    (:IMPORT-FROM SYSTEM-INTERNALS "PARSE-HOST" "BASIC-HOST" "HOST" "DEFAULT-HOST"
+			  "DEFINE-HOST" "GET-HOST-FROM-ADDRESS")
+	    (:EXPORT 
+	      "*LOCAL-HOST*"
+	      "*LOCAL-SITE*"
+	      "ABORT-SERVCE-ACCESS-PATH-FUTURE"
+	      "CONTINUE-SERVICE-ACCESS-PATH-FUTURE"
+	      "DEFINE-MEDIUM"
+	      "DEFINE-PROTOCOL"
+	      "DEFINE-SERVER"
+	      "FIND-PATH-TO-PROTOCOL-ON-HOST"
+	      "FIND-PATHS-TO-PROTOCOL-ON-HOST"
+	      "FIND-PATHS-TO-SERVICE"
+	      "FIND-PATHS-TO-SERVICE-ON-HOST"
+	      "FINGER"
+	      "GET-CONNECTION-FOR-SERVICE"
+	      "IN-NETWORK-REGION-P"
+	      "INVOKE-MULTIPLE-SERVICES"
+	      "INVOKE-SERVICE-ON-HOST"
+	      "INVOKE-SERVICE-ACCESS-PATH"
+	      "NETWORK"
+	      "NETWORK-TYPE-FLAVOR"
+	      "NOTE-SERVER-CLOSED"
+	      "NOTE-SERVER-ESTABLISHED"
+	      "PRINT-HOST-TIMES"
+	      "SERVICE-ACCESS-PATH-FUTURE-CONNECTED-P"
+	      "START-SERVICE-ACCESS-PATH-FUTURE"
+	      "WHOIS"
+	      "YOW"))
+
+(DEFPACKAGE NETWORK-INTERNALS
+	    (:USE "GLOBAL" "SYS" "NETWORK")
+	    (:SIZE 500)
+	    (:NICKNAMES "NETI")
+	    (:PREFIX-NAME "NETI"))
+
+(DEFPACKAGE INTERNET
+	    (:SIZE 500)
+	    (:NICKNAMES "IP")
+	    (:PREFIX-NAME "IP"))

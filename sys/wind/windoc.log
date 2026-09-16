@@ -1,0 +1,198 @@
+Loading BOLIO Initialization File SRC:<L.WIND>WINDOC.BOLIO
+
+;Loading SHARPM 82
+;Loading MLMAC 92
+Loading Variables File SRC:<L.WIND>WINDOC.VARS.32
+; --> SRC:<L.WIND>WINDOC.XGP  (in :DOVERable format!)
+Processing file SRC:<L.WIND>WINDOC.TEXT.15
+ Processing file SRC:<L.WIND>WINDO1.TEXT.51
+ 1.  "Concepts"
+   1.1  "Windows"
+   1.2  "Capabilities of Windows"
+   1.3  "Higher Level Window Facilities"
+   1.4  "Windows as Flavor Instances"
+   1.5  "Using a Window"
+   1.6  "Creation of Windows"
+ 2.  "Visibility and Exposure of Windows"
+   2.1  "Hierarchy of Windows"
+   2.2  "Screens"
+   2.3  "Pixels"
+   2.4  "Bit-Save Arrays"
+   2.5  "Screen Arrays and Exposure"
+   2.6  "Ability to Output"
+;Loading LET 98
+   2.7  "Window Locking"
+   2.8  "Temporary Windows"
+   2.9  "The Screen Manager"
+     2.9.1  "Control of Partial Visibility"
+     2.9.2  "Priority among Windows for Exposure"
+     2.9.3  "Delaying Screen Management"
+ Processing file SRC:<L.WIND>SELECT.TEXT.21
+ 3.  "Selection"
+   3.1  "How Programs Select Windows"
+   3.2  "Teams of Windows"
+     3.2.1  "The System Menu Select Option"
+     3.2.2  "Selection with Terminal and System Commands"
+   3.3  "Selection Substitutes"
+     3.3.1  "Non-Hierarchical Selection Substitutes"
+   3.4  "The Status of a Window"
+   3.5  "Windows and Processes"
+ Processing file SRC:<L.WIND>EDGES.TEXT.14
+ 4.  "Sizes and Positions"
+   4.1  "Init Options for Sizes and Positions"
+   4.2  "Flavor Operations for Sizes and Positions"
+   4.3  "Low Level Edges Functions"
+ Processing file SRC:<L.WIND>INPUT.TEXT.24
+ 5.  "Input"
+   5.1  "Input Buffers"
+   5.2  "Blips"
+   5.3  "Stream Input Operations"
+   5.4  "I/O Buffers"
+     5.4.1  "I/O Buffers and Type Ahead"
+     5.4.2  "I/O Buffers as Input Buffers"
+   5.5  "Intercepted Characters"
+     5.5.1  "Synchronously Intercepted Characters"
+     5.5.2  "Asynchronously Intercepted Characters"
+     5.5.3  "Global Asynchronous Characters"
+   5.6  "Polling The Keyboard Explicitly"
+ Processing file SRC:<L.WIND>OUTPUT.TEXT.26
+ 6.  "Output of Text"
+   6.1  "How A Character Is Printed"
+   6.2  "Stream Output Operations"
+   6.3  "Output Exceptions"
+     6.3.1  "Output Hold and End of Page Exceptions"
+     6.3.2  "**MORE** Exceptions"
+     6.3.3  "End of Line Exceptions"
+   6.4  "Cursor Motion"
+   6.5  "Erasing"
+   6.6  "Inserting and Deleting Lines and Characters"
+   6.7  "Anticipating the Effect of Output"
+   6.8  "Explicit (Non-Cursor) Output"
+   6.9  "Window Parameters Affecting Output"
+ Processing file SRC:<L.WIND>FONTS.TEXT.17
+ 7.  "Fonts"
+   7.1  "Specifying Fonts"
+     7.1.1  "Font Specifiers"
+   7.2  "Attributes of Fonts"
+   7.3  "Format of Fonts"
+   7.4  "Color Fonts"
+ Processing file SRC:<L.WIND>GRAFIX.TEXT.24
+ 8.  "Drawing Graphics"
+   8.1  "Alu Functions"
+   8.2  "Flavor Operations for Graphics"
+   8.3  "Low-Level Graphics Using Subprimitives"
+     8.3.1  "Subprimitives for Drawing"
+ Processing file SRC:<L.WIND>BLINK.TEXT.21
+ 9.  "Blinkers"
+   9.1  "Blinker Functions and Operations"
+   9.2  "Blinker Flavors"
+ Processing file SRC:<L.WIND>MOUSE.TEXT.33
+ 10.  "The Mouse"
+   10.1  "Encoding Mouse Clicks as Characters"
+   10.2  "Ownership of the Mouse"
+     10.2.1  "Grabbing the Mouse"
+     10.2.2  "Usurping the Mouse"
+   10.3  "How Windows Handle the Mouse"
+   10.4  "Mouse Blinkers"
+     10.4.1  "Reusable Mouse Blinker Types"
+   10.5  "Mouse Scrolling"
+     10.5.1  "Scrolling Protocol"
+     10.5.2  "Scroll Bars"
+     10.5.3  "Margin Scrolling"
+   10.6  "Mouse Parameters"
+ Processing file SRC:<L.WIND>MARGIN.TEXT.20
+ 11.  "Margins, Borders, and Labels"
+   11.1  "Borders"
+   11.2  "Labels"
+   11.3  "Margin Regions"
+     11.3.1  "Margin Region Example"
+   11.4  "Defining Margin Item Flavors"
+ Processing file SRC:<L.WIND>FRAMES.TEXT.14
+ 12.  "Frames"
+   12.1  "Constraint Frames"
+     12.1.1  "Constraint Frame Flavors"
+     12.1.2  "Examples of Specifications of Panes and Constraints"
+     12.1.3  "Specifying Panes and Constraints"
+     12.1.4  "Constraint Frame Operations"
+   12.2  "Pane-Frame Interaction"
+     12.2.1  "The Selected Pane"
+ Processing file SRC:<L.WIND>MISC.TEXT.23
+ 13.  "Miscellaneous Features"
+   13.1  "Notifications"
+   13.2  "Lisp Listeners"
+   13.3  "Editor Windows"
+   13.4  "Window Flavors for Other Programs"
+   13.5  "The Who Line"
+   13.6  "The Color Screen"
+     13.6.1  "Color Map Functions"
+     13.6.2  "Operating on Pixels"
+   13.7  "The System Menu"
+   13.8  "Window Resources"
+   13.9  "The Cold Load Stream"
+   13.10  "The Window-Based Debugger"
+ Processing file SRC:<L.WIND>CHOICE.TEXT.93
+ 14.  "Choice Facilities"
+   14.1  "Menus"
+     14.1.1  "Menu Items"
+     14.1.2  "Easy Menu Interface"
+     14.1.3  "Geometry"
+     14.1.4  "Ordinary Menus"
+     14.1.5  "Command Menus"
+     14.1.6  "Dynamic Item List Menus"
+     14.1.7  "Multiple Menus"
+   14.2  "Multiple Choice Facility"
+     14.2.1  "Functional Interface"
+     14.2.2  "Flavors and Operations"
+   14.3  "Choose-Variable-Values Facility"
+     14.3.1  "Specifying the Variables"
+     14.3.2  "Predefined Variable Types"
+     14.3.3  "Functional Interface"
+     14.3.4  "Defining Your Own Variable Type"
+     14.3.5  "Making Your Own Window"
+     14.3.6  "User Option Facility"
+   14.4  "Mouse-Sensitive Type Out"
+   14.5  "Margin Choices"
+ Processing file SRC:<L.WIND>TYPOUT.TEXT.17
+ 15.  "Typeout Windows"
+   15.1  "Activation and Deactivation"
+   15.2  "Superiors of Typeout Windows"
+   15.3  "Delaying Redisplay After Typeout"
+ Processing file SRC:<L.WIND>TSCROL.TEXT.37
+ 16.  "Text Scroll Windows"
+   16.1  "Specifying the Item List"
+   16.2  "Bells and Whistles"
+   16.3  "Item Generators"
+   16.4  "Mouse Sensitive Text Scroll Windows"
+ 17.  "General Scroll Windows"
+   17.1  "Specifying Items and Entries"
+   17.2  "Using a Scroll Window"
+   17.3  "Inserting and Deleting Items"
+   17.4  "Automatically Updating Items"
+   17.5  "Representation of Items"
+   17.6  "Mouse Sensitive Scroll Windows"
+Concept Index
+Operation Index
+Keyword Index
+Flavor and Resource Index
+
+>>ERROR: Line too long: 43327 , max is  42564
+  Decimal file position=1838 in 
+Error occurred while processing NIL
+
+
+>>ERROR: Line too long: 47030 , max is  46345
+  Decimal file position=1838 in 
+Error occurred while processing NIL
+
+
+>>ERROR: Line too long: 47030 , max is  46345
+  Decimal file position=1838 in 
+Error occurred while processing NIL
+
+Variable Index
+Function Index
+Summary Table of Contents
+Table of Contents
+(Saving variables into SRC:<L.WIND>WINDOC.VARS)
+; Runtime = 3 minutes 43.812 seconds (plus 11.515 gctime)
+; 1351 swap-in requests; thrash coefficient = 5.741

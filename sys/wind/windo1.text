@@ -1,0 +1,1835 @@
+.c -*- Mode:Bolio; Lowercase: Yes -*-
+.c This file is the first chapter of the window system document
+.space 2
+.center 5Preface*
+
+The Lisp Machine window system manual is intended to explain how you, as
+a programmer, can use the set of facilities in the Lisp Machine known
+collectively as the window system.  Specifically, this document explains
+how to create windows, and what operations can be performed on them.  It
+also explains how you can customize the windows you produce, by mixing
+together existing flavors to produce a window with the combination of
+functionality that your program requires and adding daemons to various
+operations.
+
+It is assumed that you have a working familiarity with Zetalisp as
+documented in the Lisp Machine manual.  It is also assumed that you have
+some experience with the user interface of the Lisp Machine, including
+the ways of manipulating windows, such as the 3Edit Screen*, 3Split
+Screen*, and 3Create* commands from the system menu.  To use the
+predefined flavors and methods, you need not be familiar with how
+methods are defined and combined, but you should understand what message
+passing is, how it is used on the Lisp Machine, what a flavor is, what a
+"mixin" flavor is, and how to define a new flavor by mixing existing
+flavors.  To use the information provided here on where to add daemons,
+you must be thoroughly familiar with programming with flavors, and must
+be willing to refer to the window system source code as the final
+authority for all questions.
+
+Any comments, suggestions, or criticisms will be welcomed.  Please send
+Arpa network mail to BUG-LMMAN@MIT-MC.
+
+Those not on the Arpanet may send U.S. snail to
+.lisp
+1Richard M. Stallman
+545 Technology Square, Room 914
+Cambridge, Mass. 02139*
+.end_lisp
+.page
+.center 5Note from Richard Stallman*
+
+The Lisp Machine is a product of the efforts of many people too
+numerous to list here and of the former unique cooperative environment
+of the M.I.T. Artificial Intelligence Laboratory.  I believe that the
+commercialization of computer software hinders the further development
+of systems such as described herein.  I consider proprietary software
+morally objectionable and plan to dedicate my career to promoting the
+sharing and free exchange of software.
+
+Starting in December 1983 I plan to work on the development of GNU, a
+complete Unix-compatible software system for standard hardware architectures,
+to be shared freely with everyone just like EMACS.  This will enable people to
+use computers without agreeing to the idea of proprietary software.
+This project has inspired a growing movement of enthusiastic supporters.
+If you would like to join it, write to me at the address on the previous
+page.  Help get programmers sharing again!  Contributions of part-time
+programming help will be very welcome, as will funding from
+philanthropists to support full-time workers, and donations or loans
+of computers.
+
+The current implementation of the window system is based on flavors,
+and was designed and implemented primarily by Howard Cannon and Mike
+McMahon during 1980.  It replaced an earlier version implemented by
+me, which was based on Smalltalk-like classes.  The newer version is
+generally an improvement, but as Howard Cannon steadfastly refused to
+discuss the design with me I must decline responsibility for such
+counterintuitive aspects as the definition of exposure.
+
+About a third of this manual is based on earlier documents written by
+Dave Moon and Daniel Weinreb.  Sarah Smith of LMI helped to correct
+the manual, and Chris Schneider and Steve Strassman provided useful suggestions.
+
+.chapter Concepts
+
+The term 2window system* refers to a large body of software used to
+manage communications between programs in the Lisp Machine and the user,
+via the Lisp Machine console.  The console consists of a keyboard, a
+mouse, and one or more screens.  All Lisp Machines have at least one
+high-resolution black-and-white screen, and some machines also have a
+color screen.  The window system can handle any number of screens of
+various kinds.
+
+The window system controls the keyboard, encoding the shifting keys,
+interpreting special commands such as the 3Terminal* and 3System* keys, and
+directing input to the right place.  The window system also controls the
+mouse, tracking it on the screen, interpreting clicks on the buttons,
+and routing its effects to the right places.  The most important part of
+the window system is its control of the screens, which it subdivides
+into windows so that many programs can coexist and even run
+simultaneously without getting in each other's way, sharing the screen
+space according to a set of established rules.
+
+.section Windows
+
+When you use the Lisp Machine, you can run many programs at once.  You
+can have a Lisp listener, an editor, a mail reader, and a network
+connection program, or several of each, all running at the same time,
+and you can switch from one to the other conveniently.  Interactive
+programs get input from the keyboard and the mouse, and send output to
+a screen.  Since there is only one keyboard, it can only talk to one
+program at a time.  However, each screen can be divided into regions,
+and one program can use one region while another uses another region.
+Furthermore, this division into regions can control which program the
+mouse talks to; if the mouse cursor position is in a region associated
+with a certain program, then mouse clicks are directed to that
+program, which is then allowed to decide what the clicks mean.
+Allocating access to screen space and input devices is the most
+important function of the window system.
+
+.cindex window
+The regions into which the screen is divided are known as 2windows*.
+In your use of the Lisp Machine, you have encountered windows many
+times.  Sometimes there is only one window visible on the screen; for
+example, when you cold-boot a Lisp Machine, it initially has only one
+window showing, and it is the size of the entire screen.  If you start
+using the system menu's 3Create*, 3Edit Screen*, or 3Split Screen*
+options.  you can make windows in various places of various sizes and
+flavors.  Usually windows have a border around them (a thin black
+rectangle around the edges of the window), and they also frequently have
+a label in the lower-left hand corner or on top.  This is to help the
+user see where all the windows are, what parts of the screen they are
+taking up, and what kind of windows they are.
+
+The next several sections begin to explain the detailed concepts of how
+windows work and what their internal state is.  You should probably read
+over these quickly the first time, without worrying about all the
+details.  You really don't have to understand all of the complexity to
+make simple use of the window system; it just helps if you know what
+sort of thing is going on.
+
+.section Capabilities of Windows
+
+A window may or may not be 3exposed*, which means that output
+can be done on it ((exposure)).  At any time at most one window
+can be 2selected*, which means that input can be done through it
+((selection)).  These two conditions constitute the window's
+2status*.
+
+Another kind of state information that every window has is its edges:
+its size and its position (see (sizes-and-positions)).  You can
+specify these numerically, ask for the user to tell you (using the
+mouse), ask for a window to be near some point or some other window,
+and so on.
+
+Windows can function as streams by accepting all the operations that
+streams accept.  If you do input operations on windows, they read from
+the keyboard; if you do output operations on windows, they type out
+characters on the screen.  The value of 3terminal-io* (see
+(terminal-io-var)) is normally a window, and so input/output functions
+on the Lisp Machine do their I/O to windows by default.
+
+A window whose flavor incorporates 3tv:stream-mixin* supports all the
+standard input stream operations and may be passed as the input stream
+to functions such as 3read* and 3readline* (see (input)).  Each such
+window has an 2input buffer* holding characters that have been typed
+at the window but not read yet.  You can 2force keyboard
+input* into a window's input buffer; frequently two processes
+communicate by one process's forcing keyboard input into an input buffer
+from which another process is reading characters (see
+(tv:stream-mixin-force-kbd-input-method)).
+
+Any window handles the standard output stream operations and can be
+passed as the output stream to functions such as 3print* and
+3format* (see (output)).  You can output characters at a cursor
+position, move the cursor around, selectively clear parts of the window,
+insert and delete lines and characters, and so on, by means of standard
+and not-so-standard stream operations.  Output of text on windows
+provides additional features; for example, characters can be drawn in
+any of a large set of 2fonts* (type faces), and you can switch from one
+to another within a single window (see (font-section)).  Windows can define
+their own actions for exceptional conditions that affect output, such as
+reaching the right or bottom edge of the window, or printing more that a
+window-full without pausing (see (output-exceptions)).
+
+In addition to characters from fonts, you can also display graphics
+(pictures) on windows (see (graphics-section)).  There are operations to draw
+lines, circles, triangles, rectangles, arbitrary polygons, circle
+sectors, and cubic splines.
+
+Each window can have any number of 2blinkers* (see (blinkers)).  Most
+windows have one blinker that follows the window's cursor position; this
+blinker normally appears as a blinking rectangle.  But blinkers need not
+follow the cursor and need not actually blink (some do and some don't).
+For example, the editor shows you what character the mouse is pointing
+at; this blinker looks like a hollow rectangle.  The arrow that follows
+the mouse is a blinker, too.  Blinkers are used to add visible ornaments
+to a window, or temporary modifications to a window's normal display.
+Blinkers are flavor instances with their own standard operations.
+
+Windows are the standard interface to the mouse (see (mouse)).  Both
+mouse motion and mouse clicks are normally handled by messages sent to
+the window over which the mouse is positioned.
+
+A window's area of the screen is divided into two parts.  Around the edges
+of the window are the four 2margins*; while the margins can have zero
+size, usually there is a margin on each edge of the window, holding a
+border and sometimes other things, such as a label.  The rest of the window
+is called the 2inside*; regular character output and graphics drawing
+all occur on the inside part of the window.  The margins and inside of the
+window are managed separately so that mixins to add things to the margins
+can be independent of the program that draws in the window's inside.
+See (margins).
+
+For greater flexibility in subdividing a window into multiple areas of
+different uses, you can create 2inferior windows* or 2panes* within
+the window.  The main window is then called a 2frame*.  Each pane can
+be of a different flavor suitable to its own purpose; thus Peek uses a
+frame which has a menu and a scrolling window as its two panes.  See
+(window-hierarchy), for information on the hierarchy of windows, and
+(frames), for a description of frames.
+
+The 2asynchronously intercepted characters* (such as
+3Control-Abort*) which take effect instantaneously when typed are
+handled by the selected window.  Each window can specify its own.  See
+(asynchronous-intercepted-characters).
+
+A window can have an associated process.  For example, when you type
+3Control-Abort*, the process aborted is the one associated with the
+selected window.  Exactly how processes and windows relate depends on
+the flavor of the window, and, as usual, there are several operations to
+manipulate the connections.  See (processes).
+
+2Notifications* are a facility for displaying messages from events
+taking place asynchronously and not related to the program you are running
+(errors in background processes, 3qsend*s from other users,
+file servers planning to go down, etc.).  Notifications work through
+operations on the selected window, so each window can decide how to display
+a notification.  See (notifications).
+
+Screens are represented by flavor objects also; these are not windows,
+but share some of the operations and instance variables of windows
+(see (screens)).
+Windows and screens collectively are called 2sheets*.
+Each screen object usually corresponds to a particular piece of display hardware.
+Screens can be either black-and-white or color.  Color screens have more
+than one bit for each pixel, and most operations on windows do something
+reasonable on color screens.  But the extra bits give you extra
+flexibility, and so there are some more powerful things you can do to
+manipulate colors.  Color screens also have a 2color map* which
+specifies which values of the pixels display which colors.  See (color).
+
+The 2who line* at the bottom of the screen shows the user something
+about the state of the Lisp Machine.  The window system software
+implements the who line as a separate screen even though it appears on
+the same TV monitor as the main screen and its windows.  This is why you
+cannot move the mouse into the who line area, or make windows on the
+main screen hide the who line.  See (who-line) for more information
+on the who line and how it is interfaced and implemented.
+
+.section Higher Level Window Facilities
+
+The higher level window facilities are window flavors that combine the
+basic capabilities of windows appropriately to provide directly
+usable techniques for particular common applications.  These
+facilities include menus and other choice windows, typeout windows,
+and scrolling windows.
+
+2Menus* allow the user to choose one or several of a fixed set of
+items.  The system menu that you get from double-click-right is an
+example of one.  See (menu).  2Multiple choice* windows allow the
+user to specify an answer to each of a set of similar multiple-choice
+questions (see (multiple-choice)).  The editor command 3Meta-X
+Kill or Save Buffers* shows an example of one.
+
+2Choose-variable-values* windows allow the user to view and modify the
+values of a set of variables, each variable printed and read according to
+its own range of possible values.  One variable might allow only numbers,
+while another variable's value might be restricted to a list of pathnames.
+See (choose-variable-values).
+
+2Typeout windows* allow windows such as scroll windows and editor
+windows, which normally present displays reflecting permanent data bases,
+to print output in response to individual commands.  The typeout window
+is an inferior of the other window, and exposes itself when output is
+done on it.
+
+2Scrolling windows* allow the programmer to define a display which
+the user can then scroll through.  The scrolling window facility
+provides for scrolling, redisplay, and interaction with the mouse,
+requiring the programmer only to specify the entire contents to be
+scrolled through.  There are two types of scrolling windows, 2text
+scroll windows* ((text-scroll-windows)) and 2general scroll
+windows* ((scroll-windows)), the former being less powerful but
+simpler.  Note that there is a standard interface protocol for the
+mouse to request scrolling (see (scroll-protocol)).  You need not use
+one of the standard scrolling window facilities to make a window that
+can scroll if you are willing to implement the scrolling yourself.
+For example, editor windows and menus can also scroll.
+
+.section Windows as Flavor Instances
+
+.cindex flavor
+In the Lisp world, each window is a flavor instance, an instance of some
+flavor of window.  There are many different window flavors available;
+some of them are described in this manual.  All of them contain the
+component 3tv:minimum-window*.
+
+.defflavor tv:minimum-window
+The flavor on which all window flavors are built.  Any window flavors
+you define should include this component.  This flavor itself is made of
+the components 3tv:essential-window*, 3tv:essential-activate*,
+3tv:essential-expose*, 3tv:essential-set-edges* and
+3tv:essential-mouse*.  3tv:minimum-window* has no methods of its
+own; all are inherited from those components.  So you will at times (in
+the debugger) run across methods of those component flavors.  You will
+also run across methods of 3tv:sheet*, a component of
+3tv:essential-window*.  However, there is no need for you as a
+programmer to pay attention to the distinctions among these flavors,
+and in this manual all the operations, instance variables and init
+options of 3tv:minimum-window* are documented as being "of windows"
+rather than of any specific flavor.
+.end_defflavor
+
+.defflavor tv:window
+This flavor of window has several mixins that provide much
+generally useful functionality, including the ability to select the window,
+graphics operations, labels and borders.
+.lisp
+(defflavor tv:window () 
+   (tv:stream-mixin tv:borders-mixin tv:label-mixin 
+    tv:select-mixin tv:delay-notification-mixin 
+    tv:graphics-mixin tv:minimum-window))
+.end_lisp
+
+The operations of these mixins are specifically identified in this manual.
+Use the mixins, or use the flavor 3tv:window*, if you want the
+operations to be available.
+.end_defflavor
+
+It is often necessary to mix flavors to get the desired window behavior.
+When doing this, you must pay attention to the correct ordering of flavor
+components.  The earlier components will override later ones.
+For example, if you want to make a window that will print out notifications
+on itself by mixing in 3tv:notification-mixin*, you must put it in front
+of 3tv:window*:
+.lisp
+(defflavor my-window () (tv:notification-mixin tv:window))
+.end_lisp
+If you put them in the other order, as in
+.lisp
+(defflavor my-window () (tv:window tv:notification-mixin))
+.end_lisp
+you get something equivalent to 3tv:window*.  The 3tv:notification-mixin*'s
+effect is completely lost.  The whole point of 3tv:notification-mixin* is
+that it should override some methods of 3tv:window* (inherited from
+3tv:delay-notification-mixin*), and in fact it defines the same operations
+in a different way.  It follows that if 3tv:notification-mixin* comes last,
+it will be overridden instead.
+
+It is almost always correct to put mixins first in the ordering so that
+they will override whatever they are added to.  One exception occurs
+with flavors of margin item; there, the ordering is used to control the
+spatial position of the margin items.
+
+Screens are also represented by flavor instances, which share some of
+the characteristics of windows because they share the component flavor
+3tv:sheet*.  Screens are described fully in (screens).
+
+.defflavor tv:sheet
+3tv:sheet* is a flavor that windows and screens share.  It is also
+what provides the structure required by the microcode display primitives.
+Operations defined by this flavor are documented as being
+"of windows and screens" in this manual.
+.end_defflavor
+
+Much of the contents of this manual is devoted to describing the instance
+variables and operations of various flavors of window.  They are grouped
+below by functionality.
+
+There is a vague convention sometimes followed for naming flavors of
+windows.  Here the word 2frobboz* is used to stand for any feature,
+attribute, or class of windows that would appear in a flavor name
+(e.g. 3peek*, 3lisp-listener*, or 3delayed-redisplay-label*).
+Naming conventions are different for 2instantiable* flavors (which
+are complete and can support instances of themselves) and 2mixin*
+flavors (which are incomplete and only supply one particular aspect of
+behavior).
+
+.table 3
+.item 2frobboz*
+An instantiable flavor whose most distinguishing characteristic is
+that it is a 2frobboz*.  2frobboz* is preferred to
+32frobboz*-window* except when it is necessary to make a
+distinction.
+
+.item 2frobboz*-mixin
+A flavor which provides the 2frobboz* feature when mixed into other
+flavors, but is not instantiable.  Such mixins often have no
+components, just 3:required-flavor*s.
+
+.item basic-2frobboz*
+This form of name is used instead of 32frobboz*-mixin*
+when the flavor is regarded as altering the "essential character"
+of the window.  It does not work to mix two "basic" flavors together unless
+they are designed to work together.  In certain cases a 3basic-2frobboz**
+may contain 3tv:minimum-window* as a component, and may even be
+instantiable, but usually it is a mixin that must be mixed
+with 3tv:minimum-window* and other things in order to work.
+
+.item essential-2frobboz*
+.item essential-2frobboz*-mixin
+A name like this is generally used for a component of
+2frobboz*-mixin, containing the heart of the 2frobboz* facility
+but not its bells and whistles or its specific interface.
+.end_table
+
+.section Using a Window
+
+Many programs never need to create any new windows.  Often it suffices
+to use the standard input, output and graphics operations on an
+existing window, such as a Lisp listener which is the value of
+3terminal-io* when your program is called.  For example, here
+is a graphics demo that will draw a pattern of 2xor*ed circles
+on any window which has 3tv:graphics-mixin* (such as a Lisp listener).
+
+.lisp
+(defun green-hornet (&optional (window terminal-io)
+		     (separation 40))
+ (hacks:with-real-time
+  (send window ':clear-screen)
+  (send window ':home-down)
+  (multiple-value-bind (iw ih)
+      (send window ':inside-size)
+    (let ((center-x1 (- (truncate iw 2)
+			(truncate separation 2)))
+	  (center-x2 (+ (truncate iw 2)
+			(truncate separation 2)))
+	  (center-y (truncate ih 2)))
+      (do ((i (- (min center-y center-x1) 10.)
+	      (1- i)))
+	  ((<= i 5))
+	(send window ':draw-circle
+	      (if (bit-test 20 i) center-x1 center-x2)
+	      center-y
+	      i))))
+  (send window ':tyi)
+  t))
+.end_lisp
+
+Such programs should try to stick to the most widely-implemented
+operations.  The ideal is to use only the standard stream operations
+documented in (stream-protocol); then your program will run even with
+streams that are not windows.  With graphics programs such as
+3green-hornet* you are forced to use some windows-only operations,
+but it is still best to stick to the operations provided by the flavor
+3tv:window*.
+
+.section Creation of Windows
+
+When you want to create a flashy and sophisticated user interface,
+especially involving mouse-sensitivity or automatic updating,
+it is time to consider creating your own windows (and your own
+window flavors, perhaps).
+
+.findex tv:make-window
+To create a window, use the functions 3make-instance* or 3instantiate-flavor*.
+(Old programs usually use 3tv:make-window*, which is now equivalent to
+3make-instance* but was different in the past).
+
+.defun make-instance flavor-name &rest init-options
+Creates, initializes, and returns a new instance of the specified flavor.
+The 2init-options* argument contains alternating keywords and
+values; the keywords must be 2init options* accepted by the
+flavor you are using.  The init options accepted by various window flavors
+are described in this manual.
+
+Example:
+.lisp
+(make-instance 'tv:lisp-listener
+	       ':borders 4
+	       ':font-map (list fonts:bigfnt)
+	       ':vsp 6
+	       ':edges-from ':mouse
+	       ':expose-p t)
+.end_lisp
+creates an exposed Lisp listener with big characters and lots of vertical space
+between lines.
+
+For more information on this function and on 3instantiate-flavor*, see
+(manual-make-instance-fun).
+.end_defun
+
+.defvar tv:sheet-area
+The area in which windows are by default created.
+.end_defvar
+
+.defmetainitoption windows :name name
+Every window has a name, which is used primarily for printing the window
+as a Lisp object, but also serves as a default for the window's label.
+If you do not specify a name, the default is constructed from the flavor name
+and a counter (each flavor has its own) to make the name unique.
+.end_defmetainitoption
+
+.defmetainstvar windows tv:name
+The name of the window.
+.end_defmetainstvar
+
+.chapter Visibility and Exposure of Windows
+.setq visibility-chapter chapter-number
+
+The most important piece of information about a window is whether it is
+actually 2visible* on the screen.  A related but different piece of
+information is whether the window is 2exposed*.  Understanding these basic
+concepts, the subjects of this chapter, is vital to any use of the window
+system.
+
+.cindex visible
+.cindex fully visible
+.cindex partially visible
+.cindex overlapping windows
+Using the system menu 3Create* option you can make two windows that
+partially overlap.  (If you have never done so, you should try it.)
+The window system is forced to make a choice here: only one of those
+two windows can be the rightful owner of that piece of the screen.  Of
+these two windows, only one can be (fully) 2visible* at a time; the other
+one has to be not fully visible, but either partially visible or not
+visible at all.  Only the fully visible window has an area of the
+screen to use.
+
+If you play around with this, you will see that it looks as if the two
+windows were two overlapping pieces of paper on a desk, one of which
+must be on top of the other.  Create two Lisp listeners using the
+3Create* command of the system menu so that they partially overlap,
+and then single-click-left on the one that is on the bottom.  It will
+come to the top.  Now single-click-left on the other one; it will come
+back up to the top.  The one on top is fully visible, and the other
+one is not.
+
+.section Hierarchy of Windows
+
+.cindex hierarchy of windows
+.cindex window hierarchy
+.cindex inferior windows
+.cindex superior window
+.cindex pane
+.setq window-hierarchy section-page
+
+Several Lisp Machine system programs and application programs present
+the user with a window that is split up into several sections, which are
+usually called "window panes" or "panes".  For example, the inspector
+has six panes in its default configuration: the one you type forms into
+at the top, the menu, the history list, and the three inspection panes
+below the first three.  The window debugger and ZMail also use
+elaborate windows with panes.  Just as windows on a screen can subdivide
+the screen, a window's panes subdivide the screen space of the window.
+With programs such as the editor, inspector and ZMail, it may not be obvious
+that the windows you see are panes in another window because that window
+occupies the full screen.  If you go into 3Edit Screen* and reshape one
+of these, you will see clearly how there is a window with subwindows.
+
+In fact, the panes in an inspector are related to the inspector's main
+window just as that window is related to the screen.  Windows are arranged
+in a hierarchy, each window having a superior and a list of inferiors.
+Usually the top of the hierarchy is a screen.  In the example above,
+the inspector window is an inferior of the screen, and the panes
+of the window are inferiors of the inspector window.  The screen itself has no superior
+(if you were to ask for its superior, you would get 3nil*).
+
+.cindex ancestors of a window
+.cindex descendants of a window
+A window's superior, its superior's superior, and so on, are collectively called
+its 2ancestors*.  A window's inferiors and their inferiors, and so on, are
+called its 2descendants*.
+
+The position of a window is remembered in terms of its relative position
+with respect to its superior.  To figure out where a window
+is on the screen, we add this relative position to the absolute position
+of the superior (which is computed the same way, recursively; the
+recursion terminates when we finally get to a screen).  The important
+thing about this is that when a superior window is moved, all its
+inferiors are moved the same amount; they keep their relative position
+within the superior the same.  You can see this if you play with the
+3Move Window* command in 3Edit Screen*.
+
+Normally 3Edit Screen* edits the arrangement of the windows on a screen,
+but it can also edit the arrangement of inferiors (panes) of a window
+in the same fashion.  If you click right on 3Edit Screen*, you get a menu
+containing all the superiors of the window you pointed at, up to the screen.
+You can then edit the inferiors of whichever one you choose.
+
+.cindex active window
+.cindex screen manager
+.setq activation page
+So, what 3Edit Screen* really does is to manipulate a set of inferiors
+of some specific superior, which may or may not be a screen.  The
+set of inferiors that you are manipulating is called the 2active
+inferiors* set; each inferior in this set is said to be 2active*.
+The active inferiors are all fighting it out for a chance to be
+visible on their superior.  If no two active inferiors overlap,
+there is no problem; they
+can all be visible.  However, whenever two overlap, only one of them
+can be on top.  3Edit Screen* lets you change which active inferiors
+get to be on top.  There is also a part of the window system
+called the 2screen manager* whose basic job is to keep this
+competition straight.  For example, it notices that a window that
+used to be covering up part of a second window has been reshaped, and so
+the second window is no longer covered and can be made visible.
+Inactive windows are never visible until they become active; when a
+window is inactive, it is out of the picture altogether.  The screen
+manager will be discussed at length later ((screen-manager)).
+
+Each superior keeps track of all of its active inferiors as a
+list in the instance variable 3tv:inferiors*, and each inferior window
+keeps track of its superior, in the instance variable 3tv:superior*.
+Superior windows do 2not* keep track of their inactive inferiors; this
+is a purposeful design decision, in order to allow unused windows to be
+reclaimed by the garbage collector.  So, when a window is deactivated,
+the window system doesn't touch it until it is activated again.
+
+.defmetamethod windows :activate
+Makes the window active in its superior.
+.end_defmetamethod
+
+.defmetamethod windows :deactivate
+Makes the window cease to be active in its superior.
+.end_defmetamethod
+
+.defmetainitoption windows :activate-p t-or-nil
+If this option is specified non-3nil*, the window is activated after
+it is created.  The default is to leave it deactivated.
+.end_defmetainitoption
+
+.defmetamethod windows :kill
+Killing a window deactivates it but also makes a positive effort to get
+rid of other entities such as processes or net connections that may be
+associated with the window.  If a window has these things, it may not
+be satisfactory to just allow the window to be garbage collected;
+therefore, the 3:kill* operation is provided.  A command for the
+user to get rid of windows should use 3:kill* rather
+than 3:deactivate*.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :active-p
+3t* if this window is active in its superior.
+A screen is always considered active.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :inferiors
+Returns this window or screen's list of inferiors.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :superior
+Returns this window or screen's superior.
+For a screen, it is 3nil*.
+.end_defmetamethod
+
+.defmetamethod windows :set-superior new-superior
+Makes this window an inferior of 2new-superior*.
+.end_defmetamethod
+
+.defmetainitoption windows :superior superior
+Makes the new window an inferior of 2superior*.
+If this is not specified, the default is 3tv:mouse-sheet*,
+which is initially the main black-and-white screen.
+.end_defmetainitoption
+
+.defmetainstvar "windows and screens" tv:inferiors
+A list of the active inferiors.
+.end_defmetainstvar
+
+.defmetainstvar "windows and screens" tv:superior
+In a window, the value is the window's superior.
+In a screen, the value is 3nil*.
+.end_defmetainstvar
+
+.defun tv:sheet-superior window-or-screen
+.defun1 tv:sheet-inferiors window-or-screen
+Accessor defsubsts for the corresponding instance variables.
+.end_defun
+
+.defun tv:sheet-me-or-my-kid-p sheet me
+3t* if 2sheet* is an indirect inferior, zero or more levels down, of the sheet 2me*.
+.end_defun
+
+.defun tv:map-over-exposed-sheets function
+Calls 2function* on every exposed sheet, starting with the screens,
+their inferiors, and so on down.
+.end_defun
+
+.defun tv:map-over-exposed-sheet function sheet
+Calls 2function* on every exposed inferior of 2sheet*, to all levels,
+including 2sheet* itself.
+.end_defun
+
+.defun tv:map-over-sheets function
+Calls 2function* on every active sheet, starting with the screens,
+their inferiors, and so on down.
+.end_defun
+
+.defun tv:map-over-sheet function sheet
+Calls 2function* on every active inferior of 2sheet*, to all levels,
+including 2sheet* itself.
+.end_defun
+
+.section Screens
+.cindex screens
+.setq screens section-page
+
+The topmost nodes of the window hierarchy are actually screens
+rather than windows, a screen being an instance of the flavor 3tv:screen*.
+
+.defflavor tv:screen
+Screens are also flavor instances, whose flavors incorporate 3tv:screen*.
+Screens are not windows, but they have much in common with windows,
+because both incorporate the flavor 3tv:sheet* ((tv:sheet-flavor)).
+.end_defflavor
+
+Usually each screen object represents an individual piece of display hardware.
+However, the main black-and-white physical screen that all Lisp Machines have
+is logically divided into two screens, with different screen objects.
+These are 3tv:main-screen* and 3tv:who-line-screen*.  Because these are
+separate screens, windows on the main screen cannot be extended onto the who line,
+and the mouse cannot move onto the who line, etc.
+
+Screens are the objects that know how to parse font specifiers
+(user-level names for fonts) into font objects that can be used for display.
+See (font-specifier).  Also, each screen can specify a font for each of
+the standard font purposes (3:default*, 3:label*, 3:menu*, etc.).
+See (font-purposes).
+
+.defun tv:sheet-get-screen sheet
+Returns the screen that 2sheet* is an indirect inferior of
+(2sheet* itself, if it is a screen).
+.end_defun
+
+.defvar tv:main-screen
+The screen object that represents the Lisp Machine black-and-white display,
+except for the who line area.  This is default superior for windows created
+with 3tv:make-window*.
+.end_defvar
+
+.defvar tv:who-line-screen
+The screen object that represents the who line area.
+Each field of the who line is a separate window on this screen.
+.end_defvar
+
+.defvar tv:default-screen
+This is the screen that is "normally used".  It is initialized to be the
+main screen.  Certain functions that create a window without reference
+to the mouse use it as a default for the superior of the window, and
+window resources with a superior as parameter often create one window
+initially, with the default screen as the superior.
+.end_defvar
+
+.defvar color:color-screen
+This is the color screen for the 4-bit-pixel color display that some
+Lisp Machines have.  The screen object is always present, but is exposed
+only when the machine actually has a color screen.  See (color).
+.end_defvar
+
+.defvar tv:all-the-screens
+A list of all screen objects.  With this list, you can begin a tree walk
+to cover all active windows.
+.end_defvar
+
+.defun tv:set-tv-speed &optional (speed 360.5*) (wasted-lines 30*)
+Sets the scanning rate of the main screen, in vertical sweeps per
+second, to 2speed*.  2speed* is usually a flonum.
+
+The vertical size of the screen is inversely proportional to the number
+of vertical scans per second, because the display rate in horizontal
+scan lines per second is fixed.
+
+A nonzero value of 2wasted-lines* directs the system to refrain from
+using that many horizontal scan lines at the bottom of the screen.
+If you are using MIT software on a machine built by Symbolics,
+you may need to do this, since the screens are typically misaligned
+so that the who line is obscured by the screen's cabinet.
+A value of 20 to 30 generally does the trick.
+.end_defun
+
+.section Pixels
+.cindex pixel
+.cindex black on white
+.cindex white on black
+
+A screen displays an array of 2pixels*.  Each pixel is a little dot of
+some brightness and color; a screen displays a big array of these dots
+to form a picture.  Everything you see on the screen, including borders,
+graphics, characters, and blinkers, is made up out of pixels.
+
+Each physical screen has a display memory which stores the values of
+all the pixels.  On regular black-and-white screens, each pixel has
+one of only two values, lit up or not lit up, so the pixel is
+represented in memory by one bit.  Usually 0 is used for the
+background of a window and the characters or lines on it are made of
+1's, so 1 can be considered "on" and 0 "off".  On color screens,
+pixels have more than one bit.  The usual sort of color screen has
+four bits per pixel.  0 is still often used as the background value
+and assigned the color black.  There is no convention for the use of
+other pixel values.
+
+Black and white screens have a hardware flag that controls the visual
+appearance of 1 and 0 pixels.  In "black-on-white" mode, 1 is dark and
+0 is bright, so windows appear with dark text on a white background.
+This mode is the default.  In "white-on-black" mode, 1 is bright and 0
+is dark.  Users can switch between these modes with 3Terminal C*.
+
+An individual window can specify 1 for background and 0 for text; this
+is independent of white-on-black mode (which applies to the whole
+screen) and is requested with the 3:reverse-video-p* init option or
+the 3:set-reverse-video-p* operation (see
+(windows-set-reverse-video-p-method)).  These work by controlling the
+2alu functions* used for drawing and erasing characters; see
+(alu-functions).  Programs which use the window's recommended alu
+functions for their drawing and erasing will automatically display in
+reverse-video when this is specified.  The
+who line mouse documentation window is an example of a window which
+uses reverse-video.
+
+.defun tv:black-on-white &optional (screen 3tv:default-screen*)
+Make 2screen* display one-bits as black, with zero-bits as white.
+(This is the default mode.)
+
+Note that this works by setting a bit in the display hardware; as a
+result, if done on the main screen, it applies to the who line as well.
+.end_defun
+
+.defun tv:white-on-black &optional (screen 3tv:default-screen*)
+Make 2screen* display one-bits as white, with zero-bits as black.
+.end_defun
+
+.defun tv:complement-bow-mode &optional (screen 3tv:default-screen*)
+Toggle whether 2screen* displays one-bits as white or as black.
+This is what 3Terminal C* does.
+.end_defun
+
+.definstvar tv:screen tv:bits-per-pixel
+1 for a black-and-white screen, larger numbers for other kinds
+(4 for the standard color screen).
+.end_definstvar
+
+.definstvar tv:screen tv:buffer
+The address of the screen memory, as a fixnum.
+.end_definstvar
+
+.definstvar tv:screen tv:buffer-halfword-array
+An 3art-16b* array containing the screen memory.
+.end_definstvar
+
+.definstvar tv:screen tv:control-address
+The address of the screen's control register which contains,
+among other things, the flag controlling black-on-white mode.
+.end_definstvar
+
+.section Bit-Save Arrays
+.setq bit-save-array section-page
+.cindex bit-save array
+
+The pixel values that make up a window's screen image are called its 2contents*.
+When a window is fully visible, its contents are displayed on a
+screen so that they can be seen.  When the window is not fully visible,
+its contents are lost unless there is a place to save them.
+Such a place is called a 2bit-save array*.
+
+A bit-save array is an array of bits of sufficient size to hold a copy
+of the window's contents.  If a window has a bit save array, its
+contents are copied into the array when the window ceases to be fully
+visible.  If the window becomes fully visible again, the contents are
+copied from the bit-save array back onto the screen.  In the mean time,
+programs can use 3tv:sheet-force-access* to do output into the
+bit-save array while the window is not visible (see
+(tv:sheet-force-access-fun)), and the window's inferiors, if any, can be
+exposed and do output (see (exposure)).
+
+When a window with a bit-save array is partially visible, the visible
+parts can be displayed correctly by copying them from the bit-save
+array.  This is the behavior you observe if you make a small Lisp
+listener window with 3Create* and have a full-screen window such as
+the initial Lisp listener or a Zmacs frame partially visible around it.
+It happens because the Lisp listener or Zmacs frame has a bit-save array.
+
+If a window does not have a bit-save array, then there is no place to
+put its contents when it is not visible, so they are lost.  When the
+window becomes visible again, it will try to redraw its
+contents; that is, to regenerate the contents from some state
+information in the window.  This is done by the 3:refresh* operation
+documented below.  Some windows can do this; for example, editor windows
+can regenerate their contents based on the editor buffers they are
+displaying.  Other windows, such as Lisp listeners, do not remember
+what was displayed on them and cannot regenerate their previous contents.
+Such windows just leave their contents blank, except for the margins
+(see (margins)), which all windows can regenerate.
+
+The advantage of having a bit-save array is that losing and regaining
+visibility does not require the contents to be regenerated; this is
+desirable since regeneration may be computationally expensive, or
+even impossible.  The disadvantage is that the bit-save array can be large
+and swapping it in can be slow.
+
+When a frame is in use, giving the frame a bit-save array enables the
+contents of the frame and all the panes to be preserved if the frame
+ceases to be fully visible.  Bit-save arrays for the panes would
+come into play only if panes were shuffled or substituted within the
+frame; in most applications, this happens never or rarely, and is
+accompanied by a thorough redisplay.  So normally the frame gets a
+bit-save array and the panes do not.
+
+.defmetainstvar windows tv:bit-array
+This instance variable of all windows holds the window's bit array,
+or 3nil* if it has none.
+.end_defmetainstvar
+
+.defun tv:sheet-bit-array window
+Accessor defsubst for the corresponding instance variable.
+.end_defun
+
+.defmetamethod windows :bit-array
+Returns the window's bit array, or 3nil* if it has none.
+.end_defmetamethod
+
+.defmetamethod windows :save-bits
+Returns non-3nil* if this window saves its bits when not exposed.
+.end_defmetamethod
+
+.defmetamethod windows :set-save-bits flag
+Tells this window to start or stop saving its bits when not exposed.
+2flag* is 3t* to start or 3nil* to stop.
+.end_defmetamethod
+
+.defmetainitoption windows :save-bits flag
+'kindex :delayed :save-bits
+2flag* may be 3t*, 3nil* or 3:delayed*.
+3:delayed* causes the window to acquire a bit-save array
+the first time it is deexposed, but not before.
+.end_defmetainitoption
+
+.defmetamethod windows :refresh &optional (type 3':complete-redisplay*)
+Restore the saved contents of the window or regenerate the contents,
+according to the value of 2type* (and to whether the window has a bit-save array).
+
+Here are the possible values of 2type*:
+.table 3
+.kitem :complete-redisplay
+This is the default.  The window's present bit image is completely
+discarded and regenerated from scratch.  The margins are redrawn
+by invoking 3:refresh-margins*.  The default definition of
+3:refresh* just leaves the inside blank except for refreshing
+any exposed inferiors.
+
+If the window has no bit-save array, 2type* is ignored and
+the actions for 3:complete-redisplay* are always used.
+
+.kitem :use-old-bits
+The complete contents are restored from the bit-save array.  This is
+specified by the system when a window is exposed.
+
+.kitem :size-changed
+This keyword is specified when the window's size has been changed.
+The contents are restored from the bit-save array, and then the
+margins are refreshed with 3:refresh-margins*.
+
+.kitem :margins-only
+This keyword is specified when the inside portion of the window is
+completely undisturbed, and only the margins need to be refreshed.
+The system treats it just like 3:size-changed*.
+.end_table
+
+Window flavors ought when possible to provide 3:after* daemons
+for 3:refresh*, to complete the job of redrawing the window,
+which the system itself cannot know how to do.  When these daemons
+run, the instance variable 3tv:restored-bits-p* will be non-3nil*
+if the window contents were restored from a bit-save array.
+If this is so, there is no need for the 3:after* daemons
+to do anything, except perhaps if the window's inside size has changed.
+.end_defmetamethod
+
+.defmetainstvar windows tv:restored-bits-p
+In 3:after* daemons of 3:refresh* (and therefore also of
+3:expose*), this is 3t* if the contents were restored
+from a bit-save array.  If it is 3nil*, the inside of the window was
+left blank and must be regenerated to whatever extent that is
+possible.
+.end_defmetainstvar
+
+.section Screen Arrays and Exposure
+.cindex exposed window
+.cindex exposable window
+.cindex visible
+.setq exposure section-page
+.cindex screen array
+
+This section discusses the concepts of screen arrays and of exposed
+windows.  These have to do with how the system decides where to put a
+window's contents (its pixels), how the notion of visibility on the
+screen is extended into a hierarchy of windows, and how programs can
+control which windows are visible.  Do not feel it is your fault
+if this seems complicated; you do not need to understand it fully
+on your first reading of the manual.
+
+Each window or screen can have a 2screen-array*, which is where output
+drawn on the window should go.  Drawing characters or graphics is done
+by changing elements of the window's screen array.  The screen array is
+stored in the instance variable 3tv:screen-array*.  The variable can
+also be 3nil*, to say that the window does not have a screen array at
+the present time.
+
+A screen normally has a screen array that is displaced to the special
+memory that the screen's hardware displays from.  A window that is
+visible has a screen array; it is an indirect array that points into
+the area of the superior's screen-array where the inferior gets
+displayed on the superior.  For example, consider a visible window
+whose superior is a screen and whose upper-left-hand corner is at
+location (100,100) in the screen.  The window's screen-array would be
+an indirect array whose (0,0) element is the same as the (100,100)
+element of the screen.  If you were to set a pixel in the window's
+screen-array, the corresponding pixel in the screen (found by adding
+100 to each coordinate) would be set to that value.
+
+A visible window more than one level down from the screen has a screen
+array that indirects more than once.  The window's screen-array
+points into the middle of its superior's screen array, which points into 
+the middle of the superior's superior's screen array, and so on until
+the screen is reached.  When typeout is done on the window, it will
+appear on the screen, offset by the combined offsets of all the
+ancestors, so that it will appear in the correct absolute position on
+the screen.
+
+Sometimes a window is unable to have a screen array that points
+to its superior's screen array.  For now, let's not ask why this might happen,
+but consider instead what to do about the screen array when this does happen.
+There are two alternatives.  If the window has a bit-save
+array, then the bit-save array is used as the screen array.  If there is
+no bit-save array, there can be no screen array either.  The window's
+3tv:screen-array* variable becomes 3nil*, and there is
+nowhere for output on this window to go.
+
+For a window 2w* with a bit-save array, 2w*'s inferiors are not
+affected by where 2w*'s screen array points.  2w* always has a
+screen array, and its inferiors' screen arrays can point to that.
+
+But if 2w* has no bit-save array, it may have 3nil* instead of a
+screen array, and in that case it is impossible for 2w*'s inferiors to have
+screen arrays pointing into 2w*'s screen array.  So they in turn must
+use their bit-save arrays, if any, as screen arrays, or not have screen
+arrays.  The effect propagates down the hierarchy.
+
+So we see one possible reason why a window may be unable to have a
+screen array that points into its superior's: if the superior doesn't
+have a screen array at all.  There is one other reason: the superior may
+deny permission for this window to point its screen array into the
+superior.  The superior has an instance variable
+3tv:exposed-inferiors* which record all the inferiors permitted to do
+this.  (Only active inferiors are allowed.)  This permission can be
+granted or revoked at any time, and is called 2exposability*.  Each
+window can be made exposable or not exposable using the 3:expose* and
+3:deexpose* operations.  So, if a window's superior does not have
+a screen array, or if the window is not exposable, then the window
+must scrounge up a screen array itself if it can.
+
+A window is said to be 2exposed* if it has a screen array that points
+into its superior's screen array.  Note that a window must be exposable
+in order to be exposed, but the converse is not true.  An exposable
+window is exposed as well if and only if its superior has a screen array.
+
+An exposed window is not necessarily visible.  A window is visible if
+its screen array points, through some number of levels of indirection,
+into the middle of the screen's screen array.  An exposed window's
+screen array points into the middle of 2something*, but that may be a
+bit-save array in a deexposed ancestor some number of levels up.  A
+window that is exposed but not visible must have some ancestors that are
+not exposed, and at least one of them must not be exposable either.  This diagram
+of a window 3w8* and its ancestors shows the pattern of exposed and
+deexposed windows and how it comes about.
+
+.lisp
+s <-- w1 <-- w2 <-- w3 <-- w4 <-- w5 <-- w6 <-- w7 <-- w8
+exposable    not!   exposable again...
+				  w5 has a bit-save array
+exposed...   deexposed...                exposed...
+visible...   invisible...	      ...still invisible...
+.end_lisp
+
+Output is allowed on a window whenever the window is exposed.  Usually exposed
+windows are visible and the output can be seen on the screen.  But output
+to an exposed window with a deexposed ancestor is also permitted.
+Then the output goes into the middle of that ancestor's bit-save array
+rather than onto the screen.  Such output cannot actually be seen.
+But if the unexposable ancestor that must exist is made exposable,
+the bit-save array will be copied onto the screen and
+the output already done will be seen.
+
+Output is not normally allowed on a deexposed window, even if the
+window has a screen array which is its bit-save array.  However, in
+this case, you can use 3tv:sheet-force-access* to override the
+prohibition and output onto the bit-save array.  Use of 3:permit*
+as the window's deexposed typeout action (see (deexposed-typeout-action))
+allows all output on such windows to proceed and draw in the
+bit-save array.  A deexposed window with no bit-save array cannot
+have output done on it in any fashion since it has no contents.
+
+The 3:expose* operation makes a window exposable.  If at
+that time its superior has a screen array, the window will become
+exposed as well.  Or, if the superior later acquires a screen array, the
+window will become exposed then.  This can happen if the superior itself
+is exposed, or if the superior is given a bit-save array with the
+3:set-save-bits* operation.
+
+The 3:deexpose* operation always makes the window unexposable
+and therefore not exposed.
+
+It is possible for a screen to be deexposed.  In particular, if a Lisp
+Machine does not have a color display physically attached to it, there
+is still a "color screen" Lisp object in the Lisp world, but it is
+deexposed (and so are any immediate inferiors it may have).  This is so
+saved Lisp environments can be moved easily between machines with
+different hardware configurations.  The screen object is left deexposed
+so that programs will not try to output to it.  The screen is exposed
+whenever the Lisp Machine system is booted on a machine that actually
+has a color screen; then all its exposable inferiors become exposed too.
+For screens, there is no distinction between exposed and exposable,
+since there is no superior to have a say in the matter.
+
+In order to maintain the model that windows are like pieces of paper on
+a desk, it is important that no two windows that both occupy some piece
+of screen space be exposed at the same time.  To make sure that this is
+true, whenever a window becomes exposed, the system deexposes any of
+its exposed siblings that it overlaps.  (Note: this is not true
+for temporary windows; see (temporary-window).)
+
+.defmetamethod "windows and screens" :expose &optional inhibit-blinkers bits-action new-left new-top
+Makes the window exposable, and exposed if possible.
+This is a very useful operation to attach daemons to, but remember
+that this operation may be performed on a window that is already
+exposable.  The daemons must not make the assumption that the window
+is just becoming exposable.  If the window is not a direct inferior
+of the screen, it may not be becoming exposed either.
+
+If the window is not active in its superior, it is first activated.
+
+The arguments to the 3:expose* operation are supplied by
+the system and usually of interest only to the system's methods.
+User invocations of this operation should usually supply no arguments.
+
+If the window actually becomes visible, the window's blinkers normally
+appear with their deselected visibilities.  If 2inhibit-blinkers* is
+non-3nil*, the blinkers are not acted on.  If the window is being
+exposed in order to select it, this is used to save time.
+
+'kindex :noop :expose
+'kindex :restore :expose
+'kindex :clean :expose
+If the window actually becomes visible, 2bits-action* controls how
+it is put back on the screen.  It can be 3:noop*, 3:restore* or
+3:clean*.  If it is 3:noop*, the window's screen area is not
+touched.  This is used only in very unusual cases.  If it is
+3:clean*, the window is sent a 3:refresh* message with argument
+3:complete-redisplay*, which should make the window redraw itself
+from scratch if it can.  If 2bits-action* is 3:restore*, the
+window is sent a 3:refresh* message with argument 3:use-old-bits*,
+which should make the window copy its bit-save array onto the screen.
+3nil* as the 2bits-action* is equivalent to 3:restore* for
+windows with bit-save arrays and to 3:clean* for windows without them.
+
+2new-left* and 2new-top* are the offsets within the superior at which
+to expose the window.  They default to the window's current offsets.
+These arguments are for use by the 3:set-edges* operation; you should
+not pass them.
+
+A window cannot be made exposable unless its full size fits within
+the superior.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :deeexpose &optional save-bits-p screen-bits-action remove-from-superior
+Makes the window not exposed and not exposable.
+This is a useful operation to add daemons to.
+
+The arguments to the 3:deexpose* operation are supplied by
+the system, and are usually of interest only to the system's methods.
+
+'kindex :default :deexpose
+'kindex :force :deexpose
+2save-bits-p* defaults to 3:default*.  It can also be
+3:force* or 3nil*.  3:default* means the bits are saved
+if the window has a bit-save array.  3:force* gives
+the window a bit-save array if it doesn't already have one,
+so that the bits are always saved.  3nil* does not save the bits.
+
+'kindex :noop :deexpose
+2screen-bits-action* controls what to do to the bits on the screen.
+It may be 3:noop* to do nothing to them, or 3:clean* to erase
+the area occupied by the window.
+
+If 2remove-from-superior* is 3nil*, the window remains exposable.
+You should always use 3t* (which is the default) for this argument.
+The window system uses 3nil* as part of implementing deexposure of
+an exposable window whose superior loses its screen array.  Use of
+3nil* at any other time would lead to incorrect results.
+.end_defmetamethod
+
+.defmetainitoption windows :expose-p t-or-nil
+If this option is specified non-3nil*, the window is made exposable
+after it is created.  The default is to leave it deexposed.  If the
+value of the option is not 3t*, it is used as the first argument to
+the 3:expose* operation (the 2inhibit-blinkers* argument).
+.end_defmetainitoption
+
+.defmetamethod "windows and screens" :exposable-p
+3t* if the window is exposable.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :exposed-p
+3t* if the window is exposed.
+.end_defmetamethod
+
+.defmetamethod "windows and screens" :exposed-inferiors
+Returns a list of all exposable inferiors of this window or screen.
+.end_defmetamethod
+
+.defspec tv:with-sheet-deexposed (sheet) &body body
+Executes the 2body* with 2sheet* deexposed.
+If 2sheet* had been exposed, it is reexposed when
+2body* exits.  Operations that change things about the window
+often make use of this to reduce the complicated case of an
+exposed window to the simpler case of a deexposed one.
+.end_defspec
+
+.defmetamethod "windows and screens" :screen-array
+Returns the window or screen's screen array, or 3nil*.
+.end_defmetamethod
+
+.defmetainstvar "windows and screens" tv:exposed-p
+3t* if the window is exposed.
+.end_defmetainstvar
+
+.defmetainstvar "windows and screens" tv:exposed-inferiors
+A list of all exposable inferiors of this window or screen.
+.end_defmetainstvar
+
+.defmetainstvar "windows and screens" tv:screen-array
+The screen array, or 3nil* if there is none.
+.end_defmetainstvar
+
+.defun tv:sheet-exposed-p window-or-screen
+.defun1 tv:sheet-exposed-inferiors window-or-screen
+.defun1 tv:sheet-screen-array window-or-screen
+Accessor defsubsts for the corresponding instance variables.
+.end_defun
+
+.section Ability to Output
+.setq ability-to-output section-page
+.cindex output hold
+.cindex holding output
+.cindex output hold flag
+
+Whether a window is exposed usually controls whether output can be
+done on it.  In a deexposed window a flag called the 2output hold
+flag* is normally 1.  This causes an 2output hold exception* if an
+attempt is made to output to the window.  The normal result of an
+output hold exception is that the process doing output waits until the
+output hold flag is clear.  The process wait state during this wait is
+3"Output Hold"*.
+
+The output hold flag is also set in a window that has exposed inferiors,
+because output on the window would overwrite the inferiors.
+
+.defun tv:sheet-output-hold-flag window
+1 to indicate an output hold exception, or 0 to permit
+output on the window.  This is 3setf*'able.
+.end_defun
+
+.cindex deexposed typeout action
+.setq deexposed-typeout-action page
+When a process attempts to type out on a window which is deexposed and
+has its output hold flag set, what happens depends on the window's
+2deexposed typeout action*.  The deexposed typeout action can be any
+of certain keyword symbols, or it can be a list.  After the specified
+action is taken, if the output hold flag is still set, the process
+will wait for it to clear.  The interesting thing is that the action may
+affect the value of the output hold flag.
+
+.defmetainstvar windows tv:deexposed-typeout-action
+The window's deexposed typeout action.
+.end_defmetainstvar
+
+.defmetamethod windows :deexposed-typeout-action
+.defmetamethod1 windows :set-deexposed-typeout-action action
+Get or set the window's deexposed typeout action.
+.end_defmetamethod
+
+.defmetainitoption windows :deexposed-typeout-action action
+Initializes a window's deexposed typeout action to 2action*.
+.end_defmetainitoption
+
+.defun tv:sheet-deexposed-typeout-action window
+Accessor defsubst for the instance variable.
+.end_defun
+
+Here are the possible values of deexposed typeout action:
+
+.table 3
+.xitem :normal "deexposed typeout action"
+This, the default, means "no action".  Therefore, the process will
+always have to wait for the output hold flag to clear.
+
+.xitem :expose "deexposed typeout action"
+The action is to send the window an 3:expose* message.  This may
+expose the window (if the superior has a screen-array), and if it does
+expose the window then the output hold flag will probably be cleared,
+allowing typeout to proceed immediately.  If the superior is the screen,
+the 3:expose* option provides a very different user interface from the
+3:normal* option.
+
+.setq deexposed-permit page
+.xitem :permit "deexposed typeout action"
+This means to permit typeout even though the window is not exposed, as
+long as the window has a screen array; i.e., it may type out on its own
+bit-save array even though it is not exposed.  The next time the window
+is exposed, the updated contents will be retrieved from the bit-save
+array.
+
+The action for 3:permit* is to turn off the output hold flag if the
+window has a screen array.  This mode has the disadvantage that output
+can appear on the window without anything being visible to the user, who
+might never see what is going on and might miss something interesting.
+
+It is possible to request that output in this mode to partially visible windows
+be transferred to the screen periodically.  See (deexposed-permit-in-background).
+
+.xitem :notify "deexposed typeout action"
+This means that the user should be notified when there is an attempt to
+do output on the window.  The action taken is to send the 3:notice*
+message to the window with the argument 3:output* (see
+(windows-notice-method)).  The default response to this is to notify
+the user that the window wants to type out and to put the window on a
+list for 3Terminal 0 S* to select it.  Supdup and Telnet windows have
+3:notify* deexposed typeout action by default.
+
+.xitem :error "deexposed typeout action"
+The action is to signal an error.
+
+.item 1a list,* (2operation* 2arguments*...)
+The action is to send the window a message with 2operation* and 2arguments*.
+.end_table
+
+Functions such as 3ed*, whose purpose is to select a window
+for the user, should not return immediately.  If 3ed* returned immediately,
+then when called in a Lisp listener with its deexposed typeout action set to
+3:expose*, the printing of the value returned by 3ed* would immediately
+switch back to the Lisp listener, which defeats the purpose of 3ed*.
+To avoid this behavior, 3ed* calls 3tv:await-window-exposure*.
+
+.defun tv:await-window-exposure
+Wait until 3terminal-io* is exposed (more precisely, until its
+3:await-exposure* operation returns).
+.end_defun
+
+.defmetamethod windows :await-exposure
+Does not return until the window is exposed.
+(Some window flavors implement it differently).
+.end_defmetamethod
+
+.defspec tv:sheet-force-access (window) body
+3tv:sheet-force-access* allows you to do typeout on a window that has
+a screen array even if its output hold flag is set.  It works by turning
+off the output hold flag temporarily around the execution of the body.
+This is useful for drawing on a window while it is not visible.
+For example, changing the menu items of a menu redraws the menu contents
+immediately even if the menu is not visible; this is because when the
+menu does become visible it looks better to the user for it to become
+visible in one instant with the correct contents.
+
+If the window is exposed, 3tv:sheet-force-access* goes ahead and outputs to it.
+If the window is not exposed but has a bit-save array, the output goes there.
+
+If the window is not exposed and has not bit-save array
+3tv:sheet-force-access* doesn't do anything at all; it just returns
+2without* evaluating its body.
+
+Here is an example: when a text scroll window is given a new item generator,
+which completely changes the text that it should display,
+it redisplays the window in its bit-save array if necessary.
+.lisp
+(defmethod (tv:text-scroll-window :set-item-generator)
+	   (new-item-generator)
+  (setq item-generator new-item-generator)
+  (tv:sheet-force-access (self)
+    (send self ':clear-screen)
+    (send self ':redisplay 0 
+	  (tv:sheet-number-of-inside-lines))))
+.end_lisp
+.end_defspec
+
+.section Window Locking
+.setq window-locking section-page
+
+Each window or screen has a lock which is used to prevent two processes
+from operating on the window at once in a way that might cause
+inconsistent results.  Outputting on the window, activating or
+deactivating the window, exposing or deexposing the window, and changing
+the window's shape all lock the window.  This is done with 3process-lock*,
+via 3tv:lock-sheet*.  Note that the window's inferiors must be locked too.
+
+.cindex temp-locking
+Another form of locking is called "temp-locking".  A window is temp-locked
+when a temporary window (see (temporary-windows)) is exposed on top of it.
+All the operations which lock the window will have to wait if the window
+is temp-locked just as they would if the window were locked in the ordinary manner;
+however, the lock is not considered owned by a process but rather by the
+temporary windows that overlap the window.  It will stay locked until
+the temporary windows are all deexposed.  The 3:mouse-select* operation
+and some other things know how to deexpose temporary windows when necessary
+to cause a window to become unlocked.
+
+.defspec tv:lock-sheet (window-or-screen) &rest body...
+Executes 2body* with 2window-or-screen* locked by this process.
+Calls to 3tv:lock-sheet* are found in wrappers for operations such as
+3:expose*, so you need not call it yourself, but you should be aware
+that it is being done.
+.end_defspec
+
+.defmetainstvar "windows and screens" tv:lock
+The lock.  It is 3nil* for an unlocked window, a process that has
+locked the window, or a list of covering temporary windows if this
+window is "temp-locked".
+.end_defmetainstvar
+
+.defmetainstvar "windows and screens" tv:lock-count
+The number of times the lock is locked.  This counts the number of recursive
+lockings for the same process, for example.
+.end_defmetainstvar
+
+.defun tv:sheet-lock window-or-screen
+Returns the contents of 2window-or-screen*'s lock.
+This is a defsubst and can be 3setf*'d.
+It is usually unmodular to use this.
+.end_defun
+
+.defun tv:sheet-can-get-lock window-or-screen &optional (lock-id 3current-process*)
+Returns 3t* if this window or screen could right now be locked by
+2lock-id*; essentially, if it is free or already locked that way
+(but in fact it is more complicated than this.)
+
+Note that if you call this function with 3inhibit-scheduling-flag* 3nil*,
+you are likely to be susceptible to a timing error.
+.end_defun
+
+.defun tv:sheet-clear-locks
+Unlocks the locks of all active windows.  For use in an emergency.
+.end_defun
+
+.section Temporary Windows
+.setq temporary-window page
+.setq temporary-windows page
+.cindex temporary window
+
+Normally, when a window is exposed in an area of the screen where there
+are already some other exposed windows, the windows that used to be
+there are deexposed automatically by the window system.  This is
+because the window system normally doesn't leave two windows both
+exposed if they overlap.  (In the absence of temporary windows,
+which we are about to introduce, the system never allows two overlapping
+windows to both be exposed.)
+
+But sometimes there are windows that only get put up on the screen for
+a very short time.  The most obvious examples of such windows are the
+momentary menus that only appear for long enough for you to select an item.
+It would be unfortunate if every time a momentary menu appeared, the
+windows under it had to be deexposed.  The ones without bit-save arrays
+would have their screen image destroyed, forcing them to regenerate it
+or to reappear empty.  The ones with bit-save arrays would not be damaged
+in this way, but they would have to be deexposed, and deexposure is
+a relatively expensive operation.
+
+This problem is solved for momentary menus by making them 2temporary
+windows*.  Temporary windows work differently from other windows in the
+following way: when a temporary window is exposed, it saves away the
+pixels that it covers up.  It restores these pixels when it is
+deexposed.  These pixels may come from several different windows.  This
+way it doesn't mess up the area of the screen that it uses, even if it
+covers up some windows that don't have bit-save arrays.
+
+Also, a temporary window, unlike a normal window, does not deexpose the
+windows that it covers up.  This way the covered windows need not try to
+save their bits away in their bit-save arrays (if they have them) nor ever
+have to try to regenerate their contents (if they don't).  They never notice
+that the temporary window was (temporarily) there.
+
+.defflavor tv:temporary-window-mixin
+This mixin makes a window a temporary window.
+.end_defflavor
+
+.defmetamethod windows :temporary-bit-array
+Non-3nil* if the window is a temporary window.
+.end_defmetamethod
+
+There would be some problems if temporary windows were this simple.
+Suppose there is a normal window, and a temporary window appears over
+it; some of the contents of the normal window are saved in an array
+inside the temporary window.  Now, if the normal window were moved
+somewhere else, and possibly became deexposed or overlapped by other
+windows, and then the temporary window were deexposed, the temporary
+window would dump back its saved bits where the normal window used to
+be.  This would clobber some other window.
+
+Furthermore, even though normal window is still exposed, output on it
+must not be permitted, since that could overwrite the temporary window.
+
+Because of problems like these, when a temporary window gets exposed on
+top of some other windows, all the windows that it covers up (fully or
+partially) become 2temp-locked*.  While a window is temp-locked, any
+attempt to type out on it will wait until it is no longer temp-locked.
+Furthermore, any attempt to deexpose, deactivate, move, or reposition a
+temp-locked window will wait until the window is no longer temp-locked.
+The temp-locking is undone when the temporary window is deexposed.
+
+Because of temp-locking, you should never write a program that will put a
+temporary window up on the screen for a "long" time.  There should be some
+action by the user, such as moving the mouse, which will make the temporary
+window deexpose itself.  It is best if any attempt by the user to get the
+system to do something makes the temporary window go away.  While the
+temporary window is in place, it blocks many important window system
+operations over its area of the screen.  The windows it covers cannot be
+manipulated, and programs that try to manipulate them will end up waiting
+until the temporary window goes away.  
+
+It works fine to have two or more temporary windows exposed at a time.
+If you expose temporary window 2a* and then expose temporary window
+2b*, and they don't overlap each other, they can be deexposed in either
+order, and any windows that both of them cover up will be temp-locked
+until both of them are deexposed.  If 2b* covers up 2a*, then 2a*
+will be temp-locked just like any other window, and so it will not be
+possible to deexpose 2a* until 2b* has been deexposed.
+
+.section The Screen Manager
+.setq screen-manager section-page
+.cindex screen manager
+.cindex autoexposure
+.cindex partially visible
+
+Sometimes not all of the screen is in use by fully visible windows.
+This does not happen in elementary use of the Lisp Machine, since the
+initial windows in the system are all full-screen-sized, but if you
+create a small Lisp listener with system menu 3Create* the rest of
+the screen will be unclaimed by any fully visible window.  The part of
+the window system responsible for dealing with unclaimed parts of the
+screen is called the 2screen manager*.
+
+The screen manager fills such unclaimed areas by looking for deexposed
+windows which fall entirely or partly within them.  Only active
+immediate inferiors of the screen are considered, and in a specific
+priority order described in (screen-manager-priority).
+
+A window that falls entirely within unclaimed areas can be made
+visible without deexposing any other windows.  This is called
+2autoexposure*.  Since the window is a direct inferior of the
+screen, exposing it always makes it visible.  The screen manager goes
+on considering the remaining deexposed windows, but with less screen
+area unclaimed.
+
+A window that overlaps the unclaimed areas but also overlaps a visible
+window cannot simply be exposed.  So it becomes 2partially visible*,
+which means simply that the screen manager copies the appropriate
+parts of the window's contents onto the unclaimed areas.  The window is
+not treated as visible or exposed in any other sense.  This gives the
+visual impression of overlapping pieces of paper on a desk top; the
+deexposed window is partially covered up by the visible windows, but
+you can still see those parts that aren't covered.  The contents are
+copied from the window's bit-save array.  Windows without bit-save
+arrays are by default ineligible for partial visibility, so other windows
+later in the order will get a chance for the same screen area;
+however, it is possible to arrange for windows without bit-save arrays
+to be partially visible (though the displayed contents may not be accurate).
+
+Windows whose size and position are such that they do not fit within
+the bounds of the superior cannot be exposed, and the screen manager
+does not try to autoexpose such windows.  However, they can be
+partially visible like any other windows.
+
+.cindex autoselection
+.setq autoselection page
+The screen manager has one other job.  At the same time that it
+does autoexposure, it can also select a window if there isn't any
+selected window at the time.  This is called 2autoselection*.  A
+window is a candidate for autoselection if it is an exposed inferior
+of the screen and its 3:name-for-selection* is non-3nil* (see
+(windows-name-for-selection-method)).  For more information, see
+(selection).
+
+The screen manager does not only manage the inferiors of screens; it
+can manage the inferiors of windows as well.  The system invokes the
+screen manager on a sheet's inferiors by sending the sheet a
+3:screen-manage* message.  This happens for 2all* visible sheets
+regardless of flavor.
+
+.defmetamethod "windows and screens" :screen-manage
+The default definition of this operation is to do autoexposure and
+display of partially visible windows among the active inferiors of this
+window or screen, as described above.
+.end_defmetamethod
+
+.defflavor tv:no-screen-managing-mixin
+Prevents the screen manager from dealing with the inferiors of a window
+by redefining the 3:screen-manage* operation to do nothing.
+
+When a frame is used by a single program, the program usually expects
+to have sole control over exposure of panes.  Then this mixin can be used
+to tell the screen manager not to interfere.  Constraint frames
+do not normally need to use this mixin because they avoid problems
+while changing configurations by deactivating any panes that do not
+belong in the configuration.  Zmacs frames do use this mixin
+so that the screen manager will not autoexpose various editor windows
+that belong to the frame.
+.end_defflavor
+
+.defmetamethod "windows and screens" :screen-manage-autoexpose-inferiors
+Performs autoexposure of the active inferiors of this window or screen.
+Used by the default definition of 3:screen-manage*.
+.end_defmetamethod
+
+.subsection Control of Partial Visibility
+
+.defmetamethod windows :screen-manage-deexposed-visibility
+Should return non-3nil* if parts of this window ought to be displayed
+when the window is partially visible.  The default definition returns
+non-3nil* if the window has a bit-save array.
+.end_defmetamethod
+
+.defflavor tv:show-partially-visible-mixin
+If a window has this flavor mixed in, then the screen manager will
+attempt to show it to the user when it is partially visible even if it
+doesn't have a bit-save array.  Since there are no saved contents to
+display, the screen manager must give the window a screen array
+temporarily, send it a 3:refresh* message so it will draw itself on
+the screen array, and then display whatever is found there.  Often this
+means that you will see the label and borders of the window, but not
+the inside.
+.end_defflavor
+
+.defflavor tv:gray-deexposed-right-mixin
+.defflavor1 tv:gray-deexposed-wrong-mixin
+Make any visible parts of the window appear gray if the
+window is not fully visible.  3tv:gray-deexposed-wrong-mixin* is
+faster, but does not work for windows that have inferiors.  You would use
+these mixins in windows without bit-save arrays, as a cheaper alternative
+to 3tv:show-partially-visible-mixin*, to provide something
+better than blankness when the window ought to be partially visible.
+.vindex tv:12%-gray
+.vindex tv:25%-gray
+.vindex tv:33%-gray
+.vindex tv:50%-gray
+.vindex tv:75%-gray
+
+The precise kind of gray is controlled by the instance variable
+3tv:gray-array*, which comes with operations 3:gray-array* and
+3:set-gray-array* and init option 3:gray-array*.  The value must
+be a two-dimensional array of bits that will be replicated by
+3bitblt*; its width must be a multiple of 32.  Useful values for
+3tv:gray-array* include 3tv:75%-gray*, 3tv:50%-gray*,
+3tv:33%-gray*, 3tv:25%-gray*, and 3tv:12%-gray*.
+.end_defflavor
+
+.defflavor tv:initially-invisible-mixin
+Causes a window not to appear through screen management, even partially,
+until it has first been explicitly exposed.  This is used in some window
+flavors (such as editor windows, Supdup windows, and others) of which
+instances are present in the saved system environment even without the
+user's ever having requested them.  These windows can be active, and
+available for 3System* keys to select, but will not become partly
+visible if some other window is made smaller.
+.end_defflavor
+
+.setq deexposed-permit-in-background page
+Recall that if a deexposed window has its deexposed typeout action set
+to 3:permit*, output on the window can proceed but goes to the
+bit-save array rather than to the screen.  If the window is partially
+visible, such output could modify the visible parts of the window.
+You can request that the screen manager check periodically for such
+output and copy the changed contents to the screen.
+
+.defvar tv:screen-manage-update-permitted-windows
+Controls whether the screen manager looks for
+partially-visible windows with deexposed typeout actions of 3:permit* and
+updates the visible portion of their contents on the screen.  If the value
+is 3nil*, which it is initially, the screen manager does not do this.
+Otherwise the value should be the interval between screen updates, in 60ths
+of a second.
+.end_defvar
+
+.subsection Priority among Windows for Exposure
+.setq screen-manager-priority section-page
+
+Suppose there is a section of the screen in which there are no exposed
+windows, and more than one active, deexposed window could be exposed to
+fill this area, but the two could not both be exposed (because they
+overlap).  Which one gets to be exposed?  Here's another issue: when
+the screen manager wants to display pieces of partially-visible windows,
+there may be more than one deexposed window that could be displayed in
+a given area of the screen.  How does screen manager decide which
+window to display?
+
+It decides on the basis of a priority ordering.  All of the
+active inferiors of a window are maintained in a specific order, from
+highest to lowest priority.  When there is a section of the screen on
+which more than one active inferior might be displayed, the inferior
+that is earliest in the ordering, and so has the highest priority, is
+the one that gets displayed.  This ordering is like the relative heights
+of pieces of paper on a desk; the highest piece of paper at any point on
+the desk is the one that you see, and all the rest are covered up.
+
+.defmetamethod "windows and screens" :order-inferiors
+Sorts the 3tv:inferiors* list of active inferiors of
+this window or screen into the proper order for considering them
+for autoexposure or partial visibility.
+.end_defmetamethod
+
+.cindex priority
+
+The default definition of 3:order-inferiors* uses a complicated
+algorithm which is designed to put the most recently exposed windows
+first, but also allows the programmer to specify priorities explicitly.
+If you do not need to know the details, you can safely skip the rest of
+this subsection.
+
+.cindex sorting priority
+
+The algorithm involves a value assigned to each window called its
+2priority*, which may be a fixnum or 3nil*.  The general idea is
+that windows with higher numerical priority values have higher priority
+to appear on the screen.  The default value for the priority is 3nil*,
+which is considered less than any numeric value.
+
+.defmetainstvar windows tv:priority
+The window's priority value, a number or 3nil*.
+.end_defmetainstvar
+
+.defmetamethod windows :priority
+.defmetamethod1 windows :set-priority new-priority
+Get or set the window's priority value.
+.end_defmetamethod
+
+.defmetainitoption windows :priority priority
+Initializes the window's priority value.
+.end_defmetainitoption
+
+The standard ordering of inferiors puts all exposable inferiors first,
+followed by the unexposable inferiors in order of decreasing priority.
+Each group of unexposable inferiors with the same priority is order by
+how recently they were exposable; the longer an inferior has gone
+without being exposable, the farther back it moves.
+
+This is done by computing the current ordering based on the past
+ordering (as remembered by the old value of 3tv:inferiors*).  When the
+window system does anything which should change the ordering, such as
+making a window exposable or not exposable, it invokes the
+3:order-inferiors* operation to update the recorded ordering.
+
+The ordering is updated by moving the exposable windows to the
+front and sorting the unexposable ones by priority.
+The sort is 2stable*; that is, unexposable windows with the same
+priority value keep their previous ordering.  Since most of the time
+numerical priorities are not used anyway (the priorities of most windows
+are 3nil*), the ordering generally changes only as a result of
+exposure and deexposure of windows.  When a window becomes exposable it
+gets pulled up to the front of the ordering; then when other windows
+become exposable instead, this window sinks back down.  Thus, the
+ordering ends up showing simply how recently each window was exposable.
+
+.cindex burying
+
+There is also an operation called 2burying* a window, which deexposes
+the window and puts it at the end of its priority grouping in the
+ordering.  A program typically buries its window when it thinks that the
+user is not interested in that window and would prefer to see some other
+windows.  The 3Bury* command in 3Edit Screen* is a way for the user
+to bury a window.
+
+.defmetamethod windows :bury
+Buries the window.  See also 3tv:deselect-and-maybe-bury-window*,
+a convenient interface to this operation ((tv:deselect-and-maybe-bury-window-fun)).
+.end_defmetamethod
+
+.cindex negative priorities
+
+Negative priorities have a special meaning.  If the value of a window's
+priority is -1, then the window will not ever be visible at all even
+if it is only partially covered; however, it will still get autoexposed.
+If the value of priority is -2 or less, then the window will not
+even be autoexposed, and so it will simply never be seen unless
+sent an explicit 3:expose* message.
+
+.subsection Delaying Screen Management
+.cindex delaying screen management
+
+The screen manager can potentially interfere with the actions of a
+program that explicitly deexposes windows.  Suppose you send a
+3:deexpose* message to an exposed window.  The screen manager will
+run, and will probably autoexpose that very window, canceling the
+effect of the 3:deexpose*.  That window certainly does not overlap
+any still-visible windows, and it is as recently-exposed as a window
+can get, so it will be the first candidate for autoexposure.
+
+Explicit deexposure is usually done at the beginning of a sequence of
+window rearrangements.  For example, moving an exposed window is done
+by deexposing it, changing its position (which is easy when it is
+deexposed) and reexposing it.  We want the screen manager to run when
+the whole sequence is complete; it should not consider the
+transient intermediate states.  Even if the screen manager did not directly
+interfere with the program's deliberate actions, it would waste time
+and confuse the user by displaying partially visible windows in
+temporarily-unclaimed screen areas for which the program is already
+preparing a new use.  (This is a general phenomenon.  Management is a
+useful auxiliary function, but managers have a tendency to interfere with
+work they don't understand if there is no way to shut them off.)
+
+We shut the screen manager off with the special form
+3tv:delaying-screen-management*.  While its body is being executed,
+events that would normally bring about screen management are recorded
+on a queue instead.  When the 3tv:delaying-screen-management* form
+is exited (whether normally or by throwing), the screen manager looks
+at the queue and does all necessary screen management in one blow.
+
+Sometimes it happens that screen management cannot be done when the
+3tv:delaying-screen-management* form is exited, because relevant
+windows are locked by other processes.  Then the entries are left on
+the queue.  They are handled at some later time when the necessary
+locks are free by a background process called 3Screen Manager
+Background*.  So the necessary screen management always does
+eventually get done.
+
+When 3tv:delaying-screen-management* forms are nested,
+only the outermost one will do any screen management when it is exited.
+
+.defspec tv:delaying-screen-management body...
+The body forms are evaluated sequentially with screen management delayed.
+The value of the last form is returned.
+.end_defspec
+
+.defspec tv:without-screen-management body...
+The body forms are evaluated seqentially with screen management delayed.
+Moreover, if the body completes normally, the queue entries put on by
+its execution are removed from the queue, on the assumption that the body
+has itself done all appropriate screen redisplay.  If the body terminates
+abnormally with a throw, the queued entries remain on the queue and
+are processed by the screen manager eventually.
+.end_defspec

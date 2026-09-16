@@ -1,0 +1,644 @@
+.c -*-Mode:Bolio; Lowercase:Yes;-*-
+
+.chapter Fonts
+.setq font-section section-page
+
+Having used the Lisp Machine for a while, you have probably noticed
+that characters can be typed out in any of a number of different
+typefaces.  Some text is printed in characters that are small or large,
+boldface or italic, or in different styles altogether.  Each such
+type face is called a 2font*.  A font is conceptually an array,
+indexed by character code, of pictures showing how each character
+should be drawn on the screen.
+
+A font is represented inside the Lisp Machine as a Lisp object.  Each
+font has a name.  The name of a font is a symbol, usually in the
+3fonts* package, and the symbol is bound to the font.  A typical font
+name is 3tr8*.  In the initial Lisp environment, the symbol
+3fonts:tr8* is bound to a font object whose printed representation is
+something like
+.lisp
+#<font tr8 234712342>
+.end_lisp
+The initial Lisp environment includes many fonts.  Usually there are
+more fonts stored in QFASL files in file computers.  New fonts can
+be created, saved in QFASL files, and loaded into the Lisp environment;
+they can also simply be created inside the environment.
+
+Drawing of characters in fonts is done by microcode and is very fast.
+The internal format of fonts is arranged to make this drawing as fast
+as possible.  This format is described later, but you almost certainly
+do not need to worry about it.
+
+.section Specifying Fonts
+
+.cindex font map
+.cindex current font
+
+You can control which font is used when output is done to a window.
+Every window has a 2font map* and a 2current font*.  The font map
+is conceptually an array of fonts; with a small non-negative number,
+the font map associates a font.  The current font of a window is always
+one of the fonts in the window's font map.  Whenever output is done to
+a window, the characters are printed in the current font.  You can
+change the font map and the current font of a window at any time with
+the appropriate operations.
+
+The reason why the window has a font map rather than merely a current font
+is that it is necessary to know all the fonts that will be used before doing
+any output in order to know how to position the output properly (so that
+output in different fonts on the same line will look right).
+
+In addition, certain output operations can accept fat strings (arrays of
+type 3art-fat-string*) which contain 16-bit characters, and regard the
+top 8 bits of each character as a font number to look up in the font
+map.  These include 3:compute-motion*, 3:string-length* and
+3:fat-string-out*.
+
+.defmetamethod windows :font-map
+Returns the font map of the window.  The object returned is the array
+that is actually being used to represent the font map inside the window.
+The elements are actual font objects.
+
+You should not alter anything about this array, since the window depends
+on it in order to function correctly.  To change the font map, use the
+3:set-font-map* operation.
+.end_defmetamethod
+
+.defmetamethod windows :set-font-map new-map
+Sets the font map to contain the fonts given in 2new-map*.  Returns the
+array of fonts that actually represents the font map inside the window
+(don't mess with this array!).  2new-map* may be an array of font
+specifiers, in which case this array is installed as the new internal
+array of the window, and the font specifiers are replaced by fonts.
+Font specifiers are described in the following section; a font or the
+name of a font may be used.
+
+2new-map* may also be a list of font specifiers, in which case the
+array is created from the list in the style of 3fillarray*, with the
+last element of the list filling in the remaining elements of the array
+if any (the array is made at least 26. elements long, or long enough to
+hold all the elements of the list).
+
+If 2new-map* is 3nil*, all the elements of the map are set to the
+default font of the screen.
+
+The current font is set to zero (the first font in the list or array).
+The line height and baseline of the window are adjusted appropriately
+(see below).
+
+The specified font specifiers are remembered so that the
+3:change-of-default-font* operation can cause the map to be recomputed
+from them.  This is in case one of the specifiers is a purpose keyword.
+.end_defmetamethod
+
+.defmetainitoption windows tv:font-map new-map
+This option lets you initialize the font map.  2new-map* is
+interpreted the same way it is interpreted by the 3:set-font-map*
+operation.
+.end_defmetainitoption
+
+.defmetainstvar windows tv:font-map
+The window's font map.
+.end_defmetainstvar
+
+.defmetamethod windows :current-font
+Returns the current font, as a font object.
+.end_defmetamethod
+
+.defmetamethod windows :set-current-font new-font
+Sets the current font of the window.  2new-font* may be a number, in
+which case that element of the font map becomes the current font.  It
+may also be a font specifier, in which case the font that the
+specifier describes is used, unless that font is not in the font map,
+in which case an error is signalled.  Only fonts already in the font
+map may be selected.
+.end_defmetamethod
+
+.defmetainstvar windows tv:current-font
+The window's current font.
+.end_defmetainstvar
+
+.defmetamethod windows :baseline
+Returns the maximum baseline of all the fonts in the font map.  The
+bases of all characters will be aligned so as to be this many pixels
+below the 2y* cursor position, which is top of the line on which the
+characters are printed.  In other words, when a character is drawn, it
+will be drawn below the cursor position, by an amount equal to the
+difference between this number and the baseline of the font of the
+character.
+.end_defmetamethod
+
+.defmetainstvar windows tv:baseline
+The position of the baseline of a text line, in pixels from the top of
+the line's vertical extent (its cursor position).
+.end_defmetainstvar
+
+.defun tv:sheet-font-map window
+.defun1 tv:sheet-baseline window
+.defun1 tv:sheet-current-font window
+Accessor defsubsts for the corresponding instance variables.
+.end_defun
+
+You can use the 3List Fonts* command in Zmacs to get a list of all of the
+fonts that are currently loaded into the Lisp environment.  Here is a list
+of some of the useful fonts:
+
+.table 3
+.item fonts:cptfont
+This is the default font, used for almost everything.
+.item fonts:medfnt
+This is the default font in menus.  It it a fixed-width font with
+characters somewhat larger than those of 3cptfont*.
+.item fonts:medfnb
+This is a bold version of 3medfnt*.  When you use 3Split Screen*,
+for example, the 3Do It* and 3Abort* items are in this font.
+.item fonts:hl12i
+This is a variable-width italic font.  It is useful for italic items
+in menus; ZMail uses it for this in several menus.
+.item fonts:tr10i
+This is a very small italic font.  It is the one used by the inspector
+to say "2More above*" and "2More below*".
+.item fonts:hl10
+This is a very small font used for non-selected items in Choose Variable
+Values windows.
+.item fonts:hl10b
+This is a bold version of 3hl10*, used for selected items in Choose
+Variable Values windows.
+.end_table
+
+.subsection Font Specifiers
+
+Different kinds of screen require different kinds of fonts.  The two
+kinds of screens currently supported are black-and-white screens with
+one bit per pixel, and color screens with four bits per pixel.  Color
+screens with eight bits per pixel will certainly be supported in the
+near future, and other kinds of screen may appear.  However, it is nice
+to be able to write programs that will work no matter what screen their
+window is created on.  The problem is that if your program
+specifies which fonts to use by actually naming specific fonts, then the
+program will only work if the window that you are using is on the same
+kind of screen as the fonts you are using were designed for.
+
+.cindex font specifier
+.setq font-specifier page
+
+To solve this problem, a program does not have to specify the actual
+font to be used.  Instead, it specifies a certain symbol that stands
+for a whole collection of fonts.  All of these fonts are the same
+except that they work on different kinds of screens.  The symbol that
+you use is the name of the member of the collection that works on the
+black-and-white screen.  In other words, when you want to specify a
+font, always use the name of a black-and-white font rather than a font
+itself.  Every screen knows how to understand these symbols and find an
+appropriate font to use.  This symbol is called a 2font specifier*,
+because it describes a font rather than actually being a font.
+
+A font object may be supplied as a font specifier.  This does not mean
+to use the font as specified; it means to use the font's name as a font
+specifier.  Thus, if you supply the font object for the black-and-white
+font 3cptfont* for a window on a color screen, the symbol
+3fonts:cptfont* is used as a font specifier, resulting in the color
+version of 3cptfont* actually being used.
+
+The functions that understand font specifiers have some cleverness in
+order to make life easier for you.  If you pass in the name of a font
+that is not loaded into the Lisp environment, an attempt will be made to
+load it from the file server, using the name of the font as the name of
+the file, leaving the version and type unspecified, using the 3load*
+function.  The filename used is 3SYS: FONTS; 2fontname* QFASL*.
+Also, the color screen knows how to create color versions of fonts on
+the fly if they do not already exist.  Either of these things may make
+your program run slowly the first time you run it, and so, if you care,
+you can load the file yourself and create a color version of the font
+yourself (see (color:make-color-font-fun)).
+
+.cindex font purposes
+.setq font-purposes page
+Since different users like to use different fonts, we provide a facility
+called 2font purposes*.  Wherever a font specifier is used, the
+program can specify a 2purpose* keyword instead.  This means, "use
+whatever font the user likes to use for this particular purpose".
+The window remembers when a purpose was specified instead of a
+particular font, so that if the user changes the standard font for that
+purpose, all the existing windows that were told to use that purpose
+will change font.  The user specifies a standard font for a purpose with
+3tv:set-default-font*, 3tv:set-standard-font* or
+3tv:set-screen-standard-font*.  Each screen has its own alist mapping
+font purposes to font names, but normally they are all altered in
+parallel.  Defined purpose keywords include
+.table 3
+.xitem :default "font purpose"
+This is the font name for ordinary output.  It is also called
+the 2default font*.
+.xitem :menu "font purpose"
+This is the font name for use in most menu items.
+.xitem :menu-standout "font purpose"
+This is the font name for menu items that are supposed to stand out.
+It is normally an italic font.
+.xitem :label "font purpose"
+This is the font name used by default for labels.
+.xitem :margin-choice "font purpose"
+This is the default font name for margin choice boxes (see (margin-choice)).
+.end_table
+
+
+It is up to each program to decide when any of these purpose keywords is appropriate.
+
+.defmethod tv:screen :parse-font-specifier font-specifier
+Parses a font specifier in the proper way for this window,
+according to the screen the window is on.  The value is a font object.
+.end_defmethod
+
+.defmethod tv:screen :parse-font-name font-specifier
+Parses a font specifier in the proper way for this window,
+according to the screen the window is on.  The value is a font name:
+a symbol which, evaluated repeatedly, ultimately produces a font.
+.end_defmethod
+
+.defun tv:font-evaluate font-name
+Returns the font that 2font-name* is the name of; this is done by
+evaluating 2font-name* repeatedly until the result is not a symbol.
+.end_defun
+
+.defun tv:set-standard-font purpose font-specifier
+Sets the standard font for purpose 2purpose* on each screen based on
+2font-specifier*.  2font-specifier* is turned into a font by each
+screen individually, and that font becomes the new standard font for
+2purpose* on that screen.  All windows on the screen that were
+set up to use the standard font for this purpose will switch to using
+the newly specified font.
+.end_defun
+
+.defun tv:set-default-font font-specifier
+Sets the standard font for purpose 3:default*.
+.end_defun
+
+.defun tv:set-screen-standard-font screen purpose font-specifier
+Sets the standard font for 2purpose* on 2screen* only.
+.end_defun
+
+.defmetamethod windows :change-of-default-font old-font new-font
+Informs the window that the meaning of some standard font-name symbols
+has changed.  If the window uses any of them, it may need to recompute
+various things; for example, if that font is used in the label, the
+window's inside size may be changed; if it is used in the window's font
+map, the line height may be changed.  Either one means the number of
+lines may change, and this may require adjustment of other data.
+This can be done by an 3:after* daemon on this operation.
+
+In addition, the operation must be passed along to all inferiors and
+potential inferiors.
+.end_defmetamethod
+
+.section Attributes of Fonts
+
+.cindex character height
+
+Fonts, and characters in fonts, have several interesting attributes.
+One attribute of each font is its 2character height*.  This is a
+non-negative fixnum used to figure out how tall to make the lines in a
+window.  We have mentioned earlier that each window has a certain
+2line height*.  The line height is computed by examining each font in
+the font map, and finding the one with the largest character height.
+This largest character height is added to the 2vsp* specified for the
+window (see (vsp)), and the sum is the line height of the window.  The
+line height, therefore, is recomputed every time the font map is
+changed or the 2vsp* is set.  It works this way so that there will
+always be enough room on any line for the largest character of the
+largest font to be displayed, and still leave the specified vertical
+spacing between lines.  One effect of this is that if you have a window
+that has two fonts, one large and one small, and you do output in only
+the small font, the lines will still be spaced far enough apart that
+characters from the large font will fit.  This is because the window
+system can't predict when you might, in the middle of a line, suddenly
+switch to the large font.
+
+.cindex baseline
+.setq font-baseline page
+
+Another attribute of a font is its 2baseline*.  The baseline is a
+non-negative fixnum that is the number of raster lines between the top
+of each character and the base of the character.  (The "base" is
+usually the lowest point in the character, except for letters that
+descend below the baseline such as lower case "p" and "g".)  This
+number is stored so that when you are using several different fonts
+side-by-side, they will be aligned at their bases rather than at their
+tops or bottoms.  So when you output a character at a certain cursor
+position, the window system first examines the baseline of the current
+font, then draws the character in a position adjusted vertically to make
+the bases of all the characters line up.
+
+.cindex character width
+
+There is another attribute called the 2character width*.  This can be
+an attribute either of the font as a whole, or of each character
+separately.  If there is a character width for the whole font, it is as
+if each character had that character width separately.  The character
+width is the amount by which the cursor position should be moved to the
+right when a character is output on the window.  This can be different
+for different characters if the font is a variable-width font, in which
+a "W" might be much wider than an "i".  Note that the character width
+does not necessarily have anything to do with the actual width of
+the bits of the character (although it usually does); it is just defined
+to be the amount by which the cursor should be moved.
+
+.cindex left kern
+.setq font-left-kern page
+
+There is another attribute that is an attribute of each character
+separately; it is called the 2left kern*.  Usually it is zero, but it
+can also be a positive or negative fixnum.  When the window system
+draws a character at a given cursor position, and the left kern is
+non-zero, then the character is drawn to the left of the cursor
+position by the amount of the left kern, instead of being drawn exactly
+at the cursor position.  In other words, the cursor position is
+adjusted to the left by the amount of the left kern of a character when
+that character is drawn, but only temporarily; the left kern
+affects only where the single character is drawn and does not have any
+cumulative effect on the cursor position.
+
+.cindex fixed-width font
+.cindex variable-width font
+
+A font that does not have separate character widths for each character
+and does not have any non-zero left kerns is called a 2fixed-width*
+font.  The characters are all the same width and so they line up in
+columns, as in typewritten text.  Other fonts are called 2variable-width*
+because different characters have different widths and things do not line
+up in columns.  Fixed-width fonts are typically used for programs, where
+columnar indentation is used, while variable-width fonts are typically used
+for English text, because they tend to be easier to read and to take less
+space on the screen.
+
+.cindex blinker width
+.cindex blinker height
+
+Each font also has attributes called the 2blinker width* and
+2blinker height*.  These are two non-negative fixnums that tell the
+window system a nice-looking width and height to make a rectangular
+blinker for characters in this font.  These attributes are completely
+independent of everything else and are used only for making blinkers.
+Using a fixed width blinker for a variable-width font is not the
+nicest-looking thing to do; instead, the editor actually re-adjusts
+its blinker width as a function of what character it is on top of,
+making a wide blinker for wide characters and a narrow blinker for
+narrow characters.  But if you don't want to go to this trouble, or
+don't necessarily know just which character the blinker is on top of,
+you can just use the font's blinker width as the width of your
+blinker.  For a fixed-width font there's no problem.
+
+.cindex char-exists table
+
+There is also an array for each font called the 2char-exists* table.
+It is an 3art-1b* array with a 1 for each character that actually
+exists in the font, and a 0 for other characters.  This table is not
+used by the character-drawing software; it is just for informational
+purposes.  Characters that do not exist have pictures with no bits "on"
+in them, just like the "space" character.  Most fonts implement most of the
+printing characters in the character set, but some are missing some
+characters.
+
+.section Format of Fonts
+
+This section explains the internal format in which fonts are
+represented.  Most users do not need to know anything about this
+format; you can skip this section without loss of continuity.
+
+.cindex font format
+
+Fonts are represented as arrays.  The body of the array holds the bits
+of the characters, and the array leader holds the attributes of the
+font and characters as well as information about the format of the body of
+the array.  Note that there is only one big array holding all the
+characters, rather than a separate array for each character.  The
+format in which the bits are stored is specially designed to maximize
+the speed of character drawing and to minimize the size of the data
+structure, and so it is not as simple you might expect.
+
+FED operates on fonts by converting them into a different type of
+object containing the same data.  This new object is called a 2font
+descriptor*; it is simpler and easier to work with.  See the files
+3SYS: IO1; FNTDEF LISP* for the format of font descriptors, and
+3SYS: IO1; FNTCNV LISP* for functions to operate on them, and to
+convert between font descriptors and fonts.
+
+.cindex wide fonts
+
+The font format works slightly differently depending on whether the
+font contains any characters that are wider than thirty-two bits.  If
+there are any such characters, then the font is considered to be
+"wide", and a single character may be made up of several subcharacters
+to be drawn side by side.  A wide font stores subcharacters instead of
+characters as such, and has a table indicating which subcharacters
+belong to each character of the character set.  For the time being,
+we will discuss only narrow fonts in which there is no need to
+distinguish characters from subcharacters because each character
+is made of a single subcharacter.
+
+.cindex raster width
+.cindex raster height
+
+Each character in a font has an array of bits stored for it.
+The dimensions of this array are called the 2raster width* and
+2raster height*.  The raster width and raster height are the same for
+every character of a font; they are properties of the font as
+a whole, not of each character separately.  Consecutive rows are stored
+in the array; the number of rows per character is the raster height,
+and the number of bits per row is the raster width.  An integral
+number of rows are stored in each word of the array; if there are any
+bits left over, those bits are unused.  Thus no row is ever split over a
+word boundary.  Rows are stored right-adjusted, from right to left.
+When there are more rows than will fit into a word, the next word is
+used; remaining bits at the left of the first word are ignored, and the
+next row is stored right-adjusted in the next word, and so on.  An
+integral number of words is used for each character.
+
+For example, consider a font in which the widest character is seven
+bits wide and the tallest character is six bits tall.  The raster
+width of the font is seven and the raster height is six.
+Each row of a character is seven bits, and so four of them
+fit into a thirty-two bit word, with four bits wasted.  The remaining
+two rows require a second word, the rest of which will be unused
+because the number of words per character must be an
+integer.  So this font will have four rows per word, and two
+words per character.  To find the bits for character three of the font,
+you multiply the character number, three, by the number of
+words per character, two, and find that the bits for character three
+start in word six.  The rightmost seven bits of word six are the first
+row of the character, the next seven bits are the second row, and so
+on.  The rightmost seven bits of the seventh word are the fifth row,
+and the next seven bits of the seventh word are the sixth and last row.
+
+Note that we have been talking about "words" of the array.  The
+character-drawing microcode does not actually care what type the
+array is; it only looks at machine words as a whole, unlike most of the
+array-referencing in the Lisp Machine.  In a Lisp-object-holding array
+such as an 3art-q* array, the leftmost eight bits are not under control
+of the user, and so these kinds of arrays are not suitable for fonts.
+In general, you need to be able to control the contents of every bit in
+the array, and so usually fonts are 3art-1b* arrays.  This means you
+need to know the internal storage layout of bits within an 3art-1b*
+array in order to fully understand the font format, so here it is: the
+zeroth element of an 3art-1b* array is the rightmost bit of the
+zeroth word, and successive elements are stored from right to left in
+that word.  The thirty-third element is the rightmost bit in the next
+word, and so on.
+
+.cindex font indexing table
+
+Now, if there are any characters in the font that are wider than
+32 bits, then even a single row of the font will not fit into a
+word.  Such characters are divided into subcharacters no more than
+32 bits wide, and the character is drawn by drawing all its subcharacters,
+one by one, side by side.  The character drawing microcode can only
+handle ordinary narrow characters, and it is invoked once for each
+subcharacter in order to draw a wide character.  In order to make this
+work, the wide font stores subcharacters in the same way a narrow
+font stores its characters.
+
+In addition, the wide font has a 2font indexing table* which gives
+the first subcharacter number for each character code.  (In a narrow
+font, the font indexing table is 3nil*.)  The character 7W* would
+be drawn by finding the value at index 127 (the code for 7W*) in the
+font indexing table, and the value at index 130.  Suppose that these
+are 171 and 173.  Then 7W* is made up of subcharacters 171 and 172.
+Either of these subcharacters' bits can be found in the same way that
+the bits for character code 171 or 172 would be found in a narrow
+font.
+
+The array leader of a font is a structure defined by 3defstruct*.
+Here are the names of the accessors for the elements of the array
+leader of a font.
+
+.defun tv:font-name font
+The name of the font.  This is a symbol whose value is the font and
+which serves to name the font.  The print-name of this symbol appears
+in the printed representation of the font.
+.end_defun
+
+.defun tv:font-char-height font
+The character height of the font; a non-negative fixnum.
+.end_defun
+
+.defun tv:font-char-width font
+The character width of the characters of the font; a non-negative
+fixnum.  If the 3tv:font-char-width-table* of this font is non-3nil*,
+then this element is ignored except that it is used to compute the
+distance between horizontal tab stops; it is typically the width
+of a lower-case "m".
+.end_defun
+
+.defun tv:font-baseline font
+The baseline of this font; a non-negative fixnum.
+.end_defun
+
+.defun tv:font-char-width-table font
+If this is 3nil* then all the characters of the font have the same
+width, and that width is given by the 3tv:font-char-width* of the
+font.  Otherwise, this is an 3art-q* array of non-negative fixnums,
+one for each logical character of the font, giving the character width
+for that character.  The array 2must* be an 3art-q* array for the
+sake of the 3sys:%string-translate* function.
+.end_defun
+
+.defun tv:font-left-kern-table font
+If this is 3nil* then all characters of the font have zero left
+kern.  Otherwise, this is an array of fixnums, one for each logical
+character of the font, giving the left kern for that character.
+.end_defun
+
+.defun tv:font-blinker-width font
+The blinker width of the font.
+.end_defun
+
+.defun tv:font-blinker-height font
+The blinker height of the font.
+.end_defun
+
+.defun tv:font-chars-exist-table font
+This is an 3art-1b* array with one element for each logical character
+of the file.  The element is 1 if the character exists and 0
+if the character does not exist.
+.end_defun
+
+.defun tv:font-raster-height font
+The raster height of the font; a positive fixnum.
+.end_defun
+
+.defun tv:font-raster-width font
+The raster width of the font; a positive fixnum.
+.end_defun
+
+.defun tv:font-rasters-per-word font
+The number of rows of a character stored in each word of the font;
+a positive fixnum.
+.end_defun
+
+.defun tv:font-words-per-char font
+The number of words stored for each character or subcharacter; a
+positive fixnum.
+.end_defun
+
+.defun tv:font-indexing-table font
+If this is 3nil*, then no characters of this font are wider
+than thirty-two bits.  Otherwise, this is the font indexing table
+of the font, an array indexed by character code, containing
+the number of the first subcharacter for that character code.
+There is an extra array element at an index one greater than
+the largest character code; it says where the subcharacters
+of the largest character code stop.
+.end_defun
+
+.section Color Fonts
+
+We mentioned earlier that you need to use different fonts to draw on
+different kinds of screen.  To draw on a color screen, you must use a
+color font.  If you just pass in a font specifier when you specify an
+element of a font map, then a color version of that font will be
+created if there isn't one already, and it will be used as the font.
+
+A color font is almost the same as a regular black-and-white font
+except that for each pixel there are many bits.  For example, for a
+four-bit color display (the only type presently supported), there are
+four bits for each pixel.  While nothing prevents each pixel of a font
+from having any value it wants, usually each pixel is either zero or
+one other specific value; that is, color fonts do not usually have
+multicolored characters in them, or two characters of different color.
+
+Color fonts can be created from black-and-white fonts by the following
+function:
+
+.defun color:make-color-font bw-font &optional (color 317*) (suffix 3""*)
+Creates and returns a new font.  2bw-font* should be an existing
+black-and-white font.  The new font has all the same attributes as
+2bw-font*, and each character has the same attributes as the
+corresponding character in 2bw-font*.  For each zero-valued pixel in
+2bw-font*, the pixel in the new font is zero as well.  For each
+one-valued pixel in 2bw-font*, the pixel in the new font has value
+2color*.  The name of the new font is formed by appending "color-",
+the print-name of the name of 2bw-font*, and 2suffix* together to
+form a string, and then interning that string in the 3fonts* package.
+.end_defun
+
+When a font specifier is examined and the window system decides to
+make a color version of the font, it calls 3color:make-color-font*
+with only one argument, letting the others default.  So, for example,
+if a color version of 3fonts:foo-font* is automatically created, its
+name will be 3fonts:color-foo-font*, and its pixels will have the
+value 17 wherever those in the original font have the value one.
+However, you can call 3color:make-color-font* to make many color
+versions of the same black-and-white font, each in a different color.
+
+Something to keep in mind when using color fonts is that when
+characters of a color font are drawn, onto a color window, and the
+2char-aluf* of the window is 3tv:alu-ior* (as it normally is), then
+the bits of the pixels of the character will be bit-wise "or"'ed with
+the existing bits in the pixels of the window.  If the existing bits
+(that is, the background against which the character is being drawn)
+are all zero, there's no problem.  But if they are not, the resulting
+values of the pixels will be some color determined by a bit-wise "or"
+of two color values, which is unlikely to yield meaningful results.
+Unless this is actually what you want, you should make sure that the
+background is made of zeroes before drawing characters onto a color
+window.

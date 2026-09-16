@@ -1,0 +1,45 @@
+; -*- Mode:Lisp; Lowercase:True -*-
+
+; Bolio init file for window system documentation (WINDOC version)
+
+(load '|src:<l.man>manual.bolio|)
+
+(default-manual-style t '|Window System Manual| 'DOVER 10.)
+
+;Make function-index and variable-index not index tv: stuff under tv:,
+; only under the root name.
+(deflisting function-index
+  (:type :index
+      (:losing-package-prefixes tv)
+      (:package-prefix-mode :twice)
+      (:leading-between-initial-letters 150.)))
+
+(deflisting variable-index
+  (:type :index
+     (:losing-package-prefixes tv)
+     (:package-prefix-mode :twice)
+     (:leading-between-initial-letters 150.))
+  (:columns 2))
+
+(deflisting flavor-and-resource-index
+  (:type :index
+    (:losing-package-prefixes tv)
+    (:package-prefix-mode :twice)
+    (:leading-between-initial-letters 150.))
+  (:title |Flavor and Resource Index|)
+  (:columns 2))
+
+(deflisting flavor-index
+  (:type :index))
+(deflisting resource-index
+  (:type :index))
+
+
+(defprop flavor-index flavor-and-resource-index listing-indirect-to)
+(defprop resource-index flavor-and-resource-index listing-indirect-to)
+
+(defprop initoption-index keyword-index listing-indirect-to)
+
+(setq sorted-trailing-listings
+      '(concept-index message-index keyword-index flavor-and-resource-index
+	variable-index function-index))

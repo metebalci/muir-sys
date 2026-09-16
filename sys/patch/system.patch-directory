@@ -1,0 +1,7 @@
+;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
+;;; Written 16-Mar-23 02:51:21 by AMS,
+;;; while running on Lisp Machine One from band 2
+;;; with System 99.32, microcode 322.
+
+
+("System" 100) 

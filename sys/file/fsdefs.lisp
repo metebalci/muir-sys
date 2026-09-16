@@ -1,0 +1,886 @@
+;;; -*- Mode: Lisp; Base: 10.; Package: File-System; Readtable: T -*-
+;;;; Basic Structures
+
+(DEFVAR LOCAL-FILE-SYSTEM-AREA
+	(MAKE-AREA ':NAME 'LOCAL-FILE-SYSTEM-AREA
+		   ':GC ':TEMPORARY
+		   ':ROOM T)
+  "All of the internal structures made by the file system are consed in this area.
+It may be reset only when the file system is dismounted.")
+
+(DEFSTRUCT (DISK-CONFIGURATION (:TYPE :NAMED-ARRAY)
+			       (:CONC-NAME DC-)
+			       (:ALTERANT NIL)
+			       (:MAKE-ARRAY (:AREA LOCAL-FILE-SYSTEM-AREA))
+			       (:DEFAULT-POINTER DISK-CONFIGURATION))
+  VERSION					;The version of the format on disk
+  PARTITION-SIZE
+  PUT-BASE					;Relative address of the page usage table
+  PUT-SIZE
+  ROOT-DIRECTORY				;The root directory.
+  )
+
+(DEFSTRUCT (DIRECTORY (:TYPE :NAMED-ARRAY)
+		      :CONC-NAME
+		      (:ALTERANT NIL)
+		      (:MAKE-ARRAY (:AREA LOCAL-FILE-SYSTEM-AREA)))
+  NAME						;The name of the directory
+  LOCK						;The lock associated with the directory
+  MAP						;The map of the directory.
+  FILES						;The files specified in the map.
+  )
+
+(DEFSTRUCT (BASIC-FILE (:TYPE :NAMED-ARRAY)
+		       (:CONC-NAME FILE-)
+		       (:CONSTRUCTOR NIL)
+		       (:ALTERANT NIL))
+  NAME						;A string.
+  LOCK						;A contention lock.
+  MAP						;The map of the data.
+  FILES						;Used only if the file is a directory.
+  TYPE						;A string.
+  VERSION					;A number (16b).
+  )
+
+(DEFSTRUCT (FILE (:TYPE :NAMED-ARRAY)
+		 (:INCLUDE BASIC-FILE)
+		 :CONC-NAME
+		 (:MAKE-ARRAY (:AREA LOCAL-FILE-SYSTEM-AREA)))
+  DEFAULT-BYTE-SIZE
+  OVERWRITE-FILE				;Links overwriting/overwritten files.
+  AUTHOR-INTERNAL				;A string
+  CREATION-DATE-INTERNAL			;A number (32 bits)
+  DIRECTORY					;Mommy.
+  OPEN-COUNT					;The number of times this file is open
+						;-1 if open for overwrite.
+  ATTRIBUTES					;A 16-bit word of common properties
+  PLIST						;Arbitrary properties.
+  )
+
+(DEFSTRUCT (LINK (:TYPE :NAMED-ARRAY)
+		 (:INCLUDE BASIC-FILE)
+		 :CONC-NAME
+		 (:ALTERANT NIL)
+		 (:MAKE-ARRAY (:AREA LOCAL-FILE-SYSTEM-AREA)))
+  TO-STRING					;The string linked to, ie "AI: DLA; FOO >"
+  )
+
+;;;; Property Bit Definitions
+
+(DEFVAR ATTRIBUTES (MAKE-ARRAY 16.))
+
+(DEFMACRO DEFINE-ATTRIBUTES (&BODY NUMBERS-AND-NAMES)
+  `(PROGN 'COMPILE
+	  . ,(LOOP FOR (NUMBER NAME) ON NUMBERS-AND-NAMES BY #'CDDR
+		   NCONCING `((DEFPROP ,NAME ,(1+ (* NUMBER 64.)) ATTRIBUTE)
+			      (ASET ',NAME ATTRIBUTES ,NUMBER)))))
+
+(DEFINE-ATTRIBUTES
+  0  :DONT-DELETE				;File cannot be deleted if on.
+  1  :CLOSED					;File is still being written if off.
+  2  :DELETED					;File is deleted but still open somewhere.
+  3  :DUMPED					;File has been dumped
+  4  :DONT-REAP					;Dont reap this file (not used internally)
+  5  :CHARACTERS				;The file is a CHARACTERS file.
+  6  :DIRECTORY					;The file is a subdirectory.
+
+; 10 :QFASLP
+; 11 :LISP					;Obsolete
+; 12 :TEXT					;Obsolete
+; 13 :MAY-BE-REAPED				;This bit is used by reaping programs.
+						;If it is on, the file is liable to be
+						;reaped.  Also, a reaping program may
+						;turn it on as a warning that it is liable
+						;to be reaped the next time around.
+  )
+
+(DEFSUBST FILE-ATTRIBUTE (FILE INDICATOR)
+  (LDB-TEST (GET INDICATOR 'ATTRIBUTE) (FILE-ATTRIBUTES FILE)))
+
+(DEFPROP FILE-ATTRIBUTE
+	 ((FILE-ATTRIBUTE FILE INDICATOR) .
+	  (SET-FILE-ATTRIBUTE FILE SI:VAL INDICATOR))
+	 SETF)
+
+(DEFUN SET-FILE-ATTRIBUTE (FILE VAL INDICATOR)
+  (SETF (FILE-ATTRIBUTES FILE)
+	(DPB (IF VAL 1 0) (GET INDICATOR 'ATTRIBUTE) (FILE-ATTRIBUTES FILE)))
+  (NOT (NULL VAL)))
+
+;;; Syntax for attributes.
+
+(DEFSUBST FILE-CLOSED? (FILE)
+  (FILE-ATTRIBUTE FILE ':CLOSED))
+
+(DEFSUBST FILE-DELETED? (FILE)
+  (FILE-ATTRIBUTE FILE ':DELETED))
+
+(DEFSUBST DIRECTORY? (FILE)
+  (FILE-ATTRIBUTE FILE ':DIRECTORY))
+
+(DEFSUBST ROOT-DIRECTORY? (FILE)
+  (NULL (FILE-DIRECTORY FILE)))
+
+(DEFSUBST FILE-NPAGES (FILE)
+  (MAP-NPAGES (FILE-MAP FILE)))
+
+;;;; Maps
+
+(DEFSUBST MAP-NBLOCKS (MAP)
+  (ARRAY-LEADER MAP 0))
+
+(DEFSUBST MAP-BLOCK-LOCATION (MAP INDEX)
+  (AREF MAP INDEX 0))
+
+(DEFSUBST MAP-BLOCK-SIZE (MAP INDEX)
+  (AREF MAP INDEX 1))
+
+;;;; Printers
+
+(DEFSELECT FILE-NSI
+  (:PRINT-SELF (FILE STREAM IGNORE IGNORE)
+    (SI:PRINTING-RANDOM-OBJECT (FILE STREAM :NO-POINTER)
+      (COND ((DIRECTORY? FILE)
+	     (FORMAT STREAM "LMFS-Directory~{ ~A~}" (DIRECTORY-FULL-NAME FILE)))
+	    (T
+	     (FORMAT STREAM "LMFS-File ~S"
+		     (LM-NAMESTRING NIL NIL
+				    (DIRECTORY-FULL-NAME (FILE-DIRECTORY FILE))
+				    (FILE-NAME FILE)
+				    (FILE-TYPE FILE)
+				    (FILE-VERSION FILE))))))))
+
+(DEFSELECT DIRECTORY-NSI
+  (:PRINT-SELF (DIRECTORY STREAM IGNORE IGNORE)
+    (SI:PRINTING-RANDOM-OBJECT (DIRECTORY STREAM :TYPEP :NO-POINTER)
+      (PRIN1 (DIRECTORY-NAME DIRECTORY) STREAM))))
+
+(DEFUN DIRECTORY-FULL-NAME (DIRECTORY)
+  (AND (NOT (ROOT-DIRECTORY? DIRECTORY))
+       (APPEND (DIRECTORY-FULL-NAME (FILE-DIRECTORY DIRECTORY))
+	       (LIST (DIRECTORY-NAME DIRECTORY)))))
+
+(DEFSELECT MAP-NSI
+  (:PRINT-SELF (MAP STREAM IGNORE IGNORE)
+    (SI:PRINTING-RANDOM-OBJECT (MAP STREAM :TYPEP)
+      (FORMAT STREAM "~D block~:P" (MAP-NBLOCKS MAP))))
+  (:DESCRIBE (MAP) (DESCRIBE-MAP MAP)))
+
+(DEFPROP FILE	   FILE-NSI	 NAMED-STRUCTURE-INVOKE)
+(DEFPROP LINK	   FILE-NSI	 NAMED-STRUCTURE-INVOKE)
+(DEFPROP DIRECTORY DIRECTORY-NSI NAMED-STRUCTURE-INVOKE)
+(DEFPROP MAP	   MAP-NSI	 NAMED-STRUCTURE-INVOKE)
+
+;;; Randomness.
+
+(DEFUN LMFS-KEYWORD-OPTION (OPTIONS KEYWORD DEFAULT)
+  (COND ((NULL OPTIONS)
+	 DEFAULT)
+	((EQ KEYWORD (CAR OPTIONS))
+	 (CADR OPTIONS))
+	(T
+	 (LMFS-KEYWORD-OPTION (CDDR OPTIONS) KEYWORD DEFAULT))))
+
+;;;; Locking Macros
+
+(DEFMACRO LOCKING (LOCK &BODY BODY)
+  "Execute BODY with LOCK locked."
+  (LET ((LOCK-CELL (GENSYM)))
+    `(LET ((,LOCK-CELL (LOCF ,LOCK)))
+       (UNWIND-PROTECT
+	 (PROGN (PROCESS-LOCK ,LOCK-CELL) . ,BODY)
+	 (%STORE-CONDITIONAL ,LOCK-CELL CURRENT-PROCESS NIL)))))
+
+(DEFMACRO LOCKING-RECURSIVELY (LOCK &BODY BODY)
+  "Execute BODY with LOCK locked; don't die if already locked."
+  (LET ((LOCK-CELL (GENSYM))
+	(LOCK-OWNED (GENSYM)))
+    `(LET* ((,LOCK-CELL (LOCF ,LOCK))
+	    (,LOCK-OWNED (EQ (CAR ,LOCK-CELL) CURRENT-PROCESS)))
+       (UNWIND-PROTECT
+	 (PROGN (IF (NOT ,LOCK-OWNED)
+		    (PROCESS-LOCK ,LOCK-CELL))
+		. ,BODY)
+	 (IF (NOT ,LOCK-OWNED)			;unlock it only if you locked it.
+	     (%STORE-CONDITIONAL ,LOCK-CELL CURRENT-PROCESS NIL))))))
+
+(DEFMACRO REQUIRE-LOCK (LOCK)
+  (LET ((ERSTR (FORMAT NIL "~S should be locked here but is not."
+		       (IF (NLISTP LOCK) LOCK (CAR LOCK)))))
+    `(IF (NOT (EQ ,LOCK CURRENT-PROCESS))
+	 (FERROR NIL ,ERSTR))))
+
+(DEFMACRO MODIFYING-DIRECTORY (DIRECTORY &BODY BODY)
+  "Lock DIRECTORY, execute BODY, and then mark DIRECTORY as modified."
+  (LET ((LOCK-CELL (GENSYM)))
+    `(LET ((,LOCK-CELL (LOCF (DIRECTORY-LOCK ,DIRECTORY))))
+       (UNWIND-PROTECT
+	 (PROGN (PROCESS-LOCK ,LOCK-CELL) . ,BODY)
+	 (PROGN (SETF (FILE-CLOSED? DIRECTORY) NIL)
+		(%STORE-CONDITIONAL ,LOCK-CELL CURRENT-PROCESS NIL))))))
+
+(DEFMACRO OPEN-INPUT-FILE ((FILE PATHNAME) &BODY BODY)
+  `(LET ((,FILE NIL))
+     (UNWIND-PROTECT
+       (PROGN
+	 (SETQ ,FILE (LOOKUP-FILE
+		       (PATHNAME-RAW-DIRECTORY ,PATHNAME)
+		       (PATHNAME-RAW-NAME ,PATHNAME)
+		       (PATHNAME-RAW-TYPE ,PATHNAME)
+		       (PATHNAME-RAW-VERSION ,PATHNAME)
+		       :ERROR NIL T))
+	 . ,BODY)
+       (WHEN ,FILE
+	 (LMFS-CLOSE-FILE ,FILE)))))
+
+(DEFCONST LM-VERSION 4
+  "Disk format version we will create now if we initialize a partition.")
+;Version 4 differs from version 3 in having the
+;root directory look like all other directories.
+
+(DEFCONST LM-MINIMUM-VERSION 3
+  "Lowest format version we can handle.")
+
+(DEFVAR LM-UNIT 0)				;See SET-LM-BAND
+(DEFVAR LM-PARTITION "FILE")
+(DEFVAR LM-PARTITION-POSSIBILITIES '((0 "DFIL") (0 "FILE") (4 "FILE")))
+(DEFVAR LM-PARTITION-BASE)			;The address of the partition.
+
+;; ***** This should be replaced by a device scheme.  *****
+(DEFVAR DISK-CONFIGURATION)
+(DEFVAR DISK-CONFIGURATION-RQB)
+(DEFVAR DISK-CONFIGURATION-BUFFER)
+(DEFVAR DISK-CONFIGURATION-BUFFER-POINTER)
+(DEFVAR DISK-CONFIGURATION-LOCK NIL)
+
+(DEFVAR PUT-LOCK NIL)
+(DEFVAR PUT-SCANNING-INDEX 0)
+(DEFVAR PUT-RQB)		;The page usage table is indirected into this.
+(DEFVAR PAGE-USAGE-TABLE)	;The actual table.
+
+;; The first entry in the page usage table tells whether the table is consistent
+;; with the rest of the system.  If it is not, this only reflects the fact that
+;; some pages are lost...
+(DEFCONST PUT-CONSISTENT 1)
+(DEFCONST PUT-INCONSISTENT 2)
+
+;; The remaining entries describe all the remaining pages in the file (not counting
+;; the configuration page, which is always used).
+(DEFCONST PUT-FREE 0)				;Page is up for grabs.
+(DEFCONST PUT-RESERVED 1)			;Page is allocated but (likely) deletable.
+(DEFCONST PUT-USED 2)				;Page is allocated in core and on disk.
+(DEFCONST PUT-UNUSABLE 3)			;Page should not be referenced ever.
+
+(DEFVAR PAGE-SIZE-IN-BITS (* PAGE-SIZE 32.))
+
+;; This is also in MTDEFS
+(REMPROP 'QUOTIENT-CEILING 'SOURCE-FILE-NAME)
+(DEFSUBST QUOTIENT-CEILING (Y X) (CEILING Y X))
+
+;; Get a buffer of the correct byte size
+(DEFUN GET-RQB-ARRAY (RQB BYTE-SIZE &AUX TYPE)
+  (COND ((= BYTE-SIZE 16.) (RQB-BUFFER RQB))
+	((= BYTE-SIZE 8) (RQB-8-BIT-BUFFER RQB))
+	((SETQ TYPE (CDR (ASSQ BYTE-SIZE '((4 . ART-4B) (2 . ART-2B) (1 . ART-1B)))))
+	 (MAKE-ARRAY (FLOOR (* (RQB-NPAGES RQB) PAGE-SIZE-IN-BITS) BYTE-SIZE)
+		     ':AREA LOCAL-FILE-SYSTEM-AREA
+		     ':TYPE TYPE
+		     ':DISPLACED-TO RQB
+		     ;; This is a system bug.  Don't try to figure it out.
+		     ':DISPLACED-INDEX-OFFSET (* (%P-CONTENTS-OFFSET (RQB-BUFFER RQB) 3)
+						 (FLOOR 16. BYTE-SIZE))))
+	(T (FERROR NIL "~D is an invalid byte size." BYTE-SIZE))))
+
+;; These are the only interface to the disk in the file system, with the exception
+;; of FIND-DISK-PARTITION and UPDATE-PARTITION-COMMENT.
+;; The unit is always LM-UNIT, nd the address is relative to
+;; the current partition (LM-PARTITION).
+
+(DEFUN LM-DISK-WRITE (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+; (COND ((EQ RQB PUT-RQB) (FORMAT T "~%>>Writing the page usage table"))
+;	((EQ RQB DISK-CONFIGURATION-RQB) (FORMAT T "~%>>Writing configuration"))
+;	(WITHIN-FILE-SYSTEM (FORMAT T "~%>>Writing an internal structure"))
+;	(T (FORMAT T "~%>>Writing a file block")))
+  (COND ((< ADDR (DC-PARTITION-SIZE))
+	 (UNWIND-PROTECT
+	   (PROGN (SI:WIRE-DISK-RQB RQB NPAGES)
+		  (SI:DISK-WRITE-WIRED RQB LM-UNIT (+ ADDR LM-PARTITION-BASE)))
+	   (SI:UNWIRE-DISK-RQB RQB)))
+	(T (FERROR NIL "Disk Write out of range."))))
+
+(DEFUN LM-DISK-READ (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+  (COND ((< ADDR (DC-PARTITION-SIZE))
+	 (UNWIND-PROTECT
+	   (PROGN (SI:WIRE-DISK-RQB RQB NPAGES T T)	;set modified
+		  (SI:DISK-READ-WIRED RQB LM-UNIT (+ ADDR LM-PARTITION-BASE)))
+	   (SI:UNWIRE-DISK-RQB RQB)))
+	(T (FERROR NIL "Disk Read out of range."))))
+
+
+;;; Use this to write out new maps.
+
+(DEFMACRO-DISPLACE WITH-MAP-STREAM-OUT ((STREAM . ARGS) &BODY BODY)
+  "A variant of WITH-OPEN-STREAM, it returns a new map."
+  `(LET ((.FILE-ABORTED-FLAG. ':ABORT)
+	 (,STREAM NIL))
+     (UNWIND-PROTECT
+       (PROGN (SETQ ,STREAM (MAKE-MAP-STREAM-OUT . ,ARGS))
+	      ,@BODY
+	      (SETQ .FILE-ABORTED-FLAG. NIL))
+       (IF (AND (NOT (NULL ,STREAM))
+		(NOT (ERRORP ,STREAM)))
+	   (SEND ,STREAM ':CLOSE .FILE-ABORTED-FLAG.)))
+     (AND (NULL .FILE-ABORTED-FLAG.)
+	  (SEND ,STREAM ':MAP))))
+
+(DEFMACRO-DISPLACE WITH-MAP-STREAM-IN ((STREAM . ARGS) &BODY BODY)
+  "A variant of WITH-OPEN-STREAM."
+  `(LET ((.FILE-ABORTED-FLAG. ':ABORT)
+	 (,STREAM NIL))
+     (UNWIND-PROTECT
+       (PROG1 (PROGN (SETQ ,STREAM (MAKE-MAP-STREAM-IN . ,ARGS))
+		     . ,BODY)
+	      (SETQ .FILE-ABORTED-FLAG. NIL))
+       (IF (AND (NOT (NULL ,STREAM))
+		(NOT (ERRORP ,STREAM)))
+	   (SEND ,STREAM ':CLOSE .FILE-ABORTED-FLAG.)))))
+
+;; Directory information on the disk is stored in packed format.  The
+;; following functions allow the file system to read and write fixnums
+;; and bignums in such a packed format.
+
+;(DEFUN GET-BYTES (STREAM NBYTES)
+;  (LOOP WITH V = 0 AND I = 0
+;	AS C = (FUNCALL STREAM ':TYI)
+;	WHEN (NULL C) RETURN NIL
+;	DO (SETQ V (+ (* V 256.) C)
+;		 I (1+ I))
+;	WHEN ( I NBYTES) RETURN V))
+;
+;(DEFUN PUT-BYTES (STREAM NBYTES VALUE)
+;  (LOOP FOR PPSS = (+ (* (1- NBYTES) 512.) 8) THEN (- PPSS 512.)
+;	DO (FUNCALL STREAM ':TYO (LDB PPSS VALUE))
+;	UNTIL (= PPSS 8))
+;  VALUE)
+
+;; These macros do not use ONCE-ONLY because it loses in the simple case of NBYTES = 1.
+
+(DEFMACRO GET-BYTES (STREAM NBYTES)
+  (LOOP FOR I FROM (1- NBYTES) DOWNTO 0
+	AS X = `(FUNCALL ,STREAM ':TYI)
+	WHEN (PLUSP I) DO (SETQ X `(* ,X ,(^ 256. I)))
+	COLLECT X INTO FORMS
+	FINALLY (IF (= NBYTES 1)
+		    (SETQ FORMS (CAR FORMS))
+		  (SETQ FORMS (CONS '+ FORMS)))
+		(RETURN FORMS)))
+
+(DEFMACRO PUT-BYTES (STREAM NBYTES VALUE)
+  `(PROGN . ,(LOOP FOR PPSS FROM (+ (* (1- NBYTES) #o1000) #o10) DOWNTO #o0010 BY #o1000
+		   COLLECTING `(FUNCALL ,STREAM ':TYO (LDB ,PPSS ,VALUE)))))
+
+(DEFUN PUT-STRING (STRING STREAM)
+  (FUNCALL STREAM ':TYO (ARRAY-ACTIVE-LENGTH STRING))
+  (FUNCALL STREAM ':STRING-OUT STRING))
+
+(DEFUN GET-STRING (STREAM)
+  (LET* ((LEN (FUNCALL STREAM ':TYI))
+	 (ARR (MAKE-ARRAY LEN ':TYPE 'ART-STRING)))
+    (FUNCALL STREAM ':STRING-IN NIL ARR 0 LEN)
+    ARR))
+
+(DEFUN WRITE-PROPERTY-LIST (STREAM PLIST &AUX (X (FLOOR (LENGTH PLIST) 2)))
+  (PUT-BYTES STREAM 1 X)
+  (DO ((I X (1- I))
+       (L PLIST (CDDR L))
+       (PROP))
+      ((ZEROP I))
+    (PUT-STRING (GET-PNAME (CAR L)) STREAM)
+    (COND ((NULL (SETQ PROP (CADR L)))
+	   (FUNCALL STREAM ':TYO 0))
+	  ((EQ PROP T)
+	   (FUNCALL STREAM ':TYO 1))
+	  ((SYMBOLP PROP)
+	   (COND ((MEMQ (SYMBOL-PACKAGE PROP) '(#,SI:PKG-USER-PACKAGE	;for regular frobs
+						#,SI:PKG-GLOBAL-PACKAGE	;irregular frobs
+						NIL))			;(interned later)
+		  (FUNCALL STREAM ':TYO 2)
+		  (PUT-STRING (GET-PNAME PROP) STREAM))
+		 (T (FUNCALL STREAM ':TYO 3)
+		    ;; Use this odd order for ease in interning later.
+		    (PUT-STRING (GET-PNAME PROP) STREAM)
+		    (PUT-STRING (PACKAGE-NAME (SYMBOL-PACKAGE PROP)) STREAM))))
+	  ((AND (NUMBERP PROP)
+		(FIXP PROP))
+	   (FUNCALL STREAM ':TYO 4)
+	   (PUT-BYTES STREAM 3 PROP))
+	  ((STRINGP PROP)
+	   (FUNCALL STREAM ':TYO 5)
+	   (PUT-STRING PROP STREAM))
+	  ((LISTP PROP)
+	   (FUNCALL STREAM ':TYO 6)
+	   (LET ((PACKAGE SI:PKG-USER-PACKAGE)
+		 (READTABLE si:INITIAL-READTABLE)
+		 (BASE 10.)
+		 (*NOPOINT T)
+		 (SI:PRINT-READABLY T))
+	     (PRIN1 PROP STREAM)))
+	  ((TYPEP PROP 'PATHNAME)
+	   (FUNCALL STREAM ':TYO 7)
+	   (LET ((PACKAGE SI:PKG-USER-PACKAGE)
+		 (READTABLE SI:INITIAL-READTABLE)
+		 (BASE 10.)
+		 (*NOPOINT T)
+		 (SI:PRINT-READABLY T))
+	     ;; These are the arguments to MAKE-FASLOAD-PATHNAME.
+	     (FUNCALL STREAM ':TYO #/()
+	     (PRIN1-THEN-SPACE (FUNCALL (PATHNAME-HOST PROP) ':NAME-AS-FILE-COMPUTER) STREAM)
+	     (PRIN1-THEN-SPACE (PATHNAME-DEVICE PROP) STREAM)
+	     (PRIN1-THEN-SPACE (PATHNAME-DIRECTORY PROP) STREAM)
+	     (PRIN1-THEN-SPACE (PATHNAME-NAME PROP) STREAM)
+	     (PRIN1-THEN-SPACE (PATHNAME-TYPE PROP) STREAM)
+	     (PRIN1 (PATHNAME-VERSION PROP) STREAM)
+	     (FUNCALL STREAM ':TYO #/))))
+	  (T (FERROR NIL "I don't know how to write ~S as a property." PROP)))))
+
+(DEFUN READ-PROPERTY-LIST (STREAM &AUX LIST (PAK SI:PKG-USER-PACKAGE))
+  (SETQ LIST (MAKE-LIST (* (FUNCALL STREAM ':TYI) 2)))
+  (DO ((L LIST (CDDR L)))
+      ((NULL L))
+    (RPLACA L (INTERN (GET-STRING STREAM) PAK))
+    (SELECTQ (FUNCALL STREAM ':TYI)
+      (0)
+      (1 (SETF (CADR L) T))
+      (2 (SETF (CADR L) (INTERN (GET-STRING STREAM) PAK)))
+      (3 (SETF (CADR L) (INTERN (GET-STRING STREAM)
+				(PKG-FIND-PACKAGE (GET-STRING STREAM) ':ASK))))
+      (4 (SETF (CADR L) (GET-BYTES STREAM 3)))
+      (5 (SETF (CADR L) (GET-STRING STREAM)))
+      (6 (SETF (CADR L)
+	       (LET ((IBASE 10.)
+		     (PACKAGE SI:PKG-USER-PACKAGE)
+		     (READTABLE SI:INITIAL-READTABLE))
+		   ;; This can lose pretty badly with #<'s, etc.  -- DLA
+		   (READ STREAM))))
+      (7 (LET* ((IBASE 10.)
+		(PACKAGE SI:PKG-USER-PACKAGE)
+		(READTABLE SI:INITIAL-READTABLE)
+		(FORM (READ STREAM))
+		(DEFAULT-CONS-AREA WORKING-STORAGE-AREA))	;<-*
+	   (SETF (CADR L)
+		 (IF (= (LENGTH FORM) 6)
+		     (APPLY #'FS:MAKE-FASLOAD-PATHNAME FORM)
+		   (EVAL FORM)))))		;Obsolete form for pathnames to be written.
+      (OTHERWISE (FERROR NIL "Invalid Plist property designator."))))
+  LIST)
+
+;; Functions for creating and manipulating MAPs.
+
+(DEFUN MAP-CREATE (&OPTIONAL (NBLOCKS 32.) INPUTP &AUX MAP)
+  (SETQ MAP (MAKE-ARRAY (LIST-IN-AREA LOCAL-FILE-SYSTEM-AREA NBLOCKS 2)
+			':LEADER-LENGTH 2
+			':NAMED-STRUCTURE-SYMBOL 'MAP))
+  (SETF (MAP-NBLOCKS MAP) (IF INPUTP NBLOCKS 0))
+  MAP)
+
+;; Returns the number of pages used (as opposed to the number of blocks) in the map.
+(DEFUN MAP-NPAGES (MAP)
+  (LOOP WITH NBLOCKS = (MAP-NBLOCKS MAP)
+	FOR I FROM 0 BELOW NBLOCKS
+	SUMMING (QUOTIENT-CEILING (MAP-BLOCK-SIZE MAP I) PAGE-SIZE-IN-BITS)))
+
+;; This is used during output, when a block is added onto the end of a file.
+(DEFUN MAP-APPEND-BLOCK (MAP LOCATION SIZE &AUX (NBLOCKS (MAP-NBLOCKS MAP)))
+  (AND (= NBLOCKS (ARRAY-DIMENSION MAP 0))
+       (ARRAY-GROW MAP (+ NBLOCKS 32.) 2))
+  (WITHOUT-INTERRUPTS
+    (SETF (MAP-NBLOCKS MAP) (1+ NBLOCKS))
+    (SETF (MAP-BLOCK-LOCATION MAP NBLOCKS) LOCATION)
+    (SETF (MAP-BLOCK-SIZE MAP NBLOCKS) SIZE)))
+
+;; Returns the length of the area mapped in bits.
+(DEFUN MAP-LENGTH (MAP)
+  (LOOP WITH NBLOCKS = (MAP-NBLOCKS MAP)
+	FOR I FROM 0 BELOW NBLOCKS
+	SUMMING (MAP-BLOCK-SIZE MAP I)))
+
+(DEFUN MAP-READ (STREAM)
+  (LOOP WITH NBLOCKS = (GET-BYTES STREAM 2)
+	WITH MAP = (MAP-CREATE NBLOCKS T)
+	FOR I FROM 0 BELOW NBLOCKS
+	DOING (SETF (MAP-BLOCK-LOCATION MAP I) (GET-BYTES STREAM 3))
+	      (SETF (MAP-BLOCK-SIZE MAP I) (GET-BYTES STREAM 3))
+	FINALLY (RETURN MAP)))
+
+(DEFUN MAP-WRITE (STREAM MAP)
+  (LET ((NBLOCKS (MAP-NBLOCKS MAP)))
+    (PUT-BYTES STREAM 2 NBLOCKS)
+    (DOTIMES (I NBLOCKS)
+      (MAP-WRITE-1-BLOCK STREAM
+			 (MAP-BLOCK-LOCATION MAP I)
+			 (MAP-BLOCK-SIZE MAP I))))
+  MAP)
+
+(DEFUN MAP-WRITE-1-BLOCK (STREAM LOCATION SIZE)
+  (PUT-BYTES STREAM 3 LOCATION)
+  (PUT-BYTES STREAM 3 SIZE))
+
+(DEFUN DESCRIBE-MAP (MAP &OPTIONAL (STREAM STANDARD-OUTPUT))
+  (FORMAT STREAM "~&~S maps out the following blocks:~@
+~2XIndex~3XLocation~7XSize~3XStatus~%" MAP)
+  (LET ((NBITS 0))
+    (DOTIMES (I (MAP-NBLOCKS MAP))
+      (FORMAT STREAM "~6O: ~10O ~10O   ~[Free~;Reserved~;Used~;Bad~]~%"
+	      I (MAP-BLOCK-LOCATION MAP I) (MAP-BLOCK-SIZE MAP I)
+	      (AREF PAGE-USAGE-TABLE (MAP-BLOCK-LOCATION MAP I)))
+      (INCF NBITS (MAP-BLOCK-SIZE MAP I)))
+    (FORMAT STREAM "~%Total of ~D block~:P, ~D bit~:P.~%"
+	    (MAP-NBLOCKS MAP)
+	    NBITS)))
+
+(DEFUN FILE-DATA-LENGTH (FILE)
+  (MAP-LENGTH (FILE-MAP FILE)))
+
+(DEFUN FILE-NPAGES (FILE)
+  (MAP-NPAGES (FILE-MAP FILE)))
+
+(DEFUN FILE-TRUENAME (FILE)
+  (MAKE-PATHNAME ':HOST "LM" ':DEVICE "DSK"
+		 ':DIRECTORY (OR (DIRECTORY-FULL-NAME (FILE-DIRECTORY FILE))
+				 ':ROOT)
+		 ':NAME (FILE-NAME FILE)
+		 ':TYPE (IF (EQUAL (FILE-TYPE FILE) "")
+			    ':UNSPECIFIC
+			  (FILE-TYPE FILE))
+		 ':VERSION (FILE-VERSION FILE)))
+
+;; Error handler interface.
+
+(DEFMACRO IDENTIFY-FILE-OPERATION (OPERATION &BODY BODY)
+  `(LET ((*CURRENT-FILE-OPERATION* (OR *CURRENT-FILE-OPERATION* ,OPERATION)))
+     . ,BODY))
+
+;; Wrap this around things which want to do things the simple way.
+;; If ERROR-P is non-NIL and an error occurs, the error object is returned from this form
+(DEFMACRO HANDLING-ERRORS (ERROR-P &BODY BODY)
+  `(*CATCH 'LM-TRAP-ERRORS
+     (LET ((LM-TRAP-ERRORS (NOT ,ERROR-P)))
+       (FILE-OPERATION-RETRY
+	 . ,BODY))))
+
+;; This is bound to T if one is inside LM-TRAP-ERROR, in which case control
+;; is thrown to LM-TRAP-ERROR
+(DEFVAR LM-TRAP-ERRORS NIL)
+
+(DEFVAR *CURRENT-FILE-OPERATION* NIL)
+
+(DEFPROP LM-SIGNAL-ERROR T :ERROR-REPORTER)
+(DEFUN LM-SIGNAL-ERROR (SYMBOL &OPTIONAL SOURCE PROCEEDABLE &REST MAKE-CONDITION-ARGS)
+  (OR SOURCE
+      (AND (OR (TYPEP SELF 'PATHNAME)
+	       (TYPEP SELF 'SI:FILE-STREAM-MIXIN))
+	   (SETQ SOURCE SELF)))
+  (AND SOURCE (NOT (TYPEP SOURCE 'PATHNAME))
+       (SETQ SOURCE (SEND SOURCE ':PATHNAME)))
+  (LET ((ERROR
+	  (LEXPR-FUNCALL 'MAKE-CONDITION
+			 (OR (GET SYMBOL 'ERROR-SIGNALER) SYMBOL)
+			 (LET ((STRING (GET SYMBOL 'ERROR-STRING)))
+			   (IF SOURCE
+			       (STRING-APPEND STRING " for "
+					      (SEND SOURCE ':STRING-FOR-PRINTING))
+			     STRING))
+			 SOURCE MAKE-CONDITION-ARGS)))
+    (IF LM-TRAP-ERRORS
+	(*THROW 'LM-TRAP-ERRORS ERROR))
+    (SIGNAL ERROR
+	    ':PROCEED-TYPES
+	    (COND ((CONSP PROCEEDABLE) PROCEEDABLE)
+		  (PROCEEDABLE '(:RETRY-FILE-OPERATION))))))
+
+;; Use this when an error occurs in file lookup.
+(DEFPROP LM-LOOKUP-ERROR T :ERROR-REPORTER)
+(DEFUN LM-LOOKUP-ERROR (SYMBOL DIR NAM TYP VER &OPTIONAL (OPERATION *CURRENT-FILE-OPERATION*))
+  (LM-SIGNAL-ERROR SYMBOL
+		   (MAKE-PATHNAME ':HOST "LM" ':DEVICE "DSK"
+				  ':DIRECTORY
+				  (COND ((STRINGP DIR) DIR)
+					((LISTP DIR) DIR)
+					(T
+					 (DIRECTORY-NAME DIR)))
+				  ':NAME NAM ':TYPE TYP ':VERSION VER)
+		   NIL
+		   OPERATION))
+
+;; This is to aid in debugging.  It basically provides a warning at compile time
+;; if you haven't defined an error.
+(DEFUN LM-ERROR-SYMBOL-CHECK (FORM)
+  (LET ((X (SECOND FORM)))
+    (AND (LISTP X)
+	 (EQ (CAR X) 'QUOTE)
+	 (PROGN
+	   (WHEN (NOT (GET (CADR X) 'ERROR-STRING))
+	     (COMPILER:BARF (CADR X) "is not a defined error symbol" 'COMPILER:WARN))
+	   (OR (GET (CADR X) 'ERROR-SIGNALER)
+	       (GET (CADR X) 'EH:MAKE-CONDITION-FUNCTION)
+	     (COMPILER:BARF (CADR X) "is not a defined signal name" 'COMPILER:WARN))))
+    FORM))
+
+(COMPILER:ADD-OPTIMIZER LM-SIGNAL-ERROR LM-ERROR-SYMBOL-CHECK)
+(COMPILER:ADD-OPTIMIZER LM-LOOKUP-ERROR LM-ERROR-SYMBOL-CHECK)
+(COMPILER:ADD-OPTIMIZER LM-RENAME-ERROR LM-ERROR-SYMBOL-CHECK)
+
+;; Error Definitions
+(DEFMACRO DEFINE-ERRORS (&REST SYMBOLS-AND-STRINGS)
+  `(PROGN 'COMPILE
+	  . ,(LOOP FOR (SYMBOL STRING) ON SYMBOLS-AND-STRINGS BY #'CDDR
+		   COLLECTING `(DEFPROP ,SYMBOL ,STRING ERROR-STRING))))
+
+(DEFINE-ERRORS
+;; Error signalers in SYS:IO;OPEN
+  RENAME-TO-EXISTING-FILE	"Attempt to rename to an existing file"
+  RENAME-ACROSS-DIRECTORIES	"Attempt to rename across directories"
+  FILE-NOT-FOUND		"File not found"
+  FILE-ALREADY-EXISTS		"File already exists"
+  DIRECTORY-NOT-FOUND		"Directory not found"
+  INVALID-BYTE-SIZE		"Illegal byte size"
+  NO-MORE-ROOM			"Disk full"
+  NO-FILE-SYSTEM		"File system not mounted"
+  DIRECTORY-NOT-EMPTY		"Non-empty directories cannot be deleted"
+  DONT-DELETE-FLAG-SET		"File has DONT-DELETE bit set"
+  UNIMPLEMENTED-OPTION		"Unimplemented OPEN option"
+  FILE-LOCKED			"File is locked"
+  UNKNOWN-OPERATION		"Unknown operation"
+
+;; Error signalers defined below.
+  UNDELETE-UNCLOSED-FILE	"Cannot undelete unclosed file"
+  OPEN-DELETED-FILE		"File is deleted"
+  OPEN-DELETED-DIRECTORY	"Directory is deleted"
+  OPEN-OUTPUT-FILE		"File is open for output"
+  OPEN-UNFINISHED-DIRECTORY	"Directory still being created"
+  FILE-IS-SUBDIRECTORY		"File is a subdirectory"
+  UNSETTABLE-PROPERTY		"Unsettable property"
+  INVALID-PROPERTY-NAME		"Bad property"
+  VERSION-TOO-LARGE		"Version must be smaller than 65536"
+  INVALID-DIRECTORY-NAME	"Invalid name given for a directory"
+  RENAME-DIRECTORY-INVALID-TYPE "Invalid new type or version for renaming a subdirectory."
+  LINKS-NOT-SUPPORTED		"Links not supported"
+  BAD-TYPE-FOR-SUBDIRECTORY	"Invalid type for subdirectory"
+  SUPERSEDE-DIRECTORY		"Superseding a directory"
+  TOP-LEVEL-FILE		"No non-directory files in root"
+  )
+
+(DEFPROP UNDELETE-UNCLOSED-FILE FILE-LOCKED ERROR-SIGNALER)
+
+(DEFSIGNAL OPEN-DELETED-FILE FILE-OPERATION-FAILURE (PATHNAME OPERATION)
+	   "Opening a file that is deleted.")
+
+(DEFSIGNAL OPEN-DELETED-DIRECTORY FILE-LOOKUP-ERROR (PATHNAME OPERATION)
+	   "Containing directory is deleted.")
+
+(DEFPROP OPEN-OUTPUT-FILE FILE-OPEN-FOR-OUTPUT ERROR-SIGNALER)
+
+(DEFSIGNAL OPEN-UNFINISHED-DIRECTORY FILE-LOOKUP-ERROR (PATHNAME OPERATION)
+  "Containing directory is still being created.")
+
+(DEFSIGNAL FILE-IS-SUBDIRECTORY
+	   (FILE-OPERATION-FAILURE WRONG-KIND-OF-FILE INVALID-OPERATION-FOR-DIRECTORY)
+	   (PATHNAME OPERATION)
+  "Attempt to open a file which is a directory.")
+
+(DEFSIGNAL UNSETTABLE-PROPERTY CHANGE-PROPERTY-FAILURE (PATHNAME PROPERTY)
+	   "PROPERTY isn't one of the properties this file system allows users to set.")
+
+(DEFSIGNAL VERSION-TOO-LARGE
+	   (FILE-OPERATION-FAILURE INVALID-PATHNAME-SYNTAX VERSION-TOO-LARGE)
+	   (PATHNAME OPERATION)
+  "Version larger that 65536.")
+
+(DEFSIGNAL INVALID-DIRECTORY-NAME
+	   (FILE-OPERATION-FAILURE INVALID-PATHNAME-SYNTAX INVALID-DIRECTORY-NAME)
+	   (PATHNAME OPERATION)
+  "")
+
+(DEFSIGNAL RENAME-DIRECTORY-INVALID-TYPE
+	   (RENAME-FAILURE RENAME-DIRECTORY-INVALID-TYPE)
+	   (PATHNAME NEW-PATHNAME)
+  "")
+
+(DEFSIGNAL LINKS-NOT-SUPPORTED
+	   (FILE-OPERATION-FAILURE CREATION-FAILURE CREATE-LINK-FAILURE
+				   LINKS-NOT-SUPPORTED)
+	   (PATHNAME OPERATION)
+  "Links are not supported in this file system.")
+
+(DEFSIGNAL BAD-TYPE-FOR-SUBDIRECTORY
+	   (FILE-OPERATION-FAILURE CREATION-FAILURE CREATE-DIRECTORY-FAILURE
+				   BAD-TYPE-FOR-SUBDIRECTORY)
+	   (PATHNAME OPERATION)
+  "")
+
+(DEFSIGNAL SUPERSEDE-DIRECTORY
+	   (FILE-OPERATION-FAILURE CREATION-FAILURE TOP-LEVEL-FILE)
+	   (PATHNAME OPERATION)
+  "Superseding a file which is a subdirectory.")
+
+(DEFSIGNAL TOP-LEVEL-FILE
+	   (FILE-OPERATION-FAILURE CREATION-FAILURE TOP-LEVEL-FILE)
+	   (PATHNAME OPERATION)
+  "Attempt to create a file not a directory in the root directory.")
+
+;; ALLOCATE-DISK-BLOCK returns the base and size of a block which has pages
+;; pre-set to PUT-RESERVED.
+;; {VERIFY, CHANGE, SET}-{BLOCK, MAP}-DISK-SPACE.  They should all be called
+;; inside the special form USING-PUT.  SET-... should be used minimally.
+;; WRITE-PUT (&optional force-p) may be called any time inside a USING-PUT
+;; form to force the put to be written onto the disk.  If FORCE-P is nil, and
+;; the PUT hasn't been modified in core, this is a no-op.  (WRITE-PUT) is implicit
+;; when exitting a USING-PUT.  The USING-PUT special form may be enterred recursively,
+;; and in fact usually is.
+
+;; USE-{MAP,BLOCK}-DISK-SPACE??
+
+;; This variable is T if the put has been modified in core and not written to the disk.
+(DEFVAR PUT-MODIFIED NIL)
+
+;; This array contains four numbers:  The number of pages in the PUT which
+;; have the index as their status.
+(DEFVAR PUT-USAGE-ARRAY (MAKE-ARRAY 4 ':TYPE 'ART-32B))
+
+;; This is the minimum number of free pages that must be available in order
+;; to write files.  Note that internal structures may still be written.
+(DEFVAR PUT-MINIMUM-FREE-PAGES 50.)
+
+;; This is bound by LM-WRITE-DIRECTORY to T.  This tells ALLOCATE-DISK-BLOCK
+;; that it is OK to go below PUT-MINIMUM-FREE-PAGES.
+(DEFVAR WRITING-INTERNAL-STRUCTURES NIL)
+
+(DEFVAR STANDARD-BLOCK-SIZE 20.)
+
+(DEFUN ALLOCATE-DISK-BLOCK (&OPTIONAL (REQUESTED-NPAGES STANDARD-BLOCK-SIZE)
+			    &AUX RNP (AVAILABLE 0) FREE-INDEX FREE-NPAGES
+			    (PART-SIZE (DC-PARTITION-SIZE)))
+  (DO-NAMED ALLOCATE-DISK-BLOCK () (NIL)
+    (LOCKING-RECURSIVELY PUT-LOCK
+      (COND ((OR WRITING-INTERNAL-STRUCTURES
+		 (PLUSP (SETQ AVAILABLE (- (AREF PUT-USAGE-ARRAY PUT-FREE)
+					   PUT-MINIMUM-FREE-PAGES))))
+	     (SETQ RNP (IF WRITING-INTERNAL-STRUCTURES
+			   REQUESTED-NPAGES
+			 (MIN REQUESTED-NPAGES AVAILABLE)))
+	     (SETQ FREE-INDEX
+		   (OR (%STRING-SEARCH-CHAR PUT-FREE PAGE-USAGE-TABLE
+					    PUT-SCANNING-INDEX PART-SIZE)
+		       (%STRING-SEARCH-CHAR PUT-FREE PAGE-USAGE-TABLE
+					    1 PUT-SCANNING-INDEX)
+		       (FERROR NIL "Ran out of disk space on a directory write")))
+	     (DO ((I FREE-INDEX (1+ I))
+		  (P 0 (1+ P)))
+		 (NIL)
+	       (COND ((OR ( P RNP)
+			  ( I PART-SIZE)
+			  ( (AREF PAGE-USAGE-TABLE I) PUT-FREE))
+		      (SETQ PUT-SCANNING-INDEX I)
+		      (DECF (AREF PUT-USAGE-ARRAY PUT-FREE) P)
+		      (INCF (AREF PUT-USAGE-ARRAY PUT-RESERVED) P)
+		      (SETQ FREE-NPAGES P)
+		      (RETURN-FROM ALLOCATE-DISK-BLOCK FREE-INDEX FREE-NPAGES))
+		     (T (ASET PUT-RESERVED PAGE-USAGE-TABLE I)))))))
+    ;; If we get here, the disk is full.  Leave the PUT unlocked so people
+    ;; can delete files, and signal a proceedable error.
+    (LM-SIGNAL-ERROR 'NO-MORE-ROOM NIL T *CURRENT-FILE-OPERATION*)))
+
+(DEFUN WRITE-PUT (&OPTIONAL FORCE-P)
+  (REQUIRE-LOCK PUT-LOCK)
+  (COND ((OR PUT-MODIFIED FORCE-P)
+	 (LM-DISK-WRITE PUT-RQB (DC-PUT-BASE))
+	 (SETQ PUT-MODIFIED NIL))))
+
+(DEFMACRO USING-PUT (&BODY BODY)
+  (LET ((LOCK-OWNED (GENSYM)))
+    `(LET ((,LOCK-OWNED (EQ PUT-LOCK CURRENT-PROCESS))
+	   OLD-STATE)
+       (UNWIND-PROTECT
+	 (PROGN
+	   (COND ((NOT ,LOCK-OWNED)
+		  (PROCESS-LOCK (LOCF PUT-LOCK))
+		  (IF (NOT (NULL PUT-MODIFIED))
+		      (FERROR NIL "PUT evidently modified while unlocked"))
+		  (SETQ OLD-STATE (AREF PAGE-USAGE-TABLE 0))
+		  (ASET PUT-INCONSISTENT PAGE-USAGE-TABLE 0)))
+	   . ,BODY)
+	 (COND ((NOT ,LOCK-OWNED)
+		(ASET OLD-STATE PAGE-USAGE-TABLE 0)
+		(WRITE-PUT)
+		(PROCESS-UNLOCK (LOCF PUT-LOCK))))))))
+
+(DEFUN CHANGE-BLOCK-DISK-SPACE (LOC NPAGES OLD-STATUS NEW-STATUS &AUX LIM)
+  (REQUIRE-LOCK PUT-LOCK)
+  (SETQ LIM (+ LOC NPAGES))
+  (AND (PLUSP NPAGES)
+       (NOT (AND (= OLD-STATUS PUT-RESERVED) (= NEW-STATUS PUT-FREE)))
+       (SETQ PUT-MODIFIED T))
+  (DO ((I LOC (1+ I)))
+      (( I LIM)
+       (DECF (AREF PUT-USAGE-ARRAY OLD-STATUS) NPAGES)
+       (INCF (AREF PUT-USAGE-ARRAY NEW-STATUS) NPAGES)
+       T)
+    (OR (= (AREF PAGE-USAGE-TABLE I) OLD-STATUS)
+	(FERROR NIL "Unexpected disk space status in CHANGE-BLOCK-DISK-SPACE"))
+    (ASET NEW-STATUS PAGE-USAGE-TABLE I)))
+
+(DEFUN CHANGE-MAP-DISK-SPACE (MAP OLD-STATUS NEW-STATUS
+			      &AUX NBLOCKS LIM LOC COUNT (NPAGES 0))
+  (REQUIRE-LOCK PUT-LOCK)
+  (SETQ NBLOCKS (MAP-NBLOCKS MAP))
+  (AND (PLUSP NBLOCKS)
+       (NOT (AND (= OLD-STATUS PUT-RESERVED) (= NEW-STATUS PUT-FREE)))
+       (SETQ PUT-MODIFIED T))
+  (DO ((MAP-INDEX 0 (1+ MAP-INDEX)))
+      (( MAP-INDEX NBLOCKS)
+       (DECF (AREF PUT-USAGE-ARRAY OLD-STATUS) NPAGES)
+       (INCF (AREF PUT-USAGE-ARRAY NEW-STATUS) NPAGES)
+       T)
+    (SETQ LOC (MAP-BLOCK-LOCATION MAP MAP-INDEX)
+	  COUNT (QUOTIENT-CEILING (MAP-BLOCK-SIZE MAP MAP-INDEX) PAGE-SIZE-IN-BITS)
+	  LIM (+ LOC COUNT))
+    (DO ((I LOC (1+ I)))
+	(( I LIM) (INCF NPAGES COUNT))
+      (OR (= (AREF PAGE-USAGE-TABLE I) OLD-STATUS)
+	  (FERROR NIL "Unexpected disk space status in CHANGE-MAP-DISK-SPACE"))
+      (ASET NEW-STATUS PAGE-USAGE-TABLE I))))
+
+(DEFUN SET-MAP-DISK-SPACE (MAP NEW-STATUS)
+  (REQUIRE-LOCK PUT-LOCK)
+  (WHEN (> (MAP-NBLOCKS MAP) 0)
+    (SETQ PUT-MODIFIED T)
+    (DOTIMES (MAP-INDEX (MAP-NBLOCKS MAP))
+      (LET ((COUNT (QUOTIENT-CEILING (MAP-BLOCK-SIZE MAP MAP-INDEX) PAGE-SIZE-IN-BITS))
+	    (LOC (MAP-BLOCK-LOCATION MAP MAP-INDEX)))
+	(DOTIMES (I COUNT)
+	  (DECF (AREF PUT-USAGE-ARRAY (AREF PAGE-USAGE-TABLE (+ LOC I))))
+	  (INCF (AREF PUT-USAGE-ARRAY NEW-STATUS))
+	  (ASET NEW-STATUS PAGE-USAGE-TABLE (+ LOC I)))))))
+
+(DEFUN DETERMINE-MAP-DISK-SPACE-STATUS (MAP)
+  (REQUIRE-LOCK PUT-LOCK)
+  (LET ((STATUS NIL))
+    (DOTIMES (MAP-INDEX (MAP-NBLOCKS MAP))
+      (LET ((COUNT (QUOTIENT-CEILING (MAP-BLOCK-SIZE MAP MAP-INDEX) PAGE-SIZE-IN-BITS))
+	    (LOC (MAP-BLOCK-LOCATION MAP MAP-INDEX)))
+	(DOTIMES (I COUNT)
+	  (COND ((NULL STATUS)
+		 (SETQ STATUS (AREF PAGE-USAGE-TABLE (+ LOC I))))
+		((NOT (= STATUS (AREF PAGE-USAGE-TABLE (+ LOC I))))
+		 (FERROR NIL "Inconsistent status in DETERMINE-MAP-DISK-SPACE-STATUS"))))))
+    STATUS))
+
+;; Binding this variable to non-NIL causes auto creation of directories.
+;; This is used internally to create directories, but may be bound by things
+;; such as magtape restoration programs.
+(DEFVAR LM-AUTOMATICALLY-CREATE-DIRECTORIES NIL)
+
+;; This is a variable with all file streams open since boot time.
+;; The :OPEN-STREAMS message to a LOCAL-LISPM-HOST returns COPYLIST of this.
+(DEFVAR LM-FILE-STREAMS-LIST NIL)
+

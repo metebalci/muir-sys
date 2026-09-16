@@ -1,0 +1,258 @@
+-*- Text -*-
+
+Remedial File System Documentation.
+
+Contents:
+1.  Using the local file system.
+2.  Special functions and variables.
+3.  Installing the local file system.
+4.  Maintaining the local file system.
+5.  Using, installing, and maintaining the remote file system.
+6.  Using other kludges.
+
+1.  Using the local file system.
+
+For the casual user, the only interface ever seen to this file system is
+pathnames.  They have the general syntax:
+
+HOST: DEVICE: DIRECTORY; FILENAME.TYPE#VERSION
+
+The DEVICE field has no meaning.
+The DIRECTORY field is actually
+
+[DIRECTORY[.SUBDIRECTORY[.SUBDIRECTORY[...]]]]
+
+which allows subdirectories of arbitrary depth.  An empty directory
+specification refers to the root directory; this allows you to (for
+example) do DIRED on the entire file system.  Note that due to
+constraints imposed by older versions of the file system, the root
+directory can only contain other directories, not arbitrary files.
+
+Files do not need to have types, but certain conventions should be
+followed.  In particular, MAKE-SYSTEM and other lisp machine systems
+which deal with lisp source files will expect them to have a type of
+LISP.  Random text files should have a TEXT type.  Other conventions
+usually seem to follow TOPS-20.
+
+Any characters from 0 to 177 (octal) inclusive are legal characters in a
+pathname.  Case doesn't matter for purposes of filename comparison, but
+filenames are stored using the case they were created with.  Characters
+such as space and period may be quoted by using the forward slash.
+
+Directories appear as files with the type "DIRECTORY" and the version 1.
+For convenience, we suggest not using this type where possible.
+However, no confusion is possible between files with type "DIRECTORY"
+and directories themselves, since the internal representations are
+different.
+
+Version tokens are:
+  >          Newest.  Same meaning as ITS.
+  <          Oldest.  Same meaning as ITS.
+  0          Newest.  On output, this will not create a new file if one already
+             exists, rather, it will overwrite the existing newest version.
+  *          Wild.  Same meaning as ITS.
+  (absent)   Unspecific.  This is the same as > unless there are wildcard characters
+             elsewhere in the name and type.  In that case, it is identical to *.
+  n or +n    Refers to a specific version, as on ITS.
+  -n         Refers to the version NEWEST minus n.
+
+Order is not awfully important in parsing pathnames.  The following is a
+list of strings which will parse legally.
+
+"LM: DLA; FOO.LISP"
+"LM: DLA; FOO#<"
+"DLA;.LISP"
+"#4"
+".LISP FOO DLA;#4 LM:"
+
+The host component of pathnames should be the name of the host on which
+the file system is.  Sometimes hosts may have defined nicknames; in
+particular, the nickname of CADR-27, which is the fileserver, is FS.
+That is why all pathnames which refer to CADR-27 print out with FS as
+their host.
+
+The host LM always refers to the Local Machine.
+
+2.  Special Functions and Variables
+
+The design philosophy of the local file system has been more one of
+compatibility than one of new featurism.  Therefore, there are few
+features which cannot be found in other file systems.  A nice effect of
+this is that programs can be transported easily from file system to file
+system, without revisions in code.  If you find revisions are necessary
+when doing so, it is a bug, and should be reported.
+
+Since its initial design, the file system has been upgraded to the point
+where it is almost completely compatible with the TOPS-20 file system.
+This means that subdirectories of arbitrary depth, arbitrary-length
+name/type fields, and undeletable files are all supported.  Pathnames
+for the local file system can always be specified using TOPS-20 syntax,
+although they defaultly print out in ITS-like syntax.
+
+FS:*LMFS-USE-TWENEX-SYNTAX* (variable)
+If non-NIL, Local-File pathnames print out in TOPS-20 syntax.
+The default value is NIL.
+
+The following functions are used to manipulate directories on the
+Local-File system.  They are provided only because no unified interface
+currently exists that provides this functionality for all file systems.
+
+In the descriptions, a "directory-spec" is one of the following:
+
+NIL - refers to the root directory.
+A string - refers to the directory of that name under the root.
+A list - refers to any directory; the components of the list are the
+    string names of the directories in the path to that directory.
+
+FS:LMFS-CREATE-DIRECTORY directory-spec
+This function creates a directory whose name is name.  If a directory
+by that name already exists, it does nothing.
+
+FS:LMFS-DELETE-DIRECTORY directory-spec
+This function deletes the directory whose name is name.  If no directory
+exists by that name, or if there are files in the directory by that
+name, then an error is signalled.
+
+FS:LMFS-LIST-FILES &rest directory-specs
+This function allows a quick way to list the contents of directories.
+If no arguments are given, all directories are listed.
+
+FS:LMFS-LIST-DIRECTORIES &rest directory-specs
+This function lists the given directories, or else "No such directory".
+If no arguments are given, lists all the top-level (directly under
+the root) directories.
+
+FS:LM-AUTOMATICALLY-CREATE-DIRECTORIES (variable)
+If this variable is bound to non-NIL, then a directory is created
+whenever someone refers to its name.  This is currently used in magtape
+restoration programs.
+
+FS:LOOKUP-DIRECTORY directory-spec &optional no-error-p
+This is an internal function, but when no-error-p is T, it can be used
+by users as a predicate to determine whether a directory exists.
+
+3.  Installing the file system.
+
+Currently the file system lives in one partition.  By default, this
+partition is the DFIL partition on unit 0, although this is not
+necessary.  If a partition has never been used before as a file system,
+then it must be initialized.  Initializing a file band writes an empty
+file system structure onto it.  Once a file band is initialized,
+directories may be added to it, and files may be put in those
+directories.
+
+Before using a file band, its contents must be examined, and the
+directories must be "read in".  This process is called booting the file
+system, and must be done before the file system is used.
+
+It is important to realize the distinction between initialization and
+booting.  If a file band which had files in it is initialized, all files
+which were previously there would be gone.  It is therefore important
+that you never initialize a file band unless you KNOW that there is
+nothing of use in it.
+
+Another thing which must take place to run the file system is pathname
+initialization.  This essentially tells the pathname system that the
+local file system exists, and also tells the pathname system about any
+remote hosts.  The reasons which require making this a separate
+initialization are beyond the scope of this document, but the file
+system will not run unless (1) it is booted and (2) the lisp machine
+pathnames are initialized.
+
+Whenever a lisp machine with the local file system is cold booted or
+warm booted, the pathnames are initialized and the file system is
+booted.  If you want to use the file system immediately after loading
+it, however you will have to do these operations yourself.
+
+The following functions are of use:
+
+FS:INITIALIZE-FILE-SYSTEM
+This function initializes the default partition and then boots the file
+sytsem.
+
+FS:BOOT-FILE-SYSTEM
+This function boots the file system from the default partition, and is
+done by default when cold booting or warm booting.  If any errors occur,
+it prints them and aborts.
+
+FS:LISPM-PATHNAME-HOST-INITIALIZE
+This function initializes the pathnames for lisp machines.  It is done
+by default when cold booting and warm booting.
+
+FS:SET-LM-BAND &optional (partition "FILE") (unit 0) (write-p NIL)
+This function sets the current partition and unit, and then calls
+FS:BOOT-FILE-SYSTEM.  Unit may be anything acceptable to
+SI:DECODE-UNIT-ARGUMENT.  In this way it is possible to examine the
+contents of a file system via the debugging cables or even via the
+chaosnet.  This is done at such a low level, that the normal locking
+scheme is bypassed.  Thus it is VERY IMPORTANT that only one be booted
+on a partition at a time, or SERIOUS DAMAGE could be done to the file
+partition.
+
+FS:DISMOUNT-FILE-SYSTEM
+This function "turns the file system off".  It is done by default just
+before disk-saving.
+
+The file system is a system, defined normally by DEFSYSTEM, called
+Local-File.  All that is necessary to load the file system is to do
+(MAKE-SYSTEM 'LOCAL-FILE).
+
+If you are installing the file system on the lisp machine for the first
+time, here is what you should do:
+1.  (MAKE-SYSTEM 'LOCAL-FILE)
+2.  (SI:LOAD-AND-SAVE-PATCHES)
+3.  If the file system was unable to boot, it will give the reason.  If
+    the machine boots normally, then the file system managed to boot!
+    Otherwise, you must now create a FILE partition if it is not already
+    created, and initialize it with FS:INITIALIZE-FILE-SYSTEM.  See the
+    documentation on SI:EDIT-DISK-LABEL for help in editing partitions.
+
+
+4.  Maintaining the local file system.
+
+a.  Disk Full (expansion and compression of bands)
+b.  Salvager
+
+c.  DEBUG and various DBG-* functions
+
+With the implementation of version 41 of the Local-File system, a new
+debugging package has been designed.  The major change is the
+implementation of a function called FS:DBG-EDIT, which allows you to
+edit the file system directory structure directly.  The ways in which
+you can change the structure are currently limited to very simple things
+which can't screw you, but this may change.
+
+To use the debugging package, do (FS:DEBUG).  This will print out some
+information about the disk configuration, then do (FS:DBG-LIST-PUT) and
+(FS:DBG-EDIT).
+
+To look at the state of the page usage table, to (FS:DBG-LIST-PUT).
+This will list out in numerical order every page in the file system and
+its current status.  If the salvager has been run, it will offer to show
+you the file to which a particular page is attached also.
+
+To use the structure editor, do (FS:DBG-EDIT).  The editor will print
+out the initial entry in the root directory (if any) and then enter the
+command loop.  The available commands are:
+
+F	Move Forward to the next file in this directory.
+B	Move Backward to the previous file in this directory.
+N	If this file is a directory, move downward to its first file.
+P	Move upward to the Parent directory of the one being edited.
+C	Toggle the Closed bit of the current file.
+D	Toggle the Deleted bit of the current file.
+Q	Quit the editor.
+?,HELP	Print a list of the available commands.
+
+The editor is most useful when an asynchronous interrupt such as C-ABORT
+has caused a file to be have its status bits incorrectly set.  Currently
+there isn't any protection against such occurrences because it is pretty
+hairy to do.
+
+5.  Using, installing and maintaining the remote file system.
+[really not much to say here...]
+a.  Describe both protocols, property screw.
+
+6.  Other kludges.
+a.  Magtape (in its own chapter when robust)
+b.  

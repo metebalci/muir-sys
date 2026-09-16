@@ -1,0 +1,588 @@
+.c -*-Mode:Bolio; Lowercase: Yes-*-
+
+.chapter Drawing Graphics
+.setq graphics-section section-page
+
+A window can be used to draw graphics (pictures).  There is a set of
+operations for drawing lines, circles, sectors, polygons, cubic splines,
+and so on, implemented by the flavor 3tv:graphics-mixin*.  The
+3tv:graphics-mixin* flavor is a component of the 3tv:window* flavor,
+and so the operations documented below will work on windows of flavor (or
+flavors built on) 3tv:window*.
+
+.defflavor tv:graphics-mixin
+Defines the standard window graphics operations.
+.end_defflavor
+
+There are also some operations in this section that are in
+3tv:stream-mixin* ((tv:stream-mixin-flavor)) rather than
+3tv:graphics-mixin*, because they are likely to be useful to any
+window that can draw characters, but such windows might not want the
+full functionality of 3tv:graphics-mixin*.  These operations are
+3:draw-rectangle*, and the 3:bitblt* operation and its relatives.  (If
+you are building on 3tv:window* anyway, this doesn't affect you, since
+3tv:window* includes both of these mixins.)
+
+The cursor position is not used by graphics operations; the operations explicitly
+specify all relevant coordinates.  All coordinates are in terms of the
+inside size of the window, just like coordinates for typing characters;
+the margins don't count.  Remember that the point (0,0) is in the
+upper left; increasing 2y* coordinates are 2lower* on the screen,
+not higher.  Coordinates are always fixnums.
+
+As with typing out text, before any graphics are typed the process must
+wait until it has the ability to output (see (ability-to-output)).  The
+"output hold flag" must be off and the window must not be temp-locked.
+The other exception conditions of typing out are not relevant to graphics.
+
+.cindex clipping.
+
+All graphics functions 2clip* to the inside portion of the window.
+This means that when you specify positions for graphic items, they need
+not be inside the window; they can be anywhere.  Only the portion of the
+graphic that is inside the inside part of the window will actually be
+drawn.  Any attempt to write outside the inside part of the window
+simply won't happen.
+
+.section Alu Functions
+.setq aluf section-page
+.setq alu-functions section-page
+
+Most graphics operations take an 2alu* argument, which controls how the
+bits of the graphic object being drawn are combined with the bits
+already present in the window.  In most cases this argument is optional
+and defaults to the window's 2char-aluf* (see (char-aluf)), the same
+alu function as is used to draw characters, which is normally
+inclusive-or.  The following variables have the most useful 2alu* functions
+as their values:
+
+.defvar tv:alu-ior
+Inclusive-or alu function.  Bits in the object being drawn are turned on and other bits are
+left alone.  This is the 3char-aluf* of most windows.  If you draw several
+things with this alu function, they will write on top of each other, just
+as if you had used a pen on paper.
+.end_defvar
+
+.defvar tv:alu-andca
+And-with-complement alu function.  Bits in the object being drawn are turned off and other
+bits are left alone.  This is the 3erase-aluf* of most windows.  It is
+useful for erasing areas of the window or for erasing particular characters
+or graphics.
+.end_defvar
+
+.defvar tv:alu-xor
+Exclusive-or alu function.  Bits in the object being drawn are complemented and other
+bits are left alone.  Many graphics programs use this.  The graphics operations
+take quite a bit of care to do "the right thing" when an exclusive-or
+alu function is used, drawing each point exactly once and including or
+excluding boundary points so that adjacent objects fit together nicely.
+The useful thing about exclusive-or is that if you draw the same thing
+twice with this alu function, the window's contents are left just
+as they were when you started; so this is good for drawing objects
+if you want to erase them afterwards.
+.end_defvar
+
+.defvar tv:alu-seta
+Alu function to copy the input bits into the output bits, ignoring
+the old values of the output bits.  This is not useful with the drawing
+operations, because the exact size and shape of the affected region depend
+on the implementation details of the microcode.  The seta function is
+useful with the bitblt operations, where it causes the source rectangle
+to be transferred to the destination rectangle with no dependency on the
+previous contents of the destination.
+.end_defvar
+
+.defvar tv:alu-and
+"And" alu function.  Like 3tv:alu-seta*, this is not useful with the
+drawing operations, but can be useful with the bitblt operations.  1 bits
+in the input leave the corresponding output bit alone, and 0 bits in the
+input clear the corresponding output bit.
+.end_defvar
+
+.section Flavor Operations for Graphics
+
+.defmethod tv:graphics-mixin :point x y
+Returns the numerical value of the picture element at the specified coordinates.
+The result is 0 or 1 on a black-and-white TV.  Clipping is performed;
+if the coordinates are outside the window, the result will be 0.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-point x y &optional alu value
+Draws 2value* into the picture element at the specified coordinates,
+combining it with the previous contents according to the specified 2alu*
+function (2value* is the first argument to the operation, and the previous
+contents is the second argument.)
+2value* should be 0 or 1 on a black-and-white TV.  Clipping is performed;
+that is, this operation will have no effect if the coordinates are outside
+the window.  2value* defaults to -1, which is a pixel with all bits 1.
+.end_defmethod
+
+.defmethod tv:stream-mixin :bitblt alu width height from-array from-x from-y to-x to-y
+Copies a rectangle of bits from 2from-array* onto the window.  The
+rectangle has dimensions 2width* by 2height*, and its upper left
+corner has coordinates (2from-x,from-y*).  It is transferred onto
+the window so that its upper left corner will have coordinates
+(2to-x,to-y*).  The bits of the transferred rectangle are combined
+with the bits on the display according to the Boolean function
+specified by 2alu*.  As in the 3bitblt* function, if
+2from-array* is too small it is automatically replicated.
+
+See the discussion of the 3bitblt* function ((bitblt-fun)) for
+complete details.  Note that 2to-array* is constrained as described
+there.  See also the 3tv:make-sheet-bit-array* function below
+((tv:make-sheet-bit-array-fun)).
+.end_defmethod
+
+.defmethod tv:stream-mixin :bitblt-from-sheet alu width height from-x from-y to-array to-x to-y
+Copies a rectangle of bits from the window to 2to-array*.  
+All the other arguments have the same significance as in 3:bitblt*.
+
+See the discussion of the 3bitblt* function ((bitblt-fun)) for
+complete details.  Note that 2to-array* is constrained as described
+there.  See also the 3tv:make-sheet-bit-array* function below
+((tv:make-sheet-bit-array-fun)).
+.end_defmethod
+
+.defmethod tv:stream-mixin :bitblt-within-sheet alu width height from-x from-y to-x to-y
+Copies a rectangle of bits from the window to some other place in the
+window.  All the other arguments have the same significance as in
+3:bitblt*.  Note that 2width* or 2height* may be negative, in
+which case the coordinates to be copied extend to lower values from the
+specified starting values, and copying is done in reverse order.  The
+order bits are copied makes no difference when copying between different
+arrays but is important when copying between overlapping portions of one array.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-char font char x y &optional alu
+Displays the character with code 2char* from font 2font* on the
+window with its upper left corner at coordinates (2x,y*).  This lets
+you draw characters in any font (not just the ones in the font map), and
+it lets you put them at any position without affecting the cursor
+position of the window. 
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-line x1 y1 x2 y2 &optional alu (draw-end-point 3t*)
+Draws a line on the window with endpoints (2x1,y1*) and (2x2,y2*).
+If 2draw-end-point* is specified as 3nil*, does not draw the last
+endpoint (that is, stops drawing just before that point instead of at
+it).  This is useful with alu function 3tv:alu-xor* when multiple
+connected lines are in use, since drawing an endpoint once each for
+two lines would cancel out.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-lines alu x0 y0 x1 y1 ... xn yn
+Draws 2n* lines on the screen, the first with endpoints
+(2x0,y0*) and (2x1,y1*), the second with endpoints (2x1,y1*) and
+(2x2,y2*), and so on.  The points between lines are drawn exactly once
+and the last endpoint, at (2xn*,2yn*), is not drawn.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-dashed-line x0 y0 x1 y1 alu dash-spacing space-literally-p offset dash-length
+Draws a line divided into dashes.  The first five arguments are
+the same as those of the 3:draw-line* operation.
+
+The argument 2dash-spacing* specifies the period of repetition of the
+dashes; it is the length of a dash plus the length of a space between
+dashes.  Its default value is 20.  2dash-length* is the length of the
+actual dash; it defaults to half the spacing.
+
+If 2space-literally-p* is 3nil*, the spacing between dashes is
+adjusted so that the dashes fit evenly into the length of line to be
+drawn.  If it is non-3nil*, the spacing is used exactly as specified,
+even though that might put the end point in the middle of a space
+between dashes.
+
+A nonzero 2offset* is used if you want a space between the starting point and the
+beginning of the first dash.  The value is the amount of space desired, in
+pixels.  The same space will be provided at the end point, if 2space-literally-p*
+is 3nil*.  2offset* defaults to zero.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-curve x-array y-array &optional end alu closed-p
+Draws a sequence of connected line segments.  The 2x* and 2y* coordinates
+of the points at the ends of
+the segments are in the arrays 2x-array* and 2y-array*.  The points
+between line segments are drawn exactly once and the point at the end of
+the last line is not drawn at all; this is especially useful when 2alu* is
+3tv:alu-xor*.  The number of line segments drawn is 1 less than the
+length of the arrays, unless a 3nil* is found in one of the arrays first
+in which case the lines stop being drawn.
+If 2end* is specified it is used in place of the actual length of the arrays.
+
+If 2closed-p* is non-3nil*, the end point is connected back to the first point.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-wide-curve x-array y-array width &optional end alu closed-p
+Like 3:draw-curve* but 2width* is how wide to make the lines.
+.end_defmethod
+
+.defmethod tv:stream-mixin :draw-rectangle width height x y &optional alu
+Draws a filled-in rectangle with dimensions 2width* by 2height*
+on the window with its upper left corner at coordinates
+(2x,y*).
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-triangle x1 y1 x2 y2 x3 y3 &optional alu
+Draws a filled-in triangle with its corners at (2x1,y1*), (2x2,y2*),
+and (2x3,y3*).
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-circle center-x center-y radius &optional alu
+Draws the outline of a circle centered at the point
+2center-x*, 2center-y* and of radius 2radius*.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-circular-arc center-x center-y radius start-theta end-theta &optional alu
+Draws part of the outline of a circle centered at the point
+2center-x*, 2center-y* and of radius 2radius*.
+
+The part of the circle to be drawn is specified by 2start-theta* and
+2end-theta*.  These angles are in radians; an angle of zero is the
+positive 2x* direction, and angles increase counter-clockwise.  The arc
+starts at 2start-theta* and goes through increasing angles, passing
+through zero if necessary, to stop at 2end-theta*.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-filled-in-circle center-x center-y radius &optional alu
+Draws a filled-in circle specified by its center and radius.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-filled-in-sector center-x center-y radius theta-1 theta-2 &optional alu
+Draws a "triangular" section of a filled-in circle, bounded by an arc of the circle and
+the two radii at 2theta-1* and 2theta-2*.  These angles are in radians;
+an angle of zero is the positive-X direction, and angles increase counter-clockwise.
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-regular-polygon x1 y1 x2 y2 n &optional alu
+Draws a filled-in, closed, convex, regular polygon of 3(abs 2n*)*
+sides, where the line from (2x1,y1*) to (2x2,y2*) is one of the
+sides.  If 2n* is positive then the interior of the polygon is on the
+right-hand side of the edge (that is, if you were walking from (2x1,y1*)
+to (2x2,y2*), you would see the interior of the polygon on your
+right-hand side; this does 2not* mean "toward the right-hand edge of the
+window").
+.end_defmethod
+
+.defmethod tv:graphics-mixin :draw-cubic-spline px py z &optional curve-width alu c1 c2 p1-prime-x p1-prime-y pn-prime-x pn-prime-y
+Draws a cubic spline curve that passes through a sequence of points.
+The arrays 2px* and 2py* hold the 2x* and 2y* coordinates of the
+sequence of points; the number of points is determined from the active
+length of 2px*.  Through each successive pair of points, a parametric
+cubic curve is drawn with the 3:draw-curve* operation, using 2z*
+points for each such curve.  If 2curve-width* is provided, the
+3:draw-wide-curve* operation is used instead, with the given width.
+The cubics are computed so that they match in position and first
+derivative at each of the points.  At the end points, there are no
+derivatives to be matched, so the caller must specify the boundary conditions.
+2c1* is the boundary condition for the starting point, and it defaults
+to 3:relaxed*; 2c2* is the boundary condition for the ending point,
+and it defaults to the value of 2c1*.  The possible values of boundary
+conditions are:
+.table 3
+.item :relaxed
+Makes the derivative zero at this end.
+.item :clamped
+Allows the caller to specify the derivative.  The arguments 2p1-prime-x*
+and 2p1-prime-y* specify the derivative at the starting point, and are
+only used if 2c1* is 3:clamped*; likewise, 2pn-prime-x* and 2pn-prime-y*
+specify the derivative at the ending point, and are only used
+if 2c2* is 3:clamped*.
+.item :cyclic
+Makes the derivative at the starting point and the ending point be equal.
+If 2c1* is 3:cyclic* then 2c2* is ignored.  To draw a closed curve
+through 2n* points, in addition to using 3:cyclic*, you must pass in
+2px* and 2py* with one more than 2n* entries, since you must pass
+in the first point twice, once at the beginning and once at the end. 
+.item :anticyclic
+Makes the derivative at the starting point be the negative of the
+derivative at the ending point.  If 2c1* is 3:anticyclic* then 2c2* is ignored.
+.end_table
+.end_defmethod
+
+.defun tv:spline px py z &optional cx cy c1 c2 p1-prime-x p1-prime-y pn-prime-x pn-prime-y
+This subroutine of the 3:draw-cubic-spline* operation is also useful in its own right.
+It does the computation of the spline to be drawn, then converts it into a sequence of line segments, returning arrays of 2x* and 2y* coordinates of endpoints of lines.
+3:draw-cubic-spline* works by passing these arrays to the 3:draw-curve* operation.
+
+The function returns three values, an array of 2x* coordinates, an
+array of 2y* coordinates, and the number of active points in those
+arrays.  (The arrays are not required to have fill pointers.)
+
+The arrays to be used can be supplied as
+the 2cx* and 2cy* arguments, or else new arrays will be created.
+If arrays are supplied and too short, they will be made longer.
+.end_defun
+
+.section Low-Level Graphics Using Subprimitives
+
+Drawing graphics on a window is usually done by sending messages to the
+window.  However, there is a certain overhead in sending each message.
+If your application requires speed, you can go to some more trouble by
+writing your very own method to do graphics.  It is a good idea not to
+do this until you know that using existing messages will not work; it is
+easier and less bug-prone to use the existing messages than to write handlers for new ones.
+
+To write a new method you must have a flavor to which to attach that
+method.  In this case, we want to add some graphics messages to existing
+kinds of windows.  So, what we want here is a mixin flavor.  You will
+define a new mixin flavor for your application.  You will add methods to
+this flavor to do the things you need to do.  Then, when you want to
+create an actual window to use, you will create a window of a new
+flavor; this new flavor will include, as one of its mixins, your new
+mixin.  For a simple case, you might use the following flavor definitions:
+
+.lisp
+(defflavor circus-mixin () ()
+   (:required-flavors tv:essential-window))
+   1;;This makes the instance variables of tv:essential-window accessible.*
+
+(defmethod (circus-mixin :draw-clown) (size weight happy-p)
+  ...)
+
+(defmethod (circus-mixin :draw-tent) 
+           (height &optional (number-of-rings 3))
+  ...)
+
+(defflavor circus-window () (circus-mixin tv:window))
+.end_lisp
+
+Now you can instantiate windows of flavor circus-window, and they
+will support your new messages.
+
+Within the definition of a primitive output operation you will use the
+graphics subprimitives such as 3sys:%draw-char* rather than the
+high-level operations described in previous sections.  To avoid
+errors, you should use these subprimitives only from within window
+methods that provide the error checking that the subprimitives lack.
+
+In addition, the subprimitives must be used only within the body of a
+3tv:prepare-sheet* special form.  An error is signaled if they are
+used elsewhere.
+
+.defspec tv:prepare-sheet body...
+Executes 2body* in an environment in which it is safe to draw on the
+window.  3tv:prepare-sheet* waits until the window is not output-held
+or locked, and then opens all blinkers that could be on top of the
+window so that they will not interfere with the output (see
+(open-blinkers)).  It also turns off interrupts so that the window will
+remain unlocked and the blinkers will remain open.
+
+Because interrupts are turned off, you must be careful in writing the
+2body*.  It should execute for no longer than
+you would mind being unable to do a 3Control-Abort*.  It also 2must*
+not wait for anything, since that would allow the blinkers to reappear
+and defeat the whole purpose of preparing the sheet.
+.end_defspec
+
+The microcode subprimitives generally use coordinates relative to the
+outside edges of the window.  This is unlike the high-level
+interfaces, which use cursor positions, in which the margins of the
+window do not count.  Also, subprimitives do little or no clipping or other
+testing for coordinates that are out of bounds.  The results of passing
+erroneous coordinates are unpredictable; in principle, the machine might
+halt.
+
+Another place you can use the subprimitives is inside the 3:blink*
+operation of a blinker.  This operation is always invoked in a suitable
+environment for calling them, including interrupts off.  Because
+blinkers are always drawn by xor'ing, it does not actually matter
+whether any other blinkers are present.
+
+These instance variables and macros are useful in writing output primitives:
+
+.table 3
+.item (tv:sheet-inside-left)
+.item1 (tv:sheet-inside-right)
+Return the positions of the inside left edge and the inside right edge,
+both relative to the outside left edge.  If your operation is intended
+to output on the inside of the window, these may be useful for clipping,
+and also for converting cursor positions to low-level coordinates.
+
+.item (tv:sheet-inside-top)
+.item1 (tv:sheet-inside-bottom)
+Return the positions of the inside top edge and the inside bottom edge,
+both relative to the outside top edge.
+
+.item (tv:sheet-inside-width)
+.item1 (tv:sheet-inside-height)
+Return the inside size of the window.
+
+.item tv:width
+.item1 tv:height
+The total width and height of the window, including the margins.
+
+.item tv:cursor-x
+.item1 tv:cursor-y
+The current cursor position, expressed in 2outside* coordinates.
+That is to say, these values are 2not* "cursor positions" in the usual
+sense of that term, but they do describe the position of the cursor.
+
+.item tv:screen-array
+The array of bits that hold the contents of the window.  Usually this is
+an indirect array that points to part of the screen, although it may
+also point to the superior's bit-save array, as described in
+(exposure).  You can use 3ar-2-reverse* and 3as-2-reverse* on this
+array, indexed by coordinates relative to the outside edges, to examine
+and draw individual points.  The dimensions of this array will be the
+width and height.
+
+.item tv:char-aluf
+.item1 tv:erase-aluf
+These are the alu function codes (see (alu-functions)) that are
+supposed to be used for normal drawing and erasing.  3:tyo*,
+3:string-out* and so on all use 3tv:char-aluf* and all the standard
+erase operations use 3tv:erase-aluf*.  If your operation is a kind of
+drawing or a kind of erasing, it may be correct for you to use one of
+these two.
+
+Usually 3tv:char-aluf* is 3tv:alu-ior*, which means to turn
+on (set to all ones) the corresponding bits in the array.  3tv:erase-aluf*
+is usually 3tv:alu-andca*, which means to turn off (set to zero) the
+relevant bits.  However, they would be different if the window were in
+reverse video mode.  Reverse video mode is not a highly-used feature,
+but by using these variables you can make your extensions work correctly
+in reverse video mode, so it is cleaner to use them.
+
+However, you may use any alu function.  3tv:alu-xor* is often useful.
+3tv:alu-seta* is usually not wise to use, since it will often result
+in the alteration of bits that you did not expect to change, but which
+happen to fall in the same word as the ones you were working on.
+
+.item tv:current-font
+This is the window's current font.  If you are drawing characters,
+it is usually correct to use this font.
+.end_table
+
+Here is an example from the 3tv:graphics-mixin* flavor, changed by
+adding the 3tv:* prefixes in the places where you would need them if you
+were to write this outside the 3tv* package.
+
+.lisp
+(defmethod (graphics-mixin :draw-point)
+	   (x y &optional (alu tv:char-aluf) (value -1))
+  (tv:prepare-sheet (self)
+    (setq x (+ x (tv:sheet-inside-left))
+	  y (+ y (tv:sheet-inside-top)))
+    (if (not (or (< x (tv:sheet-inside-left))
+		 ( x (tv:sheet-inside-right))
+		 (< y (tv:sheet-inside-top))
+		 ( y (tv:sheet-inside-bottom))))
+	(setf (ar-2-reverse tv:screen-array x y)
+	      (boole alu value 
+		     (ar-2-reverse tv:screen-array x y))))))
+.end_lisp
+
+This method takes its arguments in inside coordinates, and so it first
+converts them to outside coordinates.  Then it compares them with the
+boundaries of the inside of the window, and does nothing if they are
+outside those boundaries.  This is how it does clipping.  Finally, if
+everything is OK, it reads out the current value of the point, combines
+it with the new value using the specified alu function (which defaults
+to the char-aluf of the window), and stores it back into the array.
+
+.subsection Subprimitives for Drawing
+
+In addition to using 3as-2-reverse* yourself, you can use these
+subprimitives, mostly microcoded.  They are equivalent in principle to
+using 3as-2-reverse* many times, but they are much faster and have
+much less error checking.
+
+Some of these primitives will accept a sheet or an array.  In
+window-system applications the argument is usually a sheet, but any
+suitable two-dimensional numeric array will do.  (Suitable usually
+means that the width, times the number of bits per element, is a
+multiple of 32.)  If an array is used, there is no need to worry about
+3tv:prepare-sheet*.  If you are doing the output on a window, you
+should pass the window, not its screen array.
+
+.defun sys:%draw-rectangle width height x-bitpos y-bitpos alu-function sheet-or-array
+Draws a rectangle of size 2width* by 2height* with its upper left
+corner at 2x-bitpos*, 2y-bitpos*.  Alu function 2alu-function* is
+used, so you can draw, erase or complement the rectangle with the same
+function.  2sheet-or-array* is usually the sheet to be drawn on.
+There is no clipping or error checking.
+.end_defun
+
+.defun tv:%draw-rectangle-clipped width height x-bitpos y-bitpos alu-function sheet
+This is a little smarter, clipping to the edges of 2sheet*.
+It does not work on arrays.
+.end_defun
+
+.defun tv:draw-rectangle-inside-clipped width height x-bitpos y-bitpos alu-function sheet
+This clips to the inside edges of 2sheet*.
+.end_defun
+
+.defun sys:%draw-line x0 y0 x y alu draw-end-point-p sheet-or-array
+Draws a line from (2x0*,2y0*) to (2x*,2y*), all relative to the
+outside edges of the sheet, or indices in the array.
+The point at (2x*,2y*) is not drawn if 2draw-end-point-p* is 3nil*.
+No clipping or error checking is done.
+.end_defun
+
+.defun sys:%draw-triangle x1 y1 x2 y2 x3 y3 alu sheet-or-array
+Draws a triangle with the specified corners.
+No clipping or error checking is done.
+.end_defun
+
+.defun tv:draw-char font char x y alu sheet-or-array
+Draws the character with code 2char* in 2font* with its upper left corner at
+position (2x*,2y*) in outside coordinates.
+2alu* is used as the alu function, so you can either draw or erase.
+There is no clipping or error checking.
+.end_defun
+
+.defun sys:%draw-char font char x y alu sheet-or-array
+This is the actual microcoded primitive.
+It does not take into account the indexing table of a wide font,
+so when used on a wide font 2char* is not the character code that
+the user actually wants to output.  It is best to use 3tv:draw-char*.
+.end_defun
+
+.defun sys:%color-transform n17 n16 n15 n14 n13 n12 n11 n10 n7 n6 n5 n4 n3 n2 n1 n0 width height array start-x start-y
+This function operates on a rectangular portion of an 3art-4b* array.
+It examines each element of the array, and replaces the value of that element
+with 2n0* if its previous value was 0, 2n1* if its previous
+value was 1, and so on.  The upper-left hand corner of the array is
+specified by 2start-x* and 2start-y*, and its size is specified
+by 2width* and 2height*.  2array* must be an 3art-4b* array
+and the specified rectangle must be within the bounds of the array.
+.end_defun
+
+.defun bitblt alu width height from-array from-x from-y to-array to-x to-y
+Copies or merges a rectangular portion of 2from-array* to a congruent portion of
+2to-array*.  2from-x* and 2from-y* specify one corner of the
+rectangle in 2from-array*, and 2to-x* and 2to-y* specify the
+corresponding point in 2to-array*.  The opposite corner is found by
+adding 2width* and 2height* to either of those two positions.  The
+copying is done starting at the specified corner and proceeding toward
+the opposite one.
+
+3The width of each array, times the number of bits per element in that
+array, must be a multiple of 32.*
+
+When used in window system applications, one of the arrays will
+frequently be a window's screen array.  Then the window must be
+prepared using 3tv:prepare-sheet*.
+
+The operation is not simply one of copying; the bits coming from
+2from-array* can be merged with those of 2to-array*.  This is
+controlled by the 2alu* argument.  Each pair of bits is combined
+according to that argument to get the new bit to put in 2to-array*.
+If 2alu* is 3tv:alu-seta*, the old bits in 2to-array* are ignored.
+If 2alu* is 3tv:alu-ior*, then the old bits and the incoming bits
+are or'ed together.  And so on.  3bitblt* is careful never to
+change bits in 2to-array* outside the specified rectangle, which is
+why it is safe to use 3tv:alu-seta*, whereas it is not safe to use it
+in the other subprimitives.
+.end_defun
+
+.defun tv:make-sheet-bit-array window x y &rest make-array-options
+This function creates a two-dimensional bit-array useful for bitblting
+to and from windows.  It makes an array whose first dimension
+is at least 2x* but is rounded up so that 3bitblt*'s restriction regarding
+multiples of 32. is met, whose second dimension is 2y*, and whose
+type is the same type as that of the screen array of 2window* (or the
+type it would be if 2window* had a screen array).  2make-array-options*
+are passed along to 3make-array* (see (make-array-fun)) when the
+array is created, so you can control other parameters such as the area.
+.end_defun

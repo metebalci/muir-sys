@@ -1,0 +1,1081 @@
+.c -*-Mode:Bolio; Lowercase: Yes-*-
+
+.chapter Input
+.setq input-chapter chapter-number
+.setq input section-page
+.cindex keyboard input
+
+Windows can be given the ability to function as input streams (see
+(stream-protocol)).  This is implemented by the mixin
+3tv:stream-mixin*, which is a component of 3tv:window*.  (Originally,
+both input and output stream operations were defined on this mixin, but
+now the output operations are available on all windows since a window is
+fairly useless if you don't draw on it.)  Input characters normally come
+from the terminal keyboard, but can also come from mouse clicks, or
+anything else you may decide to program to generate input.
+
+.defflavor tv:stream-mixin
+This mixin defines the standard input stream operations for
+doing input from the keyboard, as well as some nonstandard input
+operations defined in the following sections.
+.end_defflavor
+
+Keyboard input is done through windows so that selection of windows
+can control which process can read input at a given time.  In fact, this
+is why the concept of selection exists: by making each process that does
+its output to a window also use that window to read input, and by making
+a single "selected" window the only window on which input operations can
+proceed, we enable the user to decide which process to direct his input to
+by selecting the corresponding window.
+
+.setq characters page
+
+Reading characters from a window normally returns a fixnum that
+represents a character in the Lisp Machine character set, possibly
+with extra bits that correspond to the 3Control*, 3Meta*,
+3Super*, and 3Hyper* keys.  Character constants in code are
+written with the 7#\* or 7#/* construct and are described in the
+Lisp Machine manual in (character-set).
+
+Programs decode keyboard characters with 3ldb* and 3dpb* using
+the following byte fields:
+.table 3
+.vindex %%kbd-char
+.item %%kbd-char
+A name for the byte field that contains the basic character.
+This is the low eight bits, and the contents are a character that
+can go in a string.
+.setq %%kbd-control-var page
+.vindex %%kbd-control
+.item %%kbd-control
+A name for the byte field that contains the 3Control* bit.
+.vindex %%kbd-meta
+.item %%kbd-meta
+A name for the byte field that contains the 3Meta* bit.
+.vindex %%kbd-super
+.item %%kbd-super
+A name for the byte field that contains the 3Super* bit.
+.vindex %%kbd-hyper
+.item %%kbd-hyper
+A name for the byte field that contains the 3Hyper* bit.
+.vindex %%kbd-control-meta
+.item %%kbd-control-meta
+A name for the four-bit byte field that contains
+the 3Hyper*, 3Super*, 3Meta* and 3Control* bits,
+in that order from most significant to least.
+.vindex %%kbd-mouse
+.item %%kbd-mouse
+A name for the byte field that is 31* if this is a "mouse" character,
+a character that reports a click of a mouse button rather than a
+pressing of a keyboard key.  (See (tv:kbd-mouse-buttons-mixin-flavor).)
+Note that mouse characters may contain 3Control* bits, etc.
+.vindex %%kbd-mouse-button
+.item %%kbd-mouse-button
+A name for the byte field that, in a mouse character, records the number
+of the button that was clicked.  The left button is 0, the middle is 1,
+and the right is 2.
+.vindex %%kbd-mouse-n-clicks
+.item %%kbd-mouse-n-clicks
+A name for the byte field that, in a mouse character, records the number
+of times whichever button was clicked, minus 1.  It is 0 for a single
+click, 1 for a double click, etc.
+.end_table
+
+Though keyboard input characters are currently fixnums, it is possible
+that a new, special data type for characters will exist in the future.
+The 7#\* construct will produce a character object rather than a
+fixnum, and the elements of a string will be character objects rather
+han fixnums.  Characters will behave just like fixnums in arithmetic and
+3=* but will not be 3eq* to fixnums.  The 3:tyi* and related
+stream operations will continue to return fixnums; new operations will
+be defined which return character objects instead.  It will still be
+possible to use 3ldb* and 3dpb* with these byte field names on
+fixnums and character objects indiscriminately.
+
+Note that reading characters from a window does not echo the characters;
+it does not type them out.  If you want echoing, you can echo the
+characters yourself, or call the higher-level functions such as 3tyi*,
+3read*, and 3readline*; these functions accept a window as their
+stream argument and will echo the characters they read.  This is in accord
+with the general Lisp Machine input stream conventions.
+
+The console hardware actually sends codes to the Lisp Machine whenever a
+key is depressed or lifted; thus, the Lisp Machine knows at all times
+which keys are depressed and which are not.  You can use the
+3tv:key-state* function to ask whether a key is down or up.  Also, you
+can arrange for reading from a window to read the raw hardware codes
+exactly as they are sent, by putting a non-3nil* value of the 3:raw*
+property on the property list of the input buffer; however, the format
+of the raw codes is complicated and dependent on the hardware
+implementation.  It is not documented here.
+
+.defvar tv:kbd-last-activity-time
+The value returned by the function 3time* when the last input
+character was typed.
+.end_defvar
+
+.section Input Buffers
+.cindex input buffer
+.setq input-buffer section-page
+.setq shared-input-buffers section-page
+
+Every window that generates input or from which input is read must have
+an 2input buffer* that holds characters that are typed by the user
+before any program reads the characters.  When you type a character, it
+enters the selected window's buffer.  (This is not precisely true, but it's a
+good first mental model.  See (io-buffer).)  Reading input from a
+window, with the 3:tyi* operation for example, takes objects out of
+the window's input buffer.  3tv:stream-mixin* gives
+the window an input buffer, but some other flavors (such as command
+menus) provide an input buffer without 3tv:stream-mixin*.  The input
+buffer lives in an instance variable of the window, called
+3tv:io-buffer*.
+
+Input buffers are examples of 2I/O buffers*, which are a general
+facility provided by the window system.  You can explicitly manipulate
+input buffers in order to get certain advanced functionality, by using
+the 3:io-buffer* init-option and the 3:io-buffer* and
+3:set-io-buffer* operations.  Another thing you
+can do is put properties on the I/O buffer's property list; this lets
+you request various special features.  I/O buffers are explained on
+(io-buffer).
+
+.cindex forcing keyboard input
+A window can be thought of as generating input when the keyboard is used
+while the window is selected.  This is the way that ordinary characters
+normally get into the input buffer.  But input can be generated at any
+place in the program by means of the 3:force-kbd-input* operation.
+For example, mouse clicks are often handled by forcing input which is
+read by the window's command-interpreting process (see
+(tv:list-mouse-buttons-mixin-flavor)).  Then we say that the mouse
+click also generates input.
+
+All the input, no matter how generated, ends up mixed together in the
+same input buffer, in chronological order.  All the input operations
+take input from the buffer in that order.
+
+.cindex sharing input buffers
+.cindex input buffers, sharing
+Normally each window that can generate input has its own input buffer.
+If a process is managing more than one window that can generate input,
+a program to look for input from all the windows at once would be
+cumbersome.  So it is not done this way.  Instead, all the windows are
+made to share a single input buffer.  Then all input generated by all of
+the windows goes into that buffer, from which the input can be read
+through any one of the windows.  The program simply reads input from one
+of the windows--always the same one, if the programmer prefers--and gets
+all the input intended for it.  All the keyboard input directed at it,
+and all mouse clicks on its windows, get merged into a single
+chronological input stream.
+
+The input buffer does not record which window was "responsible" for
+generating input read from a shared input buffer.  For mouse clicks the
+program may need to know which window the mouse was clicked on in order
+to obey the command properly.  The standard way to pass this information
+is to use a list as the input character and make the window clicked on
+one of the elements of the list.
+
+The window(s) used for input operations must have
+3tv:stream-mixin*.  The other windows need only be able to put
+input into the right input buffer.  It is often easiest to use
+3tv:stream-mixin* for them as well, and generate the input with
+3:force-kbd-input*.  However, it is sufficient for such windows
+to support the 3:io-buffer* operation by returning the
+correct shared input buffer, and put the input they generate into
+that buffer in any way that works, such as with the function 3tv:io-buffer-put*,
+or by invoking 3:force-kbd-input* on another window known to
+have 3tv:stream-mixin* and to share the same input buffer.
+
+If a frame includes a pane that is handled by its own process (such as
+a Zmacs frame), that pane should not share the input buffer used by
+the rest of the panes.  In general, there should be one input buffer
+for each process you are using, and that input buffer should be shared
+by the windows which go with that process.
+
+In general, the way to make windows share an input buffer is to create
+one using 3tv:make-default-io-buffer* and then specify it for the
+3:io-buffer* init keyword when each pane is created.  There are also
+frame flavors that automatically make the panes share an input buffer.
+
+.definstvar tv:stream-mixin tv:io-buffer
+The window's input buffer.
+.end_definstvar
+
+.definitoption tv:stream-mixin :io-buffer spec
+Initializes the input buffer of the window.
+2spec* may be an I/O buffer, a number or a list.
+If it is a number, an I/O buffer is made with that size,
+no input function, and the default output function.
+If it is a list, it is interpreted as
+.lisp
+(2size* 2input-function* 2output-function*)
+.end_lisp
+but if the 2output-function* is 3nil* or omitted,
+3tv:kbd-default-output-function* is used.
+.end_definitoption
+
+.defmethod tv:stream-mixin :io-buffer
+.defmethod1 tv:stream-mixin :set-io-buffer io-buffer
+Return or set the window's input buffer.
+.end_defmethod
+
+.section Blips
+.cindex blip
+.setq blips section-page
+Input need not be made of characters; lists are often used as well for
+program-generated input, especially for representing mouse clicks in
+different kinds of mouse-sensitive areas.  "Characters" which are lists
+are called 2blips*.  The car of the list is by convention a symbol
+which identifies the kind of blip.  Look for "blip types" in the concept
+index to find the places in this manual that define various kinds of blips.
+
+2Caution:* when using blips, you should keep in mind that the blips
+may be discarded if the process has called any function that does not
+know what to do with them.  The debugger and 3break* are such
+functions, so this can happen at any time.  Blips either should describe
+mouse actions, which can safely be ignored if they happen when they are
+not meaningful, or should notify the process to check other data
+structures.  A blip should not be used to indicate a request or response
+from another process, since this information must not be lost.  Instead,
+put the data on a separate queue and have the process check the queue
+after every command.  A blip that executes as a no-op command will
+serve to wake the process up if it is waiting for input when the data
+goes on the queue.
+
+There is a technique you can use to cause blips to be handled even in
+the middle of calls to 3read*, the debugger, and other programs that
+do not look for blips.  It is to give your window flavor an 3:around*
+method for 3:any-tyi*.  This 3:around* method can look at the
+value being returned; if it is one of certain types of blips, you can
+handle it and then loop around, calling the original 3:any-tyi* handler
+again without returning to the caller.  If it is anything else,
+you just return it.
+
+.section Stream Input Operations
+
+.defmethod tv:stream-mixin :any-tyi &optional eof-action
+Reads and returns the next character of input from the window, waiting if there is
+none.  The character comes from the window's input buffer if it contains
+any characters; otherwise, it comes from the keyboard.  2eof-action*
+is ignored since "end-of-file" is not meaningful for windows; this
+argument exists only because it is part of the input stream protocol. 
+.end_defmethod
+
+.defmethod tv:stream-mixin :tyi &optional eof-action
+Like 3:any-tyi* but throws away any blips ("characters" which are
+lists) that it receives.  It keeps on reading until it finds an actual
+character, and returns that.  Discarded blips will never be seen as input.
+.end_defmethod
+
+.defmethod tv:stream-mixin :any-tyi-no-hang &optional eof-action
+Like 3:any-tyi* if input is already present in the buffer, but returns
+3nil* right away if the buffer is empty.  This is used by programs
+that continuously do something until a key is typed, then look at the
+key and decide what to do next. 
+.end_defmethod
+
+.defmethod tv:stream-mixin :tyi-no-hang &optional eof-action
+Like 3:any-tyi* but throws away any blips ("characters" which are
+lists) that it receives.  It keeps on reading until it finds an actual
+character or the buffer empty; then it returns the character or 3nil*.
+Discarded blips will never be seen as input.
+.end_defmethod
+
+.defmethod tv:stream-mixin :mouse-or-kbd-tyi
+.defmethod1 tv:stream-mixin :mouse-or-kbd-tyi-no-hang
+These are like the 3:tyi* and 3:tyi-no-hang* operations, except that
+blips of a certain kind are not discarded and do count as input.  These
+are blips whose car is the symbol 3:mouse-button*.  In this case, the first
+value returned is the third element (caddr) of the blip, and the second
+value returned is the whole blip.  By convention, the third element of
+such a blip is a character whose 3%%kbd-mouse* bit is 31*, which
+identifies the button that the user clicked (see (mouse-blip)).  All
+other blips are discarded, as they are by 3:tyi* and 3:tyi-no-hang*.
+The first value is always a fixnum.
+.end_defmethod
+
+.defmethod tv:stream-mixin :list-tyi
+This is the "opposite" of 3:tyi*.  It returns only blips and discards
+real characters.
+.end_defmethod
+
+.defmethod tv:stream-mixin :untyi character
+Put 2character* back into the window's input buffer so that it will be
+the next character returned by 3:tyi*.  Note that 2character* must be
+exactly the last character that was read, and that it is illegal to do
+two 3:untyi*'s in a row.  This is used by parsers that look ahead one
+character, such as 3read*.
+.end_defmethod
+
+.defmethod tv:stream-mixin :force-kbd-input input
+2input* is inserted into the window's input buffer, to be read by the
+3:tyi* or other input operation in its turn.  2input* may be a
+character or a list (a blip).  It may also be a string; then all the
+characters of the string are forced as input, one by one.
+
+This is the standard way that blips are put into the input stream (see (blips)).
+.end_defmethod
+
+.defmethod tv:stream-mixin :listen
+Returns 3t* if there are any characters available to 3:tyi*, or 3nil* if
+there are not.  For example, the editor uses this to defer redisplay until it
+has caught up with all of the characters that have been typed in.
+.end_defmethod
+
+.defmethod tv:stream-mixin :wait-for-input-with-timeout timeout
+Waits until either input is available or 2timeout* 60ths of a second have elapsed.
+.end_defmethod
+
+.defmethod tv:stream-mixin :clear-input
+Clears this window's input buffer.  This flushes all the characters
+that have been typed at this window, but have not yet been read.
+.end_defmethod
+
+.defmethod tv:stream-mixin :playback
+Returns an array describing the last 2n* characters read from this
+window, for some value of 2n* (which is the size of the array).  The
+array elements are used in a circular fashion, the last one being
+followed by the first one, and array leader element 1 contains the index
+of the last slot stored into (the one containing the last character
+read).  The editor command 3Help L* uses this operation.
+.end_defmethod
+
+.defmethod tv:stream-mixin :rubout-handler options function &rest args
+Applies 2function* to 2args* inside an environment where inputting from
+this window will echo the characters typed and provide for simple input
+editing.  This is documented in more detail in the Lisp Machine manual.
+
+2options* is an assq list of keyword symbols and arguments to them.
+The options acceptable to windows are:
+.table 3
+'kindex :full-rubout :rubout-handler
+.item :full-rubout 2flag*
+If the user rubs out all of the characters that he has typed in,
+normally the rubout-handler just waits for more characters.  If the
+3:full-rubout* option is supplied, the rubout handler returns to the
+caller in this situation.  Two values are returned, 3nil* and 2flag*.
+
+'kindex :initial-input :rubout-handler
+.item :initial-input 2string*
+Treat the characters in 2string* as typeahead before reading anything
+from the keyboard.
+
+'kindex :pass-through :rubout-handler
+.item :pass-through 2ch1* 2ch2...*
+Treat the characters 2ch1*, 2ch2*, etc. as ordinary characters
+even if they would normally be special commands to the rubout-handler.
+
+'kindex :prompt :rubout-handler
+.item :prompt 2function*
+2function* is a function to be called before reading any characters;
+typically it will display a prompt.  The arguments to 2function* are the
+window and a flag.  When the rubout-handler is first entered the flag is 3nil*,
+but if it is necessary to prompt again, for instance if the user cleared
+the screen, 2function* is called with the character the user typed
+(e.g. 3#\clear-screen*) as its flag argument.
+
+2function* can also be a string; then it is simply printed as the prompt.
+
+'kindex :reprompt :rubout-handler
+.item :reprompt 2function*
+The same as 3:prompt* except that the function is not called the first
+time through.  If both 3:prompt* and 3:reprompt* are used, the
+3:prompt* is used the first time and the 3:reprompt* is used on
+reprinting.
+.end_table
+.end_defmethod
+
+.defmethod tv:stream-mixin :save-rubout-handler-buffer
+Returns a description of the rubout handler buffer's contents,
+and clears it out.  Two values are returned: a string and a fixnum
+(which is the current cursor index in the string).
+This is used on entry to the function 3break* so that typing
+the 3Break* key interfaces properly with rubout handling.
+.end_defmethod
+
+.defmethod tv:stream-mixin :restore-rubout-handler-buffer string index
+Loads the rubout handler buffer contents from 2string* and sets the
+cursor position to 2index*.  The arguments are usually two values
+obtained from 3:save-rubout-handler-buffer*.
+.end_defmethod
+
+.defmethod tv:stream-mixin :refresh-rubout-handler &optional discard-last-character
+Requests the rubout handler to reprint its buffer and reprompt.  If
+2discard-last-character* is non-3nil*, the last character in the
+buffer is discarded first.  This is used by
+3:restore-rubout-handler-buffer*.
+
+If you are reading input using the rubout handler, but want to process
+certain characters immediately (perhaps the character 3Help*) and not
+leave them as part of the ordinary input, use this operation with argument
+3t*.
+.end_defmethod
+
+.defflavor tv:preemptable-read-any-tyi-mixin
+This flavor defines the 3:preemptable-read* operation.
+.end_defflavor
+
+.defmethod tv:preemptable-read-any-tyi-mixin :preemptable-read options function &rest arguments
+You may have noticed that in the inspector and in the Window Error Handler, if
+you start typing in a Lisp expression, and then while in the middle
+of typing it you use the mouse to select an object by pointing at it,
+the program sees the object you moused.  If nothing special were done,
+though, the blip sent by the mouse process would get put at the end of
+the input buffer and would not be seen because of the characters that
+you have typed.  This mixin is what is used to solve the problem.
+
+The 3:preemptable-read* operation takes the same arguments as the normal
+3:rubout-handler* operation, and does the same thing if the mouse is not
+used.  (In fact, it has nothing to do with the 3read* function, despite the name.)
+The difference is that if any blip is sent to the window, the operation
+returns the blip as the first value and the symbol 3:mouse-char* as
+the second value.  (It does this even if the blip did not come from the
+mouse; most blips do.)  The characters that were in the rubout-handler
+buffer when the blip arrived will come back the next time a 3:preemptable-read*
+operation is used, so the user can keep typing his expression in.
+.end_defmethod
+
+.need 1500
+.nopara
+These obsolete functions are still used in some old code:
+
+.defun kbd-tyi
+Performs 3:tyi* on 3terminal-io*.
+.end_defun
+
+.defun kbd-tyi-no-hang
+Performs 3:tyi-no-hang* on 3terminal-io*.
+.end_defun
+
+.defun kbd-char-available
+Performs 3:listen* on 3terminal-io*.
+.end_defun
+
+.section I/O Buffers
+.cindex i/o buffers
+.setq io-buffer section-page
+
+An I/O buffer is an array of fixed size used as a ring buffer.
+Typically, characters are put into the buffer by one process and removed
+by another in FIFO order.  The process that is removing characters can
+wait if the buffer is empty, and a process putting in characters can
+wait if the buffer is full (or it could throw away the characters).
+Each window with 3tv:stream-mixin* has an input buffer which is
+an I/O buffer, and there is also one global I/O buffer for the keyboard
+itself.
+
+Note that the things stored in an I/O buffer can be any Lisp objects.
+They do not have to be characters, in any sense.  But in practice I/O
+buffers are in fact used for storing characters (which may be lists), so
+that is how this section is written.
+
+An I/O buffer has these slots in its leader.
+.ftable 3
+.item tv:io-buffer-size
+The number of slots in the input buffer.
+
+.item tv:io-buffer-input-pointer
+The index at which the next character inserted should be stored.
+.item tv:io-buffer-output-pointer
+The index at which the next available character is present.
+
+If the input and output pointers are equal, the buffer is empty.
+If the output pointer points at the slot after the input pointer,
+the buffer is considered full (in fact, one slot is still empty.  It
+cannot be used).
+
+.setq io-buffer-output-function page
+.item tv:io-buffer-output-function
+A function to be called when characters are removed, or 3nil*.  It is
+called with the buffer and the character as arguments.  Its value should
+be a translated version of the character (this is usually the same as
+the argument).  It can also return a non-3nil* second character, which
+says that the character should be discarded.  In this case,
+3tv:io-buffer-get* will remove the following character, or wait for
+one.
+
+In window input buffers this is usually a function that checks for and
+handles synchronous interception.
+
+.item tv:io-buffer-input-function
+A function to be called when characters are inserted, or 3nil*.
+The window system does not actually use this feature.  The calling
+conventions are the same as for the output function.
+
+.item tv:io-buffer-state
+This may be set to 3t*, 3nil*, 3:input* or 3:output* to control
+what can be done with the buffer.  Characters can be put in if this
+is 3nil* or 3:input*, and can be removed if this is 3nil* or
+3:output*.
+
+.item tv:io-buffer-plist
+A property list containing various properties.
+
+.item tv:io-buffer-last-input-process
+The last process that put a character in this I/O buffer.
+
+.item tv:io-buffer-last-output-process
+The last process that removed a character from this I/O buffer.
+
+.setq io-buffer-record page
+.item tv:io-buffer-record
+An array that records the last 2n* characters read from this
+I/O buffer, for some fixed 2n*.  This array too is a ring buffer,
+but nothing is ever "removed" from it; after it is full, it contains
+the last 2n* things stored into it.  The accessor
+3tv:io-buffer-record-pointer* gets the index of the last slot stored
+into.
+.findex tv:io-buffer-record-pointer
+.end_table
+
+.defun tv:io-buffer-empty-p io-buffer
+.defun1 tv:io-buffer-full-p io-buffer
+Non-3nil* if the buffer is empty, or full.
+.end_defun
+
+.defun tv:make-io-buffer size input-function output-function plist state
+Creates and returns an I/O buffer, initializing some of the slots
+from its arguments and the others in a default or reasonable fashion.
+The buffer is initially empty.
+.end_defun
+
+.defun tv:io-buffer-put buffer character &optional no-hang-p
+Inserts 2character* into 2buffer*, waiting if it is full unless
+2no-hang-p*.  This function also waits if the buffer's state does not
+permit input.  It returns 3t* if the character was inserted.
+.end_defun
+
+.defun tv:io-buffer-get buffer &optional no-hang-p
+Removes the next character from 2buffer*.
+If the buffer is empty, normally we wait for a character to appear, but
+if 2no-hang-p* is non-3nil* we return 3nil* immediately.
+This function also waits if the buffer's state
+does not permit output.  The character removed is put in 2buffer*'s
+3io-buffer-record* array.
+.end_defun
+
+.defun tv:io-buffer-unget buffer character
+Inserts 2character* into 2buffer* as the next character to be
+removed rather than as the last one to be removed.  This is used for
+undoing 3tv:io-buffer-get*, and it is an error if 2character* does
+not match the last character removed.  2character* is removed from the
+3io-buffer-record* array, by backing up its pointer, just to avoid
+duplication when 2character* is read a second time.
+
+This function should not be used more than once between input operations.
+.end_defun
+
+.defun tv:io-buffer-push buffer character
+Inserts 2character* into 2buffer* as the 2next* character to be
+removed; that is, in a LIFO manner.  This is as opposed to
+3tv:io-buffer-put* which inserts a character at the end.
+.end_defun
+
+.defun tv:io-buffer-clear buffer
+Makes 2buffer* empty.
+.end_defun
+
+.defun tv:process-typeahead buffer function
+Uses 2function* as a filter for the characters in 2buffer*.
+2function* is called once for each character, with the character as
+its sole argument.  If 2function* returns non-2nil*, that value is
+stored back in the buffer instead of the original character.  If
+2function* returns 2nil*, the character is deleted from the input
+buffer.
+.end_defun
+
+.subsection I/O Buffers and Type Ahead
+.setq typeahead-explanation section-page
+
+We have said (see (input-buffer)) that keyboard input goes into
+the selected window's input buffer.  This is not precisely true.
+Program-generated input made with 3:force-kbd-input* does go
+directly into the window's input buffer, but keyboard input
+actually goes into another I/O buffer called the 2keyboard input buffer*.
+(There is only one of these in the system.)  The characters move
+from the keyboard input buffer to the selected window's input buffer
+whenever a program tries to read input from that buffer and it is empty.
+The keyboard input is not assigned to a selected window until the
+instant the program is ready to read it.
+
+Asynchronous window-switching commands, such as 3Terminal S*, and
+mouse clicks that select a window, actually copy the contents of the
+keyboard input buffer into the buffer of the window that is being
+deselected.  If you type some commands to the editor, and then type
+3System L* before the editor has read its commands, those commands
+will still go to the editor, not to the Lisp listener you have
+selected.
+
+By contrast, synchronous window-switching such as is done by the
+functions 3ed*, 3supdup* and 3inspect*, and by "exit" commands
+in various programs, do not do this, since any further typed-ahead input
+should go to the program being switched to.
+
+.subsection I/O Buffers as Input Buffers
+
+.defun tv:make-default-io-buffer
+Creates and returns an I/O buffer of the sort used for window input
+buffers, with all slots suitably initialized.  The output function used is
+3tv:kbd-default-output-function*.
+.end_defun
+
+.defun tv:kbd-default-output-function buffer char
+This is the default value for a window input buffer's output function.
+It checks the character against the value of
+3tv:kbd-intercepted-characters* and also checks 3tv:kbd-tyi-hook*.
+.end_defun
+
+.defun tv:kbd-io-buffer-get buffer &optional no-hang-p (whostate 3"Keyboard"*)
+Removes a character from 2buffer*, or possibly from the keyboard input
+buffer.  The keyboard input buffer can be read from only if 2buffer*
+is the input buffer of the selected window, and it is used only if
+2buffer* is empty.  When a character is read from the keyboard input
+buffer, 2buffer*'s output function is executed, as if the character
+had been put into 2buffer* and then read from there.
+
+2whostate* is passed as the first argument to 3process-wait* if this
+function has to wait.
+.end_defun
+
+.defun tv:kbd-wait-for-input-with-timeout buffer timeout &optional (whostate 3"Keyboard"*)
+Waits until either 3tv:kbd-io-buffer-get* would not hang on 2buffer*
+or 2timeout* elapses.  2timeout* is in 60ths of a second.
+2whostate* appears in the who line while we wait.
+.end_defun
+
+.defun tv:kbd-wait-for-input-or-deexposure buffer window &optional (whostate 3"Keyboard"*)
+Waits until either 3tv:kbd-io-buffer-get* would not hang on 2buffer*
+or 2window* is not exposed.
+2whostate* appears in the who line while we wait.
+.end_defun
+
+.defun tv:kbd-snarf-input buffer &optional not-from-hardware
+Transfer any characters that 3tv:kbd-io-buffer-get* could now get from
+2buffer* right into 2buffer*.  This is what asynchronous selection
+commands use to make sure that type-ahead for the window being
+deselected remains with that window.
+.end_defun
+
+.defun tv:kbd-char-typed-p
+Non-3nil* if input is available in the selected window.
+This can be used in programs that loop with interrupts disabled,
+to tell when the user types a key.
+.end_defun
+
+The window system defines the meaning of certain properties
+on the 3tv:io-buffer-plist* of a window input buffer.
+These are
+.table 3
+'kindex :raw "input buffer plist"
+.item :raw
+Non-3nil* to inhibit translation of
+characters from hardware codes to the Lisp Machine character set.
+The effect of this is hardware dependent.
+
+'kindex :asynchronous-characters "input buffer plist"
+.item :asynchronous-characters
+An alist which controls which characters are
+intercepted asynchronously when this window is selected.
+
+.setq control-character-case page
+'kindex :dont-upcase-control-characters "input buffer plist"
+.item :dont-upcase-control-characters
+Non-3nil* prevents the 3Control* (etc.)
+keys from causing special treatment of alphabetic case.
+Normally, typing 3Control-Shift-A* produces the character
+3#\Control-/a* with a lower case "a", while 3Control-A*
+produces 3#\Control-A*; and the same for 3Meta*, 3Super*
+and 3Hyper*.  If this property is non-3nil*,
+the two inputs are interchanged in meaning, so that 3Shift*
+produces an upper case character with or without 3Control*.
+.end_table
+
+.section Intercepted Characters
+
+There are several characters that are specially intercepted by the
+window system.  Some are intercepted when a process tries to read them,
+and some are intercepted as soon as they are typed.  The first kind
+are called 2synchronously intercepted characters* and the second
+are called 2asynchronously intercepted characters*.  The latter
+come in two kinds: 2global asynchronous characters* such as
+3Terminal* and 3System* which are always available
+(see (global-asynchronous-characters)),
+and others defined by the selected window, normally including
+3Control-Abort* and so on (see (asynchronous-intercepted-characters)).
+
+.subsection Synchronously Intercepted Characters
+
+Synchronous interception is performed by the
+3io-buffer-output-function* of the window input buffer (see
+(io-buffer-output-function)).  By default, this function is
+3tv:kbd-default-output-function*, which uses the variable
+3tv:kbd-intercepted-characters* to decide which characters to
+intercept and how to handle them.  A program can change its set of
+synchronously intercepted characters simply by binding this variable
+before reading input.  Its default value specifies the characters
+3Abort*, 3Meta-Abort*, 3Break*, and 3Meta-Break*.
+
+.defvar tv:kbd-intercepted-characters
+The value is an alist specifying the characters to be intercepted
+synchronously (that is, when read by the program).  Since the variable
+is looked at by a subroutine of the 3:tyi* operation itself, what
+matters is current binding at the time the 3:tyi* is done.
+
+Each element of this list should look like
+.lisp
+(2character* 2function*).
+.end_lisp
+Then 2function* will be called if 2character* is read, with
+2character* as argument.
+
+2function* should return two values.  The second should be non-3nil*
+to say that the character has been handled by the function and should
+not be returned to the calling program as ordinary input.
+If the second value is 3nil*, the first value should be a translated
+character to use as input instead of the character typed.  (This can be
+and usually is the same character that was typed.)  The first value is
+ignored if the second is non-3nil*.  In practice, 2function* usually
+returns its argument and 3t*.
+
+2function* should begin by setting 3inhibit-scheduling-flag* to
+3nil*.
+
+It is reasonable to add new entries to the top level value of this
+variable, and also for programs to bind the variable.   It is probably
+unwise to remove the standard entries in the top level value.
+.end_defvar
+
+.defvar tv:kbd-standard-intercepted-characters
+This is the that which is the initial value of
+3tv:kbd-intercepted-characters*.
+.end_defvar
+
+.defun tv:kbd-intercept-abort char &rest ignore
+.defun1 tv:kbd-intercept-abort-all char &rest ignore
+These functions implement the standard meanings of the 3Abort* and
+3Meta-Abort* keys.  They are suitable for use in
+3tv:kbd-intercepted-characters*.  The first signals the 3sys:abort*
+condition; the second resets the current process.
+
+If 3terminal-io* handles the 3:inhibit-output-for-abort-p* operation
+and it returns non-3nil*, the string 3"[Abort]"* will not be
+printed.
+.end_defun
+
+.defun tv:kbd-intercept-break char &rest ignore
+.defun1 tv:kbd-intercept-error-break char &rest ignore
+These functions implement the standard meanings of the 3Break* and
+3Meta-Break* keys.  They are suitable for use in
+3tv:kbd-intercepted-characters*.  The first calls 3break*; the
+second invokes the debugger.
+.end_defun
+
+Furthermore, if the variable 3tv:kbd-tyi-hook* is
+non-3nil*, then it is considered to be a user function that can
+intercept the character at this point.
+
+By convention, programs are all expected to use the 3Abort* key as
+a command to abort things in some appropriate sense for that program.
+If you don't do anything special, 3Abort* will be intercepted
+automatically.  But some programs may want to do something specific
+when the user types 3Abort*.  The system default action can be replaced
+by binding the variable 3tv:kbd-intercepted-characters* so that 3Abort* goes
+to your own intercept routine instead of 3tv:kbd-intercept-abort*,
+or so that 3Abort* is read as an input character from the stream like any other and
+then is handled by your program.
+
+.defvar tv:kbd-tyi-hook
+The default 3io-buffer-output-function* (3tv:kbd-default-output-function*),
+before it does anything else, sees whether the
+value of 3tv:kbd-tyi-hook* is non-3nil*; if so, it assumes that the
+value is a function of one argument, and it applies the function to the
+character that was typed.  If the function returns a non-3nil* value,
+then the character will not be returned to callers of 3:tyi* or other
+input operations; otherwise, the character is processed normally.
+
+The idea is that you can write a function that intercepts anything
+passing through an input buffer that uses the default
+3io-buffer-output-function*.  Your function gets passed the character,
+and returns 3nil* if it doesn't want to handle it, or 3t* if it has
+taken care of the character.
+.end_defvar
+
+.subsection Asynchronously Intercepted Characters
+.setq asynchronous-intercepted-characters section-page
+
+Each window that has 3tv:stream-mixin* can define a set of
+characters to be intercepted asynchronously when that window is
+selected.  The interception is done through a different mechanism from
+that used for synchronous interception, but the same handling
+functions such as 3tv:kbd-intercept-abort* can ultimately be used.
+By default, a window requests asynchronous interception of the four
+characters 3Control-Abort*, 3Control-Meta-Abort*,
+3Control-Break*, and 3Control-Meta-Break*.  The default meanings
+of these keys are given in (call-and-abort).  You can change the set
+of such asynchronous keys on a per-window basis.
+
+Since the interception is done by the keyboard process, the characters
+cannot straightforwardly be specified by a variable for the program to
+bind.  So each window has a list of them (which is actually stored as
+the 3:asynchronous-characters* property on the input buffer's property
+list).
+
+.definitoption tv:stream-mixin :asynchronous-characters alist
+2alist* specifies the characters to be intercepted asynchronously
+while this window is selected, and what they should do.
+
+Each element consists of a character, a function to call, and optionally
+some extra arguments to be passed to it.  When the function is called,
+its arguments will be the character, the selected window, and any
+specified additional arguments from the alist element.
+
+If the init option is not specified, the default comes from the value of
+3tv:kbd-standard-asynchronous-characters*, the initial value of which
+is
+.lisp
+((#\c-abort tv:kbd-asynchronous-intercept-character
+  (:name "Abort" :priority 50.)
+  tv:kbd-intercept-abort)
+ (#\c-m-abort tv:kbd-asynchronous-intercept-character
+  (:name "Abort All" :priority 50.)
+  tv:kbd-intercept-abort-all)
+ (#\c-break tv:kbd-asynchronous-intercept-character
+  (:name "Break" :priority 40.)
+  tv:kbd-intercept-break)
+ (#\c-m-break tv:kbd-asynchronous-intercept-character
+  (:name "Error Break" :priority 40.)
+  tv:kbd-intercept-error-break))
+.end_lisp
+How these work is explained below.
+.end_definitoption
+
+.defmethod tv:stream-mixin :asynchronous-character-p character
+Returns non-3nil* if this window defines 2character* for
+asynchronous interception.
+.end_defmethod
+
+.defmethod tv:stream-mixin :handle-asynchronous-character character
+Invokes the handler a defined for asynchronous interception of
+2character*.  This runs the handler function in your current process.
+But since handler functions typically do 3process-run-function*, it
+usually doesn't matter.
+.end_defmethod
+
+.defmethod tv:stream-mixin :add-asynchronous-character character handler-function &rest additional-args
+Define 2character* for asynchronous interception in this window,
+to be handled by 2handler-function* and the 2additional-args*.
+This adds an element
+.lisp
+(2character* 2handler-function* . 2additional-args*)
+.end_lisp
+to the alist on the input buffer's property list.
+.end_defmethod
+
+.defmethod tv:stream-mixin :remove-asynchronous-character character
+Removes 2character*'s element from the alist, so that it is no longer
+intercepted asynchronously in this process.
+.end_defmethod
+
+Asynchronous interception is done by the 3Keyboard* process, and the
+handler function runs in that process.  Therefore, it must obey some
+strict conventions.  It must not do any I/O, or wait for anything; it
+should not run for very long; it should not get an error.  It is usually
+easiest to create another process and do the real work there, using
+3process-run-function*.
+
+.defun tv:kbd-asynchronous-intercept-character character window process-options subhandler additional-subhandler-args
+This function is provided as a convenient way to set up the handling of
+an asynchronously intercepted character.  It enables you to interface to
+the same functions used for synchronous interception.  It is used with
+at least two additional
+arguments: the process name and options for 3process-run-function*, and
+the function to call in the new process.  Thus,
+.lisp
+(#\c-break tv:kbd-asynchronous-intercept-character
+ (:name "Break" :priority 40.)
+ tv:kbd-intercept-break)
+.end_lisp
+arranges to create a process named 3"Break"* with priority 40, and
+call 3tv:kbd-intercept-break* in that process.
+
+2subhandler*, which is 3tv:kbd-intercept-break* in this example,
+is passed as arguments 2character*, 2window*, and the
+2additional-subhandler-args* if any.
+.end_defun
+
+.subsection Global Asynchronous Characters
+.cindex global asynchronous characters
+.cindex Terminal key
+.cindex System key
+.setq global-asynchronous-characters section-page
+.setq terminal-and-system page
+
+The 3Terminal* and 3System* keys are also intercepted
+asynchronously, but since their functions do not usually relate to the
+selected window, they are not controlled by the selected window's alist
+of asynchronous characters.  These are called global asynchronous characters.
+
+.defvar tv:kbd-global-intercepted-characters
+This is an alist whose value controls
+the characters intercepted regardless of the selected window.
+Its elements look and work just like those of the alist specified
+in the 3:asynchronous-characters* init option for a window.
+
+The initial value is
+.lisp
+((#\terminal tv:kbd-esc)
+ (#\system tv:kbd-sys))
+.end_lisp
+.end_defvar
+
+3Terminal* and 3System* are defined to call functions that read
+another character and dispatch on it.  The meaning of the second
+character is controlled by an alist so you can define new 3Terminal*
+and 3System* commands.
+
+.defvar tv:*escape-keys*
+The value of this variable is an alist, each entry of which describes a
+subcommand of the 3Terminal* key.  (3Escape* is the old name for the
+3Terminal* key.)  Rather than modifying the list yourself, use
+3tv:add-escape-key* or 3tv:remove-escape-key* (below).  Entries on
+the list are of the form:
+.lisp
+   (2char* 2function* 2documentation* 2option1* 2option2* 2...*)
+.end_lisp
+2char* is the character that should be typed after 3Terminal* to get
+the new command.  The character gets upper-cased before it is searched
+for in this list, so don't use lower case characters.  2function* may
+either be a list to be evaluated, or a symbol, which is the name of a
+function to be applied to one argument.  This is either the numeric
+argument specified by the user (as in 3Terminal 0 S*), or 3nil* if
+the user gave no argument.
+
+2documentation* should be a string giving documentation, or a form
+that gets evaluated and returns either a string or 3nil*.  The string
+will be printed by 3Terminal Help*, except that 3nil* means to omit
+this character from the 3Terminal Help* display.
+
+Normally 2function* is evaluated or applied in a new process created
+for the purpose, but if you give the 3:keyboard-process* option it
+will run in the keyboard process.  This option exists because certain of
+the built-in commands 2must* work this way.  If you add your own, you
+should not use this option, since you do not want to interfere with the
+operation of the keyboard process.  The cost of creating a new process is quite low.
+
+If the 3:typeahead* option is specified, then everything typed before
+the 3Terminal* key will be shoved into the selected I/O buffer, i.e.
+it will be treated as typeahead to the currently selected window.  Use this
+option with commands that change the selected window, to ensure that the user's
+typed input goes where he expected it to when he typed it.
+
+Here is a sample element:
+.lisp
+   (#\clear-screen
+    (tv:kbd-screen-redisplay)
+    "Clear and redisplay all windows.")
+.end_lisp
+.end_defvar
+
+.defun tv:add-escape-key char function documentation &rest options
+Adds an element to 3tv:*escape-keys**, and puts it in the right place
+alphabetically.
+.end_defun
+
+.defun tv:remove-escape-key char
+Removes any element for 2char* from 3tv:*escape-keys**.
+.end_defun
+
+.defvar tv:*system-keys*
+The value of this variable is an alist, each entry of which describes a
+subcommand of the 3System* key.  Use the functions
+3tv:add-system-key* and 3tv:remove-system-key* (below) to modify the list
+rather than doing it yourself.  Entries are of the form:
+.lisp
+   (2char* 2find* 2documentation* 2create*)
+.end_lisp
+2char* is the character that should be typed after
+3System* to get the new command.  The character gets upper-cased
+before it is searched for in this list, so don't use lower case
+characters.  2documentation* should be a string to be printed by
+3System Help*.
+
+If 2find* is an instance of a flavor, then it should be
+a window, and the 3System* command will select that particular window.
+However, normally 2find* is the name of a flavor.  If it is, the 3System*
+command first searches the previously-selected-windows list for a window
+of that flavor, and selects one if it finds one.  Otherwise, if the
+currently selected window is of that flavor, it beeps.  Otherwise, it
+looks at 2create* to figure out what to do.  2find* can also be a
+list; then it is evaluated and the value should be a window or a flavor
+name to be used as described above.
+
+If 2create* is 3nil*, it beeps.  If 2create* is 3t*, a new
+window of flavor 2find* is created by calling 3make-instance* with
+no options, and is selected.  If 2create* is some other symbol, it is
+the name of the flavor of window to be created.  (This can be different
+from the flavor to look for, which might be a mixin that is component of
+several different flavors all of which are suitable to select when this
+key is typed.)  Otherwise, 2create* is a form to be evaluated to
+create a window.  The 3System* command runs in a newly-created process
+and so the form is evaluated in its own process, not the keyboard
+process.
+
+If the character typed after the 3System* key is typed with the
+3Control* shift, existing windows are ignored and a new window is
+created according to 2create*.
+
+Here is a sample element:
+.lisp
+   (#/E zwei:zmacs-frame "Editor" t)
+.end_lisp
+.end_defvar
+
+.defun tv:add-system-key char find documentation &optional (create 3t*)
+Adds an element to 3tv:*system-keys**, and puts it in the right
+alphabetical position.
+.end_defun
+
+.defun tv:remove-system-key char
+Removes any element for 2char* from 3tv:*system-keys**.
+.end_defun
+
+.defun tv:find-window-of-flavor flavor-name
+Returns a previously selected window of flavor 2flavor-name*.  Windows
+are found in 3tv:previously-selected-windows*
+((tv:previously-selected-windows-var)) and checked with 3typep*.
+.end_defun
+
+.defun tv:select-or-create-window-of-flavor flavor-name
+Selects a previously selected window of flavor 2flavor-name*,
+or, if none exists, creates a new one and selects it.
+.end_defun
+
+.section Polling The Keyboard Explicitly
+
+Another way of using the keyboard, different from reading a stream of input
+characters from a window, is to treat it as a "random access" device and
+look at the instantaneous state of particular keys.  Spacewar does this.
+
+.defun tv:key-state key-name
+Returns 3t* if the keyboard key named 2key-name* is currently
+depressed, 3nil* if it is not.
+
+2key-name* may be the symbolic name of a shift key, from the table below,
+or the character code of a non-shift key, which is the character you get when you
+type that key without any shifts: a lower-case letter, a digit, or a special
+character.  Shift keys that come in pairs have three symbolic names; one for
+the left-hand key, one for the right-hand key, and one for both, which is
+considered to be depressed if either member of the pair is.  The shift
+key names are:
+.lisp
+:shift		:left-shift		:right-shift
+:greek		:left-greek		:right-greek
+:top		:left-top		:right-top
+:control	:left-control		:right-control
+:meta		:left-meta		:right-meta
+:super		:left-super		:right-super
+:hyper		:left-hyper		:right-hyper
+:caps-lock	:alt-lock		:mode-lock
+:repeat
+.end_lisp
+.end_defun

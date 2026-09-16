@@ -1,0 +1,4305 @@
+Date: 7 June 1982 19:22-EDT
+From: Alan Bawden <ALAN at MIT-MC>
+Subject:  #x100 IS equal to (1+ #x+FF).
+To: Daniel at MIT-AI
+cc: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 7 June 1982 18:54-EDT
+    From: Daniel Weise <Daniel at MIT-AI>
+    Re:   #x100  is not equal to (1+ #xFF).
+
+    From Blueman page 327
+
+    #X  #x number reads nubmer in radix 16. (hexadecimal) regardless of the
+    setting of ibase. 
+        As with #o, any expression can be prefixed by #x.
+        [Unfortunately, #x does not completely work, currently, since it does
+        not cause the letters A through F to be recognized as numbers.  This
+        does not seem to have bothered anyone yet.] 
+
+    That last line is now inoperative.
+
+In fact, it was made inoperative a couple of months ago when somebody else
+complained that radix 16 didn't work.  I fixed it at that point.  Notice,
+however, that you must type "+FF" to get a radix 16 number (this is to prevent
+confusion with the symbol named "FF").  The next version of the manual should
+be careful to explain all this.
+
+
+Date: Wednesday, 12 May 1982, 21:03-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: bug-lmman at MIT-AI
+
+There should be a concept index entry for
+``si:defstruct-description structure''.
+
+Date:  5 May 1982 1824-PDT
+From: PENTLAND at SRI-AI
+Subject: is there a :byte-size?
+To: bug-lmman at MIT-AI
+
+Hello.  I am trying to write some i/o interfaces between a lisp machine
+and a vax running vms.  When I write
+ (with-open-file (file filename '(:read :fixnum :byte-size 8)) ...)
+I get the message
+ File error UOO (Severity C) Unknown Open Option on file ....
+This doesn't happen when the :byte-size option is deleted.
+
+So what is wrong? Isn't there a :byte-size option anymore?
+-------
+
+Date: Friday, 23 April 1982, 14:50-EST
+From: Daniel L. Weinreb <dlw at SCRC-TENEX>
+To: kmp at MIT-MC, BUG-LMMAN at MIT-MC
+
+Well, that's why page 442 says that everything in the section is incorrect.
+
+
+Date: 21 April 1982 04:58-EST
+From: Kent M. Pitman <kmp at MIT-MC>
+To: BUG-LMMAN at MIT-MC
+
+The documentation on page 442 of the LispM manual about args that signal
+handlers take is radically out of date. Using the info it supplies, one
+might be inclined to write:
+
+  (defun master-condition-handler (condition msg p? r? name &rest args)
+    condition p? r? name ; ignored
+    (format t "~&Aborting after error condition:~%")
+    (lexpr-funcall #'format t msg args)
+    (*throw 'master-exit t))
+
+  (*catch 'master-exit
+    (condition-bind ((nil #'master-condition-handler))
+       (+ 'a 3))) ;make a spurious error
+
+If he did, he'd recursively cons error handlers infinitely due to wrong 
+number of args to his signal handler.
+
+
+Date: Tuesday, 20 April 1982  12:34-EST
+From: MOON at SCRC-TENEX
+To:   bug-lmman at SCRC-TENEX
+Subject: [EB: forwarded]
+
+Date: 20 April 1982 01:34-EST
+From: Edward Barton <EB at MIT-AI>
+To: Moon at SCRC-TENEX
+
+It doesn't tell you in the blue manual to use CDR on locatives,
+at least not in the section on locatives.  What it tells you is
+that you can use either CAR or CDR, and that you have to be careful
+about which one you use, IF YOU MIX LOCATIVES AND LISTS.  Someone
+who always uses LOCF will not necessarily be aware that he is
+mixing locatives and lists, since LOCF claims to return a
+locative.  I guess that is what I found confusing.
+---
+He is right.  Fix.
+
+Date: Tuesday, 20 April 1982, 00:42-EST
+From: David A. Moon <Moon at SCRC-TENEX>
+Subject: [EB at MIT-AI: Forwarded]
+To: bug-lmman at SCRC-TENEX
+Cc: eb at MIT-AI
+
+Date: 19 April 1982 21:51-EST
+From: Edward Barton <EB at MIT-AI>
+To: BUG-LISPM at MIT-AI
+
+There should be a warning somewhere in the manual about (LOCF (CDR X)).
+That seems to be about the only case where LOCF doesn't (can't?) return
+a locative pointer as the manual claims LOCF does.  That means that
+code that uses CAR to access locatives will run happily on LOCF of
+just about anything, until someone gives it (LOCF (CDR X)) and it
+does the wrong thing because it must use CDR to win in that case.
+---
+Note that it tells you in a few places in the manual to use CDR
+on locatives, I guess it needs more cross-referencing.
+
+Date: 10 April 1982 19:50-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+BlueNual, p. 325, last line, has ``\#'' for ``#\''.
+
+Date: Thursday, 18 March 1982, 09:23-EST
+From: David Chapman <ZVONA at MIT-AI>
+To: ALAN at MIT-MC
+Cc: BUG-LISPM at MIT-AI, bug-lmman at MIT-AI
+In-reply-to: The message of 17 Mar 82 19:44-EST from Alan Bawden <ALAN at MIT-MC>
+
+    I LIKE the fact that I can use ~D to print a list of fixnums in
+    base ten.  My code will break if format starts insisting on numbers there.
+
+Hmm, the documentation is inconsistent.  It begins with ``arg, a number,
+is printed as a decimal integer.''  That was as far as I got.  On the
+next page, it goes on to say ``If arg is not a number, it is printed in
+~A format and decimal base.''
+
+Date: 18 Mar 1982 0332-EST
+From: David A. Moon <MOON at SCRC-TENEX>
+Subject: copytree
+To: bug-lmman at SCRC-TENEX
+
+COPYTREE takes an optional second argument (area) which is not in the manual
+-------
+
+Date: 17 March 1982 18:37-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+The definition of tailp on p.67 of the BlueNual uses old-style
+do.  Since use of old-style do is discouraged, it shouldn't be in
+an example.
+
+Date: 28 February 1982 16:13-EST
+From: Steven C. Bagley <Bagley at MIT-MC>
+To: BUG-lispm at MIT-AI, BUG-lmman at MIT-AI
+
+Is binding PACKAGE to NIL the accepted way of forcing the package prefix
+to be printed by PRINT, FORMAT, and friends.  If so, this ought to be
+documented in the appropriate places (FORMAT section, package chapter). 
+
+Date: 26 February 1982 22:23-EST
+From: David A. Moon <MOON at MIT-MC>
+Subject: Error-handling
+To: JES at MIT-XX
+cc: BUG-LMMAN at MIT-MC
+
+    Date: 25 Feb 1982 2228-EST
+    From: Joseph E. Stoy <JES at MIT-XX>
+    Subject: Error-handling
+    To: bug-lmman at MIT-AI
+    cc: JES at MIT-XX
+
+    What's the status of the error system?  I believe the current edition of the
+    manual still says "[This section is incorrect ...]" about the section on error
+    condition handlers.
+The error system is currently being actively redesigned.
+
+    Specifically, I want to trap numeric over- and underflow and return a symbol
+    such as 'real-underflow as the result of such operations.  I had thought of
+    defining a handler which would use (return 'eh:return-value ...).  Does that
+    work?  Is there a better way?
+It is possible that you might be able to get that to work, but I wouldn't
+guarantee it.  In fact I wouldn't even bet on it.  Of course, the next time you
+try to do arithmetic on that symbol you will get an error since it's not a number.
+
+There is a variable called ZUNDERFLOW (which for some reason is not in the index
+of the manual) which, if you set it to T, will cause underflow to return zero
+as the result.
+
+    Please tell me, too, if I should really be sending questions like this
+    somewhere else.
+BUG-LISPM is the usual place.
+
+Date: 26 FEB 1982 1746-PST
+From: DEKLEER at PARC-MAXC
+To:   BUG-lmman at MIT-AI
+
+In lmman in ETHER 24.12, System 78.58, microcode 841, on Xerox Lisp Machine One:
+
+On page 63 of the grey manual the definition for sublis is incorrect.
+The actual code does a symbol test, not an atom test.  I think it should
+do an atom test (or for that matter no test at all, i.e. always try
+assq), but whatever the case, the documentation should be correct.
+-------
+
+Date: 26 February 1982 10:27-EST
+From: David W. Shipman <shipmn at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 78.57, ZMail 38.5, Local-File 31.10, Experimental Spire 1.2, microcode 836, 60Hz, on Lisp Machine Twelve:
+
+Following not in manual (or at least not in the index):
+
+The variable ZUNDERFLOW.
+The function STRING-COMPARE.
+
+Date: 25 Feb 1982 2228-EST
+From: Joseph E. Stoy <JES at MIT-XX>
+Subject: Error-handling
+To: bug-lmman at MIT-AI
+cc: JES at MIT-XX
+
+What's the status of the error system?  I believe the current edition of the
+manual still says "[This section is incorrect ...]" about the section on error
+condition handlers.
+
+Specifically, I want to trap numeric over- and underflow and return a symbol
+such as 'real-underflow as the result of such operations.  I had thought of
+defining a handler which would use (return 'eh:return-value ...).  Does that
+work?  Is there a better way?
+
+Please tell me, too, if I should really be sending questions like this
+somewhere else.
+
+Thanks.		Joe Stoy.
+-------
+
+Date: 19 February 1982 09:14-EST
+From: Steven C. Bagley <Bagley at MIT-MC>
+To: BUG-LMMAN at MIT-AI
+cc: BUG-LISPM at MIT-AI
+
+Has any thought ever been given to producing Lispm manuals with "change
+bars" in the margins, indicating what has changed since the previous
+version of the manual?
+
+Date: Thursday, 18 February 1982, 19:12-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-lmman at MIT-AI
+
+In lmman in System 78.58, ZMail 38.5, Programmer's Apprentice 21.4, Dungeon 2.1, Detective 2.2, microcode 836, Sorcerer's Apprentice, on Lisp Machine Twenty-two:
+
+The function defun-compatibility is by implication in
+global.  In fact it is in sys.
+
+Date: 13 February 1982 1540-EST (Saturday)
+From: Guy.Steele at CMU-10A
+To: David A. Moon <MOON at MIT-MC> 
+Subject:  Re: Problem with syntax for describing special forms
+CC: bug-lmman at MIT-AI
+In-Reply-To:  David A. Moon's message of 13 Feb 82 15:04-EST
+
+I agree that the nested square brackets are incredibly ugly.  They do
+have the advantage of yielding a context-free meta-grammar, whereas
+what the manual uses now is context-sensitive.  Moreover, what the
+manual uses is contrary to the usual convention that every set of
+brackets is independent.  Given this, either a change or an explanation
+with an example is in order.
+
+If you choose to change the explanation rather than the syntax, however,
+it must be done with care, and brackets must be used with care.
+Consider the following description of DEFUN:
+
+	DEFUN name (var... [&OPTIONAL bindspec...] [&REST var]) form...
+
+Here the two square-bracket sets really are independent.
+
+Also note that the documentation of LOOP in Chapter 18 uses a different
+notation from the rest of the manual; it uses curly braces instead of
+brackets to indicate optional items (and also uses vertical bars to
+separate choices, though this is not explicitly stated that I can find).
+As an example, in Blue Chine Nual, page 237, we find the description
+
+	FOR var {data-type} FROM expr1 {TO expr2} {BY expr3}
+
+As I understand it, the three optional parts really are meant to be
+independent.
+
+Date: 13 February 1982 15:04-EST
+From: David A. Moon <MOON at MIT-MC>
+Subject: Problem with syntax for describing special forms
+To: Guy.Steele at CMU-10A
+cc: BUG-LMMAN at MIT-MC
+
+My feeling about that is that nested square brackets are disgustingly
+ugly, and there are no cases, anywhere, of two arguments being
+independently optional.  It's unfortunate that this wasn't made clear
+in the notation section at the front of the manual.
+
+Date: 13 February 1982 14:31-EST
+From: David W. Shipman <SHIPMN at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In System 78.57, ZMail 38.5, Local-File 31.10, Experimental Spire 1.2, microcode 836, 60Hz, on Lisp Machine Twelve:
+
+Whether PROCESS-WAIT-WITH-TIMEOUT returns T or NIL is backwards
+from the what the manual says. Example:
+
+  (process-wait-with-timeout "foo" 10. #'false) --> NIL
+
+Manual (Blue, pg. 431) says should return T.
+
+
+Date: 11 February 1982 1309-EST (Thursday)
+From: Guy.Steele at CMU-10A
+To: bug-lmman at MIT-AI
+Subject:  Problem with syntax for describing special forms
+
+The square-bracket syntax is used incorrectly in a few places
+in describing special forms.  For example:
+	DEFVAR variable [initial-value] [documentation]
+Square brackets are described as meaning that the contents are
+optional.  Thus the above specification can be interpreted to
+mean that the two bracketed things are independently optional,
+leading one to write
+	(DEFVAR var "documentation")
+and wondering by what magic this is distinguished from
+	(DEFVAR var "value-string").
+
+The correct description, I think, is:
+	DEFVAR variable [initial-value [documentation]]
+That indicates that the documentation is optional only if
+the initial-value is supplied.
+--Guy
+
+Date: 10 February 1982 12:57-EST
+From: David A. Levitt <LEVITT at MIT-AI>
+Subject: REM-IF and REM-IF-NOT have undocumented &REST arguments. Etc.
+To: BUG-LMMAN at MIT-AI
+
+It would be helpful to include the full (PRED LIST &REST EXTRA-LISTS)
+arglist in the description of these functions.  When was this change
+made?  Was this ever announced to INFO-LISPM?  I assume it's permanent,
+it's so useful.  Ditto for globalizing UNION and INTERSECTION -- has
+documentation been updated?  Is there an accompanying SET-DIFFERENCE
+by any name?  There should be.
+
+I mention these because I don't recall seeing announcements for them; I
+assume that anything announced to INFO-LISPM is also on the
+documentation queue.
+
+While I'm at it, the little chapter on Mapping really ought to mention
+CIRCULAR-LIST.
+
+Date: 31 January 1982 08:14-EST
+From: Kent M. Pitman <kmp at MIT-AI>
+Subject: Indexing 
+To: BUG-LMMAN at MIT-AI
+
+If you're going to put package prefixes in the index, I think they 
+should appear shifted into the margin. eg,
+
+         ...
+	 pairlis, 71
+    time:parse, 496
+      fs:parse-pathname, 382
+    time:parse-universal-pathname, 496
+      fs:pathname-plist, 384
+         peek, 503
+         pkg-bind, 398
+         ...
+
+This would have the decided advantage that the eye can scan down the
+line of the beginning of the real name and look at the package prefix
+only for disambiguation or clarification once it has found what it wants.
+
+I find myself being very confused trying to decide whether to move forward
+or backward alphabetically because I pick a point, glance at the first
+letter, then turn back or forward a few pages accordingly ony to find it
+was FS:THING that I'd looked at and I'd turned forward looking for 
+FS:OTHER-THING because I was thinking I wanted "O" and that I was at "F".
+If the package prefix were clearly separated, it would not be so much problem.
+
+Another alternative, if that's too visually unpleasant, might be:
+
+         ...
+	 pairlis, 71
+         parse, time: 496
+         parse-pathname, fs: 382
+         parse-universal-pathname, time: 496
+         pathname-plist, fs: 384
+         peek, 503
+         pkg-bind, 398
+         ...
+
+This has the advantage that if there were more than one package, you could
+write, say, 
+
+         parse, time: 497, 832; russian: 6, 7
+
+
+Date: 30 January 1982 21:45-EST
+From: Alan Bawden <ALAN at MIT-MC>
+Subject: BACKQ screw?
+To: KMP at MIT-MC
+cc: ALAN at MIT-MC, BUG-LMMAN at MIT-MC, DANIEL at MIT-MC,
+    GJC at MIT-MC, REES at YALE, Guy.Steele at CMU-10A
+
+    Date: 30 January 1982 05:23-EST
+    From: Kent M. Pitman <kmp at MIT-AI>
+
+    ...
+
+    Oh, and of course I could have spelled out the CONS literally, but
+    that's pretty ugly and runs me past the level of my indentation...
+
+Well, I don't understand why if you want a cons, you don't just call
+the function than makes conses for a living.  ESPECIALLY if you are
+concerned about the cdr-coding of the result.  It is clear that there
+isn't much room in the syntax of backquotage to specify much more than
+the printed representation of the resulting object, so if you want to
+control some other aspects then you must call the functions that give
+you that control.
+
+    Anyway, the reason I mention this is not so much that I expect it
+    to get fixed, because I understand the optimizations going on and
+    most of the time they are useful; rather, the interesting thing
+    here is that the nesting of backquote expressions does not work as
+    straightforwardly as it might seem. I started with the innermost
+    definer thing and when I had gotten tired of writing them, wrote
+    the 2nd-level definer, adding a couple of ,' things where needed.
+    Then later I got tired of writing that definer, I wrote a
+    3rd-level definer ...  And though the transformations I was making
+    were (I thought) well-defined, they had subtle consequences that
+    people should probably be on the look-out for.
+
+What are you talking about?  I don't see anything in your examples
+that support this conclusion.  Can you supply a simple example where
+your "well-defined transformations" resulted in "subtle consequences"
+other than the usual sharing/cdr-coding ones we already warned you
+about?  I admit that I may have overlooked such an example buried in
+your message somewhere.
+
+    Further, in some cases, this can mean that an expressions that
+    were constant pieces of structure will be introduced where they
+    were not apparent in the form the user wrote: eg,
+
+       `(list ,a `(a ,,a a ,',a))
+
+You claim to have a feeling for where the "constant pieces" of
+structure in an example of doubly nested backquotage lie?  And you
+claim that backquote violates that feeling?  Then perhaps you
+shouldn't rely on those feelings!  I certainly have no idea where
+backquote is going to produce sharing in a doubly nested expression
+like this.
+
+If you are claiming there is some deficiency in the documentation for
+backquote in the LispMachine manual, then could you please be more
+explicit than alluding to "subtle consequences"?  The current
+documentation looks to me like it spends at least half its time
+warning you not to rely on what backquote expands into, or on what
+structure it manages to share.  What is it that you think it doesn't
+say?
+
+Date: Saturday, 30 January 1982, 16:13-EST
+From: David A. Moon <Moon at SCRC-TENEX>
+Subject: Your process bug
+To: dpl at MIT-AI
+Cc: bug-lispm at SCRC-TENEX, bug-lmman at MIT-AI
+
+Names of processes are supposed to be strings, not symbols.  I guess
+symbols used to work but only by accident.  The manual is not explicit
+on this point for some reason (it neither says what the name of a process
+has to be nor gives any hint as to what the name is for).
+
+Date: 30 January 1982 05:23-EST
+From: Kent M. Pitman <kmp at MIT-AI>
+Subject: BACKQ screw
+To: ALAN at MIT-AI
+cc: BUG-LMMAN at MIT-AI, DANIEL at MIT-AI, REES at YALE,
+    Guy.Steele at CMU-10A, GJC at MIT-MC, KMP at MIT-MC
+
+`(,form . ,'NIL) should mean (CONS form NIL), but that rule is not preserved
+at deep levels of backquote structure. Consider the following example:
+
+(defmacro defdefalist (name accessor)
+  `(defmacro ,name (&rest atoms)
+     `(progn 'compile
+	     ,@(mapcan #'(lambda (atom)
+			   (let ((temp (gensym 'g)))
+			     `((defmacro ,atom (key)
+				 `(cdr (,',',accessor ,key ,',atom)))
+			       (define-setf-handler ,atom ((nil key) v)
+				 `(let ((,',temp ,key))
+				    (rplacd (or (,',',accessor ,',temp
+						               ,',atom)
+						(car (setq ,',atom
+							   `((,,',temp . t)
+							     ,@,',atom))))
+					    ,v)))
+			       ',atom)))
+		       atoms))))
+
+(defdefalist defalist  assoc) ;Sample usage
+(defdefalist defalistq assq)
+
+Note the (,,',temp . t). I feel I SHOULD be able to have (,,'temp . ,'nil)
+there in order to achieve a (CONS something NIL) effect at that level, but
+I can't because by the end of the macro expansions. I need a (CONS ...) because
+I'm going to be immediately RPLACD'ing and don't want invisible pointers.
+Sadly, by the end of the macro expansion, the (CONS something nil) has become
+(LIST something) for all of the following alternatives:
+
+    (,,',temp)   ; this one is reasonable -- the rest are not
+
+    (,,',temp . ,nil)            (,,',temp ,@nil)
+
+    (,,',temp . ,'nil)           (,,',temp ,@'nil)
+    (,,',temp . ,','nil)         (,,',temp ,@','nil)
+    (,,',temp . ,',','nil)       (,,',temp ,@',','nil)
+
+So the (,,',temp . T) manages to stay (CONS something T) all the way through.
+
+Oh, and of course I could have spelled out the CONS literally, but that's 
+pretty ugly and runs me past the level of my indentation...
+
+Anyway, the reason I mention this is not so much that I expect it to get fixed,
+because I understand the optimizations going on and most of the time they 
+are useful; rather, the interesting thing here is that the nesting of 
+backquote expressions does not work as straightforwardly as it might seem. I 
+started with the innermost definer thing and when I had gotten tired of writing 
+them, wrote the 2nd-level definer, adding a couple of ,' things where needed.
+Then later I got tired of writing that definer, I wrote a 3rd-level definer ...
+And though the transformations I was making were (I thought) well-defined, 
+they had subtle consequences that people should probably be on the look-out for. 
+
+Further, in some cases, this can mean that an expressions that were constant pieces
+of structure will be introduced where they were not apparent in the form the user
+wrote: eg,
+
+   `(list ,a `(a ,,a a ,',a)) ;GRIND-TOP-LEVEL does something ugly with this,
+			      ; by the way...
+
+Suppose a is bound to C, then this turns into something which has a constant
+inner tail of (A C) where none was apparent from the surface description. If the
+user RPLAC'd into that tail, he'd find out all his code was sharing it -- not
+good, since that's likely not what he intended.
+
+Anyway, it's something to think about...
+--kmp
+
+Date: 27 January 1982 09:18-EST
+From: Kent M. Pitman <kmp at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+On page 330 of the blue manual in the description of si:break syntax,
+a right paren is missing at the end of the parenthetical remark about
+the syntax of left paren.
+-kmp
+
+Date: Tuesday, 26 January 1982, 22:32-EST
+From: James M. Turner <JMTURN at MIT-AI>
+Subject: PACKAGE-DECLARE
+To: BUG-LMMAN at MIT-AI
+Cc: JMTURN at MIT-AI
+
+In LMMAN in System 78.51, ZMail 38.5, microcode 843, on Lisp Machine Seven:
+Page 396:
+	"Your package declarations should go into seperate files containing
+only package declarations. Group them however you like, one to a file or all
+in one file. Such files can be read with load. It doesn't matter what package
+you load them into, so use USER, since that has to be safe."
+
+	This fails to adequately point out that the files CAN NOT be compiled.
+All it says is that they should be alone and loaded with LOAD.
+
+						James
+
+MOON@MIT-MC 01/25/82 15:35:32
+To: Zvona at MIT-AI
+CC: (BUG lmman) at MIT-AI
+    Date: Saturday, 23 January 1982, 20:26-EST
+    From: David Chapman <Zvona at MIT-AI>
+    To: BUG-lmman at MIT-AI
+
+    In lmman in System 78.48, ZMail 38.5, Experimental Programmer's Apprentice (Aux) 12.0, microcode 843, on Lisp Machine Eighteen:
+
+    It is not clear from the documentation whether or not
+    (prog t ...) is invisible to return.  I actually need to
+    know.
+The only reason prog t exists is to be invisible to return.  It is
+discussed on page 41 under do-named, and there is a pointer to there
+from prog (but not from return).  This whole thing is disorganized;
+the discussion of named prog scopes should be in a separate section,
+not buried inside the description of a function.
+
+Date: Sunday, 24 January 1982, 22:33-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: KMP at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 24 January 1982 10:58-EST
+    From: Kent M. Pitman <KMP at MIT-AI>
+    On page 399 of the purple manual, the intern functions are documented as returning
+    pkg as their third value if the symbol is found. 
+If the symbol is NOT found, they return pkg as the third value.
+						     If pkg is a symbol, 
+Do you mean if "string" is a symbol?  If "pkg" is a symbol, it just calls
+pkg-find-package and proceeds as if "pkg" had been a package.
+									 it is not
+    what is returned; rather, the package to which pkg referred is always returned.
+
+Could you just send in a case that fails?  I do not understand this report.
+
+Date: 24 January 1982 10:58-EST
+From: Kent M. Pitman <KMP at MIT-AI>
+Sender: turnip at MIT-AI
+To: BUG-LMMAN at MIT-AI
+
+In LMMAN in System 78.50, ZMail 38.5, microcode 836, on Lisp Machine Twenty-two:
+
+On page 399 of the purple manual, the intern functions are documented as returning
+pkg as their third value if the symbol is found. If pkg is a symbol, it is not
+what is returned; rather, the package to which pkg referred is always returned.
+
+Also, the wording the the second paragraph under intern is quite confusing. Where
+it says:
+ "If it doesn't find one, it interns string--rather than a newly created symbol--in
+  pkg."
+It is confusing to refer to the symbol as string at that point. It might want to say:
+ "If it doesn't find one, it interns the given symbol--rather than a newly created
+  one--in pkg."
+
+-kmp
+
+Date: Saturday, 23 January 1982, 20:26-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-lmman at MIT-AI
+
+In lmman in System 78.48, ZMail 38.5, Experimental Programmer's Apprentice (Aux) 12.0, microcode 843, on Lisp Machine Eighteen:
+
+It is not clear from the documentation whether or not
+(prog t ...) is invisible to return.  I actually need to
+know.
+
+kmp@MIT-MC 01/23/82 05:22:10 Re: cdr-coding
+To: (BUG LMMAN) at MIT-AI
+In LMMAN in System 78.44,...
+
+The manual should probably say explicitly that LIST* makes its last cons
+get a cdr-normal style, not a cdr-next:
+
+  (%P-CDR-CODE (LIST* 'A NIL)) => <cdr-normal>
+  (%P-CDR-CODE (LIST  'A    )) => <cdr-nil>
+
+The manual doesn't document this as what happens and probably should.
+On page 57 it just says the last cons is "dotted", which is ok I guess  because 
+it's not talking about cdr-coding at that point. As with COPYLIST* (which is
+correctly documented on page 58), LIST* may often be the right operator
+to pick in many places where LIST might otherwise seem like a good idea if
+NCONC is going to be called later.
+
+In fact, page 65 of the purple manual incorrectly puts CONS, XCONS, and NCONS in 
+one category and LIST*, LIST, LIST-IN-AREA, etc. in another category related to 
+the goodness of NCONC'ing or NREVERSE'ing them. In fact, LIST*'d things can 
+be NCONC'd efficiently, but they cannot (usually) be NREVERSE'd efficiently, 
+so they deserve their own category.
+
+
+Date: 17 January 1982 20:27-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 78.44, ZMail 38.5, Experimental Tester 18.22, microcode 836, on Lisp Machine Twenty-two:
+
+BlueNual, p.125 at top: array-reference vs array-ref.
+
+Date: 16 January 1982 21:06-EST
+From: George J. Carrette <GJC at MIT-MC>
+To: DLW at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+ALPHALESSP is strange, it is incompatible with Maclisp! I didn't
+realize that when I sent the note about it to BUG-LMMAN.  This can be
+incredibly confusing for "compatibility" functions , for example, I
+had snarfed the lispm definition of ALPHALESSP for use in NIL, and
+some other bug had caused Macsyma to be calling ALPHALESSP on
+non-symbols, giving rise to subtly wrong mathematical results, instead
+of the easier to find wrong-type-argument error it would have gotten
+if I had done ALPHALESSP correctly.
+
+Date: Saturday, 16 January 1982, 10:07-EST
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: GJC at MIT-MC, BUG-LMMAN at MIT-AI
+
+I belive that alphalessp and string-lessp were equivalent then, but somebody changed
+alphalessp in a strange way at some point.
+
+Primarily for Maclisp compabitility means that they are only secondarily provided
+for their usefulness.
+
+GJC@MIT-MC 01/15/82 14:44:49
+To: (BUG LMMAN) at MIT-AI
+In LMMAN in System 78.43, ZMail 38.5, microcode 840, on Lisp Machine Fifteen:
+
+The documentation for ALPHALESSP is wrong, it is *not* equivalent to STRING-LESSP!
+e.g. (ALPHALESSP   1000. 1000.) => ()
+     (STRING-LESSP 1000. 1000.) => ; An ERROR.
+
+Also, what is the comment "The following functions are provided primarily for
+Maclisp compatibility" supposed to mean? What is primary?
+
+
+Date: 18 December 1981 18:01-EST
+From: David Chapman <ZVONA at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+:dover lmwind;windoc press => ``WINDOC is DEFINITELY not a good PRESS file''
+etc., etc.  Que pasa?
+
+Date: 15 December 1981 03:22-EST
+From: Barry Margolin <BARMAR at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+On page 209 of the blue manual, there is a missing close paren
+in the top text line.  there is no close paren for the setq.
+
+MOON5@MIT-ML 12/13/81 03:13:04 Re:  The :INIT message
+To: (BUG lmman) at MIT-AI
+The flavor chapter mentions this all over the place, but never
+explicitly discusses it.  The closest it comes is under MAKE-INSTANCE
+and again under INSTANTIATE-FLAVOR.  Also it doesn't appear in the
+message index.
+
+Date: 12 December 1981 04:44-EST
+From: "Kenneth W. Haase, Jr." <KWH at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In the section on the error handler, the second Control-Meta-N should
+be a Control-Meta-P.
+
+Date: 7 December 1981 23:14-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Documentation for graphics commands
+To: BUG-LMMAN at MIT-AI, CSD.LARK at SU-SCORE
+
+By the way, that document is about how to write programs.  If you want the user
+interface, you want the document whose file name is LMWIND; OPERAT.  I'm also
+not sure whether there is a press file around.  The source files are for BOLIO
+input, not SCRIBE, so you probably can't justify them, but they are pretty
+readable.
+
+Date: 7 December 1981 23:13-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Documentation for graphics commands
+To: BUG-LMMAN at MIT-AI, CSD.LARK at SU-SCORE
+
+You want the document whose filename is LMWIND; WINDOC on MIT-AI.  I
+think there is still a press file lying around, but its FN2 may not be
+"PRESS" since there are programs that wipe out large press files in
+order to make disk space.  The source for this document is in the files
+LMWIND; WINDO1 > and LMWIND; WINDO2 >.  Look around on that directory
+and send me mail if you still can't find it.
+
+ALAN@MIT-MC 12/07/81 23:11:43
+To: (BUG LMMAN) at MIT-MC
+Gentlemen, I am shocked to discover that in this enlightened day and age
+the index to the manual still lists the special forms in an index labeled
+"Function Index".  Perhaps they should have their own index, or perhaps the 
+index should be relabeled.
+
+Date: 5 December 1981 20:18-EST
+From: David Chapman <zvona at MIT-AI>
+Sender: RG at MIT-AI
+To: BUG-LMMAN at MIT-AI
+
+Bluenual p. 325 ``superceded by \#''
+
+Date:  4 Dec 1981 1530-PST
+From: Jay Lark <CSD.LARK at SU-SCORE>
+Subject: Documentation for graphics commands
+To: bug-lmman at MIT-AI
+
+I am looking for any documentation of the graphics and windowing command
+available on the Lisp Machine.  I have a March 81 LM Manual but it does not
+include any of this info.  Do you have any documents available for these
+commands?  I am starting a Master's Project involving graphics and would
+like to keep my code as close to Lisp Machine code as possible.  I have
+access to the Arpanet and a dover printer so I could handle Scribe or
+Press files.  Thank you.
+
+Jay Lark (CSD.Lark@SU-SCORE)
+-------
+
+Date: 4 December 1981 11:25-EST
+From: Mike McMahon <MMcM at MIT-AI>
+Subject: :advance-input-buffer
+To: RMS at MIT-AI
+cc: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+Before sending my message, I did the following.
+
+(1) Checked all callers of :ADVANCE-INPUT-BUFFER in the system.  They
+all expected pointer, not count, or gave NIL.  I happened not to have
+the local file system tape software loaded.
+
+(2) Looked in the manual.  It documents pointer, not count.  This is
+true in the red manual, whose version of IOS was written 8 months ago.
+
+(3) Looked at the old version of QFILE where the first
+:ADVANCE-INPUT-BUFFER message was implemented a couple of years ago.
+This is long before LMIO; STREAM.  There too it was pointer, not count.
+
+I therefore concluded that programs that used count and not pointer were
+wrong and should be fixed, rather than breaking programs that are
+working according to the documentation.
+
+Date: 3 December 1981 23:55-EST
+From: Richard M. Stallman <RMS at MIT-AI>
+To: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+I seem to recall seeing other streams and programs
+that expect the arg to :advance-input-buffer to be
+a count, not an index.
+
+It seems that this is an example of confusion,
+and it is not fair to label RG's act as "a change"
+which is "incompatible" and "should be announced".
+It would be just as accurate to say that MMCM
+made an "incompatible change" which he was irresponsible
+not to announce.  THe actual fact is that RG and MMCM had
+different ideas of what that operation was "already doing".
+In this, neither one is "at fault"; but it also follows
+that MMCM's criticism of RG was not appropriate.
+
+ALAN@MIT-MC 12/03/81 22:47:22
+To: (BUG LMMAN) at MIT-MC
+In the Blue Chinenual all the filenames at the bottoms of pages lie about
+the machine where the documentation is to be found.
+
+Date: 3 December 1981 19:27-EST
+From: Mike McMahon <MMcM at MIT-AI>
+To: RG at MIT-AI
+cc: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+    rg@MIT-AI 12/03/81 01:13:54
+    (BUFFERED-INPUT-STREAM :ADVANCE-INPUT-BUFFER)  was taking as arg
+    a new index instead of a count to advance by.   I talked to DLW
+    who said you told him the plan was to obsolete :advance-input-buffer
+    eventually anyway, so I changed it to take a count, which is compatible
+    with current usage.
+Well, according to LMMAN;IOS, it takes a new index, not a count.  If
+this change is to be made, it should be announced in the system release
+notice.  It is not compatible with current usage.  I know of at least
+two programs already that it will break.
+
+Date: 1 December 1981 00:27-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: %MAKE-POINTER (p 176 of purple manual)
+To: KMP at MIT-AI, BUG-LMMAN at MIT-AI
+
+Yes, it is atomic.  The manual currently does not attempt to explain
+issues of storage conventions and GC integrity, which is why it doesn't
+tell you so in the manual.  All of those % functions are atomic, and
+that is one of the things that they do for a living.
+
+Date: 30 November 1981 15:52-EST
+From: Kent M. Pitman <kmp at MIT-AI>
+Subject: %MAKE-POINTER (p 176 of purple manual)
+To: BUG-LMMAN at MIT-AI
+
+Is %MAKE-POINTER-OFFSET an atomic operation with respect to the GC? Right now
+it doesn't matter since the GC doesn't run in our system, but if we turned it
+on, is there any chance of having a GC in the middle of it and losing? 
+ (DEFMACRO FAST-NTHCDR (CDR-CODED-LIST N)
+   `(%MAKE-POINTER-OFFSET ,CDR-CODED-LIST DTP-LIST ,N))
+can I be screwed by GC relocation (presuming I have not done something foolish
+like indexing off the end of the list) and end up with a pointer into the wrong
+space? The manual documents these with warnings about confusing the GC, but does
+not say how they can properly be used. 
+Thanks. -kmp
+
+Date: 28 November 1981 16:57-EST
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: FLAVIO at MIT-ML
+cc: BUG-LMMAN at MIT-AI
+
+Your problem has nothing to do with fs:close-all-files.  Opening a file for
+output, from a Lisp Machine, creates a new file with the next highest
+version number, and that is why you observed the effect you did.
+
+FLAVIO@MIT-ML 11/27/81 21:08:50
+To: (BUG lmman) at MIT-AI
+On p. 367 the function fs:close-all-files is
+said to close all open files.  However, I believe
+that issuing a fs:close-all-files is not the
+same as doing a close on every file that one
+has opened.  I have reached this conclusion
+experimentally, as follows:
+(setq mystream (open "test" ':out))
+(princ '(0 1 0) mystream)
+(close mystream)
+At this stage, the file "test" contains (0 1 0).
+Then I type:
+(setq mystream (open "test" ':out))
+(princ '(0 1 1) mystream)
+(fs:close-all-files)
+and the file "test" STILL contains (0 1 0).
+    If indeed an fs:close-all-files is not
+the same as a close on every open file,
+may I suggest that the Manual explain the
+difference?
+    Thanks.
+
+Date: 25 November 1981 23:59-EST
+From: David A. Moon <Moon at MIT-AI>
+Subject: [kmp at MIT-AI: Forwarded]
+To: BUG-LMMAN at MIT-AI
+
+kmp@MIT-AI 10/07/81 18:00:29
+To: (BUG LMDOC) at MIT-AI
+In System 73.32, ZMail 33.10, microcode 786, on Lisp Machine Twenty-two:
+
+  (MAKE-AREA ':NAME FOO ':SIZE 10 ':REGION-SIZE 10 ':REPRESENTATION ':LIST
+	     ':GC ':STATIC)
+
+  ...do 11 cons-in-area's; nothing happens. do 8179 more cons-in-area's; 
+  nothing happens. (the next cons errs saying the maximum size, 10, has
+  been exceeded).
+
+The documentation on page 178 of the LispM manual might want to mention
+that this quantity is in fact rounded up and by how much if that's what's
+going on.
+
+MOON@MIT-MC 11/25/81 13:37:34 Re: Some window-system questions
+To: KMP at MIT-MC
+CC: (BUG LMMAN) at MIT-AI
+    Date: 23 November 1981 21:25-EST
+    From: Kent M. Pitman <kmp at MIT-AI>
+    Subject: Some questions
+    To: BUG-LMMAN at MIT-AI
+
+    In System 74.45, ZMail 34.11, ..., microcode 793, on Lisp Machine Twenty-two:
+
+    I have several questions primarily related to the window system. If
+    documentation exists, I'd be obliged if you could point me at it. If
+    not, perhaps it would be worthwhile to include answers to these
+    questions in upcoming additions to the manual...
+Do you have a copy of AI working paper 210 (I think that's the number)?
+
+    On FRAMES/PANES,...
+
+     * Why is CONSTRAINT-FRAME the simplest kind of frame? What if I don't care
+       about something that hacks constraints? I am just curious why 
+       TV:CONSTRAINT-FRAME is not built out of some simpler TV:FRAME flavor.
+?.  BASIC=CONSTRAINT-FRAME is built on BASIC-FRAME.
+
+     * The documentation does not say what the recommended way of using 
+       TV:COMMAND-MENU-PANE is. I did it by adding a TV:PROCESS-MIXIN and a 
+       TV:STREAM-MIXIN and having the process just sit in a loop TYI'ing and
+       interpreting the blips it sees.
+If your process isn't doing anything but looking at the menu, you generally
+don't need a command menu, but can just use a plain menu and send it a
+:CHOOSE message, which is much more direct.  Normally you use the :IO-BUFFER
+init option to a command menu to tell it the io-buffer of some other window
+to which it should direct its blips.  Then you have a process associated with
+that window that reads input from several sources through the one io-buffer.
+I guess working paper 208 only mentions this in passing in a single sentence.
+
+    On Windows with processes,...
+
+            * With windows with processes (a la TV:PROCESS-MIXIN), I have
+       not been able to figure out what causes the window to come up with
+       its process active.  Setting things like :EXPOSE-P T and :ACTIVATE-P
+       T in the :DEFAULT-INIT-PLIST has not always been sufficient, so I am
+       wondering what the actual thing controlling this behavior is. I can
+       probably create a case where it doesn't get started when I think it
+       should if it sounds like what I am saying shouldn't be happening.
+I forget but probably the process is not automatically given a run reason
+until the window is selected.  This is so that when you boot, all the processes
+for all the programs don't have to page themselves in so they can wake up
+and go to sleep, which made booting considerably slower when it used to
+occur.  You can give the process a run reason youself in an :after :init
+method if you would prefer it to start up immediately.
+
+    On system window menus,...
+
+            * How does one control which things are listed in the Select
+       menu? Last night during debugging I had about 17 frames each with 4
+       inferior windows. Doing a Select in there is nearly impossible. It
+       almost makes one wish those pop-up menus were ZWEI flavored so
+       string-search would work... In any case, I would have been happy to
+       make only the frames go into the System menu or to dynamically
+       delete things from that menu if I knew how. (By the way, it's
+       comforting to see that scrolling works right in the pop-up selection
+       window when it gets too long.) A mixin which allowed a per-window
+       message saying :ADVERTISE-SELF T/NIL would be the kind of thing I am
+       looking for, I guess...
+Selection is desperately in need of a redesign, which I think it might get
+soon.  The :ALIAS-FOR-SELECTED-WINDOWS and :NAME-FOR-SELECTION messages
+are relevant to this.  You could do a m-X List Methods for these and
+look at a few representative methods to see what they are.
+
+            * How does one add to the list of possible flavor windows that
+       the Create menu offers? It seems to me like this must be related to
+       system key definitions.  Probably they are two unrelated mechanisms.
+       I think they probably shouldn't be unrelated. Anyway, I am wondering
+       how to add something to this.
+There's a variable for each of them, and a third variable for the programs
+column of the system menu.  In the sense that each of those variables may
+choose to have a different subset of the available programs they are unrelated.
+They all use the same flavors.  I don't remember the names of the variables,
+but you could find them in about a minute and a half by looking at the item
+list for the system menu and the function that does Create, either by using
+the inspector or by reading the source file SYS:WINDOW;SYSMEN LISP.
+
+            * Is there documentation about the various kinds of scroll
+       mechanisms that will make menus happy? I got a message saying I was
+       missing TV:SCROLL-BAR yesterday when I compiled some flavor and
+       putting it in made things happy, but I would really like to get
+       ahold of the kind of scrolling like happens in inspector windows and
+       Zwei with the single-pointed arrow that you can bump downwards to
+       scroll down a line, etc.
+These are probably in that working paper mentioned above.  The flavors
+you want have names something margin-scroll-mixin and flashy-scrolling-mixin.
+One way to find flavors that not everyone may be aware of is by getting
+the editor to ask you for the name of a flavor (e.g. m-X Describe Flavor)
+then using the completing reader.  For instance you might type SCROLL
+then whatever the "apropos" character is (type HELP to find out what it
+is), which will page for a while then list all the flavors that have SCROLL
+in their names, some of which will be relevant.  Not the best user
+interface but at least the information is there.
+
+Date: 23 November 1981 21:25-EST
+From: Kent M. Pitman <kmp at MIT-AI>
+Subject: Some questions
+To: BUG-LMMAN at MIT-AI
+
+In System 74.45, ZMail 34.11, ..., microcode 793, on Lisp Machine Twenty-two:
+
+I have several questions primarily related to the window system. If documentation
+exists, I'd be obliged if you could point me at it. If not, perhaps it would be
+worthwhile to include answers to these questions in upcoming additions to the
+manual...
+
+On FRAMES/PANES,...
+
+ * Why is CONSTRAINT-FRAME the simplest kind of frame? What if I don't care
+   about something that hacks constraints? I am just curious why 
+   TV:CONSTRAINT-FRAME is not built out of some simpler TV:FRAME flavor.
+
+ * The documentation does not say what the recommended way of using 
+   TV:COMMAND-MENU-PANE is. I did it by adding a TV:PROCESS-MIXIN and a 
+   TV:STREAM-MIXIN and having the process just sit in a loop TYI'ing and
+   interpreting the blips it sees.
+
+On Windows with processes,...
+
+ * With windows with processes (a la TV:PROCESS-MIXIN), I have not been able
+   to figure out what causes the window to come up with its process active. 
+   Setting things like :EXPOSE-P T and :ACTIVATE-P T in the :DEFAULT-INIT-PLIST
+   has not always been sufficient, so I am wondering what the actual thing
+   controlling this behavior is. I can probably create a case where it doesn't 
+   get started when I think it should if it sounds like what I am saying 
+   shouldn't be happening.
+
+On system window menus,...
+
+ * How does one control which things are listed in the Select menu? Last night
+   during debugging I had about 17 frames each with 4 inferior windows. Doing
+   a Select in there is nearly impossible. It almost makes one wish those pop-up
+   menus were ZWEI flavored so string-search would work... In any case, I would
+   have been happy to make only the frames go into the System menu or to 
+   dynamically delete things from that menu if I knew how. (By the way, it's 
+   comforting to see that scrolling works right in the pop-up selection window 
+   when it gets too long.) A mixin which allowed a per-window message saying
+   :ADVERTISE-SELF T/NIL would be the kind of thing I am looking for, I guess...
+
+ * How does one add to the list of possible flavor windows that the Create menu
+   offers? It seems to me like this must be related to system key definitions.
+   Probably they are two unrelated mechanisms. I think they probably shouldn't
+   be unrelated. Anyway, I am wondering how to add something to this.
+
+ * Is there documentation about the various kinds of scroll mechanisms that will
+   make menus happy? I got a message saying I was missing TV:SCROLL-BAR yesterday
+   when I compiled some flavor and putting it in made things happy, but I would
+   really like to get ahold of the kind of scrolling like happens in inspector
+   windows and Zwei with the single-pointed arrow that you can bump downwards to
+   scroll down a line, etc.
+
+Neves@MIT-MC 11/23/81 15:57:04
+To: (BUG LMMAN) at MIT-MC
+Perhaps someday someone will rewrite the later part of the FORMAT
+section (i.e. the part on iteration and fields).  I spent a few hours on
+it a couple of months ago and eventually had to write my own functions
+to print out lists in the format I wanted because I couldn't figure out
+how to get FORMAT to do it.  I think that section could use a lot
+of examples.
+
+ALAN@MIT-MC 11/21/81 20:10:02 Re: New Blue Chinual
+To: (BUG LMMAN) at MIT-MC
+In the copy of the new blue manual I picked up it seems that pages 253
+thru 262 inclusive appear twice.  Once in the correct place, and again
+between pages 172 and 173.  Is this a fluke or a general bug?
+
+Date: 21 November 1981 19:22-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+The new format for the SYSTEM MSG is a winner, but you should consider putting the numbers in
+the table of contents on the items as well, so people can search for interesting ones.
+
+Bluenual is not much different from RedMan.  The interlisp manuals have changes marked in the
+new versions.  That's probably overkill, but it would be useful if you put a list of major
+changes in the preface.
+
+MOON@MIT-MC 11/21/81 15:35:11 Re:  Compiling files in Maclisp
+To: KWH at MIT-AI
+CC: (BUG MACLISP) at MIT-AI, (BUG LMMAN) at MIT-AI
+    Date: 21 November 1981 02:55-EST
+    From: "Kenneth W. Haase, Jr." <KWH at MIT-AI>
+    To: BUG-MACLISP at MIT-AI, BUG-LMMAN at MIT-AI
+
+    COMPLR didn't seem to know the IF-FOR-MACLISP function documented
+    in the new (and the old also, I think) LISPM manual.  Is this
+    a bug in Maclisp, the manual, or me?  I can just use #M, but it
+    would be nice if I could pretty up my code by having clear
+    regions....
+Did you put either the declaration given on page 189 of the red manual
+or the one given on page 206 of the blue/gray manual at the front of your file?
+
+Date: 21 November 1981 02:55-EST
+From: "Kenneth W. Haase, Jr." <KWH at MIT-AI>
+To: BUG-MACLISP at MIT-AI, BUG-LMMAN at MIT-AI
+
+COMPLR didn't seem to know the IF-FOR-MACLISP function documented
+in the new (and the old also, I think) LISPM manual.  Is this
+a bug in Maclisp, the manual, or me?  I can just use #M, but it
+would be nice if I could pretty up my code by having clear
+regions....
+
+MOON@MIT-MC 11/18/81 15:23:13 Re: Catch-error
+To: Henry at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+    Date: 17 November 1981 00:00-EST
+    From: Henry Lieberman <Henry at MIT-AI>
+    Subject: Catch-error
+    To: BUG-LMMAN at MIT-AI
+
+    Catch-error seems to return one value if the form didn't have an 
+    error and four values if it errored, whereas the BlueNual says 
+    it should always return two.
+CATCH behaves the same way.  CATCH returns two undocumented extra values
+which are used internally (you can probably find documentation on them
+in the black manual).  The multiple values section of the manual discusses
+why functions may return extra values, and missing values are presumed
+to be nil, if I remember correctly.
+
+Date: 17 November 1981 00:00-EST
+From: Henry Lieberman <Henry at MIT-AI>
+Subject: Catch-error
+To: BUG-LMMAN at MIT-AI
+
+Catch-error seems to return one value if the form didn't have an 
+error and four values if it errored, whereas the BlueNual says 
+it should always return two.
+
+MOON@MIT-MC 11/12/81 17:06:12 Re: POP
+To: RWK at MIT-MC
+CC: KMP at MIT-MC, (BUG lmman) at MIT-AI
+    RWK@MIT-MC 11/11/81 15:26:40 Re: POP
+    To: MOON at MIT-MC
+    CC: (BUG LISPM) at MIT-MC, KMP at MIT-MC
+    I don't understand your note.  According to the documentation, POP
+    *DOES NOT* guarentee its return value.  Are you trying to say that
+    POP should guarentee its return value?  If so, then there's a bug in
+    the documentation.  If not, it isn't depending on what SETF returns.
+
+Well I guess the last sentence on page 203 in the red manual could
+be misinterpreted to mean that, although that isn't how I read it.
+This ought to be corrected in the next edition.
+
+Date: 6 November 1981 13:56-EST
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In System 74.43, ZMail 34.11, microcode 793, 60Hz, on Lisp Machine Twenty-two:
+
+there should be cindex for read-eval-print loop and break loop.
+
+Date: 25 October 1981 16:02-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Third Edition; you asked for it!
+To: BUG-LMMAN at MIT-AI, SK at MIT-MC
+
+    p. 25 the description of PROGN should mention the obscure usage of
+    (PROGN 'COMPILE ....)  [such as on p. 196 ]   is due to the reason on
+    p. 184.  
+Right, I've fixed it.
+
+    p. 193 the explanation of DEFMACRO doesn't explain the property list
+    usage on p. 366.
+This was fixed in the source already, but I have improved the fix.
+
+    p. 448 Can't DESCRIBE tell you about flavors, areas, packages, etc?
+    (i.e., why are there separate functions for this?)
+Because (describe 'foo) tells you about the symbol foo, (describe-flavor 'foo)
+tells you about the flavor named foo, (describe-area 'foo) tells
+you about the area named foo, and so on.
+
+    The keyword functions on p. 134 and p. 39 should be in the concept
+    index under keyword functions.  
+I've put the former (keyword-extract in.  The latter (defselect) was not
+about keywords at all, and I have changed it to refer to the first
+argument as the "message name".
+
+    p. 39 The explanation of KEYWORD-EXTRACT needs work; I get the
+    impression that it expands into one giant SELECTQ so that
+    "other-clauses" only get executed if there is no "primary" spec.  
+Yes, I've changed it to say that explicitly.
+								      At
+    the end of the sentence containing "(CAR (SETQ iteration-var ...", you
+    might add the phrase: "as when the keyword takes more than one
+    argument.
+No, it's differnt because it take the car after cdring, rather than before.
+The manual now explains this.
+	      You probably also want to add a reference to the &key keyword.
+Right, done.
+
+Thanks, and if you have more comments please let me know. -- Dan
+
+Date: 19 October 1981 20:38-EDT
+From: David W. Shipman <Shipmn at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In System 73.33, ZMail 33.12, Experimental Local-File 19.0, microcode 786, Spire, on Lisp Machine Twelve:
+
+In the Window System W.P. 210, pg. 11 last paragraph: It says that the default screen
+management for arbitrary sheets is the same as for screens. This seems to be true except
+for :SCREEN-MANAGE-UNCOVERED-AREA which in the case of screens will clear the uncovered
+area. For some reason, this is redefined for arbitrary sheets not to do anything (i.e.,
+it leaves the old crufty bits lying there).
+
+Date: 15 October 1981 00:33-EDT
+From: Steven T. Kirsch <SK at MIT-MC>
+Subject:  Third Edition; you asked for it!
+To: BUG-lmman at MIT-AI
+
+p. 25 the description of PROGN should mention the obscure usage of
+(PROGN 'COMPILE ....)  [such as on p. 196 ]   is due to the reason on
+p. 184.  
+
+p. 193 the explanation of DEFMACRO doesn't explain the property list
+usage on p. 366.
+
+p. 448 Can't DESCRIBE tell you about flavors, areas, packages, etc?
+(i.e., why are there separate functions for this?)
+
+The keyword functions on p. 134 and p. 39 should be in the concept
+index under keyword functions.  
+
+p. 39 The explanation of KEYWORD-EXTRACT needs work; I get the
+impression that it expands into one giant SELECTQ so that
+"other-clauses" only get executed if there is no "primary" spec.  At
+the end of the sentence containing "(CAR (SETQ iteration-var ...", you
+might add the phrase: "as when the keyword takes more than one
+argument."  You probably also want to add a reference to the &key keyword.
+
+NEVES@MIT-MC 10/13/81 14:55:29
+To: (BUG LMMAN) at MIT-MC
+CC: NEVES at MIT-MC
+I have a few comments about Lispm documentation.  A few of them are related
+to difficulties I had with the lispm as a beginner a few months ago.  I have
+tried to mentally reconstruct those difficulties.
+
+Errors.
+  When I was first starting out I had little idea of how to recover from bad
+states I would get into.  These bad states could be window configurations in
+which I did not know how to deal with or other error states.  The first
+thing I learned about was cold boot.  I used the cold boot as a "^C" on a
+tops-20 system.  Needless to say this made for very long debug loops.  I
+have seem this kind of behavior from a couple of other beginners as well --
+they don't know what is going on in the situation in which they are in so
+they cold boot to get into a situation in which they know.
+  The problem is that there are a lot of things a user can do,( i.e. abort,
+control abort, meta control abort, kill the window, reset the process in the
+window, make a new window, do a CALL, go to a different window) when he is
+in a bad sitution.  Perhaps the manual (OPERATE) should indicate what kinds
+of problems the user might have and what the appropriate error recovery
+behavior is.  
+
+Too much information.
+    -keyboard.
+  The impression I got from some of the documentation was that there was
+too much information there.  For example in OPERATE (i think) the keyboard
+is discussed along with all the varied keys like super, hyper, greek, ...
+I think when I first looked at this I was very confused because I thought I
+had to learn about all these modifier and function keys, whereas many are
+either not used by any lispm software, many are used by only one piece of
+software (i.e. network), and some are not used by beginners.
+    - going between windows
+  I was initially confused about how to go from window to window.  Initially
+I used the lisp functions (like "(ed)") to go from the lisp window to
+another window.  Then I found out about using the system menu.  Then I 
+started to use the system key, which is what I use now.  The problem was
+that there were all these ways of doing things and I (as a beginner) had no
+indication of which way to use.  Perhaps the documentation could help with
+this.
+- Windows
+    It took me awhile to develope an internal model of the window system
+that was correct.  There was all this general discussion (in WINDOW?) about
+the screen manager and inferiors of windows and how they are handled and I
+was set up for some complicated hierarchical structure.  The only way see
+the window structure is with the PEEK system which I learned about later.  I
+later learned that there are really only 2 or 3 levels in this hierarchy and
+that they system windows (ie. zmail, editor ...) are inferiors of the
+screen.  In reality the window system does not easily handle many levels of
+inferiors (i.e. most windows -- except frames -- should not have inferiors).
+The documentation should make clearer the internal structure of the system
+windows, perhaps even drawing a picture of the hierarchy.
+
+- Teach-lispm
+   There is a great need for on-line help and something like a (teach-lispm)
+function.  
+   Many things cannot be understood from the manual because although
+they explain things they do not say what those things are for.  A case in
+point is the Inspector.  For a long time I could not figure out what it was
+for even though there was some documentation on it in OPERATE.  It was not
+until someone else had shown me how look at Window structure with it that I
+realized what it was good for.  
+   The start up time of a new Lispm person is very great.  I have shown one
+or two people but it is a great drain on my time to spend it teaching about
+the system.  It would be nice to have a program (like teach-emacs) that a
+beginner could sit in front of and learn the basics of how to get around in
+the lisp machine.  I am not sure how it should be set up but if it was I
+would help writing some of the text as would others as well.  It could be as
+simple as an editor buffer that has some text in it which tells the user to
+do things.  (in this case all other windows would have to be 1/2 size so as
+not to interfere with the teach-lispm window).
+
+- writing and debugging code.
+  The beginning user does not know how to go about writing and debugging
+code on the lisp machine.  The most basic thing he would want to try (i.e.
+defining a function in the lisp listener) is wrong if he want to save his
+code.  He should write all functions in the editor, compile them there, and
+then go to the lisp listener to execute them.  This simple loop should be
+documented.
+  I also have had several people ask me how they can save their functions on
+the lisp machine.  Some do not realize the use of MC and AI as file
+computers, the connection to the Chaos net, that files are specified by
+<device> (which is a file computer) followed by the file name on that
+device.  I am sure this is documented but the beginner cannot read
+everything.  There should be essential information put in a seperate place
+for him.
+
+- Comment on the Red manual.
+  The last chapter (on misc. things) is important for the beginner and
+should not be at the end.  It says how to log in for example.
+   
+I hope the preceeding was of some use.  -dave
+
+
+Date: 12 OCT 1981 1316-PDT
+From: LEBRUN at PARC-MAXC
+Subject:  tiny typo
+To:   BUG-LMMAN at MIT-AI
+
+In Experimental System 74.15, Experimental ETHER 12.3, microcode 794, on
+Xerox Lisp Machine One:
+
+red manual p453 under number-gc-on after "performance" insert "of"
+
+
+-------
+
+Date: 10 October 1981 10:09-EDT
+From: David W. Shipman <Shipmn at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 73.33, ZMail 33.12, Experimental Local-File 19.0, microcode 786, Spire, on Lisp Machine Twelve:
+
+The reference to DECLARE in the description of ARGLIST on pg. 137/138 should be indexed
+under DECLARE in the index, since this information is not included in the primary
+description of DECLARE on pg. 184.
+
+
+MOON@MIT-MC 10/08/81 17:09:17 Re: How is one supposed to easily turn the number 1 into the string "1"?
+To: NEVES at MIT-MC
+CC: (BUG LMMAN) at MIT-MC
+I hope my previous answer wasn't too abrupt.  WITH-OUTPUT-TO-STRING is
+in the section on strings, and there is a cross-reference to FORMAT there.
+Indeed the writeup on the STRING function needs to be clarified.
+
+Date: 8 October 1981 00:44-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: SHIPMN at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 7 October 1981 04:34-EDT
+    From: David W. Shipman <SHIPMN at MIT-AI>
+    To: BUG-LMMAN at MIT-AI
+
+    In lmman in System 73.31, ZMail 33.10, Experimental Local-File 19.0, microcode 786, Spire, on Lisp Machine Twelve:
+
+    Mention in the description of SORT, etc. that the ARRAY-ACTIVE-LENGTH of an array, and
+    not the ARRAY-LENGTH, is what is used.
+
+I have put in such a note for SORT, but I really can't find every place
+in the manual that says anything about arrays and put in such a note.
+The active length is used practically everywhere by everything (at
+least, I hope so).
+
+Date: 7 October 1981 04:34-EDT
+From: David W. Shipman <SHIPMN at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 73.31, ZMail 33.10, Experimental Local-File 19.0, microcode 786, Spire, on Lisp Machine Twelve:
+
+Mention in the description of SORT, etc. that the ARRAY-ACTIVE-LENGTH of an array, and
+not the ARRAY-LENGTH, is what is used.
+
+Date: 5 October 1981 01:11-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+Subject: nits in the Third Edition
+To: SK at MIT-MC
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 27 September 1981 22:35-EDT
+    From: Steven T. Kirsch <SK at MIT-MC>
+
+    I am more concerned that the manual answer these questions than
+    just getting an answer.
+
+    p. 130 If many of the functions are macros rather than Special forms,
+    why not say so and change all the references in the manual?  Since
+    there aren't that many *real* special forms, you can almost do a
+    global replace.
+
+Some special forms are implemented as macros rather than magic functions,
+in actuality, but we document them as special forms because we do not
+PROMISE that they are implemented as macros; that is an implementation
+detail and we may change our minds later.  (This has actually happened.)  I
+might consider explaining this in the manual, but it is a rather subtle
+point and if it is not added carefully to the manual, it would just confuse
+people.
+
+    p. 289 Place a comma after "read" in the first sentence of
+    set-syntx-macro-char.
+
+No.  The sentence, as it stands, is correct; adding your comma AND one
+after the word "which" would also be correct.  Read about "parenthetical
+clauses" in The Elements of Style by Strunk and White.
+
+    p. 46 You may want to make refernce to the CIRCULAR-LIST function here
+    (after "... exhausted.")
+
+True.
+
+    p. 277 %%kbd-char seems to be mistakenly "yanked" into descriptions
+    where it should have been changed (e.g., read the description of
+    %%kbd-hyper).
+
+Yeah, this has been fixed already.
+
+    p. 379 The wholine reference in PROCESS-WAIT should be indexed.
+
+What do you mean?
+
+    p. 387 in a simple process, "run inside ... a stack group...have no
+    stack group." is a contradiction.  They don't have their OWN stack
+    group.  
+
+Yes; I thought this meaning would be obvious, but I'll clarify it.
+	    
+	    Will a sequence break stop a simple process? (I assume not).
+
+I assume not, too; I'll check and put it in the manual.
+
+    p. 380 Do functions on the clock-function-list executed in the
+    scheduler stack group (I assume yes)?  Also, there is nothing in the
+    description of the scheduler about how these functions are
+    scheduled!!!!  One only is told that other processes can run if a
+    process is done or a once a second sequence break occurs.  So is there
+    really a once a 1/60th of a second sequence break?  I assume not.  I
+    would guess that the scheduler preempts the running process every
+    1/60th, but won't switch to a new PROCESS until the process waits or
+    is outa time.  
+
+Yes, they run in the scheduler stack group.  There is only a sequence
+break once a second, and at that time the process is pre-empted
+and the scheduler decides whether to continue with it or to move to a new process.
+Nothing happens every 1/60th, at the Lisp level; the microcode does
+some stuff with that frequency but it does not affect scheduling.
+I'll clear this up.
+
+    p. 381 I'm surprised there is no WITH-PROCESS-LOCK macro.  
+							       
+Yeah, there really should be one.
+
+							       It might be
+    nice to have a GENERAL facility that does these kinds of things; 
+    this shouldn't be hard at all, e.g., 
+
+    (WITH keyword arg-list body)
+
+    where keyword (e.g., :file-open, :interrupts-off, :process-locked,
+    etc.) can be LOOKED UP in a *WITH-KEYWORD-ALIST*.  This alist
+    associates the keyword with 1) the function to apply to
+    arg-list and 2) the "undo" function at the end of the
+    unwind-protect (the first function should bind any variables the undo
+    function might need to use).
+
+It's just as easy to define a new WITH- macro as to add something
+to the ALIST, and it is easier to remember how to do the former, and the
+former is more modular.
+
+    p. 387 si:set-process-wait is undocumented.
+
+Um, so what?  Lots of junk in si is not documented.
+
+    p. 410 Sec. 26.4.3 "This" in "This symbol starts out..." refers to a
+    noun two sentences ago!
+
+True, will fix.
+
+    p. 21 Says keyword symbols are in the keyword package.  I thought they
+    were in the user package from reading Chapter 23.
+
+They are.  The user package is the keyword package.  The package system
+is getting changed soon anyway so this may change.
+
+    p. 45 In the description of unwind protect, you should mention that
+    the cleanup-forms are executed with the stack unwound to the point of
+    the unwind-protect so that if the protected-form does any lambda
+    binding of stuff to be undone, you lose.
+
+It should be obvious that the cleanup form cannot refer to such
+variables, since it is not inside the scope of the lambda.  This
+just obeys the usual scoping rules; the cleanup form runs in the context
+that you would expect it to run in, given its lexical position
+in the code.  But probably this bears explicit discussion in the manual.
+
+    I hope these comments are of some use.  If not, let me know.
+
+Thank you very much for your comments, and please send in any
+more if you have any.  I am very interested in this kind of feedback
+and will incorperate into the manual any good changes that you suggest.
+Thanks again.
+
+-- Dan
+
+Date: 5 October 1981 00:41-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+Subject: concept index entries for subst and named-subst
+To: ZVONA at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+Yeah, you're right, and these exist in the Fourth Edition (which
+has been printed by Symbolics, in gray covers, though not by MIT).
+Thanks.
+
+Date: 5 October 1981 00:37-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+Subject: tiny red manual bug
+To: LEBRUN at PARC-MAXC
+cc: BUG-LMMAN at MIT-AI
+
+Quite right, and you're the first one to find that bug.  Keep those
+cars and cdrs coming.  By the way, if you could send such things to BUG-LMMAN
+instead of BUG-LISPM you would save some people, who are not interested, from
+seeing your report, although I will get it in either case.  Thanks.
+
+Date: 2 October 1981 15:01-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 73.32, ZMail 33.10, Experimental Tester 13.0, microcode 786, on Lisp Machine Twenty-two:
+
+there ought to be a concept index entry for ``substs'' and maybe ``named-substs''.
+
+Date: 27 September 1981 22:35-EDT
+From: Steven T. Kirsch <SK at MIT-MC>
+Subject:  nits in the Third Edition
+To: BUG-lmman at MIT-AI
+
+I am more concerned that the manual answer these questions than
+just getting an answer.
+
+p. 130 If many of the functions are macros rather than Special forms,
+why not say so and change all the references in the manual?  Since
+there aren't that many *real* special forms, you can almost do a
+global replace.
+
+p. 289 Place a comma after "read" in the first sentence of
+set-syntx-macro-char.
+
+p. 46 You may want to make refernce to the CIRCULAR-LIST function here
+(after "... exhausted.")
+
+p. 277 %%kbd-char seems to be mistakenly "yanked" into descriptions
+where it should have been changed (e.g., read the description of
+%%kbd-hyper).
+
+p. 379 The wholine reference in PROCESS-WAIT should be indexed.
+
+p. 387 in a simple process, "run inside ... a stack group...have no
+stack group." is a contradiction.  They don't have their OWN stack
+group.  Will a sequence break stop a simple process? (I assume not).
+
+p. 380 Do functions on the clock-function-list executed in the
+scheduler stack group (I assume yes)?  Also, there is nothing in the
+description of the scheduler about how these functions are
+scheduled!!!!  One only is told that other processes can run if a
+process is done or a once a second sequence break occurs.  So is there
+really a once a 1/60th of a second sequence break?  I assume not.  I
+would guess that the scheduler preempts the running process every
+1/60th, but won't switch to a new PROCESS until the process waits or
+is outa time.  
+
+p. 381 I'm surprised there is no WITH-PROCESS-LOCK macro.  It might be
+nice to have a GENERAL facility that does these kinds of things; 
+this shouldn't be hard at all, e.g., 
+
+(WITH keyword arg-list body)
+
+where keyword (e.g., :file-open, :interrupts-off, :process-locked,
+etc.) can be LOOKED UP in a *WITH-KEYWORD-ALIST*.  This alist
+associates the keyword with 1) the function to apply to
+arg-list and 2) the "undo" function at the end of the
+unwind-protect (the first function should bind any variables the undo
+function might need to use).
+
+p. 387 si:set-process-wait is undocumented.
+
+p. 410 Sec. 26.4.3 "This" in "This symbol starts out..." refers to a
+noun two sentences ago!
+
+p. 21 Says keyword symbols are in the keyword package.  I thought they
+were in the user package from reading Chapter 23.
+
+p. 45 In the description of unwind protect, you should mention that
+the cleanup-forms are executed with the stack unwound to the point of
+the unwind-protect so that if the protected-form does any lambda
+binding of stuff to be undone, you lose.
+
+I hope these comments are of some use.  If not, let me know.
+
+Date: 23 September 1981 19:38-EDT
+From: Carl W. Hoffman <CWH at MIT-MC>
+To: BUG-LMMAN at MIT-AI, LEBRUN at PARC-MAXC
+
+    Date: 22 SEP 1981 1122-PDT
+    From: LEBRUN at PARC-MAXC
+    To:   BUG-LISPM at MIT-AI
+
+    In System 73.17, ETHER 11.27, microcode 912, on Xerox Lisp Machine Two:
+
+    In the manual, I wish the alphabetizer for the index would ignore the
+    package and non-alphameric prefixxes.  (They should obviously be printed
+    in the index, though.  Maybe in a different font?).  As it is now, even
+    if you remember the name of the thing you may have look all over for it
+    since it might be si:foo, fs:foo, %foo, *foo, or some combination, etc.
+
+I'd like to see both forms of indices.  Sometimes I'll go looking for a
+function name knowing that it lives in a certain package.
+
+
+Date: 22 September 1981 23:31-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+Subject: fonts
+To: BUG-LMMAN at MIT-AI
+cc: BUG-LISPM at MIT-AI
+
+I cleaned up some of the functions in LMIO1;FNTCNV and standardized
+their calling sequences.  At some point, the comment at the start of
+that file should be expanded into a short documentation section.
+
+Moon@MIT-MC 09/20/81 23:07:34
+To: (BUG lispm) at MIT-AI, (BUG lmman) at MIT-AI
+CC: MMcM at MIT-AI
+    Date: 16 Sep 1981 1656-EDT
+    From: Mike McMahon <MMcM at MIT-XX>
+    Reply-to: MMCM@MIT-AI
+    To: bug-lispm at MIT-AI
+
+    delete-initialization does not complain if no initialization is found.
+
+It seems to be designed to return T or NIL saying whether it found the thing
+to delete, although this is not documented.  Are there any opinions about
+whether it should be documented or changed to complain?
+
+Gumby@MIT-AI 09/18/81 19:07:38
+To: (BUG LMMAN) at MIT-AI
+In LMMAN in System 73.15, ZMail 33.8, microcode 786, on Lisp Machine Six:
+
+oops...disregard that previous message.
+
+		--david
+
+(I still think it's a little strange, though)
+
+Date: 16 September 1981 23:07-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: Neves at MIT-MC
+cc: BUG-LMMAN at MIT-AI
+
+Yes, I am interested in hearing about bugs in the documentation,
+but the file you referred to (SHEET) is completely abandoned and
+long obsolete.  The only active files are WINDOC, CHOICE, and OPERAT.
+Everything else is obsolete and should be ignored.
+
+Neves@MIT-MC 09/14/81 15:17:59
+To: (BUG lmman) at MIT-AI
+In lmman in System 73.15, ZMail 33.7, Experimental Local-File 18.0, microcode 786, Scheme, on Lisp Machine Twenty:
+
+tv:sheet-calculate-offsets in lmwind;sheet 9 is documented as having an
+optional argument.  In reality the second argument is not optional.
+p.s. do you not want to hear window documentation bugs?
+
+GJC@MIT-MC 09/13/81 13:46:13 Re: TYIPEEK
+To: DLW at MIT-MC
+CC: (BUG LISPM) at MIT-MC, (BUG LMMAN) at MIT-MC
+:TYIPEEK is a good message in itself, since it may be a lot more efficient
+than :TYI, :UNTYI, and since it is usually trivial to support. 
+
+-gjc
+
+Side issue: I think somebody should go through the lispm manual and
+            get rid of the phrase "mainly for Maclisp compatibility."
+            It is really "squishy" since either something is for compatibility
+            or not. "Mainly for Maclisp compatibility" has complex overtones
+            and connotations that only an insider can fully appretiate,
+            and which are out-of-place in something published as documentation.
+            The person should look out for catch phrases like
+            "basically the same."
+
+
+
+MOON@MIT-MC 09/10/81 16:37:46
+To: (BUG lmman) at MIT-AI
+Date: 10 September 1981 01:30-EDT
+From: Kent M. Pitman <KMP at MIT-MC>
+To: BUG-LMDOC at MIT-MC
+
+It would be helpful if TIME:MICROSECOND-TIME said how long it goes before wrapping
+or explicitly that it does not wrap if that's in fact the case. Similarly for
+TIME:FIXNUM-MICROSECOND-TIME; the "every few seconds" comment is very vague. A
+timer is of little use without some sense of when the precision will be exceeded.
+
+The manual does not give any time estimates for hash tables of small sizes. Presumably
+for small numbers of elements, a property list is better, but when does it become
+useful to switch over to hash tables? ...If hash tables are more efficient always,`
+one would wonder why property lists are not simply implemented as hash tables...
+or why hash tables do not simply store things internally as a property list until
+a certain critical number of elements is reached when hashing would become appropriate.
+
+I also think the order of arguments to the hash functions is awful. It seems like
+(GETHASH table indicator) and either (PUTHASH table indicator val) or (PUTHASH table
+val indicator) would have been a lot more sensible. Omitted middle arguments are
+very unintuitive (ie, from PUTASH to GETHASH an arg is dropped); they only make
+sense in things like ASET where there is a variable number of args (subscripts)
+problem and an omitted arg problem being dealt with in parallel. I suppose it's too
+late to push for a change at this point, though. I just thought I would note my
+disapproval.
+
+
+
+Date: 15 August 1981 05:11-EDT
+From: Richard M. Stallman <RMS at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+The documentation of INTERN ought to say explicitly that case is
+significant in pname comparison, and mention that normally READ converts
+everything to upper case and that this is why case is not significant in
+programs.
+
+Date: 15 August 1981 03:32-EDT
+From: David L. Andre <DLA at MIT-AI>
+To: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+cc: DLA at MIT-AI
+
+In System 72.32, ZMail 31.22, microcode 774, on Lisp Machine Six:
+
+(reverse 'foo) ==> NIL
+This is contrary to the documentation, whose example would loop forever,
+and is non-obvious.  Three solutions I see are:
+1.  Update the documentation
+2.  (reverse 'foo) ==> FOO and update the documentation
+3.  (reverse 'foo) causes an error and update the documentation
+
+Date: 10 August 1981 14:32-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In lmman in System 72.23, ZMail 31.15, microcode 774, ZM 31.13, on Lisp Machine Eighteen:
+
+the function compiler:ma-unload advertised in lmdoc;mcdoc is funbound.
+
+Date: 31 July 1981 21:33-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Gratuitous confusion
+To: KMP at MIT-MC, BUG-LMMAN at MIT-MC
+
+Yeah, I editing out that (food 3) thing some time ago; it is replaced by
+something more obvious, in Revision 4.  Thanks anyway.
+
+
+KMP@MIT-MC 07/31/81 05:07:10 Re: Gratuitous confusion
+To: (BUG LMMAN) at MIT-MC
+A friend of mine was reading the LispM manual for the first time and was
+totally confused by the description at top of page 3 about function 
+descriptions. Specifically, she couldn't figure out where the (3 food) came
+from. It took me about 10 seconds to figure out myself and I think it's
+very cute, but I think it has no place in a manual -- certainly not in the
+part that tries to tell people who to read the manual! If you take that part
+of the manual as a joke, you might as well not include it. Many people won't
+need to look at it but those who do really want it to be clear and informative.
+Save the joke return values for later at least or maybe just punt them 
+altogether...
+
+
+KMP@MIT-MC 07/31/81 05:01:50 Re: Uniformity of naming convention?
+To: (BUG LMMAN) at MIT-MC
+Why does MAKE-HASH-TABLE take a :REHASH-SIZE keyword to specify how much the
+size is to increase when the table is full and MAKE-EQUAL-HASH-TABLE take a
+:GROWTH-FACTOR keyword to say how much its size should grow? If there is some
+subtle difference, it should be expounded upon because the descriptions look
+nearly identical. If they are the same information, then they should be the 
+same keyword.
+
+
+Date: 30 July 1981 02:21-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Comments
+To: BUG-LMMAN at MIT-AI, SK at MIT-MC
+
+Thank you for the compliments; also, thank you for the criticisms.
+Regarding the GC, the main problem here is the sorry state of the GC in
+the Lisp Machine.  It basically doesn't work; the complete explanation
+of what is going on is quite involved and I am not up-to-date on all of
+it, but the idea is that using the GC currently makes the machine
+unacceptably slow.  We have many ideas about how to fix this and not
+enough personpower to work on any of them.  Right now, no garbage collection
+of general objects is done, although there is a thing that quickly and
+efficiently collects most intermediate-result number-objects.  There isn't
+much to be documented except how it all works, which, like other system
+internal stuff, generally isn't documented in the LMMAN.
+
+The answers to all your questions about macros can be determined by
+fully understanding section 17.5 of the manual.  The answers are
+that displacement is indeed not interesting as far as compiled code
+is concerned, since the expansion only happens once anyway, so defmacro
+and defmacro-displace are essentially the same, and there is no "memoizing"
+except what the displace function does, which is completely described
+in the manual.
+
+Date: 30 July 1981 01:38-EDT
+From: Steven T. Kirsch <SK at MIT-MC>
+Subject: Comments
+To: BUG-lmman at MIT-AI
+
+First off, I must say that I think the manual is superb;  it is both
+highly comprehensible to the uninitiated and has the best
+cross-references and indexing that I've ever seen.
+
+Some questions that were unanswered:
+
+There is very little on the gc.  The manual subtly hints on p. 434
+that an incremental scheme is used.  I heard some sort of rumor from
+someone at Stanford that Lisp was abandoned in favor of Pascal for
+some medical diagnosis program (Mycin?) because the doctors complained
+about having to wait too long if a gc occurred.
+
+It was not clear what happens when a DEFMACRO is seen by the compiler.
+Are DEFMACRO-DISPLACE and DEFMACRO identical for compiled code?
+For compiled defmacros, must the definition appear before the usage
+(unlike in the interpreted case)?  In interpreted code, is there any
+memoizing of expansion or is it expanded each time?  Section 17.4
+hints that it is, but if defmacro caused a displacement, but didn't
+grindef right, this would also be consistent with section 17.4.
+
+
+Date: 26 July 1981 18:40-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In LMMAN in System 71.19, ZMail 30.12, microcode 774, on Lisp Machine Eighteen:
+
+both ``named structure'' and ``named-structure'' are in the concept
+index, at different pages.
+
+Date: 23 July 1981 21:57-EDT
+From: David L. Andre <DLA at MIT-AI>
+To: MMCM at MIT-AI, MOON at MIT-AI
+cc: DLA at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 23 July 1981 14:56-EDT
+    From: Mike McMahon <MMcM at MIT-AI>
+    To: MOON at MIT-AI, MMCM at MIT-AI
+    cc: DLA at MIT-AI
+
+    There should be an argument to MAKE-AREA to put it on the list that ROOM
+    looks at for areas created during loading.
+I added a :ROOM keyword to MAKE-AREA, whose argument is a flag saying
+whether or not to push this area onto ROOM.  The default value for ROOM
+is still the same.
+
+Date: 21 July 1981 21:07-EDT
+From: Robert W. Kerns <RWK at MIT-AI>
+Subject: Concept index
+To: BUG-LMMAN at MIT-AI
+
+The entry for locatives does not refer you anywhere near to LOCF.
+Indeed, about the only real explanation of locative pointers I
+can find is the brief mention that CAR, CDR, RPLACA, and RPLACD
+could be considered subprimitives because of locatives, and
+an overly-brief definition of the locative datatype.  This isn't
+nearly enough for someone completely new to the idea.
+
+Date: 11 July 1981 18:57-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+I updated MAKSYS and PATCH for my recent changes.
+
+Date: 10 July 1981 20:17-EDT
+From: David L. Andre <DLA at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+I changed QC-FILE-LOAD to take the same arguments as QC-FILE, rather
+than just a filename argument.
+
+
+Date: 6 July 1981 00:09-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: RWG at MIT-MC
+cc: BUG-LMMAN at MIT-MC
+
+    RWG@MIT-MC 07/05/81 23:43:17
+    To: dlw at MIT-AI
+    CC: (BUG LMMAN) at MIT-MC
+    If the next version is not TOO much thicker, the current binding can be
+    rebound using the winning Cheshire (a XEROX company) binder.  All of
+    you folks still using velobinders, get with it.
+Hmm.  Never heard of it.  How do I get a demo (i.e. where do I call to
+get a salescoolie to tell me about it)?
+
+
+RWG@MIT-MC 07/05/81 23:43:17
+To: dlw at MIT-AI
+CC: (BUG LMMAN) at MIT-MC
+If the next version is not TOO much thicker, the current binding can be
+rebound using the winning Cheshire (a XEROX company) binder.  All of
+you folks still using velobinders, get with it.
+
+Date: 6 July 1981 00:06-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: STRING-NCONC
+To: JMTURN at MIT-AI, BUG-LMMAN at MIT-AI
+
+    In the manual, STRING-NCONC is not documented as needing a leader on the
+    string to be concatanated onto, which it does.
+Oh yes it is.  It says you need a fill pointer, which, of course, means
+that you need a leader.
+
+Date: Sunday, 5 July 1981, 23:16-EDT
+From: James M. Turner <JMTURN at MIT-AI>
+Subject: STRING-NCONC
+To: BUG-LMMAN at MIT-AI
+Cc: JMTURN at MIT-AI
+
+In LMMAN in System 70.29, ZMail 28.18, microcode 772, on Lisp Machine Eighteen:
+
+In the manual, STRING-NCONC is not documented as needing a leader on the
+string to be concatanated onto, which it does.
+
+
+					James Turner
+
+GSB@MIT-ML 07/05/81 22:00:47 Re: new bolio
+To: (BUG BOLIO) at MIT-ML
+CC: (BUG LMMAN) at MIT-ML
+I am at this moment installing a new bolio with many minor and hopefully
+not incompatible changes.  The changes are approximately:
+   (1)  JCL can be given to tell bolio what to do.  See ML:BOLIO;DOC >,
+which is extremely drafty at the moment (it is essentially an update
+of the old .FORMAT file).  In line with this, the BOLIO function has
+changed somewhat, but should remain compatible.
+
+   [Remainder uninteresting except to those who frob bolio themselves]
+
+   (2)  Bolio uses patch-file and job-startup stuff i cooked up for
+dumps here.  When it starts up it will load up the init file, as before.
+It will also automatically load-patches.  When a bolio is installed
+(copied from ml to ai) it is imperative that the files BOLIO;BOLIO (PDIR)
+and BOLIO;SYSnnn (PDIR) (for bolio version nnn) be copied also, as well
+as any patch files for that version.
+   (3)  New dumping scheme.  Bolio is now dumped pure.  This amounts to
+about 30 additional sharable pages over what it used to be.  This involved
+some changes to the input routines which in theory slow things down, but
+the difference was so small that i could not measure it in the different
+environments.  Anyway the purification should speed up the gc a little,
+and help paging if more than one bolio runs at the same time.
+
+
+GSB@MIT-ML 07/05/81 21:10:06 Re: crock
+To: (BUG LMMAN) at MIT-ML
+CC: (BUG BOLIO) at MIT-ML
+ml:bolio;doc >
+
+
+Date: 5 July 1981 19:14-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: CWH at MIT-MC, BUG-LMMAN at MIT-MC
+
+    Date: 2 July 19x1 23:17-EDT
+    From: Carl W. Hoffman <CWH at MIT-MC>
+    To: BUG-LMMAN at MIT-MC
+
+    I would like to see a stronger binding used in the next printing of the
+    manual.  The one in 800F is already falling apart.  It really needs a
+    better binding given its size and frequency of use.  Alternately,
+    publish a version which is 3-hole punched and unbound.
+
+Do you want to be able to afford a copy on one year's salery?  The
+binding we are using now (called "Perfect" binding, however
+inappropriately) is fairly expensive, and the next step up, real book
+binding, is quite expensive.  I think we will eventually go to
+three-ring binding, to make updating easier, although I can't stand the
+fact that the holes always tear though and so you always lose pages.
+
+
+
+Date: 5 July 1981 19:11-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Dogs or no dogs...
+To: CWH at MIT-MC
+cc: BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+OK, I have upgraded the BEEP function to take a second, optional STREAM
+argument.  This is a fully upward-compatible (i.e., safe) change.  Note
+that :BEEP is documented in the manual as a stream operation.
+Accordingly, documentation of BEEP belongs in the LMMAN rather than
+separate window system documentation, and so I have added it.
+
+Moon@MIT-MC 07/04/81 23:43:22 Re: p. 91 of third edition
+To: CHEESE at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+    Date: 4 July 1981 00:53-EDT
+    From: Susan J. Cohen <CHEESE at MIT-AI>
+    Subject:  p. 91 of third edition
+    To: BUG-LMMAN at MIT-AI
+
+	    The definition of arctangent used as a basis for the functions atan
+    and atan2 on page 91 is confused.  It is very difficult to find the arctan
+    of an angle y/x.
+
+Thanks.  This will be fixed in the next edition of the  manual.  The
+angle is the value, not the argument.
+
+Date: 4 July 1981 00:53-EDT
+From: Susan J. Cohen <CHEESE at MIT-AI>
+Subject:  p. 91 of third edition
+To: BUG-LMMAN at MIT-AI
+
+	The definition of arctangent used as a basis for the functions atan
+and atan2 on page 91 is confused.  It is very difficult to find the arctan
+of an angle y/x.
+				Susie
+
+Date: 2 July 1981 23:17-EDT
+From: Carl W. Hoffman <CWH at MIT-MC>
+To: BUG-LMMAN at MIT-MC
+
+I would like to see a stronger binding used in the next printing of the
+manual.  The one in 800F is already falling apart.  It really needs a
+better binding given its size and frequency of use.  Alternately,
+publish a version which is 3-hole punched and unbound.
+
+
+Date: 1 July 1981 00:40-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: features
+To: GSB at MIT-ML, BUG-BOLIO at MIT-ML
+cc: BUG-LMMAN at MIT-ML
+
+    GSB@MIT-ML 06/29/81 00:04:26 Re: features
+    To: (BUG BOLIO) at MIT-ML
+    CC: (BUG LMMAN) at MIT-ML
+    .LISP now takes 2 optional numeric args, the indentation to use
+    (in mills, default 500. as before), and the font to use, which
+    defaults (as before) to 7.
+    I have added a similar request .ENGLISH which differs only in that
+    it turns filling on rather than off, and defaults the font to 1.
+    Coming soon to a bolio near you, probably later tonight.
+
+Have you been updating the documentation when you make changes like this?
+
+By "documentation" I am referring to AI: LMMAN; .FORMA >, although if there
+is other documentation I'd like to know about it.
+
+
+
+GSB@MIT-ML 06/29/81 00:04:26 Re: features
+To: (BUG BOLIO) at MIT-ML
+CC: (BUG LMMAN) at MIT-ML
+.LISP now takes 2 optional numeric args, the indentation to use
+(in mills, default 500. as before), and the font to use, which
+defaults (as before) to 7.
+I have added a similar request .ENGLISH which differs only in that
+it turns filling on rather than off, and defaults the font to 1.
+Coming soon to a bolio near you, probably later tonight.
+
+
+Date: 28 June 1981 23:15-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: format
+To: GSB at MIT-AI, RMS at MIT-AI, BUG-LMMAN at MIT-AI, MOON at MIT-MC
+
+OK, the ctl-string-is-a-list feature is hereby declared inactive.  I
+will change the documentation to reflect the new story, and leave the
+code the same in case there are still uses of the old form (I bet there
+are).
+
+Date: 28 June 1981 23:04-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Multiple modules in DEFSYSTEM
+To: MMCM at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+Ah, I understand now.  I've fixed the manual.
+
+Date: 28 June 1981 16:13-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-NWS at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+In NWS in System 70.20, ZMail 28.14, microcode 766, on Lisp Machine Eighteen:
+
+It doesn't work to give a lambda-expression for the print-function in a
+tv:choose-variable-values-keyword.  (It tries to funcall lambda.)  This
+should be fixed or documented.
+
+MOON@MIT-MC 06/26/81 05:26:55 Re: format
+To: dlw at MIT-AI
+CC: GSB at MIT-AI, RMS at MIT-AI, (BUG LMMAN) at MIT-AI
+    Date: 25 June 1981 21:50-EDT
+    From: Daniel L. Weinreb <dlw at MIT-AI>
+    Subject: format
+    To: GSB at MIT-AI, RMS at MIT-AI, BUG-LMMAN at MIT-AI
+
+	Date: 22 June 1981 21:53-EDT
+	From: Glenn S. Burke <GSB at MIT-AI>
+	Subject: format
+	To: BUG-LMMAN at MIT-AI
+
+	The documentation on what happens when control-string is a list does
+	not agree with the code.  The doc says that if an element of that list
+	is a list and its car is not a format operator, it is evaluated;  the
+	code looks like it bombs out.  (This text follows the list of
+	operators.)
+
+    This is true.  Now that we have OUTPUT, the whole business of allowing
+    lists instead of format control strings to be lists seems obsolete
+    anyway.  RMS, what do you think?
+Well, actually, RMS pout the current version of it in for the sake of
+OUTPUT (so you could use it in connection with FERROR, FQUERY, etc.)
+It's a kludge to prevent FORMAT from noticing ~'s in the output of OUTPUT
+as it passes it though, basically.
+
+Date: 26 June 1981 00:47-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+Subject: Multiple modules in DEFSYSTEM
+To: DLW at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 26 June 1981 00:38-EDT
+    From: Daniel L. Weinreb <dlw at MIT-AI>
+	Date: 25 June 1981 22:22-EDT
+	From: Mike McMahon <MMcM at MIT-AI>
+	This works.  What doesn't work is for a dependency to be an implicit
+	substransformation, i.e. just one of these modules.  Dependencies can
+	only be expressed transformations.  The documentation should make this
+	clear if it does not already.
+    I don't understand what you are saying here.  Would you please do
+    whatever editing is needed for the documentation, or else explain more
+    clearly what is going on?
+The following works:
+(defsystem foo
+  (:module foo "FOO")
+  (:module bar "BAR")
+  (:compile-load (foo bar)))
+
+but this does now:
+(defsystem foo
+  (:module foo "FOO")
+  (:module bar "BAR")
+  (:module blort "BLORT")
+  (:compile-load (foo bar))
+  (:compile-load blort (:fasload foo)))
+
+because foo's :fasload is not mentioned explicitly (i.e. at top-level) but is only implicit
+in the (:compile-load (foo bar)).  One must instead write:
+(defsystem foo
+  (:module foo "FOO")
+  (:module bar "BAR")
+  (:module blort "BLORT")
+  (:compile-load foo)
+  (:compile-load bar)
+  (:compile-load blort (:fasload foo)))
+
+Date: 26 June 1981 00:38-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: Multiple modules in DEFSYSTEM
+To: MMCM at MIT-AI, DLA at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 25 June 1981 22:22-EDT
+    From: Mike McMahon <MMcM at MIT-AI>
+    Subject: Multiple modules in DEFSYSTEM
+    To: DLA at MIT-AI
+    cc: BUG-LMMAN at MIT-AI
+
+    This works.  What doesn't work is for a dependency to be an implicit
+    substransformation, i.e. just one of these modules.  Dependencies can
+    only be expressed transformations.  The documentation should make this
+    clear if it does not already.
+
+I don't understand what you are saying here.  Would you please do
+whatever editing is needed for the documentation, or else explain more
+clearly what is going on?
+
+Date: 25 June 1981 22:22-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+Subject: Multiple modules in DEFSYSTEM
+To: DLA at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+This works.  What doesn't work is for a dependency to be an implicit
+substransformation, i.e. just one of these modules.  Dependencies can
+only be expressed transformations.  The documentation should make this
+clear if it does not already.
+
+Date: 25 June 1981 21:50-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: format
+To: GSB at MIT-AI, RMS at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 22 June 1981 21:53-EDT
+    From: Glenn S. Burke <GSB at MIT-AI>
+    Subject: format
+    To: BUG-LMMAN at MIT-AI
+
+    The documentation on what happens when control-string is a list does
+    not agree with the code.  The doc says that if an element of that list
+    is a list and its car is not a format operator, it is evaluated;  the
+    code looks like it bombs out.  (This text follows the list of
+    operators.)
+
+This is true.  Now that we have OUTPUT, the whole business of allowing
+lists instead of format control strings to be lists seems obsolete
+anyway.  RMS, what do you think?
+
+Date: 25 June 1981 20:16-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: ZVONA at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Maybe you know that dlw;windoc has references to (io-buffer), which is
+    not defined anywhere.
+
+Oh, certainly, it's full of stuff like that.  It's a very incomplete document,
+and it will probably be published in working paper form in a still-incomplete
+state.
+
+Date: 25 June 1981 19:58-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: BUG-LMMAN at MIT-AI, Neves at MIT-MC
+
+Thank you.  I've edited it in the source and it will be fixed in the next
+published edition.
+
+Date: 25 June 1981 13:52-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In the version of LMMAN in System 70.7, ZMail 28.12, microcode 766, on Lisp Machine Four:
+
+Maybe you know that dlw;windoc has references to (io-buffer), which is
+not defined anywhere.
+
+RWG@MIT-MC 06/25/81 04:44:32
+To: (BUG LMMAN) at MIT-MC
+Perhaps it should be noted that (LOOP ... APPENDING L INTO LS ...)
+is really just NCONCING (COPYLIST L) INTO LS, thus avoiding n^2
+conses, but screwing ... IF (= 3 (LENGTH LS)) DO (SETQ FOO LS) ... .
+
+Date: 25 June 1981 03:08-EDT
+From: David M. Neves <Neves at MIT-MC>
+To: BUG-LMMAN at MIT-AI
+
+In the version of LMMAN in System 70.13, ZMail 28.12, microcode 766, on Lisp Machine Twenty:
+
+The example for dotimes (page 38) is missing a right parenthesis.
+(dotimes (i (// m n)
+  (frob i))
+
+Date: 23 June 1981 16:18-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In the version of LMMAN in System 70.2, ZMail 28.2, microcode 766, on Lisp Machine Nineteen:
+
+completely bogus documentation on user defined types in choose variable
+values
+
+Date: 22 June 1981 21:53-EDT
+From: Glenn S. Burke <GSB at MIT-AI>
+Subject: format
+To: BUG-LMMAN at MIT-AI
+
+The documentation on what happens when control-string is a list does
+not agree with the code.  The doc says that if an element of that list
+is a list and its car is not a format operator, it is evaluated;  the
+code looks like it bombs out.  (This text follows the list of
+operators.)
+
+MOON@MIT-MC 06/22/81 14:48:40 Re:  bignum-to-array, array-to-bignum
+To: ALAN at MIT-MC
+CC: (BUG lmman) at MIT-AI
+Since they are on the SYSTEM package, rather than GLOBAL, they don't
+really belong in the manual.  You could simply document them in LISPM;DOCMIC
+
+Date: 22 June 1981 13:39-EDT
+From: Alan Bawden <ALAN at MIT-MC>
+To: BUG-lmman at MIT-AI
+
+BIGNUM-TO-ARRAY and ARRAY-TO-BIGNUM should be documented somewhere.
+Tell me where and I will do it.
+
+Moon@MIT-MC 06/19/81 20:33:17 Re: <-
+To: Zvona at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+    Date: 19 June 1981 15:43-EDT
+    From: David Chapman <Zvona at MIT-AI>
+    To: BUG-LMMAN at MIT-AI
+    
+    In System 69.14, ZMail 27.12, microcode 757, on Lisp Machine Nine:
+    
+    <- doesn't seem to be explained anywhere.  How is it different from funcall?
+
+<- is part of the class system, which is not documented in the manual because
+it is obsolete.  I believe there is an online file with a semiobvious name
+like LMDOC;CLASS or LMMAN;MSG that documents the class system.  <-'s main
+differences from funcall are that it is slower and that it allows sending
+messages to "random" objects such as symbols and numbers.
+
+Date: 19 June 1981 15:43-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In System 69.14, ZMail 27.12, microcode 757, on Lisp Machine Nine:
+
+<- doesn't seem to be explained anywhere.  How is it different from funcall?
+
+Date: 5 June 1981 05:48-EDT
+From: Richard M. Stallman <RMS at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+The documentation of module specifications and transformations, what
+they can look like and what they mean, is so cumbersome that I can't
+really read them even though I have some idea from the examples of what
+they are supposed to be saying.
+
+I can't figure out what :compile-load-init is for.
+
+
+Date: 4 June 1981 19:41-EDT
+From: George J. Carrette <gjc at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In the version of LMMAN in System 69.4, ZMail 27.5, microcode 757, on Lisp Machine Sixteen:
+
+It would be very nice for scanning the index section in the back if
+there were a mark of some kind (an indentation, a letter, a boldface ...)
+when the leading alphabetic-character changes.
+
+MOON@MIT-MC 05/30/81 21:57:51
+To: (BUG LMMAN) at MIT-MC
+zwei:save-all-files should be in the last chapter of the manual.
+
+Date: 29 May 1981 18:00-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+The pathname stuff should explain more explicitly that since by merging
+or manual construction you can get two pathnames that always access the
+same files ("print the same") but are different, you should usually
+store properties on truename's or generic-pathnames.
+
+
+Date: 28 May 1981 22:35-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: truename
+To: MOON at MIT-MC
+cc: BUG-LMMAN at MIT-AI
+
+You are right.  The manual is clear about this; there's no problem.
+
+MOON@MIT-MC 05/28/81 15:46:13 Re: truename
+To: DLW at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+    Date: 28 May 1981 02:25-EDT
+    From: Daniel L. Weinreb <DLW at MIT-AI>
+    Subject: truename
+    To: BUG-LMMAN at MIT-AI
+
+    In your latest edits to PATHNM, you explain in the Maclisp compatibility
+    section that if you want to do a TRUENAME operation you should send
+    a :TRUENAME message.  But the :TRUENAME message is not documented; a comment
+    in the manual says this is intentional becausde it is internal.  How
+    are users supposed to do this?
+No.  TRUENAME in Maclisp is a stream operation, and the :TRUENAME message
+to streams is documented.  The :TRUENAME message to pathnames, on the other
+hand, is not, because it is only there so PROBEF can send it.
+In Maclisp PROBEF and TRUENAME go together, the former taking a filename
+and the latter a stream.  I was confused about this too at one point;
+is there any residue of that confusion in the documentation?
+
+Date: 28 May 1981 02:25-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+Subject: truename
+To: BUG-LMMAN at MIT-AI
+
+In your latest edits to PATHNM, you explain in the Maclisp compatibility
+section that if you want to do a TRUENAME operation you should send
+a :TRUENAME message.  But the :TRUENAME message is not documented; a comment
+in the manual says this is intentional becausde it is internal.  How
+are users supposed to do this?
+
+Date: 28 May 1981 01:25-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: ZVONA at MIT-AI
+cc: BUG-LMMAN at MIT-AI, BUG-LISPM at MIT-AI
+
+This was a typo in the manual which has been fixed in the source.  It's
+really called :named-structure-symbol.
+
+Date: 26 May 1981 21:39-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI, BUG-LISPM at MIT-AI
+
+In System 68.18, ZMail 26.7, microcode 752, on Lisp Machine One:
+
+The following code from fd.arr
+;; Create a named-structure with five leader
+;; elements, initializing some of them.
+(setq b (make-array 20 ':leader-length 5 
+		       ':leader-list '(0 nil foo)
+		       ':named-structure 'bar))
+
+Fails with a :named-structure not a good option in make array.
+
+What is the right thing to use?
+
+Date: 26 May 1981 19:52-EDT
+From: David Chapman <ZVONA at MIT-AI>
+To: DLW at MIT-AI
+cc: ZVONA at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 26 May 1981 18:07-EDT
+    From: Daniel L. Weinreb <DLW at MIT-AI>
+
+    The si:io-stram-p property is a gross crock for Maclisp compatibility.
+    I would hate to see it documented.  Do you have a good reason
+    why it must be documented?
+Cuz you get screwed if you don't know about it: if I do 
+
+(defselect (foo-stream foo-stream-default-handler)
+  (:tyi...
+
+I expect
+
+(read 'foo-stream)
+
+to read from the foo-stream, whereas it thinks foo-stream is a
+eof-option. 
+
+Certainly I'd much rather flush the property, the function of the same
+name, and the documentation.
+
+Date: 26 May 1981 18:07-EDT
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: ZVONA at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+The si:io-stram-p property is a gross crock for Maclisp compatibility.
+I would hate to see it documented.  Do you have a good reason
+why it must be documented?
+
+MOON@MIT-MC 05/25/81 18:04:31
+To: (BUG LMMAN) at MIT-MC
+subst does not actually behave as documented in the manual;
+it does not subst for nonatomic cdrs.  This should be corrected
+one way or another.  The current manual source is the same
+as printed in edition 3.
+
+Date: 25 May 1981 16:22-EDT
+From: David Chapman <Zvona at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+In System 68.10, ZMail 26.3, microcode 752, on Lisp Machine Four:
+
+The si:io-stream-p property should be documented.  
+
+Date: 21 May 1981 23:36-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: window system
+To: HENRY at MIT-AI, BUG-LMMAN at MIT-AI
+
+    Date: 9 May 1981 19:18-EDT
+    From: Henry Lieberman <Henry at MIT-AI>
+    Subject:  window system
+    To: BUG-LMMAN at MIT-AI
+    
+    The example on p. 52 of DLW;WINDOC doesn't work.
+    You can't mix :EVEN and other types of constraints.
+All of the examples have been tested and worked for me.  I don't think
+I mix :EVEN with other types of constraints in any of the examples.
+Could you tell me exactly which example you are talking about?
+
+MOON@MIT-MC 05/18/81 03:43:54 Re: Invisible pointers
+To: (BUG LMMAN) at MIT-MC
+The manual does not say what the different between dtp-one-q-forward
+and dtp-external-value-cell-pointer is (the difference is binding).
+
+Date: 12 May 1981 17:58-EDT
+From: Mike McMahon <MMcM at MIT-AI>
+To: RMS at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 12 May 1981 04:48-EDT
+    From: Richard M. Stallman <RMS at MIT-AI>
+    I gathered that the string argument to COMPLETE-STRING is
+    something the user might have typed, but that doesn't completely
+    specify everything.  What is this string supposed to be interpreted
+    as?  An entire pathname?  Or only part of one?  Is it supposed
+    to contain a host name?  A directory?  Or sometimes yes, sometimes no?
+    I would like to see a list of examples of what all the possibilities
+    are, for one specific file system; then I could figure out what the
+    possibilities are for any other file system.
+
+The string really is something typed by the user which the user expects
+to have completed (i.e. the user's input is just as host dependent as in
+other cases).  It may contain a host, a directory or anything else that
+was typed.  It is not a complete pathname specifier, which is why it is
+passed as a string and not as a pathname.  The string given to the
+:COMPLETE-STRING message will not contain the host name, as per the
+usual convention.  The way completion works is entirely host dependent,
+as is all printing and parsing of pathnames.
+
+On ITS, it works like the editor's completing reader, each field typed
+is completed and fields not typed are filled in from the defaults.  Thus
+you might have RM;F B => RMS;FOO BAR.
+
+On Tops-20, completion is done by the system in the normal fashion.
+That means that all tokens but the last typed are taken as complete and
+a partially specified token is completed based on existing files and any
+unspecified fields filled in from the defaults provided those files
+exist, etc.
+
+Date: 12 May 1981 04:48-EDT
+From: Richard M. Stallman <RMS at MIT-AI>
+To: MMCM at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+I gathered that the string argument to COMPLETE-STRING is
+something the user might have typed, but that doesn't completely
+specify everything.  What is this string supposed to be interpreted
+as?  An entire pathname?  Or only part of one?  Is it supposed
+to contain a host name?  A directory?  Or sometimes yes, sometimes no?
+I would like to see a list of examples of what all the possibilities
+are, for one specific file system; then I could figure out what the
+possibilities are for any other file system.
+
+Date: 12 May 1981 03:32-EDT
+From: Mike McMahon <MMCM at MIT-AI>
+To: RMS at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    RMS@MIT-AI 05/11/81 22:04:01
+    The documentation of COMPLETE-PATHNAME doesn't explain what I need to
+    know.  I don't know what to do with the pathname and the string.  I
+    don't know what to expect the string to contain.  I don't know what
+    significance the pathname is supposed to have.
+The pathname is a default.  The string is something the user typed -- you
+turn it into another string that the user might also have typed but which
+is in some way more complete based on those defaults.
+I frankly cannot imagine anything else those arguments might mean.
+
+Date: 9 May 1981 19:18-EDT
+From: Henry Lieberman <Henry at MIT-AI>
+Subject:  window system
+To: BUG-LMMAN at MIT-AI
+
+The example on p. 52 of DLW;WINDOC doesn't work.
+You can't mix :EVEN and other types of constraints.
+
+Date: 9 May 1981 00:53-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: :index-offset versus :displaced-index-offset
+To: kmp at MIT-MC
+cc: BUG-LMMAN at MIT-AI
+
+Right you are; it'll be fixed in the next printing.  Thanks.
+
+	
+
+Date: 9 May 1981 00:48-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: DEKLEER at PARC-MAXC
+cc: BUG-LMMAN at MIT-AI
+
+Page 84 doesn't say nearly enough about PDL numbers to give you the
+impression that they work ANY particular way, as far as I can tell.  Do
+you see a discussion of PDL numbers someplace in the manual that gives
+the misimpression that you got?  If so, please let me know and I will
+mark it for correction.  But the impression I have is that they are not
+described in detail anywhere in the manual.
+
+Date: 8 May 1981 14:52-EDT
+From: David A. Moon <MOON at MIT-MC>
+Subject:  extra-pdl numbers
+To: DEKLEER at PARC-MAXC
+cc: BUG-lmman at MIT-AI
+
+    Date: 6 MAY 1981 1539-PDT
+    From: DEKLEER at PARC-MAXC
+    To:   bug-lmman at MIT-AI
+
+    From reading the manual:
+
+    The description of pdl numbers on p 84 implies that every time a pdl
+    number is consed into permanent structure a new number cons happens.
+The manual is perhaps misleading.  Only one permanent copy of a number
+is made.  This permanent copy is not EQ to the temporary copy, which is
+the reason for the discussion on page 84.  The manual mentions extra-pdl
+numbers in about three places, but never explicitly discusses them.  I
+don't propose to add a discussion since they will go away when the new
+garbage collector is eventually installed.
+
+Date: 6 May 1981 10:32:51-PDT
+From: CSVAX.fateman at Berkeley
+To: rz@mit-mc
+Subject: The typography
+Cc: bug-lmman@mit-ai, CSVAX.halbert@Berkeley
+
+The new manual which has now reached all the way to California,
+suffers from the typeface, which appears to require resolution of
+1 dot-wide lines.  The Dover does not manage this reliably, and
+thus the standard font e is sometimes indistinguishable from a c.
+most letters with a small round part (e.g. "o") are frequently
+open on top and/or bottom.  
+
+Date: 6 MAY 1981 1539-PDT
+From: DEKLEER at PARC-MAXC
+To:   bug-lmman at MIT-AI
+
+From reading the manual:
+
+The description of pdl numbers on p 84 implies that every time a pdl
+number is consed into permanent structure a new number cons happens.  Is
+this really true?  This means in bad cases like filling a section of an
+art-q array it  may cons a new floating point number for each element!
+You might mention this, as I can imagine some numerical analysis
+algorithms number consing like mad.  You would think that at the first
+time the number was moved into permanent structure a single number cons
+would happen and the pdl-number "indirected" to this number.  Only one
+instance of any pdl-number should ever be created.
+-------
+
+MACRAK@MIT-MC 05/03/81 17:51:19
+To: (BUG LMMAN) at MIT-MC
+How do I get a copy of the new LM Manual?
+	Stavros
+
+
+JonL,RWK@MIT-MC (Sent by JONL@MIT-MC) 05/01/81 10:53:05
+To: (BUG LMMAN) at MIT-MC
+Section 16.6 is completely wedged;  certainly it's obsolete by
+several years, if nothing else.
+1) MacLISP has &optional, &rest, and &aux as standard
+2) IF-FOR-LISPM, IF-FOR-MACLISP, IF-IN-LISPM ...
+   are generally being dropped by the user community.
+3) AI:LMDOC;.COMPL PRELUD  causes the overloading of good reader
+   functionality with bad -- it garbles the MacLISP # macro, and
+   uses a poor substitute for pseudo strings;  also clobbers 
+   the winning MacLISP LET, PUSH, POP, and other things.  There
+   should be a file that has LISPM things that have no correspondent
+   in MacLISP (such as DEFSUBST, SECOND, etc).
+3) MacLISP's DEFMACRO is an upward-compatible extension of the LISPM's
+   formerly-documented one (has &WHOLE), and it looks like the current
+   LISPM one extends MacLISP's only by &LIST-OF;  similarly, MacLISP's
+   backquote hacks hunks of various varieties, but is otherwise the
+   same in functionality.
+
+
+Date: 21 April 1981 10:57-EST
+From: Robert W. Kerns <RWK at MIT-MC>
+Subject: Malformed MacLisp
+To: ALAN at MIT-MC, MOON at MIT-MC
+cc: BUG-LMMAN at MIT-MC, BUG-LISP at MIT-MC
+
+HAHAHAHAHAHAHAHAHAHAHAHAHAHAHAHAHAAHAHAHAHAHAHAHAHaHaHaHaHaHaHaHahahahahahahahahahaaaaaaaaaaaaaaaaaaa..................URKK!!
+
+I hope I don't have any occurances of that in my code, using
+special variables!   I think the right thing to do here is
+to leave the LISPM alone and fix the losing MacLisp interpreter.
+The compiler is OK.
+
+
+Date: 21 April 1981 10:50-EST
+From: Alan Bawden <ALAN at MIT-MC>
+Subject: Malformed do loops
+To: RWK at MIT-MC
+cc: MOON at MIT-MC, BUG-LMMAN at MIT-MC, BUG-LISP at MIT-MC
+
+    Date: 21 April 1981 08:15-EST
+    From: Robert W. Kerns <RWK at MIT-MC>
+
+        Date: 17 April 1981 17:31-EST
+        From: Alan Bawden <ALAN at MIT-MC>
+        Subject: Malformed do loops
+        To: MOON at MIT-MC
+        cc: BUG-lmman at MIT-AI, BUG-lispm at MIT-AI
+
+	    Date: 17 April 1981 16:04-EST
+	    From: David A. Moon <MOON at MIT-MC>
+
+		ALAN@MIT-MC 04/17/81 07:29:03
+		To: (BUG lmman) at MIT-AI
+		The do loops in both of the samefringe functions in the stack-group
+		documentation examples, are malformed.  (pages 154 and 155)
+
+	    No they aren't.  This is an incompatibility between Lisp machine
+	    and Maclisp.  That code was tested by running it directly out of
+	    the source file of the manual by the way.
+        
+        Well that's a shame.  Could we get it changed back?  Doesn't anyone
+        else ever mis-type the number of parens in a do loop out there?  I
+        sure am surprised I haven't noticed this before given the number of
+        times I make the error.
+
+    Huh?  Am I confused or are you two?  As near as I can figure, both DO loops
+    are perfectly legal in both LISPM and MacLisp.  Or are you refering to
+    something else besides the atomic index variable specification?
+
+Well, well.  MacLisp does seem to try and support this losing feature:
+
+(putprop 'v1 'foo 'bar)
+FOO 
+(do (v1 v2) (nil) (print (list v1 v2)))
+(NIL NIL) 		;first time around v1 and v2 bound to nil
+;FOO UNBOUND VARIABLE	;(caddr 'v1) is FOO!
+
+;BKPT UNBOUND-VARIABLE
+
+
+Date: 21 April 1981 08:15-EST
+From: Robert W. Kerns <RWK at MIT-MC>
+Subject: Malformed do loops
+To: ALAN at MIT-MC
+cc: MOON at MIT-MC, BUG-lmman at MIT-AI, BUG-lispm at MIT-AI
+
+    Date: 17 April 1981 17:31-EST
+    From: Alan Bawden <ALAN at MIT-MC>
+    Subject: Malformed do loops
+    To: MOON at MIT-MC
+    cc: BUG-lmman at MIT-AI, BUG-lispm at MIT-AI
+    
+	Date: 17 April 1981 16:04-EST
+	From: David A. Moon <MOON at MIT-MC>
+    
+	    ALAN@MIT-MC 04/17/81 07:29:03
+	    To: (BUG lmman) at MIT-AI
+	    The do loops in both of the samefringe functions in the stack-group
+	    documentation examples, are malformed.  (pages 154 and 155)
+	No they aren't.  This is an incompatibility between Lisp machine
+	and Maclisp.  That code was tested by running it directly out of
+	the source file of the manual by the way.
+    
+    Well that's a shame.  Could we get it changed back?  Doesn't anyone
+    else ever mis-type the number of parens in a do loop out there?  I
+    sure am surprised I haven't noticed this before given the number of
+    times I make the error.
+
+Huh?  Am I confused or are you two?  As near as I can figure, both DO loops
+are perfectly legal in both LISPM and MacLisp.  Or are you refering to
+something else besides the atomic index variable specification?
+
+
+Date: 19 April 1981 22:11-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: [Shipmn at MIT-AI: Forwarded]
+To: BUG-LMMAN at MIT-AI
+
+Shipmn@MIT-AI 04/15/81 02:12:18
+
+The new manual is excellent, a great job. I read it over the weekend, making marginal
+notes. Here they are, whether you want them or not:
+
+1.3, p3, par 2
+  bold-fact --> bold-face
+
+2.2, p8, nlistp
+  Why is this the "recommended predicate" when it might "be changed in the future"? surely
+  atom is better.
+
+3., p12,  par 7
+  in page 129 --> on page 129
+
+3.2, p20, &optional
+  this doesn't talk about the 3rd "present-p argument" to &optional, that probably goes
+  in section 10.7
+
+3.3, p24, par 6
+  "Care is required!" -- somewhere you should note that 'foo gives the same effect as #'foo
+  (when it's in a function context) and that the 'foo syntax always references the current
+  definition of foo
+
+4.2, p36, do
+  I would play down the old-style do, considering it an obsolete form; and refer to the
+  new-style do as simply do.
+
+4.4, p45, map...
+  I would say at the start that loop is prefered over these forms. (otherwise somebody
+  might actually use one of them!)
+
+5., 48, last par, l 2
+  the the conses --> that the conses
+
+6.1, p. 78, boundp
+  You might mention that doing boundp on a local (i.e. non-special) variable will not
+  return T; the result of boundp being based on the corresponding special variable. I don't
+  know if this is a bug or feature, but I was screwed once with a macro that had a
+  boundp test inside it -- it worked for specials but not locals.
+
+6.4, p81, samepnamep
+  say this is obsolete (p. 186 says it gets a compiler style warning); the maknam's in
+  the example are also obsolete.
+
+7.4, p90, Transcendental Functions
+  "If given a small-flonum, they will return a small-flonum" -- a lie! sqrt, sin, sind,
+  cos, cosd, atan, and atan2 return a float when given a small-flonum.
+
+8., p 100, array-bits-per-element and array-element-size
+  theres a bug in the code and/or a bug in the documentation. art-32b's hold 24. bits of
+  signed fixnum, but only 23. bits of unsigned fixnum. If you don't consider this a bug
+  (since there are 24. bits of data there) then it should be explained somewhere how
+  art-32b's return signed (24. bit) numbers on aref, while all other art-xb's return
+  unsigned numbers on aref.
+
+  For array --> For arrays
+
+8.2, p104, aset, aloc, store-array-leader, ap-leader
+  I'd discourage use of these, suggesting setf and locf instead.
+
+8.4, p107, return-array
+  attempts to returns --> attempts to return
+
+8.10, p113, last par and first par of next page
+  This discussion of column-major order probably should go somewhere besides "Maclisp
+  Compatability" since it is of general interest (e.g. in understanding paging behavior
+  of large two dimensional arrays)
+
+9.2, p 116, alphabetic-case-affects...
+ It it --> If it
+
+9.3, p118, string-left-trim and string-right-trim
+ references here to "char-list" should be to "char-set"
+
+11.3, p147, locate-in-closure
+ "An equivalent thing to write" -- confusing way to put it, I thought you were refering 
+  to I/O!
+
+14.8, p164, %p-ldb
+  reference to %p-contents should be flushed since it doesn't exist (according to the
+  preceding documentation anyway)
+
+14.12, p168, si:unwire-page
+  A lie!
+  ... is the same as (si:wire-page address) --> ... is the same as (si:wire-page address nil)
+     
+16., p 181, The compiler
+  You should say something about variables named IGNORE somewhere.
+
+16.4, p186, all-special-switch
+  provides full compatibility --> provides compatibility
+  (e.g. in the compiler, macros behave like displacing macros do in the interpreter and this
+  switch won't change that)
+
+16.5, p187, par 2
+  "This is somewhat like a Markov algorithm." -- I'd flush this sentence
+
+16.5, p187, compiler:add-optimizer
+  calls to which --> calls which
+
+17., p191, Macros
+  This chapter gives a very confusing explanation of a simple idea. My suggestion:
+  1) explain backquote/comma earlier in the manual, back with list perhaps. Backquote
+  is very generally useful and not at all particular to macros.
+  2) start right away with defmacro and use the backquote convention right away as well.
+  Flush all examples of the form (list 'car (cadr x))), these are just confusing. Explain
+  macro after some examples of defmacro, as an explanation of what defmacro produces
+  internally.
+
+  A little section on guidelines for macro writers is in order. I would discuss the problem
+  of evaluating forms more than once; and how this is solved by binding a local variable to
+  the form's value and then using the local variable; and how the local variable must be
+  such as not to be confused with a user's variable which appears in an enclosed body;
+  and how the convention of surrounding such local variable names with dots (e.g.,
+  .local.var.) is used to prevent this and assumes that such names are not used outside
+  macros. (By the way, the DOPLIST macro doesn't do this and you get screwed if you have
+  the variable PLIST in your body.)
+
+17.8, p201, Generalized Variables
+  This is a very good explanation of this idea.
+
+18.1, p205, 2nd example
+  This should use array-length and aref instead of the Maclisp (or whatever they are) forms.
+  Even though loop is on many different Lisps, it looks bad in the LispM manual.
+
+18.7.1.2, p221 top
+  bad break
+
+19.5, p237, last example
+  Again, use of |'s instead of strings looks old-fashioned.
+
+21.2.4, p287, #X
+  "This does not seem to have bothered anyone." -- just for the record, I got screwed by
+  this once and had to write my own hex reader
+
+21.2.6, p291, set-syntax-#-macro-char
+  number or special --> number of special
+
+21.5.4, p302, eh:error-handler-io
+  handler to user --> handler to use
+
+23.3, p347, Shared Programs
+  Mention explicitly that foo: can be used in front of a list and everything in the list
+  will be read with package bound to foo. (It does imply this but its worth pointing out.)
+
+23.7, p352, Packages
+  "you can intern a symbol in any number of packages" -- given the interface documented here
+  I don't see how this is possible
+
+23.10, p355, Subpackages, par 2
+  probably be in a together --> probably be together
+
+23.10, p355, par 3
+  "(described in the appendix)" -- appendix?
+
+23.10, p356, par 2
+  "subprograms" and "sub-programs" --> subpackages
+
+23.11, p356, par 4
+  flush reference to pkg-load
+
+24.1, p359, defsystem
+  use of :package as option to :module doesn't work when the file plist specifies a different
+  package. It gets loaded into the package specified by the plist anyway.
+
+24.1, p361, par 1
+  first two each has --> first two each have
+
+24.4, p364, par 4
+  si:*file-tranformation-function --> si:*file-tranformation-function*
+
+24.6, p366, par 2
+  has changed --> have changed
+
+24.8.3, p374, disk-save, top par
+  "equivalent of a cold-boot" -- isn't it actually the equivalent of a disk-restore, i.e.
+  the microcode is not reloaded
+
+26.1.3, p395, check-arg
+  whose value is --> whose value may be
+
+26.7, p414, set-mar
+  example should use locf (as suggested on p. 79)
+
+31.1, p447, who-calls
+  m-X List Callers --> meta-X List Callers  (to correspond to other places in manual)
+
+31.1, p448, room
+  "available virtual memory" -- doesn't this really tell you how much virtual memory address
+  space you have left; the amount you actually have "available" is determined by the size of
+  the swapping area
+
+31.3, p453, number-gc-on
+  performance computational --> performance of computational
+
+
+
+Again, INCREDIBLE job! This is the best documenation in the business.
+
+Date: 19 April 1981 22:10-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: [I sent this reply to SHIPMN and forgot to CC it to BUG-LMMAN.]
+To: BUG-LMMAN at MIT-AI
+
+Thank you very much for the extensive list of manual errors.  Your mail contained
+far more errors than the total number of error reports we have ever received for
+the manual over the past two years!
+
+All of the typoes and such have been marked in the official copy and
+will be fixed.  As for the more subtle points:
+
+    4.2, p36, do
+      I would play down the old-style do, considering it an obsolete form; and refer to the
+      new-style do as simply do.
+Well, it is already played-down, as we mention is secondly.  Otherwise
+we do have to document it, and not everyone considers it obsolete. 
+    
+    4.4, p45, map...
+      I would say at the start that loop is prefered over these forms. (otherwise somebody
+      might actually use one of them!)
+It is not preferred by everyone.  Many people find the mapping functions clearer.
+We only nag the users about style in cases where there is a very strong consensus.
+    6.1, p. 78, boundp
+      You might mention that doing boundp on a local (i.e. non-special) variable will not
+      return T; the result of boundp being based on the corresponding special variable. I don't
+      know if this is a bug or feature, but I was screwed once with a macro that had a
+      boundp test inside it -- it worked for specials but not locals.
+The reason boundp is documented under "symbols" rather than "variables" is
+just for this reason.  Nowhere do we say that it works for "variables".  I'll
+change section 6.1 to make this more clear.
+    
+    7.4, p90, Transcendental Functions
+      "If given a small-flonum, they will return a small-flonum" -- a lie! sqrt, sin, sind,
+      cos, cosd, atan, and atan2 return a float when given a small-flonum.
+This is actually a bug rather than a lie exactly, but I will mark it to
+be documented if nobody gets around to fixing it.
+    
+    17., p191, Macros
+      This chapter gives a very confusing explanation of a simple idea. My suggestion:
+      1) explain backquote/comma earlier in the manual, back with list perhaps. Backquote
+      is very generally useful and not at all particular to macros.
+      2) start right away with defmacro and use the backquote convention right away as well.
+      Flush all examples of the form (list 'car (cadr x))), these are just confusing. Explain
+      macro after some examples of defmacro, as an explanation of what defmacro produces
+      internally.
+This is a matter of philosophy.  My feeling is that it is worth going through it
+this way in order to make sure that the user learns what is actually really and
+truly going on.  You can get quite confused if you think that defmacro is
+"just like defun except..." and then start leaping to conclusions due to
+an insufficient understanding of the underpinning concepts.
+
+    21.2.4, p287, #X
+      "This does not seem to have bothered anyone." -- just for the record, I got screwed by
+      this once and had to write my own hex reader
+I agree that this should be fixed.
+    
+    23.7, p352, Packages
+      "you can intern a symbol in any number of packages" -- given the interface documented here
+      I don't see how this is possible
+You just call intern on the symbol more than once.  A lot of package documentation
+ought to get rewritten since by the next time the manual is released we ought to
+have the new package system ready.
+
+Again, thanks a lot for the comments!  I really appreciate the work you
+put into this.  -- Dan
+
+Date: 17 April 1981 17:31-EST
+From: Alan Bawden <ALAN at MIT-MC>
+Subject: Malformed do loops
+To: MOON at MIT-MC
+cc: BUG-lmman at MIT-AI, BUG-lispm at MIT-AI
+
+    Date: 17 April 1981 16:04-EST
+    From: David A. Moon <MOON at MIT-MC>
+
+        ALAN@MIT-MC 04/17/81 07:29:03
+        To: (BUG lmman) at MIT-AI
+        The do loops in both of the samefringe functions in the stack-group
+        documentation examples, are malformed.  (pages 154 and 155)
+    No they aren't.  This is an incompatibility between Lisp machine
+    and Maclisp.  That code was tested by running it directly out of
+    the source file of the manual by the way.
+
+Well that's a shame.  Could we get it changed back?  Doesn't anyone
+else ever mis-type the number of parens in a do loop out there?  I
+sure am surprised I haven't noticed this before given the number of
+times I make the error.
+
+MOON@MIT-MC 04/17/81 16:04:21 Re:  Malformed do loops
+To: ALAN at MIT-MC
+CC: (BUG lmman) at MIT-AI
+    ALAN@MIT-MC 04/17/81 07:29:03
+    To: (BUG lmman) at MIT-AI
+    The do loops in both of the samefringe functions in the stack-group
+    documentation examples, are malformed.  (pages 154 and 155)
+No they aren't.  This is an incompatibility between Lisp machine
+and Maclisp.  That code was tested by running it directly out of
+the source file of the manual by the way.
+
+RWK@MIT-MC 04/17/81 09:49:16 Re: BACKQUOTE
+To: (BUG LMMAN) at MIT-MC
+BACKQUOTE deserves to be listed in the concept index.
+After all, that section is crossed-referenced from
+other places, people should be able to get to that
+directly.
+
+
+ALAN@MIT-MC 04/17/81 07:29:03
+To: (BUG lmman) at MIT-AI
+The do loops in both of the samefringe functions in the stack-group
+documentation examples, are malformed.  (pages 154 and 155)
+
+BARMAR@MIT-MC 04/17/81 03:37:16
+To: (BUG LMMAN) at MIT-AI
+In System 66.15, ZMail 20.2, microcode 747, on Lisp Machine Thirteen:
+
+The documentation for time:parse says that it returns 6 values, the
+seconds, minutes, hours, date, month, and year of the parse time.  It
+actually returns 8 values, the seventh being the day of week and the
+eigth being DAYLIGHT-SAVINGS-TIME-P.  In addition, the manual doesn't
+mention that when it encounters an error, such as an unrecognized
+date/time format or one of the conditions (i.e. DAY-MUST-BE-VALID) not
+being met, a string containing the error message will be returned
+instead of the error going to the user.  This documentation bug
+continues into time:parse-universal-time, which is documented only to
+return a number, but which will return a string if an error occurs.
+
+Although I do not agree with the idea of these things returning strings
+when they encounter errors, I will not argue with it, as I can see the
+reasoning that went into it.  This reasoning, however, is for naught,
+wrong even, if this "feature" is not documented.
+
+
+
+Date: 16 April 1981 21:39-EST
+From: Carl Richard Feynman <CARLF at MIT-AI>
+To: BUG-LMMAN at MIT-AI
+
+	In my efforts toward building a graphics editor, I find
+myself at the point where it would be sensible to design a user
+interface, with a frame, command menu, lisp listener, and other
+goodies. This requires getting a process, a frame, a menu and
+an i/o buffer to work in concert.  This I find extremely
+difficult, inasmuch as they all must work before anything
+diagnosable (at least by me) occurs. I have DLW; WINDOC ,
+LMWIND;CHOICE and LMWIND; BASWIN. Alas, reading these is like
+reading Hegel: too many concepts, too fast, and too few
+examples. I thus have a couple of questions:
+	1: Is there, somewhere in the system, a window
+interface which is up and running, and not too complicated? If
+I could examine such a thing, no doubt much would become clear.
+	2: Is there any documentation on i/o buffers?
+
+	I also noticed a few typos in WIDOC, which is generally
+a fine document. They are:
+	At the beginning of the 6th paragraph of section 2.1,
+the entire 1st line ended up in the index.
+	The paragraph in 2.10.3 which begins "Each description
+describes... " is redundant. Sentences 2 and 5 say exactly the
+same thing.
+	In the table of constraint keys, should not the
+keywords ":even", ":ask", etc. be written in the
+typewriter-like font usually used for keywords, rather than in
+italic, as now? Later in the table, "function" is spelled
+"funtion" and "arg-2" is spelled "aerg-2".
+
+				Yours,
+
+					-- Carl
+
+Date: 13 April 1981 12:13-EST
+From: David A. Moon <MOON at MIT-MC>
+Subject: New manual (Edition 3) signp example
+To: dlw at MIT-AI
+cc: ALAN at MIT-MC, Margolin at MIT-MULTICS, BUG-LMMAN at MIT-AI
+
+Checking in Bawden's complete collection of Lisp manuals reveals that
+somehow the argument to signp mutated from -1 to 12 between the second
+edition of the Maclisp manual and the first edition of the Lisp machine
+manual.  I guess no one ever bothered to read the writeup on signp before.
+
+Date: 13 April 1981 10:06-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Subject: New manual (Edition 3)
+To: BUG-LMMAN at MIT-AI, Margolin at MIT-MULTICS
+
+You're right about both problems.  The signp example dates back at least
+to the original Lisp Machine Manual; I wonder if that was copied from
+the Maclisp manual? (If I had a copy here I'd check...)
+
+Date:     9 April 1981 0314-est
+From:     Barry Margolin             <Margolin at MIT-Multics>
+Subject:  New manual (Edition 3)
+To:       bug-lmman at ai
+
+I have noticed two bugs in the new LispMachine Manual:
+
+In FD.FLO - The fonts in the description of IF are screwed up.  Several
+meta-variables, both on the definition line and in the text are in
+boldface instead of italics.
+
+In FD.NUM - The first example for SIGNP is incorrect.
+          (SIGNP LE 12) => NIL, not T as the manual says.
+
+Date: 8 April 1981 19:47-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: DANIEL at MIT-AI, BUG-LMMAN at MIT-AI
+
+Congratulations, you are the first to report a problem with the manual.
+Keep those cars and cdrs coming!
+
+Date:  8 APR 1981 1553-EST
+From: Daniel at MIT-AI (Daniel Weise)
+To: (BUG LMMAN) at MIT-AI
+
+In the version of LMMAN in System 66.15, ZMail 20.3, Daedalus 15.7, microcode 747, on Lisp Machine Eight:
+
+I think that the documentation for si:unwire-page (Red ChineNual Page 168)
+should read 
+(si:unwire-page address) is the same as (si:wire-page address nil)
+instead of
+(si:unwire-page address) is the same as (si:wire-page address)
+???
+
+Date: 28 March 1981 19:05-EST
+From: Daniel L. Weinreb <DLW at MIT-AI>
+To: CARLF at MIT-AI, BUG-LMMAN at MIT-AI
+
+The STREAM file is obsolete.  Use WINDOC.
+
+Date: 27 MAR 1981 2140-EST
+From: CARLF at MIT-AI (Carl Richard Feynman)
+To: (BUG LMMAN) at MIT-AI
+
+	lmwind; stream 25 says window accept the :pixel and :set-pixel
+messages. They do not. The real messages are :point and :draw-point.
+					-- Carl
+
+Date: 15 MAR 1981 0120-EST
+From: dlw at MIT-AI (Daniel L. Weinreb)
+Subject: Variable monitoring
+To: (BUG LMMAN) at MIT-AI
+
+The function si:unmonitor-variable is (a) not on the GLOBAL package as
+documented, and (b) appears to crash the machine in every trivial case I
+tried.  I have not tried to diagnose this at all.
+
+Date: 12 March 1981 02:36-EST
+From: Alan Bawden <ALAN at MIT-MC>
+To: DLW at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 12 March 1981 01:39-EST
+    From: Daniel L. Weinreb <dlw at MIT-AI>
+
+    Does set-syntax-macro-char make the character a delimiter?  (That is, is
+    the character like single-quote or like number-sign, or does it
+    leave it alone?)
+
+set-syntax-macro-char gives you precisely the same syntax as
+single-quote, backquote, comma and semicolon.
+
+Date: 12 MAR 1981 0139-EST
+From: dlw at MIT-AI (Daniel L. Weinreb)
+To: ALAN at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+
+Does set-syntax-macro-char make the character a delimiter?  (That is, is
+the character like single-quote or like number-sign, or does it
+leave it alone?)
+
+Date: 11 March 1981 22:16-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: CARLF at MIT-AI, BUG-LMMAN at MIT-AI
+
+ZMAIL documentation is in ZMAIL; POOP.  Also, you should be on the
+INFO-ZMAIL mailing list to get updates etc; mail to this list
+is archives in ZMAIL; INFO MAIL.
+
+Date:  8 MAR 1981 2159-EST
+From: CARLF at MIT-AI (Carl Richard Feynman)
+To: (BUG LMMAN) at MIT-AI
+
+In the version of LMMAN in System 59.29, ZMail 16.3, microcode 723, on Lisp Machine Eight:
+
+Is there any documentation on ZMAIL?
+				-- Carl
+p.s. Keep up the good work on the manual!
+
+Date: 4 February 1981 18:49-EST
+From: Glenn S. Burke <GSB at MIT-ML>
+To: MMCM at MIT-AI
+cc: BUG-LMMAN at MIT-AI, BUG-BOLIO at MIT-AI
+
+    Date:  4 FEB 1981 1236-EST
+    From: MMCM at MIT-AI (Mike McMahon)
+
+    The whitespace in references like "Chapter 7.  , page 69" looks
+    pretty poor.
+(In the process of being) fixed.  There was some complete bogousity in the
+consing up of section-number strings.  For the record, .SETQ treats the
+following second "argument"s specially:
+  page ("page 7")
+  chapter-number ("4")
+  css-number, section-number ("4", "4.5", "4.5.6", "4.5.6.7")
+  section-page ("chapter 7, page 69", "section 4.5, page 259")
+  page-number ("7")
+
+
+Date:  4 FEB 1981 1236-EST
+From: MMCM at MIT-AI (Mike McMahon)
+To: (BUG LMMAN) at MIT-AI, (BUG BOLIO) at MIT-AI
+
+The whitespace in references like "Chapter 7.  , page 69" looks pretty poor.
+
+Date: 30 January 1981 04:04-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: SHIPMN at MIT-AI, BUG-LMMAN at MIT-AI
+
+    SHIPMN@MIT-AI 01/28/81 21:43:36
+    A suggestion for explaining backquote in the new manual:
+    
+    Backquote is generally pretty confusing to people the first few times. It helps me to
+    think of it as a "template" for an s-expression. The places with commas in front are
+    "slots" in the template. The slots get filled in by evaluating the form following the
+    comma. Using this image, I have little trouble understanding or using nested
+    quote/backquote/comma combinations.
+    
+    Also, I would suggest that backquote be given its own section since its utility
+    extends far beyond its application in macro definitions.
+    
+					    Best,
+					    Dave Shipman
+
+Well, it does introduce backquote sort of that way, in the first two
+sentences that explain what commas do, though it doesn't go into the
+point too heavily.  Maybe phrasing it with the words "template" and
+"slot", and having more of the simple examples, would be a good idea.
+
+I know that it is useful outside of macros, but since, in practice, it
+seems to be used in them far more often than anywhere else, I decided to
+organize it that way.  It is the same reason I put setf and locf in the
+chapter on defstruct.  Maybe Moon and I should reconsider this.
+
+GSB@MIT-ML 01/26/81 05:19:01 Re: loop doc
+To: (BUG LMMAN) at MIT-ML
+I changed all .CINDEX requests to be .LOOP_TOPIC, which for the TM
+will be the same as .CINDEX.  ML:LSBDOC;LOOPTM LISPM contains
+a definition for .LOOP_TOPIC which may be appropriate for the chine ual,
+or you might just synomize it with .comment.
+
+
+Date: 23 January 1981 23:21-EST
+From: Mike McMahon <MMcM at MIT-AI>
+To: JCW at MIT-AI
+cc: BUG-LMMAN at MIT-AI
+
+    Date: 23 JAN 1981 2246-EST
+    From: jcw at MIT-AI (James C. Williams)
+    A problem with the documentation, at least as it exists in the black manual:
+    SORT (and its variants), in the case of a long list, uses rplacd rather than
+    rplaca, and thus it cannot be used for side effect only; the value must be
+    stored away.  This is unclear from the documentation.
+
+Reread the second paragraph under the section 5.6 "Sorting" on page 55.
+Mention of the use of rplacd is quite explicit.
+To wit,
+"After sorting, the argument (be it list or array) is rearranged
+internally so as to be completely ordered.  In the case of an array
+argument, this is accomplished by permuting the elements of the array,
+while in the list case, the list is reordered by 3rplacd*'s in the
+same manner as 3nreverse*. ..."
+
+GSB@MIT-ML 01/23/81 12:51:27 Re: Format and ~<...~>
+To: (BUG LMMAN) at MIT-ML, KMP at MIT-MC
+    KMP@MIT-MC 01/23/81 00:06:36 Re: Format and ~<...~>
+    Also,
+    (format nil "$~10,,'*<~3f~>" 2.59023)
+    returns
+    |$                                          2.59|
+    instead of
+    |$******2.59|
+    as the lispm manual claims it will. This seems like a large discrepancy.
+This is a documentation bug, unless Lispm format parses parameters
+bogusly.  There is a comma missing: "$~10,,,'*<~3f~>", as the params
+are mincol, colinc, minpad, and padchar.
+
+
+Moon@MIT-AI 01/13/81 00:21:58 Re: format
+To: GSB at MIT-ML
+CC: (BUG LMMAN) at MIT-ML
+    GSB@MIT-ML 01/12/81 14:39:00 Re: format
+    To: (BUG LMMAN) at MIT-ML
+    ~Q seems to not be documented.  Although cumbersome, i have found it
+    reasonable to use in place of defining new format operators, when the
+    use is localized.
+    
+    Also, i believe (although i'm not absolutely positive, i'm not in a
+    position to test it) that the hair for
+    ~<prefix~:;....~>
+    has been modified slightly such that any newline must be output by the
+    stuff in prefix, rather than by format itself as it used to be.
+
+Yes to both.  Fixed in the source of the manual.
+
+
+GSB@MIT-ML 01/12/81 14:39:00 Re: format
+To: (BUG LMMAN) at MIT-ML
+~Q seems to not be documented.  Although cumbersome, i have found it
+reasonable to use in place of defining new format operators, when the
+use is localized.
+
+Also, i believe (although i'm not absolutely positive, i'm not in a
+position to test it) that the hair for
+~<prefix~:;....~>
+has been modified slightly such that any newline must be output by the
+stuff in prefix, rather than by format itself as it used to be.
+
+
+Date: 11 JAN 1981 1247-EST
+From: BAK at MIT-AI (William A. Kornfeld)
+To: (BUG LMMAN) at MIT-AI, Moon at MIT-MC
+
+Yes, I discovered that sentence after I sent the message.  It should
+definitely be more prominent.  I also don't see the harm in stating that
+SETF in a number of contexts returns its second argument.  I use it mostly
+in dealing with structures and occasionally makes use of its "unsupported"
+return value.
+
+Date: 11 January 1981 12:45-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+To: BAK at MIT-AI
+cc: BUG-LMMAN at MIT-AI, Moon at MIT-MC
+
+I have moved the note about the returned value from setf (that whole
+paragraph, in fact) into the descriptions of setf and locf themselves,
+to make it easier to find.  This will be in the next version of the manual.
+
+Moon@MIT-MC 01/10/81 23:25:37
+To: BAK at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+    Date: 10 JAN 1981 2318-EST
+    From: CENT at MIT-AI (Pandora B. Berman)
+    To: (BUG LMMAN) at MIT-AI
+    CC: BAK at MIT-AI
+    
+    forwarding from users3;manual mail:
+    
+    BAK@MIT-AI 01/03/81 21:10:57
+    To: (BUG MANUAL) at MIT-AI
+    The description of SETF in the manual should include the sentence "SETF always returns
+    its second argument." (if this is in fact true).
+It is in fact not true.  This is documented on the bottom of page 146 in the jan79
+edition.  Evidently it needs to be documented more prominently.
+
+Date: 10 JAN 1981 2318-EST
+From: CENT at MIT-AI (Pandora B. Berman)
+To: (BUG LMMAN) at MIT-AI
+CC: BAK at MIT-AI
+
+forwarding from users3;manual mail:
+
+BAK@MIT-AI 01/03/81 21:10:57
+To: (BUG MANUAL) at MIT-AI
+The description of SETF in the manual should include the sentence "SETF always returns
+its second argument." (if this is in fact true).
+
+^_
+
+GSB@MIT-ML 01/09/81 03:29:21 Re: loop doc
+To: (BUG LMMAN) at MIT-ML
+ML:LSBDOC;LOOPTM LISPM is a "lisp init file" for use in inserting
+loop doc into the lmman.  It contains appropriate comments in it.
+
+
+Date: 22 DEC 1980 0101-EST
+From: LEVITT at MIT-AI (David A. Levitt)
+Subject:  Considered supporting fraction arithmetic?
+To: (BUG LMMAN) at MIT-AI
+
+Has the Lispm group considered supporting a representation of fractions
+(as duples of fixnums, as in a list or dotted pair)?  The code is simple,
+and undoubtably exists in some form in programs like Macsyma. So the 
+question is one of system-wide support (which is why this is to BUG-LMMAN).
+
+Support could take various forms:
+1) A convention described in the manual.
+2) Fraction arithmetic operations, predicates, and type conversion.
+3) Extend the general arithmetic functions to apply to them too; since the
+    present system barfs when you try an arithmetic operation on a CONS,
+    this should be relatively simple.  Type coercion issues are subtle, though.
+4) Extend FORMAT to do nice things with them.
+
+Even if infrequently used, this would be preferable to letting users who really need it
+reinvent their own versions.  And probably many other users have wished they could
+carry around 1/3 "as such" now and again, without flonum imprecision, if the system
+had only made it convenient.
+
+Date: 19 DEC 1980 1814-EST
+From: CWH at MIT-AI (Carl W. Hoffman)
+To: (BUG LMMAN) at MIT-AI
+
+There were two places in LMMAN;TIME where ".end-defun" appeared.
+I took these to be typos and replaced them with ".end_defun".
+
+Date: 18 DEC 1980 1807-EST
+From: DLW at MIT-AI (Daniel L. Weinreb)
+Subject: Maclisp compatibility
+To: INFO-LISPM at MIT-AI, (BUG LMMAN) at MIT-AI
+
+The Lisp Machine implements Maclisp "single-character objects" as
+symbols, but, as opposed to what it says in the Lisp Machine manual,
+they are not interned in the USER package; in reality, they are interned
+in the current package, whatever it is.  The system had been
+inconsistent about this; in particular, READCH was wrong.  A recent
+system patch fixes READCH so that it will return symbols in the current
+package rather than the USER package.  If this affects your programs,
+you may want to fix them.  JLK says this will not break Macsyma.
+
+
+Date: 4 December 1980 13:21-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR9 at MIT-AI
+To: TFT at MIT-AI, BUG-LISPM at MIT-AI, BUG-LMMAN at MIT-AI
+
+No, there isn't a non-obsolete function that does the same thing; if it
+did the same thing, it would be called EXPLODEN.  What this warning is
+trying to tell you is that the Lisp Machine has real strings, and you
+can deal with them as arrays if you want to examine their characters.
+EXPLODEN allocates a lot of list structure and does a lot of unnecessary
+work which you probably don't actually need done.
+
+I realize there is no way that you could easily have figured this out
+from what the compiler told you.  I think we should either remove those
+warnings from the compiler, or else explain in the Lisp Machine manual
+with each "obsolete" function just why it is that we are flagging it as
+"obsolete".
+
+Date: 16 November 1980 22:58-EST
+From: Daniel L. Weinreb <DLW at MIT-AI>
+Sender: DLW at CADR8 at MIT-AI
+Subject: Crocks
+To: BUG-LMMAN at MIT-AI, BUG-LISPM at MIT-AI
+
+Without looking at any code, it seems clear what the right thing to have
+is.  First, the > and < functions should be changed to be exactly the
+same as greaterp and lessp.  (Justifications: + and PLUS are the same
+too; why have a two-arg version when you could have an upward-compatible
+multi-arg version).  Secondly, these should be functions, and functions
+don't evaluate arguments, evaluators evaluate arguments: it should be
+fixed so that these are (or at least are the same as) normal functions,
+with all arguments always evaluated exactly once in order.  Finally, the
+manual should be fixed.
+
+BAK@MIT-AI 11/07/80 01:55:03
+To: (BUG LMMAN) at MIT-AI
+I dont know if this bug has been caught, but
+on page 257, in the discussion of set-mar, the :write should be quoted.
+
+
+DLW@MIT-AI 11/06/80 21:15:46
+To: RMS at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+I have regenerated the .LMMAN TAGS file and retrieved PROGS > off
+GFR tape; it should all be in good shape now.
+
+Date: 06 Nov 1980 0213-PST
+From: Richard Stallman <RMS at SU-AI>
+Subject: PROGS > LMMAN;
+To:   bug-lmman at MIT-AI   
+
+This file has been GFR'd.
+
+Someone should clean up .LMMAN TAGS so that people
+like me can use it in being conscientious
+about updating documentation when we make changes.
+
+
+
+RMS@MIT-AI 11/06/80 05:13:08
+To: (BUG LMMAN) at MIT-AI
+.LMMAN TAGS is very old, and TAGS gets an error
+on it (PROGS > -link to non-ex file).
+
+MOON@MIT-AI 11/03/80 03:24:36 Re: Top-level binding of TERMINAL-IO
+To: DLW at MIT-AI
+CC: (BUG LMMAN) at MIT-AI
+It should be documented where stack groups are documented, in the following way.
+If you want your stack group to use the same i/o stream (e.g. a window) as 
+its creator, you must make its top-level function bind TERMINAL-IO to the same
+value.  That should be the right place to document it.  Alternatively we could
+make a varianet of STACK-GROUP-PRESET that did this and any other useful
+bindings automatically.
+
+Date: 3 November 1980 01:59-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR6 at MIT-AI
+Subject: Top level binding of TERMINAL-IO
+To: HIC at MIT-MC
+cc: BUG-NWS at MIT-AI, BUG-LMMAN at MIT-AI
+
+Oh.  Stupid of me.  That's too bad; I don't see a reasonable fix for the
+problem either.  I guess we'll just have to document it.  Very
+disappointing.
+
+Date: 1 November 1980 16:51-EST
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR1 at MIT-AI
+To: MOON at MIT-MC
+cc: BUG-LMMAN at MIT-AI, BUG-LISPM at MIT-AI
+
+I don't understand at all.  FMAKUNBOUND has precisely the same bug; if
+you have used a one-q-foprward to move a function cell, and you
+FMAKUNBOUND it, FMAKUNBOUND will write over the forwarding pointer
+instead of following it.  What do you mean "it didn't have those bugs"?
+
+I think probably MAKUNBOUND ought to follow evcps.  This is probably the
+"simpler" behavior for it to have from the point of view of the Lisp
+programmer, even though it is more complex internally.  Since we don't
+have a SYMEVAL that fails to follow evcps, maybe a MAKUNBOUND that fails
+to follow them is equally not needed.  Or if it is, it should have
+a different name.
+
+Actually, if we wanted to support variable linking as a feature, we need
+a bunch of functions to make it easier.  "link this", "unlink this", "what
+is this linked to", and so on, for both function and value cells.
+
+Date: 23 October 1980 20:46-EDT
+From: Glenn S. Burke <GSB at MIT-ML>
+Subject: condition-bind
+To: dlw at MIT-AI, BUG-LMMAN at MIT-AI, MOON at MIT-AI
+
+Actually, it was the example which caused the confusion.  (Read it slowly...)
+I also interpreted the "sequentially" to mean just what it intends to mean,
+although in retrospect that also could be misconstrued.
+
+
+Date: 23 October 1980 20:41-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR6 at MIT-AI
+Subject: condition-bind
+To: BUG-LMMAN at MIT-AI, GSB at MIT-ML, MOON at MIT-ML
+
+Oh, foo.  Where it says that they are established sequentially, what I
+think it is trying to say is that the cond-1 name goes before the cond-2
+name on the condition list, so that if you set up two handlers for the
+same thing in the same condition-bind, the first one will get used.
+This is a pretty trivial thing to worry about documenting, anyway; I
+guess I didn't realize it might not be clear that they are established
+in parallel.  Yeah, the manual writeup is a loser.
+
+And I think that we decided that it OUGHT to evaluate the handlers, but
+actually it was misimplemented.  If you are making one yourself, you
+should have it evaluate the forms.  I will start moving towards fixing
+it on the Lispm.  Thanks.
+
+BAK@MIT-AI 10/19/80 22:47:11
+To: DLW at MIT-AI
+CC: MOON at MIT-AI, RMS at MIT-AI, (BUG LMMAN) at MIT-AI
+
+Concerning SI:FDEFINE-FILE-SYMBOL, I don't really see an argument
+for not documenting it (other than laziness) since it serves a
+purpose that is impossible (or even more obscure) to get any other
+way.  [I, in fact, got a pointer to it from MOON.] 
+
+Concerning the manual itself, the FCC many other organizations provide a
+model for distributing evolving documentation that you might want to
+emulate.  The stuff is distributed on 3-hole paper.  Every so often
+"updates" are distributed and you go through the manual, throwing out
+certain pages and inserting certain others.  They use hacks like page
+"74a" to go in between pages 74 and 75 so page numbering doesnt cause you
+to reprint the whole thing.  I would think BOLIO could figure this out 
+without too much difficulty.  This way people can have up-to-date info
+without the expense and delay of generating whole manuals.  I only mention
+this because I see a danger of the Lispm manual going the same route as
+the Maclisp manual -- into a black hole.  This business of "look it up in
+the code" or "ask someone" is ok when nothing else is available, but 
+thorough documentation is much superior.  I'm sure CADRs would not have
+seen anywhere near as much use as they have if the CHINE NUAL hadn't appeared.
+
+I'll fix warn-if-changed to not error out when eval'd from top level.
+
+
+Date: 19 October 1980 15:29-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR6 at MIT-AI
+To: BAK at MIT-AI
+cc: RMS at MIT-AI, MOON at MIT-AI, BUG-LMMAN at MIT-AI
+
+I was a bit concerned about your use of SI:FDEFINE-FILE-SYMBOL in
+WARN-IF-CHANGED; I was not sure it was really an advertised feature, and
+was afraid your facility might break in the future.  So I looked around;
+it looks like it is probably OK for you to be using it, and I think we
+ought to document it.  (Moon generally tends to think things like this
+should not be documented, on the grounds that there are too many of them
+and anyone who wants to win will look in the code anyway, but I disagree
+for various reasons.  I haven't asked him about this one.)
+
+By the way, lots of functions in the system are careful about checking
+whether it is bound, just in case they are called at top level.
+However, LISP-REINITIALIZE sets it to NIL, which is very useful and
+should be considered part of the definition of the meaning of the
+symbol.
+
+MOON@MIT-MC 10/09/80 23:23:56
+To: (BUG lmman) at MIT-AI
+Date: 28 Jul 1980 0137-PDT
+From: Dan Weinreb <DLW at SU-AI>
+Subject: LMMAN    
+To:   moon at MIT-MC   
+
+I just noticed taht on p. 68 of the Chine Nual, it tells you that
+FLONUMs have stable rounding, but it leaves you guessing about
+SMALL-FLONUMs.  This should be fixed.
+
+We should also have at least sixteen rounding modes...
+
+
+
+Date:  6 OCT 1980 2139-EDT
+From: MOON at MIT-MC (David A. Moon)
+Subject: List sort
+To: GLS at MIT-MC
+CC: (BUG LISPM) at MIT-MC, (BUG LMMAN) at MIT-MC
+
+Yes, the list sort is unstable, and the documentation is incorrect.
+SI:SORT-SHORT-LIST is stable.  When we get around to it the plan
+is to make a new function STABLE-SORT which will be stable on all
+arguments but possibly slower.
+
+Date: 6 October 1980 12:09-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR6 at MIT-AI
+Subject: [Guy.Steele at CMU-10A: Sorting on LISPM]
+To: BUG-LMMAN at MIT-AI
+
+Date:  6 October 1980 1051-EDT (Monday)
+From: Guy.Steele at CMU-10A
+To: bug-lispm at MIT-AI
+Subject:  Sorting on LISPM
+Message-Id: <06Oct80 105113 GS70@CMU-10A>
+
+I was looking at the has table stuff in LMMAN;FD.CON (looks nice),
+and noticed that the following section on sorting advertises that
+the list sort is stable.  This is not true if the LISP Machine is
+still using the hairy CDR-coding sort I devised.
+
+DLW@MIT-AI 10/04/80 12:46:28 Re: PHI
+To: MOON at MIT-MC
+CC: CWH at MIT-AI, (BUG LMMAN) at MIT-AI
+    MOON@MIT-MC 10/04/80 01:50:06 Re: PHI
+    It's worthless.  That is to say, there are programs that use it but it doesn't
+    make sense to have a macro for every possible program that uses unwind-protect,
+    it's not like it's hard to write it yourself.  We have with-open-file
+    because it's so common and to try and stop naive users from forgetting to
+    close their files.
+Yeah; that is what I thought too.  I just wanted to get another opinion
+before deciding to leave it out.  We must remember to make the documentation
+clear enough about how to write your own unwind-protect handler so that
+people will do it right.  Probably the manual should show the complete
+expansion of with-open-file.
+
+ALAN@MIT-MC 10/01/80 19:50:22
+To: MOON at MIT-MC, DLW at MIT-MC, (BUG LMMAN) at MIT-MC
+PLIST of a CONS should be CDR.  Document this under dismbodied
+prop lists as well as PLIST.
+
+
+dlw@MIT-AI (Sent by ACW@MIT-AI) 09/28/80 02:33:26
+To: (BUG LMMAN) at MIT-AI
+#/alpha and friends don't seem to be documented.
+
+Date: 26 September 1980 19:50-EDT
+From: Daniel L. Weinreb <dlw at MIT-AI>
+Sender: dlw at CADR2 at MIT-AI
+To: BUG-LMMAN at MIT-AI
+
+In the version of lmman on system 44.3, with microcode 692, on LISP Machine Two:
+The official convention on termination items in menus is:
+
+Primary names:
+
+Do It: Do the thing that it says here to do, make the menu go away.
+(This is for when things are not done immediately, but are postponed
+until the entire setup is specified.  For example, Split Screen.)
+
+Abort: Do NOT do the thing it says here to do, if anything, and make
+the menu go away.
+
+Exit: I have already done the things I want to do.  Make the menu go away.
+(This is for when things happen immediately, rather than being postponed.)
+
+Secondary names:
+
+Done: A cross between Do It and Exit, when some action is immediate
+and some is postponed.  This is the positive way to finish.
+
+Quit: A cross between Abort and Exit, when one is at the top level
+of a program.
+
+RICH@MIT-AI 09/02/80 13:04:30
+To: (BUG LMMAN) at MIT-AI
+In system 37.1, with microcode 684, on LISP Machine Eight:
+According to page 256 re Stepper, the variables STEP-FORM, etc. are supposed
+to be bound in a breakpoint.  I do not find this to be the case.
+
+DLW@MIT-AI 08/30/80 03:56:01
+To: MOON at MIT-MC
+CC: (BUG LMMAN) at MIT-AI
+    MOON@MIT-MC 08/29/80 04:14:06
+        DLW@MIT-AI 08/25/80 01:48:58
+        To: (BUG LMMAN) at MIT-AI
+        The manual doesn't say what lexpr-funcall of one arg does.
+    It shouldn't be allowed, does it claim to be?
+The manual doesn't say; it should mention explicitly that
+although the arg pattern is "f &rest args", there must be at least
+TWO arguments.
+
+MOON@MIT-MC 08/29/80 04:14:06
+To: (BUG LMMAN) at MIT-MC
+    DLW@MIT-AI 08/25/80 01:48:58
+    To: (BUG LMMAN) at MIT-AI
+    The manual doesn't say what lexpr-funcall of one arg does.
+It shouldn't be allowed, does it claim to be?
+
+DLW@MIT-AI 08/27/80 14:47:32 Re: ASCII function
+To: (BUG LMMAN) at MIT-AI
+Date: 27 AUG 1980 0423-EDT
+From: MOON at MIT-MC (David A. Moon)
+Subject: ASCII function
+To: DLA at MIT-EECS
+CC: (BUG lispm) at MIT-AI
+
+    Date: 25 Aug 1980 2200-EDT
+    From: Dave Andre <DLA at MIT-EE>
+    Subject: ASCII function
+    To: bug-lispm at MIT-AI
+
+    The ascii function interns its result in the current package,
+    not the USER package as the documentation says.
+
+The documentation is incorrect.  The ascii function must intern in the
+current package in order for Maclisp programs (probably the only ones
+that use it) to work compatibly.
+
+DANNY@MIT-AI 08/25/80 02:12:01
+To: (BUG LMMAN) at MIT-AI
+There shoulf be a good index entry for # reader macros. There documentation is there but 
+I have had trouble finding it in index.
+
+DLW@MIT-AI 08/25/80 01:48:58
+To: (BUG LMMAN) at MIT-AI
+The manual doesn't say what lexpr-funcall of one arg does.
+
+DLW@MIT-AI 08/21/80 02:39:42
+To: (BUG LMMAN) at MIT-AI
+The next version should have a little section to help new users who
+just came over from Maclisp understand LM code.  Also to help people
+who have only had introductory Lisp.  It should give lots of little
+pointers: "In case you're wondering what all the '#' characters are,
+look at chapter 2.5; the most common one is #/A, which means..."  "In
+case you're wondering what defflavor and defmethod are, these are part
+of the flavor system, documented in chapter 259" and so on.
+
+A chapter addressed to Interlisp users would be nice too...
+
+DLW@MIT-AI 08/10/80 08:52:57 Re: APPEND Documentation
+To: (BUG LMMAN) at MIT-AI
+Date:  4 AUG 1980 2051-EDT
+From: JERRYB at MIT-AI (Gerald R. Barber)
+Subject:  APPEND Documentation
+To: (BUG LISPM) at MIT-AI
+
+
+The documentation for APPEND should be more explicity about the fact that the
+last argument is not copied.  In fact, the coded example for the general case
+does copy the last argument.
+
+Date: 30 Jul 1980 0121-PDT
+From: Dan Weinreb <DLW at SU-AI>
+To:   bug-lmman at MIT-AI   
+
+Section 10.2 starts out as if it were going to give many examples
+of closures, but it only gives one.
+
+
+
+Date: 25 Jun 1980 1635-PDT
+From: Silverberg at SRI-KL (Brad A. Silverberg)
+Subject: manual request
+To: bug-lmman at MIT-AI
+
+Could you please send me a copy of the  Lisp Machine Manual?
+My address is:
+
+	Brad Silverberg
+	Computer Science Lab
+	SRI International
+	Menlo Park, CA 94043
+
+I would be glad to pay for any expenses.
+
+Thanks,
+
+Brad Silverberg
+-------
+
+Date: 14 May 1980 1422-PDT
+From: Silverberg at SRI-KL (Brad A. Silverberg)
+Subject: lisp machine manual request
+To: bug-lmman at MIT-AI
+
+Can you please send me a copy of the latest version of the
+Lisp Machine Manual.  My address is:
+
+	Brad Silverberg
+	Computer Science Lab
+	SRI International
+	Menlo Park, CA 94025
+
+Thanks.
+-------
+
+DLW@MIT-AI 02/17/80 04:31:26 Re: omissions
+To: LPD at MIT-AI, (BUG LMMAN) at MIT-AI
+    LPD@MIT-AI 02/16/80 18:12:19 Re: omissions
+    I don't recall seeing anywhere in the manual any discussion of the
+    difference between using || and slashification.
+That's because there isn't any; the wording on page 157 ("You can also
+enclose the name...") is intended to mean this.
+
+    A description of how to add your own # characters for the reader and
+    ~ codes for format should really be in there.  I don't know how to
+    do it, and it can't be THAT awful.
+
+    I hope the next edition will contain at least some of the omitted
+    sections, like readtables, a better discussion of the display I/O
+    system, the stepper, etc.  (This list is not in priority order.)
+
+Readtables and reader macros actually could not be changed easily at
+the time the manual went into print, so there was no way to include
+that.  The stepper is documented on page 255, unless somebody has
+written a new stepper that I don't know about.  For FORMAT extensions
+page 87 tells you to "read the code" because we were not sure how
+permanent this was and it didn't seem worth documenting at the time.
+The display system is undergoing total redesign at present and it is
+being documented by ACW, I think.  The next edition ought to fix all
+of this.
+
+MOON@MIT-MC 02/16/80 18:51:15 Re: omissions
+To: LPD at MIT-AI
+CC: (BUG LMMAN) at MIT-MC
+    LPD@MIT-AI 02/16/80 18:12:19 Re: omissions
+    To: (BUG LMMAN) at MIT-AI
+    I don't recall seeing anywhere in the manual any discussion of the
+    difference between using || and slashification.  
+That's because there is no difference.
+						     I gather that the
+    former creates un-interned symbols?  
+No.
+					 I'm not sure where this point
+    should go -- probably in the section on the reader and external
+    syntax, with a brief mention in the early section on special
+    characters.
+
+    A description of how to add your own # characters for the reader and
+    ~ codes for format should really be in there.  I don't know how to
+    do it, and it can't be THAT awful.
+The next edition will have the former.  I'm not sure about the latter.
+    I hope the next edition will contain at least some of the omitted
+    sections, like readtables, a better discussion of the display I/O
+    system, the stepper, etc.  (This list is not in priority order.)
+It will.  It's just a matter of lack of time to do everything.
+
+LPD@MIT-AI 02/16/80 18:12:19 Re: omissions
+To: (BUG LMMAN) at MIT-AI
+I don't recall seeing anywhere in the manual any discussion of the
+difference between using || and slashification.  I gather that the
+former creates un-interned symbols?  I'm not sure where this point
+should go -- probably in the section on the reader and external
+syntax, with a brief mention in the early section on special
+characters.
+
+A description of how to add your own # characters for the reader and
+~ codes for format should really be in there.  I don't know how to
+do it, and it can't be THAT awful.
+
+I hope the next edition will contain at least some of the omitted
+sections, like readtables, a better discussion of the display I/O
+system, the stepper, etc.  (This list is not in priority order.)
+
+DLW@MIT-AI 02/04/80 17:57:15
+To: LPD at MIT-AI, (BUG LMMAN) at MIT-AI
+Thank you very much for reporting our errors; I have fixed them in the
+source.  If you see any other mistakes, or anything that you feel might
+confuse or mislead InterLisp users, please let us know and we'll remedy
+it.  We really ought to have a whole chapter addressed to InterLisp
+users; if I were still at MIT and if I knew more about InterLisp I'd
+like to write this.
+
+Thanks again!  --Dan
+
+LPD@MIT-AI 02/04/80 09:51:18
+To: (BUG LMMAN) at MIT-AI
+Here are a few bugs I found in reading the Lisp Machine Manual.  All but one
+are minor typos.
+
+First the typos:
+pp. 74-75: "minumum" should be "minimum" in several places
+p. 104: "envorinment" should be "environment"
+p. 167: "availible" should be "available"
+p. 184: "rememberes" should be "remembers"
+
+Now the glitch:
+on pp. 41-42, it is claimed that the LM nthcdr function is the same as the
+Interlisp nth function.  It is not.  nthcdr is 0-origin, while nth is 1-origin.
+In Interlisp, (nth x 1) = x, while (nth x 0) = (cons nil x).  That's just how
+it is -- don't blame me.
+
+Date: 31 Jan 1980 2332-EST
+From: RESSLER at RUTGERS
+Subject: Lisp Machine availability
+To: BUG-LMMAN at MIT-AI
+
+A friend of mine just got a Lisp Machine manual from you folks the second preliminary version and I started to look it over and basically decided that if I wanted to buy a computer it would be the Lisp Machine.  To make a long story short is anybody in the process of manufacturing the thing if so is it priced in typical micro range.  I would be interested in any resonable speculations about this.
+Thanks a lot....Sanford (Sandy) Ressler
+-------
+
+KATSU@MIT-AI 10/20/79 12:55:30
+To: (BUG LMMAN) at MIT-AI
+I think zwei should have "auto save mode" as soon as posible.
+Because funny bugs often force me to do boot strap,
+and the contents in the buffer go away.
+
+Date: 2 Aug 1979 1138-PDT
+Sender: MJAMES at USC-ISIE
+Subject: Lisp Machine
+From: MJAMES at USC-ISIE
+To: Greenblatt at MIT-AI
+Cc: Bug-LMMan at MIT-AI, Moon at MIT-AI
+Message-ID: <[USC-ISIE] 2-Aug-79 11:38:36.MJAMES>
+
+Richard,
+
+        I  sent  a  message  off  to  Baker  asking him about the
+availability of your lisp machine to outside sources and received
+no  response.   So  now  I will try you.  I am a consultant for a
+company which is doing some  AI  work.   They  would  rather  buy
+hardware  rather  than  a  100k or so of computer time on a local
+computer firm here.
+
+        Your lisp machine seemed like the obvious choice and  was
+wondering if we can buy several of them.  If they are available I
+will need to  know  such  things  as  purchase  price,  available
+options  and their corresponding prices, delivery date if ordered
+immediately, what we can do  about  maintance,  can  something  be
+arranged  so  that  they don't have to be boot from a PDP-10.  We
+would like the two machines operate stand-alone and with the  two
+machines  only  connected  via  a  9600  baud  modem line.  These
+machines will be located at the researchers' house.
+
+Mark
+
+Date: Thursday, 8 March 1979  12:44-EST
+From: Earl Killian <EKILLIAN at BBN-TENEXE>
+To: bug-lmman
+
+I just picked up a copy of the LISP CHINE NUAL (very interesting cover
+- it says "ma ma" on the back).  I suppose by now you know your
+printer blew it and put page 107 out of sequence.
+
+I notice on page 1 it says "It is hoped that anyone with some previous
+programming experience (not necessarily in Lisp) could learn all about
+the Lisp language and the Lisp Machine from the manual."  Are you
+serious?  I think you ought to strike that sentence; it isn't true,
+nor do I think it should be.
+
+Also, on page 136 I think you've been unfair in picking your example.
+Of course you want to show off defmacro and backquote, but writing
+(macro for (x)
+ (cons 'do
+       (cons (cadr x)
+	     (cons (caddr x)
+		   (cons (list '1+ (cadr x))
+			 (cons (list '> (cadr x) (cadddr x))
+			       (cddddr x)))))))
+instead of
+(macro for (x)
+ (append (list 'do (cadr x) (caddr x) (list '1+ (cadr x))
+	       (list '> (cadr x) (cadddr x)))
+	 (cddddr x)))
+is just making the problem seem even worse than it already is (this is
+something Madison Ave. would do).
+
+Date: 17 Jan 1979 1936-PST
+Sender: brad at SRI-UNIX 
+Subject: manual request
+From: brad at SRI-UNIX 
+To: bug-lmman at mit-ai
+
+I would like to request a copy of the Lisp Machine Manual
+plus any other info about the LM you have.
+My address is:
+
+Brad Silverberg
+Computer Science Laboratory
+SRI International
+Menlo Park, CA 94025
+
+
+If you need to communicate with me for some reason
+(i.e., there is a charge) please send netmail to
+silverberg@sri-kl.
+
+Thanks,
+
+Brad Silverberg
+-------
+
+
+Date: 17 Jan 1979 1936-PST
+Sender: brad at SRI-UNIX 
+Subject: manual request
+From: brad at SRI-UNIX 
+To: bug-lmman at mit-ai
+
+I would like to request a copy of the Lisp Machine Manual
+plus any other info about the LM you have.
+My address is:
+
+Brad Silverberg
+Computer Science Laboratory
+SRI International
+Menlo Park, CA 94025
+
+
+If you need to communicate with me for some reason
+(i.e., there is a charge) please send netmail to
+silverberg@sri-kl.
+
+Thanks,
+
+Brad Silverberg
+-------
+
+
+Date: 21 Dec 1978 1058-PST
+From: SILVERBERG at SRI-KL
+Subject: LM manual
+To: BUG-LMMAN at MIT-AI
+
+Could you please send me a copy of the Lisp Machine manual? I would
+also like to be placed on the mailing list (if one exists) for
+any information, announcements, etc. about the LM.
+My address is:
+
+Brad Silverberg, J1092
+Computer Science Laboratory
+SRI International
+Menlo Park, CA 94025
+
+If there is a charge, please let me know and I'll remit a check.
+Thanks.
+
+Brad Silverberg.
+-------
+
+Date:    2 Dec 1978 1213-EST
+From:    MARK.FAUST(A730MF20) at CMU-10A 
+Subject: LISP Machine Manual
+To:      bug-lmman at MIT-AI
+
+Hi-
+	Could someone there possibly send me a copy of the LISP Machine
+Manual?  I'll gladly pay copying and postage costs.  Thanks very much.
+
+Mark Faust
+c/o Computer Science Dept
+Carnegie -Mellon Univ
+Pittsburgh, PA 15213
+
+hic@MIT-AI (Sent by RG@MIT-AI) 11/24/78 16:45:32
+To: (BUG LMMAN) at MIT-AI
+I added a new function of possible user interest to CHAOS:.
+It's called HOST-DATA and given a host spec (Either name or number) as arg
+it returns two values: First, the host name string as specified by the
+host (if the host is unknonw (isn't a LISP Machine) it will do a STATUS),
+second value is the host address.
+
+HIC@MIT-MC 07/10/78 00:31:15
+To: (BUG LMMAN) at MIT-MC
+I read thru the Lisp Machine I/O System paper.  I noted a few spelling
+type errors and write notes on the paper itself (I hope this is what
+you wanted).
+
+A)  You do not seem to mention the option :ASCII in the 'ignored for MacLISP
+compatibility stuff'.
+
+B)  I get the feeling that the document is trying to be both a reference and a tutorial.
+At times I felt somewhat "talked down to".  What kind of audience are you aiming
+this document at?
+
+Other than that, I am glad to actually see a document taking shape.
+
+--Howard
+
+
+DLW@MIT-AI 06/07/78 20:16:21
+To: RG at MIT-AI, (BUG LMMAN) at MIT-AI
+    RG@MIT-AI 06/07/78 16:00:54
+    To: (BUG LMMAN) at MIT-AI
+      EVAL-WHEN DOESNT SEEM TO BE DOCUMENTED (AT LEAST ITS NOT
+    FOUND BY .LMMAN TAGS.)  THIS WOULD SEEM TO BE A FAIRLY HIGH
+    PRIORITY THING TO HAVE DOCUMENTED.
+It is documented; the problem was that nobody had done a :TAGS
+for a while.  It works now (modulo bugs in the EMACS Tags functions,
+which are mildly annoying), and the thing is documented in fairly
+gross detail.
+
+RG@MIT-AI 06/07/78 16:00:54
+To: (BUG LMMAN) at MIT-AI
+  EVAL-WHEN DOESNT SEEM TO BE DOCUMENTED (AT LEAST ITS NOT
+FOUND BY .LMMAN TAGS.)  THIS WOULD SEEM TO BE A FAIRLY HIGH
+PRIORITY THING TO HAVE DOCUMENTED.
+
+RMS@MIT-AI 06/05/78 02:47:49
+To: (BUG LMMAN) at MIT-AI
+We need to have .defcatch so that we can make an index of all
+catch-tags whose meanings are defined by the system.
+
+KLE@MIT-AI 05/23/78 23:06:57
+To: (BUG LMMAN) at MIT-AI
+A set of R macros for formatting various parts of LMMAN which use the
+format described in LMMAN;.FORMA > are currently available.  They can
+produce ouput to be printed on a lineprinter or XGP and even multiple
+font displays on any knight-console via XD.  These macros are still very
+experimental and under development but I felt obligated to provide some
+documentation on their use before I take off for a couple of weeks. I
+hope you find them useful.  Documentation on their use is currently
+available in LMMAN;.LMMAN INFO  --- any questions or comments are
+welcome.
+
+--54
+
+ALAN@MIT-AI 05/23/78 18:15:08
+To: (BUG LMMAN) at MIT-AI
+	Gee I use things like "`(,a ,b . ,c)" all the time.
+
+DLW@MIT-AI 05/23/78 01:54:34
+To: RMS at MIT-AI, (BUG LMMAN) at MIT-AI
+    RMS@MIT-AI 05/22/78 04:31:44
+    To: (BUG LMMAN) at MIT-AI
+    1) Backquote's usefulness is not particularly restricted
+    to macros.  I think that it should be documented where
+    LIST and CONS are documented, or where regular quote is documented, 
+    or some such place, instead of under macros.
+Although it is not restricted to macros, 99% of the use of it
+can be found there.
+    2) The documentation on macros follows the mathematical
+    order, defining everything before it is used.  This makes it
+    unmotivating for the newcomer, who will get turned off
+    by the ugly macros that don't use ` or defmacro, and
+    will give up without realizing that macros are really easy to use.
+I hope you aren't seriously suggesting that we document DEFMACRO
+before documenting simple macros.  I cannot hink of a more confusing thing
+to do.  I do not consider the LMMAN an advertisment for Lisp;
+it is a reference manual.
+    3) While SETF is a macro, it is so fundamental that
+    people shouldn't have to have read about macros to have heard
+    about it.  The action of SETF is no more mysterious to a beginner
+    than the action of SETQ.
+My answer to this is my real answer to all three parts of this
+letter: the macros section is not a little obscure section that very
+few people will read; it is a fundamental part of the manual that
+each and every user is going to have to read.  Macros are much
+more important in the Lisp Machine system than they traditionally
+have been in Maclisp; we use them a lot, and we have lots of installed
+system macros where Maclisp has none.  I think the present orginization
+is OK for now.  When we have lots more text written, I intend
+to look at the stuff and really figure out the organization then,
+including such issues as the policy on what gets to be a "Chapter",
+"Section" or "Subsection".
+
+RMS@MIT-AI 05/22/78 04:31:44
+To: (BUG LMMAN) at MIT-AI
+1) Backquote's usefulness is not particularly restricted
+to macros.  I think that it should be documented where
+LIST and CONS are documented, or where regular quote is documented, 
+or some such place, instead of under macros.
+2) The documentation on macros follows the mathematical
+order, defining everything before it is used.  This makes it
+unmotivating for the newcomer, who will get turned off
+by the ugly macros that don't use ` or defmacro, and
+will give up without realizing that macros are really easy to use.
+3) While SETF is a macro, it is so fundamental that
+people shouldn't have to have read about macros to have heard
+about it.  The action of SETF is no more mysterious to a beginner
+than the action of SETQ.
+

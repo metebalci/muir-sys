@@ -1,0 +1,59 @@
+.c -*- Mode:Bolio; Lowercase: Yes -*-
+
+.c .title Introduction to Using the Window System
+
+.headings off
+
+.space 10
+.center 9Lisp Machine Window System Manual*
+.space 4
+.center Edition 1.1, System Version 95
+.space
+.center August 1983
+.space 5
+.center Richard Stallman
+.center Daniel Weinreb
+.center David Moon
+.space 12
+.nopara
+This report describes research done at the Artificial Intelligence
+Laboratory of the Massachusetts Institute of Technology.  Support for the
+laboratory's artificial intelligence research is provided in part by the
+Advanced Research Projects Agency of the Department of Defense under Office
+of Naval Research Contract number N00014-80-C-0505.
+.page
+.headings on
+
+.c Cross references to the Chine Nual
+.c These are for the Fifth edition
+
+.setq manual-make-instance-fun "section 20.7 of the Lisp Machine manual"
+.setq stream-protocol "section 21.5 of the Lisp Machine manual"
+.setq character-set "section 21.1 of the Lisp Machine manual"
+.setq call-and-abort "Operating the Lisp Machine"
+.setq make-array-fun "section 8.2 of the Lisp Machine manual"
+.setq bitblt-fun "section 8.7 of the Lisp Machine manual"
+.setq terminal-io-var "section 21.5.9 of the Lisp Machine manual"
+.setq defresource-fun "section 5.12 of the Lisp Machine manual"
+.setq si:process-reset-method "section 26.4.3 of the Lisp Machine manual"
+.setq stream-copy-until-eof-fun "section 21.4 of the Lisp Machine manual"
+.setq progw-fun "section 3.1 of the Lisp Machine manual"
+.setq fs:pathname-string-for-wholine-method "section 22.6 of the Lisp Machine manual"
+
+.insert windo1
+.insert select
+.insert edges
+.insert input
+.insert output
+.insert fonts
+.insert grafix
+.insert blink
+.insert mouse
+.insert margin
+.insert frames
+.insert misc
+.insert choice
+.insert typout
+.insert tscrol
+
+.eof

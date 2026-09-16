@@ -1,0 +1,725 @@
+.c -*-Bolio-*-
+
+.chapter Selection
+.setq selection-chapter chapter-number
+.setq selection section-page
+.cindex selection
+.cindex selected window
+
+At any time, keyboard input is directed to at most one window,
+designated by programs or by the system in response to user commands.
+This window is called the 2selected* window.  A process trying to do
+input through another window will normally wait until the window is selected
+(however, the window's deexposed typein action can change this; see below).
+
+.defvar tv:selected-window
+The value of this variable is the selected window.  You should not set
+this variable yourself, but use the defined interfaces described below.
+.end_defvar
+
+A window's cursor blinker normally blinks only when the window is
+selected.  This is how the user can tell which window is selected.  (You
+can control what happens to each blinker when its window becomes selected;
+see (blinker-visibility).)
+
+The user can change the selected window using the 3Terminal* and
+3System* keys or the system menu.  Also, clicking the mouse on
+a window usually selects that window if it is meaningful to do so.
+
+The simplest, and paradigmatic, case of window selection happens if you
+have several independent windows on the screen, such as Lisp listeners.
+One of them displays a blinking cursor, and input echoes there.  The
+processes in the others remain in a keyboard input wait, as you can see
+if one of the windows on the screen is a Peek.  The mouse, or the
+3Terminal O* command, can be used to select a different window.
+
+The selected window needs to handle certain operations that windows in
+general do not need to handle.  The flavor 3tv:select-mixin* defines
+these operations, and should be used in flavors of windows that are
+going to be selected.  (A window can be useful without being selectable.
+For example, menus cannot be selected.)  The flavor 3tv:window*
+includes 3tv:select-mixin*.
+
+If two processes try to read from the same window (or windows sharing an
+input buffer), it is unpredictable which one will get the input.  If you
+are designing an application where this might happen, you must make sure
+than you will not have two processes actually active and reading input
+from the same source at the same time.  In most applications there will
+be only one process that ever reads input from any one window or input
+buffer.  In these applications you should use 3tv:process-mixin* in
+the window flavor to tell the window which process is associated with
+it (see (tv:process-mixin-flavor)).
+
+The selected window controls the actions performed by the system at
+the instant a character is typed on the keyboard.  Due to typed-ahead
+commands that switch windows (such as 3Control-Z* in the editor), there
+is no way to know for certain which window will eventually read a
+character being typed at a given moment, so letting the selected window
+decide asynchronous processing for the character is the best that can be done.
+Asynchronous processing options include asynchronous intercepted characters
+(see (asynchronous-intercepted-characters)) and case conversion of control characters
+(see (control-character-case)).
+
+Asynchronous intercepted characters such as 3Control-Abort* which act on a process
+ask the selected window which process to operate on, with the 3:process* operation
+(see (tv:select-mixin-process-method)).
+The who line usually does the same thing to find the process whose run state should
+be displayed.  If you use 3tv:process-mixin*, 3:process* returns the process associated
+with the window; otherwise, a default definition of 3:process* is inherited from
+3tv:select-mixin* and returns whichever process last read input from the window
+(or from any other window sharing the same input buffer).
+This is fine for the who line, but can lead to weird results in 3Control-Abort*.
+So 2you should use 3tv:process-mixin* whenever it makes sense.*
+
+.cindex deexposed typein action
+.setq deexposed-typein-action page
+'kindex :normal "deexposed typein action"
+'kindex :notify "deexposed typein action"
+If a process tries to do input from a window whose input buffer is empty
+and not selected, it cannot get any input and must wait.  (The input buffer
+is selected if this window, or any other window sharing the same input buffer,
+is the selected window).  The wait ends
+when input appears in the buffer, or when the buffer becomes selected
+and there is keyboard input available.  If the window
+is not even exposed, a notification may happen in addition.  This is
+controlled by the window's 2deexposed typein action*, which may be
+either 3:normal* or 3:notify*.  3:notify* means that input from
+the window when it is deexposed should notify the user (see
+(tv:notify-fun)) with a message like "Process X wants typein", and make
+the window "interesting" so that 3Terminal 0 S* can select it.
+
+.defmetainitoption windows :deexposed-typein-action action
+Initializes the "deexposed typein action" (see (deexposed-typein-action))
+of the window to 2action*.  It defaults to 3:normal*.
+.end_defmetainitoption
+
+.defmetamethod windows :deexposed-typein-action
+Returns the "deexposed typein action" (see (deexposed-typein-action))
+of the window.
+.end_defmetamethod
+
+.defmetamethod windows :set-deexposed-typein-action action
+Sets the "deexposed typein action" (see (deexposed-typein-action))
+of the window to 2action*.
+.end_defmetamethod
+
+.section How Programs Select Windows
+
+Programs change the selected window using the 3:select* operation.
+
+.defmetamethod windows :select &optional (remember-previous 3t*)
+Makes this window (or its selection substitute, if any) the selected window.
+Unless 3remember-previous* is 3nil*, the previous selected window
+is entered on the list of previously selected windows for the 3Terminal*
+and 3System* keys to use.
+
+Many application window flavors define daemons for this operation.
+Note, however, that the daemons will be run whenever this operation
+is invoked, even if the window is already selected.
+.end_defmetamethod
+
+.defflavor tv:select-mixin
+No window can actually be selected unless its flavor includes this mixin.
+3tv:select-mixin* is part of 3tv:window* but not part of
+3tv:minimum-window*.
+
+Windows whose flavors do not contain this mixin may be sent 3:select* messages
+only if they have designated other windows as selection substitutes (see below).
+The ultimate substitute which is finally selected must have 3tv:select-mixin*.
+.end_defflavor
+
+.defmetamethod windows :selected-p
+Returns 3t* if this window is the selected window.
+.end_defmetamethod
+
+.defmetamethod windows :mouse-select args
+Selects a window, for a mouse click or for asynchronous keyboard input
+such as the 3Terminal* command.
+
+While mostly the same as sending 3:select* to the window's alias for
+selected windows (see (previously-selected-windows-section)), this
+operation also causes all type-ahead input to remain with the window
+that used to be selected (see (tv:kbd-snarf-input-fun)).
+
+Note that the 3:select* and 3:mouse-select* operations should not
+be invoked in the mouse process.  This means that if you want to use them
+in a 3:mouse-click* or 3:mouse-buttons* or 3:handle-mouse* method,
+you must do
+.lisp
+(process-run-function "Select" 2window-to-select* ':mouse-select)
+.end_lisp
+.end_defmetamethod
+
+.defmetamethod windows :deselect &optional (restore-selected 3t*)
+This operation is invoked by the window system when a window
+ceases to be selected.  This can be because the window is no longer visible,
+or because some other window is being selected.
+
+Many application window flavors defined daemons for the 3:deselect* operation.
+
+2restore-selected* controls what will be done with this window in the
+3tv:previously-selected-windows* array used by the 3Terminal S* and
+3System* commands, and whether to select automatically some other
+window found in that array.  The possible values are
+.table 3
+.kitem :dont-save
+Do not put the window being deselected into the list anywhere,
+and do not select any other window.
+'kindex :beginning :deselect
+.item nil 1or* :beginning
+Put the window being deselected at the front of the list,
+but do not select any other window.
+.kitem :end
+Put the window being deselected at the end of the list,
+but do not select any other window.
+.kitem :first
+Put the window being deselected at the front of the list,
+after selecting the window that used to be at the front of the list.
+This is like what 3Terminal S* does.
+'kindex :last :deselect
+.item :last 1or* t
+Put the window being deselected at the end of the list,
+and select the window at the front of the list.
+This is the default.
+.end_table
+.end_defmetamethod
+
+.defun tv:deselect-and-maybe-bury-window window deselect-mode
+Deselects 2window*, selecting the previously selected window.
+If that causes 2window* to become deexposed, 2window*
+is buried.  2deselect-mode* is passed to the 3:deselect* operation,
+where it controls where to put the window in the list of
+previously selected windows used by the 3Terminal* and 3System* commands.
+.end_defun
+
+.defspec tv:window-call (window [exit-operation exit-args...]) body...
+.defspec1 tv:window-mouse-call (window [exit-operation exit-args...]) body...
+Execute 2body* with 2window* selected.  3tv:window-call* uses the
+3:select* operation to do this, while 3tv:window-mouse-call* uses
+the 3:mouse-select* operation; that is how they differ.  On exit, they reselect the
+window that had been selected before, and send 2window* a message
+with operation 2exit-operation* and arguments 2exit-arguments*.
+2exit-operation* is often 3:deactivate*.  It can also be omitted;
+then nothing is done to 2window* except for deselecting it because
+some other window is selected.
+
+These constructs are no longer as useful as they once were.  For
+controlling selection among windows of a team, selection substitutes
+(see (selection-substitutes)) should be used now instead.
+.end_defspec
+
+.section Teams of Windows
+.setq window-teams section-page
+.cindex teams of windows
+
+The simple paradigm of selection is based on windows that are
+independent competitors for the user's input, such as a pair of Lisp
+listeners.  Another frequent situation is a to have a group of windows
+that act as a team.  Usually the windows consist of a single frame and
+its panes, and usually they are managed by a single process, but neither
+of these is necessarily so.  Often the windows of a team share an input
+buffer to make it easier for one process to read input from all of the
+windows at once (see (shared-input-buffers)); this is an
+important technique which you should definitely read about if you are
+designing a team of windows.
+
+The simple paradigm extends cleanly to teams if we imagine that the user
+regards each team as a unit of selection.  In this extended paradigm,
+the user selects among entire teams as if they were single windows.
+
+Teams are not actual Lisp objects, merely concepts understood by the
+user and programmer.  The window system cannot have a selected team;
+some window of the team must be selected.  Each team's program chooses a
+window of the team as the team's selection representative.  The selected
+window should then be the selection-representative of the user's chosen
+team.  The selected window can change when the user chooses a new team,
+or when the user's chosen team picks a new representative.
+
+To implement this, the programmer of the team first picks one window
+of the team to be the "leader".  This is not the same as the selection
+representative; that can change from moment to moment, but the leader
+must be fixed.  When the team is a frame and its panes, it is natural
+to make the frame be the leader.  Standard mixins are provided to make
+this easy to do.  These mixins and the techniques of using them
+are described below, and in the following sections.
+
+The selection representative is implemented as the leader's selection
+substitute (see (selection-substitutes).  Then the team can be selected
+with the 3:select* operation on its leader window.
+
+Even when the team allows the user some notion of selecting among the
+windows of the team--such as, when a Zmacs frame in two-window mode
+allows the user to mouse either of the editor windows to select it--
+this is implemented most cleanly by starting from the model of a team
+which does all selection under program control, and defining the
+appropriate mouse clicks as commands which tell the team's program
+to change its selection representative.
+
+Usually you will want to have only a single item appear for the team in
+the system menu 3Select* option's menu.  If the team consists of a
+frame which is the leader and its panes, this can be done with
+3tv:inferiors-not-in-select-menu-mixin* in the frame's flavor.
+More complicated behavior is also possible; for example, Zmacs frames
+in two-window mode allow each editor window to have its own entry
+in the 3Select* menu.
+
+Also, 3Terminal* and 3System* commands should reselect the team by
+selecting its current selection representative.  This is done by making
+them record and reselect the team's leader.  If the team consists of a
+frame which is the leader and its panes, this can be done with
+3tv:alias-for-inferiors-mixin* in the frame's flavor.  (In case you
+are curious, Zmacs frames follow this pattern exactly.  The frame is the
+alias for any editor windows inside it.)
+
+The following subsections describe the details of how these things are done.
+
+.subsection The System Menu Select Option
+.setq select-menu section-page
+.cindex select menu
+
+When the 3Select* option in the system menu is used, it gets the list
+of alternatives to offer by sending each screen a
+3:selectable-windows* message.  This operation is normally defined to
+recurse down the window hierarchy and ask each window whether it wants
+to be included.  Each window is sent a 3:name-for-selection* message.
+The value should be either 3nil* (omit this window) or a string,
+which is the string to display in the menu of windows.
+
+.defmetamethod windows :selectable-windows
+Returns an alist of strings versus windows, which will become part of the
+alist that will be displayed in the system menu 3Select* option's menu.
+The alist returned should describe this window and its inferiors,
+or whichever of them ought to appear in that menu.
+
+The normal definition includes this window using its
+3:name-for-selection* as the car of the alist element, or omits this
+window if its 3:name-for-selection* is 3nil*.  It then appends the
+3:selectable-windows* values obtained from the window's inferiors.
+.end_defmetamethod
+
+.defflavor tv:inferiors-not-in-select-menu-mixin
+This mixin redefines 3:selectable-windows* to ignore the window's
+inferiors.  They are not asked whether they should be included.  This is
+an easy way to make a team of a frame and its panes have only one entry,
+the entry for the frame.
+.end_defflavor
+
+.defmetamethod windows :name-for-selection
+This operation is supposed to return a string to display in
+the system menu 3Select* option's menu of windows for this window.
+It may also return 3nil*, meaning do not list this window in the menu.
+
+The default definition uses the window's label string if any, or else
+its name.  Many applications redefine the operation.
+3tv:not-externally-selectable-mixin* redefines it to return 3nil*.
+
+If you want more complicated behavior from a team than simply having a
+single entry, you can get it by redefining this operation on the flavors
+of various windows in the team.
+
+This operation also affects autoselection, done by the screen manager.
+A window can be autoselected only if its 3:name-for-selection* is non-3nil*.
+.end_defmetamethod
+
+.subsection Selection with Terminal and System Commands
+.setq previously-selected-windows-section section-page
+
+.defvar tv:previously-selected-windows
+This variable's value is an 3art-q* array whose contents are all
+the active windows, not including the selected window, which the
+3Terminal* and 3System* key commands for window selection should
+know about.  The windows of a team are generally all represented by a
+single member of the team, which we can call the "leader".
+Typically the "leader" is a frame which contains the rest of the team as panes,
+but this is not required.
+.end_defvar
+
+The 3Terminal S* command can be thought of as acting on a combined
+list that contains the selected window followed by the previously
+selected windows.  So, 3Terminal 2n* S* rotates the first 2n*
+elements of this list, so that the selected window becomes the first
+previously-selected window, and the 2n*th previously selected window
+becomes the selected window.  The 3System* key also uses this data
+base to find a window of the appropriate flavor to select, or to rotate
+through all the windows of that flavor.
+
+Windows are put on 3tv:previously-selected-windows* and taken off of
+it automatically when they are selected, deselected, activated or
+deactivated.  Attention is required from the applications programmer
+only to identify teams of windows that should be treated as a unit.  The
+system uses the 3:alias-for-selected-windows* operation to inquire
+about this.
+
+.defmetamethod windows :alias-for-selected-windows
+Should return the window to represent this one in
+3tv:previously-selected-windows*.  When this window gets deselected,
+its alias is what will be recorded in that array.  In the simple
+paradigmatic case of independent Lisp listeners, the alias of each
+Lisp listener is itself.  For a window in a team, this should return
+the team's "leader" window.
+
+The default definition of this operation is to return the superior's
+3:alias-for-inferiors* if that is non-3nil*, otherwise to return
+this window itself.
+.end_defmetamethod
+
+.defmetamethod windows :alias-for-inferiors
+Should return a window to serve as the alias for all inferiors to all
+levels of this window, if that is desired.  Otherwise it should return 3nil*.
+
+The default definition returns this window's superior's
+3:alias-for-inferiors*.  Thus, if an ancestor of this window says it wants
+to be an alias for all of its descendants, we pass on its request, but
+otherwise we allow the descendants to decide for themselves.
+.end_defmetamethod
+
+.defflavor tv:alias-for-inferiors-mixin
+This mixin makes a window be an alias for all of its inferiors.
+Thus, the window and all of its inferiors form a team considered as a unit
+by the 3Terminal* and 3System* commands, and this window is the
+"leader".
+.end_defflavor
+
+If two windows in a hierarchy, one above the other, both have
+3tv:alias-for-inferiors-mixin*, then the higher one "wins".  Put
+another way, windows are grouped into the largest possible teams,
+and there are no subteams within teams.
+
+Note also that no record is kept of which window in a team was actually
+selected most recently.  3tv:previously-selected-windows* records only
+the alias or team leader window, and this is the window that will
+receive the 3:select* message if a 3Terminal* command is given to
+switch back to that team.  The way to make sure that the proper window
+within the team is selected is to use selection substitutes, as described
+in the following section.
+
+.defflavor tv:not-externally-selectable-mixin
+This mixin makes a window (and its descendants) have the window's
+superior as an alias, and keeps the window out of the 3Select* menu.
+
+Using this mixin, you can control more closely which windows are
+distinguished by the 3Select* menu and by 3Terminal* commands:
+instead of making the top of the team's hierarchy be an alias for
+2all* of its descendants, specifically chosen descendants are given
+this mixin so that they are not distinguished, and any other descendants
+remain distinguished. 
+
+An older name for this mixin, which still works, is
+3tv:dont-select-with-mouse-mixin*.
+.end_defflavor
+
+.section Selection Substitutes
+.cindex selection substitutes
+.setq selection-substitutes section-page
+
+Every window has the ability to designate a "selection substitute".
+If a window has a substitute, requests to select or deselect the
+original window will be passed along to the substitute.  The substitute
+may have a substitute of its own, and so on.  A window's selection
+substitute is remembered in the instance variable
+3tv:selection-substitute*, whose value is another window or 3nil*.
+
+.defmetainstvar windows tv:selection-substitute
+The window's selection substitute, or 3nil*.
+.end_defmetainstvar
+
+The main use of selection substitutes is for controlling selection
+within a team of windows.  The team has one window designated as the
+leader; all user requests to select the team come as 3:select* messages
+to the team leader as a result of arrangements described in the previous
+section.  As a result, the team's program can choose a selected window
+within the team by making it the leader's selection substitute.
+
+The 3:alias-for-selected-windows* of the substitute window should be
+the same as that of the window it substitutes for, to avoid paradoxical
+results from the 3Terminal* command.  With a hierarchical team of
+windows, this is usually arranged by using
+3tv:alias-for-inferiors-mixin* in the top window of the team.  The
+substitute window should not appear in the system menu 3Select* menu,
+for if it did, its entry and the entry for the window it substitutes for
+would be functional duplicates.
+3tv:inferiors-not-in-select-menu-mixin* in the top window of the team
+serves to prevent the duplicate entry.
+
+These operations on windows are provided for working with selection
+substitutes:
+
+.defmetamethod windows :selection-substitute
+Returns this window's selection substitute,
+or 3nil* if the window does not currently have one.
+.end_defmetamethod
+
+.defmetamethod windows :ultimate-selection-substitute
+Returns this window's substitute's substitute... and so on until
+a window is reached that has no substitute.  If this window has
+no substitute, it itself is returned.
+.end_defmetamethod
+
+.defmetamethod windows :self-or-substitute-selected-p
+3t* if this window, or its substitute, or its substitute's substitute,
+etc., is selected.
+.end_defmetamethod
+
+.defmetamethod windows :set-selection-substitute substitute
+Sets this window's selection substitute to 2substitute* (another
+window or 3nil*).  If it was previously the case that this window or
+its substitute was selected, then the window's new substitute (or the
+window itself) will be selected afterward.  Thus, the value of
+3:self-or-substitute-selected-p* on this window is not changed by
+this operation.
+.end_defmetamethod
+
+Note that when the team's program uses 3:set-selection-substitute* on the
+team's leader window to change the selected pane within the team, it does not
+matter whether the team is currently selected.  The "right" results will happen
+if the team is deselected and reselected at any time.
+
+To switch the selected pane temporarily, use
+
+.defspec tv:with-selection-substitute (window for-window) body...
+Executes 2body* with 2window* as the substitute for 2for-window*.
+On exit, it sets 2for-window* back to whatever it used to be,
+and deexposes or deactivates 2window* if appropriate.
+.end_defspec
+
+Also useful is
+
+.defspec tv:preserve-substitute-status window body...
+Executes 2body*, then selects 2window* if 2window* or its substitute
+had been selected to begin with.
+.end_defspec
+
+.defmetamethod windows :remove-selection-substitute window-to-remove suggested-substitute
+Makes sure that 2window-to-remove* is not this window's substitute,
+suggesting 2suggested-substitute* (possibly 3nil*) as a substitute
+instead.  The standard implementation of this operation simply sets the
+substitute to 2suggested-substitute* if the substitute was
+2window-to-remove*.  This operation is used and documented so that
+particular windows can define their own ways of calculating the new
+value for the substitute, perhaps ignoring 2suggested-substitute*.
+
+When a typeout window is deactivated, this operation is used to make
+sure that it ceases to be another window's substitute.
+.end_defmetamethod
+
+.subsection Non-Hierarchical Selection Substitutes
+
+Some programs wish to "replace" one window with another temporarily.
+For example, the functions 3supdup* and 3telnet* can behave this
+way, giving the appearance of temporarily changing the Lisp listener or
+other window in which they are called into a Supdup or Telnet window.
+They do this by creating a suitable Supdup or Telnet window and
+making it the substitute for the original window.  In this case, the
+substitute window will have the same edges and the same superior as the
+original window.  It is not an inferior of the original window.  It is
+not required that the "replacement" window be the same size as the
+original, either.
+
+Non-inferior selection substitutes are usually established and
+deestablished by using 3tv:with-selection-substitute* in a
+straightforward manner.  The only thing that requires special attention
+is to make sure that the original window is the
+3:alias-for-selected-windows* of the substitute.  In the case of
+3supdup* this is desirable to complete the illusion that the Lisp
+listener has "magically" changed temporarily into a Supdup window.
+Since the substitute window is not a descendant of the original one, it
+must have some other way to find the original window (such as an
+instance variable for the specific purpose) and a specially defined
+3:alias-for-selected-windows* method to return the original window.
+
+.section The Status of a Window
+
+A window's 2status* is a keyword that encodes whether the window
+is selected, whether it is exposed, and whether it is active.
+
+.defmetamethod windows :status
+Returns one of these symbols:
+.table 3
+.kitem :selected
+Means this is the selected window.
+.kitem :exposed
+Means this is exposed but not selected.
+It may not be visible.
+.kitem :exposed-in-superior
+Means this window is exposable
+but its superior has no screen array.
+.kitem :deexposed
+Means this window is active in its superior but not exposable.
+.kitem :deactivated
+Means this window is not even active.
+.end_table
+.end_defmetamethod
+
+.defmetamethod windows :set-status status
+Restores the window's status to 2status*, by selecting or deselecting,
+exposing or deexposing, and activating or deactivating, as necessary.
+2status* must be one of the possible values of the 3:status* operation.
+
+The 3:status* and 3:set-status* operations are useful for
+selecting a window temporarily and then restoring everything as
+it was.  3:set-status* is correct for this because it may
+be necessary to deexpose the window or deactivate it in addition
+to deselecting it.
+.end_defmetamethod
+
+.section Windows and Processes
+.setq processes section-page
+.cindex processes
+
+A self-contained interactive system that has its own window(s) usually
+has its own process to drive the windows.  Peek, Zmacs, ZMail and the
+inspector all do this when invoked through the 3System* key.  Usually
+each window you create has its own process; there is a Peek process
+for each Peek window, so different Peek windows run completely
+independently.
+
+Whether a window is managed by a dedicated process or by various
+processes is not a crucial decision.  The program that reads commands
+from the window and draws on the window can always be run in one
+dedicated process, or in different processes at different times (though
+if you run it in two processes at once, you had better be careful to
+keep them from confusing each other).  The mechanisms of selection and
+exposure that control whether input and output are possible on a window
+at a given time work automatically on any process(es) that try to do the
+input or output.  So when there is a dedicated process for a window,
+often the only connection between them is that the dedicated process is
+running a program that has a pointer to that window (typically the
+value of 3terminal-io* in the process is that window).
+
+For example, the inspector you get with 3System I* has a dedicated
+process, whereas the one you get by calling 3inspect* runs in the
+process that 3inspect* is called in.  Yet these two windows have the
+same flavor, and the same function, 3tv:inspect-command-loop*, does the
+main work.  The only differences are in deciding when to deexpose the
+window, what to do when that happens, when it can be reused, what to
+do if the user types 3End*, and other things related directly to the
+difference in the two user interfaces for entering and exiting.
+
+The inspector makes an instructive example for comparing these two ways
+of managing a window.  The function 3inspect* allocates a window out
+of a resource of reusable windows of the right flavor (see
+3defresource*, (defresource-fun)).  It sends the window some messages
+to initialize it for this particular session of use; this is how it
+tells the window about the object that is the argument to 3inspect*.
+Then it selects the window manually using 3tv:window-call* (see
+(tv:window-call-fun)) and calls the inspector program.  When the user
+types 3End*, the program returns, 3tv:window-call* reselects the old
+window and deactivates the inspect window, and 3inspect* returns.
+3inspect* uses an 3unwind-protect* so that aborting outside of
+3inspect* for any reason brings back the old window.
+
+Typing 3System I* finds or creates an an inspect window of the same
+flavor.  When no init options are specified, this flavor's default init
+plist specifies the creation of a process, which is initialized to call
+the inspector program.  If the user types 3End* and the inspector
+command loop returns, the top-level function in the dedicated process
+buries the inspector window and loops back to the beginning.  That's all
+that is necessary to make 3System I* work.  The resource that
+3inspect* uses explicitly specifies an init option when it constructs
+a window, so that no process is made.
+
+.defflavor tv:process-mixin
+Provides an instance variable 3tv:process* which can remembers a process
+associated with the window.  A window that will sometimes be used with
+a dedicated process should have this mixin.
+
+The most valuable service that this flavor provides is an easy way to
+create and initialize a process for each window that is created, and
+inform the process which window it was created for.  Once this is done,
+for the most part the desired results follow without special effort.
+
+Selecting the window or making it visible will give the process a
+run reason.  The window itself is used as the run reason.
+Also, this will reset the process if it is flushed (waiting with
+3false* as its wait function).
+
+The 3:kill* operation on the window will invoke the 3:kill*
+operation on the process.
+
+Use of 3tv:process-mixin* guarantees that the 3:process* operation
+will return the explicitly specified process, regardless of which
+process has most recently read from the window.
+.end_defflavor
+
+.definstvar tv:process-mixin tv:process
+The process associated with the window, or 3nil*.
+.end_definstvar
+
+.definitoption tv:process-mixin :process process-or-description
+Specifies the process for this window.  The argument can be a process, or
+it can be a list, which is used as a description for creating a process.
+The list looks like
+.lisp
+(2initial-function* 2make-process-options*)
+.end_lisp
+When the process starts up, it will call 2initial-function* with the
+window as its sole argument.  Usually the initial function should bind
+3terminal-io* to the argument.
+
+If this option is omitted or 3nil*, the window starts out without a process.
+.end_definitoption
+
+.defmethod tv:process-mixin :process
+.defmethod1 tv:process-mixin :set-process process
+Gets or sets the process associated with this window.  3nil* is a legal
+value, which means that the window has no process associated with it,
+even though it has the ability to have one.
+.end_defmethod
+
+.defmetamethod windows :processes
+Returns a list of processes dedicated to this window.
+3:append* method combination is used, so that all the processes
+mentioned by any of the methods are put into the final answer.
+These are the processes that the 3:kill* operation will kill.
+
+The default is to return 3nil*.
+3tv:process-mixin* contributes a suitable method.
+.end_defmetamethod
+
+.need 1500
+.nopara
+These process-related operations are defined on 3tv:select-mixin* so
+that they are always supported by the selected window.
+Since windows lacking 3tv:process-mixin* do not explicitly remember a
+process, a heuristic is used to come up with a process to operate on:
+it is the last process to have read input from this window's input
+buffer.  (Think about the fact that the input buffer may be shared with
+other windows.)
+
+3tv:process-mixin* is always put before 3tv:select-mixin* in the
+components of a window flavor, so this method will be overridden.
+
+.defmethod tv:select-mixin :process
+Gets a process somehow associated with this window, heuristically if
+necessary.
+.end_defmethod
+
+.defmethod tv:select-mixin :set-process process
+Records 2process* in the place where the last process to read input
+from this window would normally be recorded.
+.end_defmethod
+
+.defmethod tv:select-mixin :arrest
+.defmethod1 tv:select-mixin :un-arrest
+Arrests or unarrests the process returned by the 3:process* operation.
+The arrest reason used or revoked is not specified (it defaults).
+.end_defmethod
+
+.defmethod tv:select-mixin :call
+Selects an idle Lisp listener window (possibly this window, if it is an
+idle Lisp listener).  If the window selected is not this one, arrest
+this window's process with arrest reason 3:call*.  This arrest reason
+is removed automatically by selecting this window again.
+.end_defmethod
+
+.defflavor tv:reset-on-output-hold-mixin
+Causes any process that tries to draw on this window when it has an
+output hold to be reset when it does so (see the 3:reset* operation on
+processes, (si:process-reset-method)).
+.end_defflavor
+
+.defflavor tv:truncating-pop-up-text-window-with-reset
+A temporary window that truncates lines and also resets processes that
+try to output on it when it has output hold.  This flavor is what
+3Terminal F* uses.
+.end_defflavor

@@ -1,0 +1,82 @@
+.c -*- Mode:Bolio; Lowercase: Yes -*-
+
+.headings off
+
+.space 10
+.center 9ZMail Manual*
+.space 4
+.center First Edition, ZMail Version 50 (System 94)
+.space
+.center April 1983
+.space 5
+.center Richard Stallman
+.space 12
+.nopara
+This report describes research done at the Artificial Intelligence
+Laboratory of the Massachusetts Institute of Technology.  Support for the
+laboratory's artificial intelligence research is provided in part by the
+Advanced Research Projects Agency of the Department of Defense under Office
+of Naval Research Contract number N00014-80-C-0505.
+.page
+.headings on
+.space 2
+.center 5Preface*
+
+This is a reference manual for ZMail, the Lisp machine system's facility
+for reading, managing and sending mail.  It describes how to use ZMail,
+but not how to customize it, except for the profile options which you
+can set with ZMail's own profile editing mode.
+
+Command names and names of keyboard characters are in bold face and
+capitalized, as in 3Control* and 3Select Referenced Msg*.  Names of
+menu items are also in bold face, except that italics are used for menu
+items that appear on the screen in italics.  Menu items are capitalized
+as they appear in the menu (or at least that is the intention).
+
+A general knowledge of the conventions of operating the Lisp machine is
+necessary for understanding this manual.  For the most part, you do not
+need to know anything about programming in Lisp.  The exceptions are a
+few functions that it may be useful for your programs to
+call to interface with ZMail.
+
+Many Lisp variables affecting ZMail's operation are documented in this
+manual (all in the 3zwei:* package, though that is not stated
+explicitly below).  These variables are ZMail profile options.  While
+you can refer to or set them with Lisp code, generally you would set
+them with the ZMail profile editor (see (profile)), which you can use
+without knowing how to program in Lisp.  When a variable has a fixed
+set of alternative values, these are documented as they would appear
+in the ZMail profile editor.  The actual Lisp values of the variables
+can be figured from the following rule: replace all imbedded spaces
+with hyphens, and intern the string in the keyword package.  3Yes*
+and 3No* are exceptions, represented by 3t* and 3nil*.
+
+Any comments, suggestions, or criticisms will be welcomed.  Please send
+Arpa network mail to BUG-LMMAN@MIT-OZ.
+
+Those not on the Arpanet may send U.S. snail to
+
+.lisp
+1Richard M. Stallman
+545 Technology Square, Room 791
+Cambridge, Mass. 02139*
+.end_lisp
+.space 2
+.center 5Note*
+
+The Lisp Machine is a product of the efforts of many people too
+numerous to list here and of the former unique environment of the
+M.I.T. Artificial Intelligence Laboratory.  The author of this manual
+believes that the commercialization of the computer industry
+hinders the further development of systems such as described herein.
+He considers proprietary software morally objectionable and
+plans to dedicate his career to promoting the sharing and free
+exchange of software.  For more information on this issue, write
+to the address above.
+
+ZMail was written primarily by Mike McMahon.  Sarah Smith helped to
+correct this manual.  Eugene C. Ciccarelli (author of Babyl) wrote the
+section on the Babyl file format, one day when the disks were not
+getting too many errors.
+.insert zm
+.eof

@@ -1,0 +1,960 @@
+.c -*-Mode:Bolio; Lowercase:Yes-*-
+
+.chapter Miscellaneous Features
+
+.section Notifications
+.cindex notifications
+.setq notifications section-page
+
+Notifications are asynchronous messages that come from something other
+than the selected window.  For example, when an interactive message from
+another user comes in (which was sent with the 3qsend* function), it
+is printed as a notification.  You may have noticed that sometimes a
+notification is printed out immediately, while sometimes all that happens
+is a message in the who line.  The selected window is responsible for
+deciding what to do with the notification.
+
+.defun tv:notify window-of-interest format-string &rest format-args
+.defun1 tv:careful-notify window-of-interest careful-p format-string &rest format-args
+Make a notification.  2format-string* and 2format-args* are passed
+to 3format* to print the text of the notification.  Where this text is
+printed, and how, is under the control of the selected window, as
+described below.
+
+2window-of-interest* is a window that should be selected if the user
+clicks the mouse on the notification window (if the notification happens
+to use its own window).  For example, a notification about a message
+from another user will supply the Converse window as this argument.
+This window can also be selected with the 3Terminal 0 S* command.
+
+3tv:careful-notify* is different in that if 2careful-p* is
+non-3nil* and the notification cannot be printed now because of
+windows being locked, it returns immediately.  The value is non-3nil*
+if the notification was printed successfully.
+.end_defun
+
+.defmetamethod windows :print-notification time string window-of-interest
+The system invokes this operation on the selected window to ask it to make a
+notification.  2time* will be a time to mention in the notification.
+2string* is the text to print.  2window-of-interest* should be set
+up for the user to select in some convenient fashion, if possible.
+.end_defmetamethod
+
+.defflavor tv:notification-mixin
+This mixin causes a window to handle notifications which happen while it
+is selected by printing them out on the window itself, if the window is
+big enough.  Lisp listeners and typeout windows of all sorts use this
+mixin.
+.end_defflavor
+
+.defmethod tv:notification-mixin :print-notification-on-self time string window-of-interest
+This operation does the actual work of printing a notification on the
+window itself, once it has been decided definitely to do so.
+It is sometimes useful for window flavors incorporating
+3tv:notification-mixin* to redefine this.
+.end_defmethod
+
+.defflavor tv:delay-notification-mixin
+3tv:delay-notification-mixin* implements the default way of handling
+notifications: to make them wait.  It is a component of 3tv:window*,
+and also of anything that contains 3tv:select-mixin*.
+3tv:notification-mixin* works by overriding it.
+
+If a notification arrives while a window of this sort is selected, it is
+put on a list called 3tv:pending-notifications*.  All that happens
+immediately is a beep.  But the presence of a non-3nil* value for this
+variable causes the mouse documentation line to display a message that
+there are notifications waiting, with blinking asterisks at each end of
+the line.
+
+As soon as a window that can print the notifications is selected,
+they will be printed.  For example, selecting a Lisp listener will do it.
+If you are in the editor, selecting the typeout window by typing
+3Break* will do it.  There is also a command, 3Terminal N*,
+which selects a window that just prints the notifications.
+
+Alternatively, 3Terminal 2 N* can be used to make the mouse
+documentation line go back to its normal function.  This works by
+transferring everything on 3tv:pending-notifications* onto another
+list, 3tv:deferred-notifications*.  These deferred notifications will
+still be printed if you switch to a suitable window.
+.end_defflavor
+
+Another way a window can handle a notification is to ask some other
+window to do so.  For example, editor windows (3zwei:zmacs-window-pane*)
+ask the containing Zmacs frame to do the job, and it in turn asks
+the echo area window to do it.  This window displays the notification
+itself if the notification fits.
+
+.defun tv:find-process-in-error
+Returns a process that has got an error and is waiting, having made a
+notification, for a window to be selected so the debugger can be run.
+If no such process is waiting, returns 3nil*.  If there are several
+such processes, the most recent one to make its notification is
+returned.  The window the process is waiting for selection of is
+returned as the second value.
+.end_defun
+
+.defun tv:choose-process-in-error
+Similar to 3tv:find-process-in-error* but asks the user about each
+candidate process.  When the user answers 3Y*, that process is
+returned.  If the user answers 3N* to each candidate, the value is
+3nil*.  The window the process is waiting for selection of is returned
+as the second value.
+.end_defun
+
+.defun tv:print-notifications
+Prints on 3standard-output* all the notifications that have happened
+in this session.
+.end_defun
+
+.defmetamethod windows :notice event
+The 3:notice* operation is used to report certain events
+so that flavors can redefine what to do when they happen.
+The argument to 3:notice* is an event name, a keyword.
+Additional arguments are allowed but have no meaning
+for any of the events yet defined.  Here are the defined events:
+.table 3
+.xitem :input :notice
+.xitem1 :output :notice
+The window is being used for input (output) and is not exposed,
+and its deexposed input (output) action is 3:notify*.
+The default action is to make a notification and wait.
+
+.xitem :input-wait :notice
+The window is being used for input and the process is waiting because no
+input is available now.  The default action is to adjust the vertical
+position at which the next 7**MORE*** will happen.
+
+.xitem :error :notice
+The window is being used for the debugger and is not exposed.
+The default action is to make a notification and wait, or to get another
+window if this one is too small.
+.end_table
+
+The 3:notice* operation uses 3:or* method combination: all the
+methods are run until one returns non-3nil*.  Aside from that, the
+value returned is not meaningful.
+.end_defmetamethod
+
+.section Lisp Listeners
+
+.defflavor tv:lisp-listener
+This flavor of window is used for the window initially selected when the
+system starts up, and for windows created when you ask to create a
+"Lisp" window with any of the system menu commands.
+.end_defflavor
+
+
+.defvar tv:initial-lisp-listener
+The Lisp listener window that is selected when you boot.
+.end_defvar
+
+.defun tv:idle-lisp-listener &optional screen.
+Returns a Lisp listener which is waiting for input at top level,
+and is the full size of the specified screen.  The screen defaults to
+3tv:default-screen* ((tv:default-screen-var)).
+.end_defun
+
+.defflavor tv:lisp-interactor
+This flavor of window works just like a Lisp listener, but 3System L*
+will not select this kind of window, nor will 3tv:idle-lisp-listener*
+return one.
+.end_defflavor
+
+The mixin primarily responsible for making a Lisp listener behave the
+way it does is 3tv:listener-mixin-internal*.
+
+.defflavor tv:listener-mixin-internal
+This contains
+3tv:process-mixin*, and arranges by default for the process to be
+initialized to run the Lisp top level read-eval-print loop
+3si:lisp-top-level1*.
+.end_defflavor
+
+.defmethod tv:listener-mixin-internal :package
+.defmethod1 tv:listener-mixin-internal :set-package package
+Get or set the package being used by the read-eval-print loop.
+These work by interfacing with some complicated code in
+3tv:lisp-top-level1*.  The value from 3:package* can be 3nil*.
+When you set the package, either a package or a package name is
+acceptable.
+
+These operations communicate with the process running the read-eval-print loop
+to access that process's own binding of 3package*.
+.end_defmethod
+
+.defflavor tv:listener-mixin
+This flavor inherits its entire definition from
+3tv:listener-mixin-internal*.  The only difference is that 3System
+L* is defined to look for windows with this flavor, and not the other.
+.end_defflavor
+
+.section Editor Windows
+
+.defflavor zwei:zmacs-frame
+This is the flavor of the window you get when you type 3System E*.
+It has its own process, and can select any Zmacs buffer.
+Generally none of the editor-specific operations should be invoked
+on this window; that should be left up to the window's own process.
+Requests to this process, which generally ask the process to select
+a buffer, are passed to it as blips of the form
+.cindex blip types
+.kindex :execute "blip type"
+.lisp
+3(:execute zwei:edit-thing 2spec*)*
+.end_lisp
+where 2spec* is anything valid as the argument to 3ed*.
+.end_defflavor
+
+A Zmacs frame is useful for providing the user an opportunity to edit
+whatever he likes.  Sometimes it is useful for a program to offer the user
+specific text to edit for its own purposes.
+
+.defflavor zwei:standalone-editor-window
+This is a window with no panes that serves as an editor.
+It has a minibuffer and type-in window that pop up as its inferiors
+when they are needed.  This window has no process of its own;
+use the 3:edit* operation in any process to do editing in the window.
+.end_defflavor
+
+.defflavor zwei:standalone-editor-frame
+Another kind of standalone editor window, but this one is a frame
+with a permanently visible mode line and typein-window or mini buffer,
+just as a Zmacs frame is.
+.end_defflavor
+
+.defmetainitoption "standalone editor windows" :comtab comtab
+Specifies the comtab to use in editing in this frame.
+The default is 3zwei:*standalone-comtab**.
+.end_defmetainitoption
+
+.defmetamethod "standalone editor windows" :edit
+Invokes the editor command loop on this window.
+The 3End* command will return.
+.end_defmetamethod
+
+.defmetamethod "editor windows" :interval-string
+Returns a string giving the current text in the window.
+.end_defmetamethod
+
+.defmetamethod "editor windows" :set-interval-string string
+Sets the text in the window to 2string*.
+.end_defmetamethod
+
+.defmetamethod "editor windows" :interval
+Returns the interval which is being edited in the window.
+If the window is a Zmacs frame, this is the selected buffer.
+Standalone editor windows have their own nonshared intervals
+which they edit; many of the editor primitives that work
+on Zmacs buffers also work on these intervals.
+.end_defmetamethod
+
+.defmetamethod "editor windows" :set-interval interval
+Sets the interval that this window is displaying and editing to
+2interval*.  On a Zmacs window, 2interval* must be a Zmacs buffer;
+then this will actually tell the window to select the new buffer.
+.end_defmetamethod
+
+.defflavor zwei:pop-up-standalone-editor-frame
+A temporary window form of 3zwei:standalone-editor-frame*.
+.end_defflavor
+
+.defresource zwei:pop-up-standalone-editor-frame &optional (superior 3tv:mouse-sheet*)
+A resource of such windows, used by the following function.
+.end_defresource
+
+.defun zwei:pop-up-edstring string &optional (near-mode 3'(:mouse)*) mode-line-list min-width min-height initial-message (comtab 3zwei:*standalone-comtab**)
+Pops up an editor window containing 2string* and let the user edit it.
+When he types 3End*, returns a string giving whatever he left in the
+editor buffer.  If he types 3Abort*, the value is 3nil*.
+
+2near-mode* specifies how to position the window before popping it up.
+It is passed to 3tv:expose-window-near*.
+
+2mode-line-list* is a list to be used to drive the mode line.
+
+2min-width* and 2min-height* are minimums for the size of the window.
+The window is larger than that if 2string* requires more space to display.
+
+2initial-message*, if non-3nil*, is displayed in the typein window
+immediately after the frame pops up.
+
+2comtab* is the comtab to be used for editing.
+.end_defun
+
+.defflavor zwei:editor-top-level
+This is the flavor used by the Lisp (Edit) window which you can create
+with the system menu 3Create* option.
+It is a kind of Lisp listener in which both the input and the output
+are recorded in an editor interval and can be edited.
+It is based on 3zwei:standalone-editor-window*.
+.end_defflavor
+
+.defresource zwei:temporary-mode-line-window-with-borders-resource &optional (superior 3tv:mouse-sheet*)
+A resource of such windows, used by the following functions.
+.end_defresource
+
+.defflavor zwei:temporary-mode-line-window-with-borders
+The temporary mode line window contains just a mode line and a mini buffer.
+It is a way for a program to request a small piece of input while allowing
+the user to edit with Zwei.
+
+This is the flavor of window that you get in ZMail if you click right on
+3Select* in the ZMail command menu and then click on 2Find File* in
+the 3Select* menu.
+.end_defflavor
+
+.defun zwei:typein-line-readline-near-window window format-string &rest format-args
+Pops up a temporary mode line window near 2window*, displaying its mode line by passing
+2format-string* and 2format-args* to 3format*, and lets the user edit.
+3Return* terminates editing.  The user's input is returned as a string.
+2window* may be any window on the screen, or 3:mouse*, meaning pop up
+near the mouse.
+.end_defun
+
+.defun zwei:read-defaulted-pathname-near-window window prompt defaults special-type
+Pops up a temporary mode line window near 2window*, displaying the
+string 2prompt* as the mode line, and lets the user edit text which
+(when the user types 3Return*) is parsed into a pathname using
+2defaults* and 2special-type*.
+2window* may be any window on the screen, or 3:mouse*, meaning pop up
+near the mouse.
+.end_defun
+
+.defmethod zwei:temporary-mode-line-window-with-borders :call-mini-buffer-near-window window function &rest args
+Pops up this window near 2window*, then uses 2function* to read the input
+and returns the value it returns.
+2function* should be an editor function which invokes the mini buffer using
+3zwei:edit-in-mini-buffer*.
+The first argument to 2function* is a stream reading from the
+text the user edited.  2args* are passed to 2function* as additional arguments.
+.end_defmethod
+
+.section Window Flavors for Other Programs
+
+.defflavor tv:peek-frame
+This flavor of window is a self-contained Peek display
+with its own process to update it.
+.end_defflavor
+
+.defflavor tv:inspect-frame
+This flavor of window is a self-contained inspector
+with its own process to update it.
+.end_defflavor
+
+.defresource tv:inspect-frame-resource &optional (superior 3tv:mouse-sheet*)
+A resource of inspector frames which are created in a slightly special way
+so that they do not have their own processes, but instead are to be invoked
+in some other process by the function 3inspect*.
+.end_defresource
+
+.defflavor supdup:supdup
+A self-contained Supdup window with its own pair of processes
+to transfer data to and from the network.
+.end_defflavor
+
+.defflavor supdup:telnet
+A self-contained Telnet window with its own pair of processes
+to transfer data to and from the network.
+.end_defflavor
+
+.defresource supdup:supdup-windows &optional (superior 3tv:mouse-sheet*)
+.defresource1 supdup:telnet-windows &optional (superior 3tv:mouse-sheet*)
+Resources of Supdup and Telnet windows,
+for use by the functions 3supdup* and 3telnet*
+when operating in the mode of substituting for another window.
+.end_defresource
+
+.defflavor tv:pop-up-text-window
+A temporary window, otherwise like 3tv:window*.
+.end_defflavor
+
+.defresource tv:pop-up-text-window &optional (superior 3tv:mouse-sheet*)
+A resource of such windows.
+.end_defresource
+
+.defflavor tv:truncating-pop-up-text-window
+A temporary window which truncates lines of output, otherwise like
+3tv:window*.
+.end_defflavor
+
+.defflavor tv:truncating-pop-up-text-window-with-reset
+Like 3tv:pop-up-text-window* but truncates lines
+and resets the associated process when deexposed.
+This is the kind of window that 3Terminal F* uses to print
+its output, and it is good for many similar applications.
+.end_defflavor
+
+.defresource tv:pop-up-finger-window &optional (superior 3tv:mouse-sheet*)
+A resource of such windows.
+.end_defresource
+
+.section The Who Line
+.setq who-line section-page
+.cindex who line
+
+The 2who line* is the pair of lines at the bottom of the main Lisp
+Machine screen which display the current status of the machine.  The
+first of the two lines displays documentation what mouse clicks would do
+at the present time, based on the actual position of the mouse.  The
+second line displays the time, your login name, the current process's
+package and run state, and file or net server information.  The term
+"who line" is sometimes used to refer to this line alone.
+
+The window system treats the who line as a separate screen, thus preventing
+windows on the rest of the screen from being moved or reshaped to overlap
+the who line.  The mouse documentation line is displayed by a window
+of its own, and so is each field of the second line.
+
+The documentation displayed by the mouse documentation line is obtained
+by sending the window under the mouse a 3:who-line-documentation-string* message
+(see (windows-who-line-documentation-string-method)), or from the
+variable 3tv:who-line-mouse-grabbed-documentation* when the mouse is grabbed
+(see (tv:who-line-mouse-grabbed-documentation-var)).
+
+.defun tv:who-line-documentation t-or-nil
+Turns the who line display of mouse documentation on or off.
+.end_defun
+
+The package name and run state displayed in the who line describe only one process.
+They normally describe the process associated with the selected window,
+which is a different process if a new window is selected.
+However, the who line can be fixated on a particular process, independent of
+the selected window.
+
+.defvar tv:who-line-process
+The process to describe in the who line, or 3nil* meaning to display
+the one associated with the selected window.  In the latter case,
+the 3:process* operation on the window is used to get the process to display.
+.end_defvar
+
+.defvar tv:last-who-line-process
+The process most recently described in the who line, regardless of why
+that process was chosen.  May be 3nil* if there was no process to describe
+(for example, if the who line was supposed to describe the selected window
+but there was no selected window or the window had no process).
+.end_defvar
+
+The user can set 3tv:who-line-process* using the 3Terminal W* command
+(see "Operating the Lisp Machine").
+
+.defun tv:who-line-clobbered
+Informs the who line that it must redisplay everything.
+.end_defun
+
+Recording open file streams for display:
+
+.defun tv:who-line-file-state-sheet
+This who line window displays the status of an open stream or active
+network server.  It can also display the idle time if there is no stream or server.
+
+This window is also responsible for maintaining the lists of streams and
+servers that could be displayed.  New streams and servers are reported
+to it with operations described here.
+.end_defun
+
+.defmethod tv:who-line-file-sheet :add-stream stream update-p
+Adds 2stream* to the list of open streams recorded by the
+file state sheet.  If 2update-p* is non-3nil*, the who line
+field is updated immediately.
+.end_defmethod
+
+.defmethod tv:who-line-file-sheet :delete-stream stream
+Removes 2stream* from the list of streams for the who line.
+.end_defmethod
+
+.defmethod tv:who-line-file-sheet :delete-all-streams
+Clears out the list of streams for the who line.
+.end_defmethod
+
+.defmethod tv:who-line-file-sheet :open-streams
+Returns the list of streams recorded for the who line.
+.end_defmethod
+
+When the who line describes an open file, the name to display for it is
+obtained with the 3:string-for-wholine* pathname operation.  See
+(fs:pathname-string-for-wholine-method).
+
+.defmethod tv:who-line-file-sheet :add-server conn contact-name process function
+Adds a entry to the list of active network servers recorded by the file
+state sheet.  2conn* should be the network connection of this server,
+2contact-name* the contact name it responded to, 2process* the
+process the server is running in.
+.end_defmethod
+
+.defmethod tv:who-line-file-sheet :delete-server conn
+Removes the entry for connection 2conn* from the list of servers for
+the who line.  Note that this happens automatically if the connection
+is broken or closed.
+.end_defmethod
+
+.defmethod tv:who-line-file-sheet :delete-all-servers
+Clears out the list of servers for the who line.
+.end_defmethod
+
+.defun tv:close-all-servers &optional (reason 3"Foo on you"*)
+Closes the connections of all network servers, giving 2reason* (a
+string) as the reason in the CLS packet.
+.end_defun
+
+.defun tv:describe-servers
+Prints descriptions of all active network servers.
+.end_defun
+
+.section The Color Screen
+.setq color section-page
+.cindex color screen
+
+The usual color screen on a Lisp Machine has 454. lines of 576. pixels
+each, and each pixel has four bits.  This allows sixteen different
+colors to be displayed at once.  There are far more than sixteen possible colors.
+A 2color map* controls the meaning of each of the sixteen pixel values.
+Each of the sixteen color map slots specifies an eight-bit red intensity,
+an eight-bit green intensity, and an eight-bit blue intensity.
+Thus there are about 16 million different colors that can appear,
+but only sixteen can be displayed at once.
+
+.defvar color:color-screen
+The screen object that represents the color screen.
+This object is always present whether the machine has a color screen or not.
+.end_defvar
+
+.defun color:color-exists-p
+3t* if this machine actually has a color screen.
+.end_defun
+
+.subsection Color Map Functions
+
+.defun color:write-color-map slot r g b &optional synchronize screen
+Writes the color map contents for 2slot*, a fixnum from 0 to 17, with
+the three intensities 2r*, 2g* and 2b*, all fixnums from 0 to 377 octal.
+
+If 2synchronize* is non-3nil*, the change is delayed until the
+vertical retrace time, so that it will take effect between frames.
+2screen* is the screen to operate on, in case you have more than one.
+It defaults to the normal color screen.
+.end_defun
+
+.defun color:write-color-map-immediate slot r g b &optional screen
+Like 3color:write-color-map*, but faster.  It performs no
+synchronization at all, and is intended for use when you have already
+waited for vertical retrace.
+.end_defun
+
+.defun color:blt-color-map array &optional screen
+Copies the contents of 2array*, a 16 by 3 array, into the color map of
+2screen* (which defaults to the normal color screen).  This function
+always waits for vertical retrace to do its work.
+.end_defun
+
+.defun color:read-color-map slot &optional screen
+Returns three values, the red, green and blue intensities from the color
+map from slot 2slot*.  This does not actually read the hardware color map,
+as there is no way to do that.  Instead, 3color:write-color-map* maintains
+a copy for this purpose.
+.end_defun
+
+.defun color:fill-color-map r g b &optional (start-slot 31*) screen
+Writes multiple slots in the color map, starting with 2start-slot*
+and ending with slot 17, from 2r*, 2g* and 2b*.
+Note that the default omits slot 0, which is normally left as black
+(all three intensities zero).  This function
+always waits for vertical retrace to do its work.
+.end_defun
+
+.defun color:random-color-map &optional (start 31*) synchronize screen
+Sets the contents of the color map to sixteen randomly chosen colors.
+The slots modified are 2start* through 17, by default omitting slot 0.
+2synchronize* is the same as in 3color:write-color-map*.
+.end_defun
+
+.defun color:spectrum-color-map
+Sets the color map to a spectrum, leaving color 0 as black.
+.end_defun
+
+.defun color:colorize &optional (delay 34*)
+Sets the color map (except for slot 0) randomly over and over again,
+waiting 2delay* 60ths of a second in between.
+.end_defun
+
+.defun color:colorate &optional (delay 34*) (steps 31000.*)
+Repeatedly chooses two colors (numbers from 1 to 17) randomly and moves
+their color map values gradually towards and through each other, so that
+ultimately the two slots exchange colors.  A delay of 2delay* 60ths
+of a second elapses between exchanges.
+.end_defun
+
+.subsection Operating on Pixels
+
+One way to draw on the color screen is to store into its screen array
+with 3as-2-reverse*.  The screen array of the color screen can be
+obtained with 3tv:sheet-screen-array*, and it is an array of type
+3art-4b*.  You can also use these functions:
+
+.defun color:clear
+Fills the whole color screen with color 0.
+.end_defun
+
+.defun color:rectangle x y width height color &optional aluf screen
+Sets the contents of a rectangle on the color screen to pixel value 2color*.
+2x* and 2y* are the coordinates of the upper left corner,
+and 2width* and 2height* are the size.
+
+2aluf* is an alu function to apply to each pixel, combining the
+specified color with the old pixel contents to get the new contents.
+The default is 3tv:alu-seta*, which ignores the old contents.
+This alu function is used only on the pixels of the rectangle,
+which is different from what is done by the drawing primitives
+for the black and white screen; this is why 3tv:alu-seta* does not produce
+incorrect results as it normally would.
+.end_defun
+
+.defun color:color-draw-line x1 x2 y1 y2 &optional (color 317*) aluf screen
+Sets a line from (2x1*,2y1*) to (2x2*,2y2*) on the color screen
+to color 2color*.  2aluf* is used as in 3color:rectangle*.
+.end_defun
+
+.defun color:color-draw-char font char x y &optional (color 30*) screen
+Draws character 2char* in font 2font* at position (2x*,2y*) in
+color 2color*.  2font* is an ordinary black-and-white font.
+.end_defun
+
+Color fonts can also be created.  A color font is composed of four-bit
+pixels just like the color screen.  Using a color font, characters can
+be drawn with the normal character drawing primitives.  When this is
+done, each bit of the color font pixel is combined with the
+corresponding bit of the screen pixel using the alu function.  The alu
+function operates bit by bit just as it does on black-and-white screens,
+and is applied to many pixels in the neighborhood of the character,
+so 3tv:alu-seta* should not be used.
+
+.defun color:make-color-font bw-font &optional bit-list name-suffix
+Creates a color font from black-and-white font 2bw-font*.
+2bit-list* is a list of four numbers, zero or one, which
+specifies the bits of the pixels of the color font that correspond
+to ones in the original font.  Pixels that are zero in the original
+font remain all zero in the color font.  2bit-list* defaults to
+3(1 1 1 1)*.
+
+The name of the resulting font is 3color-* followed by the name
+of the original font, followed by the value of 2name-suffix*.
+.end_defun
+
+Windows can be created on the color screen in the ordinary manner by
+specifying 3color:color-screen* as the superior.
+When fonts are specified for such windows, if the font specifier
+names a black-and-white font, a color version of it is found or created.
+This color font is created with bit list 3(1 1 1 1)*.  This is done
+by the 3:parse-font-specifier* method of the color screen.
+
+.section The System Menu
+
+This section describes how to interface with and customize the system menu
+which pops up when you click twice on the right mouse button.
+
+The system menu is an instance of flavor
+3tv:dynamic-multicolumn-momentary-window-hacking-menu* (see
+(tv:dynamic-multicolumn-momentary-window-hacking-menu-flavor)), which
+means that its menu items are grouped by columns, and each column's
+items come from the value of a corresponding variable which is examined
+each time the menu is popped up in case more items have been added.
+This is to enable you to add items to the menu and control where they
+go.  The most common column to add to is the third one, which lists
+various kinds of windows to select (somewhat like the 3System*
+command), so a special interface is provided for adding to it.
+
+.defun tv:add-to-system-menu-programs-column name form documentation &optional after
+Adds an item named 2name* to the third column of the system menu.
+2form* is what to execute if the user clicks on the item,
+and 2documentation* is the mouse documentation string.
+
+2after* is the name of an item to add after (a string),
+or 3t* to add at the top, or 3nil* to add at the bottom.
+.end_defun
+
+.defvar tv:*system-menu-windows-column*
+A menu item list which forms the first column of the system menu.
+.end_defvar
+
+.defvar tv:*system-menu-this-window-column*
+A menu item list which forms the second column of the system menu.
+By convention this is used for things that operate on the window
+that the mouse was pointing at when the system menu was brought up.
+They are implemented with 3:window-op* menu items.
+.end_defvar
+
+The 3Select* item in the system menu pops up a momentary menu with a list
+of windows that the user might want to select.  Not all the visible
+windows are included; usually a team of windows belonging to a single program
+is represented by a single entry since selection among the team is controlled
+by the program rather than the user.  See (select-menu), for full details.
+
+The 3Create* item in the system menu pops up a menu for the user to choose
+a flavor of window to create.
+
+.defvar tv:default-window-types-item-list
+A menu item list that is used by the system menu 3Create* option,
+and by 3Create* in the screen editor when operating on a screen.
+
+In general, the screen editor can operate on the inferiors of any window.
+Then, the 3:pane-types-alist* operation on that window is used to get
+the item list for possible flavors to create; see (frames-pane-types-alist-method).
+On a screen, the operation returns the value of this variable.
+.end_defvar
+
+.section Window Resources
+
+A 2resource* is a pool of interchangeable objects that are available
+to be used temporarily and then returned to the pool (see (defresource-fun).
+Read that before you continue here).
+
+Resources whose objects are windows are often useful.  For example,
+there is a resource of windows of the right flavor to serve as "the
+system menu"; when you invoke "the" system menu, a window is allocated
+from the resource, and it is returned to the resource's pool when it
+is deactivated.
+
+Normally one defines a resource with 3defresource*.  If the objects in
+the resource are windows, it is better to use instead a different
+function, 3tv:defwindow-resource*.  Allocating windows from
+resources, and returning them, is just like working with any other
+resources, and is documented in the Lisp Machine manual.
+
+All the names described in this manual as resources are defined in this way.
+
+.defspec tv:defwindow-resource name parameters &rest options
+Defines a resource of windows, named 2name*.  2parameters* are parameters on which
+the object can depend.  Following the parameters specified is one
+additional parameter that is always defined: the window's superior.
+When you allocate a window from the resource, this parameter defaults to
+3tv:mouse-sheet*.
+
+2options* is a list of alternating keywords and values.  Neither the
+keywords nor the values are evaluated at the time that
+3tv:defwindow-resource* is executed, but sometimes the value becomes
+part of an expression that will be executed later (when a window is
+allocated from the resource).
+
+The allowed keywords are
+.table 3
+.item :initial-copies
+The value is the number of windows to create in the resource when the
+resource is defined.  The default is one.  The initial copies are made
+inferiors of 3tv:default-screen*.  Creating an initial copy is just a
+way of saving time the first time a window needs to be allocated from
+the resource.
+.item :constructor
+See the definition of 3defresource*.  If it is not specified,
+3tv:defwindow-resource* provides a default, which calls 3make-instance*
+with arguments taken from the 3:make-window* option.
+.item :make-window
+The value should be a list of a flavor name followed by keyword arguments.
+This list will be consed into a 3make-window* form to get the constructor
+for the resource.
+.item :reusable-when
+The value should be 3:deexposed*, 3:deactivated*.
+If this keyword is not specified, then windows of the resource can be
+allocated to requesters if they have been explicitly returned to the
+pool and are not locked.  3:deexposed* means that any window that
+is not exposed is considered to have been returned to the pool.
+3:deactivated* means that any window that is not active is considered
+to have been returned to the pool.
+.end_table
+.end_defspec
+
+.defvar tv:window-resource-list
+A list of the names of all window resources defined with 3tv:defwindow-resource*.
+.end_defvar
+
+.lisp
+.exdent 96 Example: the system menu is created thus:
+
+;Resource of system menus
+(defwindow-resource system-menu ()
+  :make-window
+  (dynamic-multicolumn-momentary-window-hacking-menu
+    :column-spec-list
+    '(("Windows" *system-menu-windows-column*
+       :font fonts:hl12i)
+      ("This window" *system-menu-this-window-column*
+       :font fonts:hl12i)
+      ("Programs" *system-menu-programs-column*
+       :font fonts:hl12i))
+    :save-bits t)
+  :reusable-when :deexposed)
+.end_lisp
+
+.section The Cold Load Stream
+
+User programs that make use of the screen organization and
+standardization facilities provided by the window system are frequently
+in a somewhat difficult position.  If that interface to the window
+system does not work, there seems to be no way at all to find out what
+is going on.  Similarly, debugging code associated with switching between
+windows can be difficult since there may be no place to print debugging
+output at the time such code is executing.
+
+One way to debug such problems is to use the 2cold load stream*.
+This is the stream used in constructing the initial Lisp Machine
+environment, before the window system itself has been loaded.  It has
+the advantage that it does not attempt to interface with the rest of the
+window system, or vice versa.  It will never deexpose any windows or
+lock any locks.  It types out one character at a time, by calling the
+microcode directly, and has very simple-minded ideas about end of line
+exceptions and more breaks.
+
+.defvar tv:cold-load-stream
+The cold load stream is the value of this variable.
+.end_defvar
+
+When the cold load stream is "waiting" for type-in, it does not
+actually wait; in fact, it loops until a character appears, with
+scheduling turned off, blinking its own special blinker by hand.  The
+who line is not updated.  Also, the chaosnet processes do not get to run.
+If the machine stays in this state too long, all chaosnet connections
+will be lost.
+
+Whenever the system gets an error in the keyboard process, the
+scheduler or the mouse process, the debugger uses the cold-load-stream
+rather than 3terminal-io*.  You also have the option of requesting
+this if there is an error in a process whose 3terminal-io* is a
+window that is not exposed and cannot be exposed because of locked
+windows.  (You will be queried, using the cold load stream, to choose
+between this and a couple of other possibilities.)
+
+When you exit from the debugger after it was using the cold load stream
+for one of these reasons, it will ask you whether to "restore the screen".
+Normally you should say Yes; then the screen contents will go back to what
+they were before the debugger was entered.
+
+It is often preferable to use the cold load stream for debugging
+window problems even when the normal alternatives are available.  This
+is because the operation of the debugger using a window for I/O may
+interfere with the window phenomena being debugged.  Use of the cold
+load stream will avoid these problems.  You can request use of the
+cold load stream by setting 3debug-io* to the value of
+3tv:cold-load-stream* before you run your test.  Once this has been
+done, not only errors but 3breakon* and 3Meta-Break* as well will
+use the cold load stream.  To turn off use of the cold load stream for
+all debugger invocations, set 3debug-io* back to 3nil*.
+
+You can also force 3trace* output into the cold load stream by
+setting 3trace-output*.  Note that you must not set 3trace-output*
+to 3nil* when done; you must save its original value and set it back
+to that.
+
+When the cold load stream is used because you have set one of the
+stream variables to it, you do not get the chance to restore the
+screen.  It is not so easy to define how to do that "right" in this
+case; if it were done after each exit from the debugger, you would not
+get to see the history of multiple entries to the debugger.
+
+The program can invoke a break loop using the cold load stream by
+calling 3tv:kbd-use-cold-load-stream*.  Type 3Resume* to continue.
+Note that when the break is entered, the package you are typing into
+is typed out, because the package in the who-line is not going to be
+correct for this break loop.
+
+You the user can request such a break loop by typing 3Terminal Call*
+or by clicking on 3Emergency Break* item in the system menu.  You can
+get your program into the debugger using the cold load stream, without
+having made advance preparation, by getting a break loop in this fashion,
+setting 3debug-io* to the cold load stream, exiting, and typing
+3Meta-Break*.
+
+Also, it is often useful to get a cold load stream break loop and call
+3eh* on various processes or stack groups.
+
+.section The Window-Based Debugger
+
+The window-based debugger is an alternative to the usual debugger;
+it performs the same functions but displays graphically
+rather than using sequential stream I/O.  You invoke the
+window-based debugger by typing 3Control-Meta-W* while in the
+usual debugger.  You can switch back and forth between the two
+debuggers any number of times while handling a single error.
+
+The debugger window is divided into six panes.  At the bottom is
+a Lisp-listener-like window, which ordinarily provides a
+read-eval-print loop similar to the regular keyboard debugger.
+More commands are available by using the mouse in the other windows as
+described below.
+
+At the top is a display of the disassembled or ground code for the
+currently selected stack frame, depending on whether or not it is
+compiled.  It has a scroll-bar, but is otherwise not sensitive to the
+mouse. 
+
+Next are the args and locals windows, side by side, displaying the
+names and values of the arguments to the current stack frame and its
+local variables; they are grayed out if there are none.  They also have
+scroll bars.  Clicking the mouse on the name of an argument will print
+the name and the value in the Lisp window.  Clicking on just the value
+will print it in the Lisp window.  The mouse will highlight any
+relevant quantity that you are pointing to.
+
+Next is the stack window, which displays in a pseudo-list format the
+functions and arguments on the stack.  Clicking on a function or
+argument or sublists of them will cause them to be printed in the Lisp
+window as in the argument or local windows.  Also, clicking the mouse to
+the left of a line containing a particular stack frame will make the
+debugger select that frame, changing what the above three windows show.
+
+Below this, and above the Lisp window, is the command menu for the debugger window.  The available commands are:
+.table
+.item What error
+Reprints the error message for the current error, in the Lisp window.
+
+.item Exit Window EH
+Exits the debugger window, returning to the regular debugger.
+
+.item Abort Program
+Like 3Abort* in the regular debugger.
+
+.item Arglist
+Asks for the name of a function, which can be typed on the keyboard, or
+moused if it is on the screen.  Picking an actor or a closure will ask
+for the message name to that actor and print the arguments to its
+method for that message.  Picking a line of a stack frame from the
+stack window will try to align the printout of the arguments with what
+value was supplied in that position in that frame.
+
+.item Edit
+Reads a name of a function in the same fashion as the 3Arglist* command and
+invokes the editor on that function.
+
+.item Retry
+Attempts to restart the current frame, like the 3Control-Meta-R* command
+in the regular debugger.
+
+.item Return a Value
+Asks for the name of a value (which can be selected with the mouse) and
+returns it from the current frame, like 3Control-R* in the regular debugger.
+
+.item Proceed
+Proceeds from the error.  Clicking left on 3Proceed* is like typing
+3Resume* in the regular debugger.  Clicking right on 3Proceed*
+gets you a menu of available proceed types, from which you can select one.
+This is equivalent to using one of the available 3Super* commands
+in the regular debugger.  If proceeding asks for an object to return,
+you can specify it with keyboard input or by pointing to a value
+with the mouse.
+
+.item Set arg
+Select an argument or local with the mouse and type or mouse a new value
+to be substituted in.
+
+.item Search
+Like the 3Control-S* command, except that the mouse can be used.
+
+.item Throw
+Like 3Control-T* in the regular debugger, it asks for a tag and a
+value and throws there.  The mouse can be used to specify the tag and
+value.
+
+.item T
+.item1 NIL
+Ordinarily just supply those symbols as arguments or values for other
+commands.  These can also be used to answer yes-or-no questions.
+.end_table

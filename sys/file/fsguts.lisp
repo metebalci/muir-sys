@@ -1,0 +1,2217 @@
+;;; -*- Mode: Lisp; Package: File-System; Base: 10.; Readtable: T -*-
+;;; The guts of the filesystem
+
+;; Booting.  The hairy thing here is that we want to have arbitrary sized partitions.
+;; Given that, the PUT has to change size proportionally.
+
+(DEFVAR LMFS-ROOT-DIRECTORY-NAME "Root-Directory")
+
+(DEFUN INITIALIZE-FILE-SYSTEM (&AUX PBASE PSIZE NECESSARY-PUT-SIZE)
+  (*CATCH 'BOOT-FILE-SYSTEM
+    (DISMOUNT-FILE-SYSTEM)
+    ;; Setup the DISK-CONFIGURATION variables.
+    (SETQ DISK-CONFIGURATION (MAKE-DISK-CONFIGURATION)
+	  DISK-CONFIGURATION-LOCK NIL
+	  DISK-CONFIGURATION-RQB (GET-DISK-RQB)
+	  DISK-CONFIGURATION-BUFFER (GET-RQB-ARRAY DISK-CONFIGURATION-RQB 8))
+    ;; Attempt to find the LM band first; if can't,
+    ;; will try current LM-UNIT/LM-PARTITION.
+    (FIND-LM-BAND)
+    ;; Now open up the partition for use.
+    (MULTIPLE-VALUE (PBASE PSIZE)
+      (FIND-DISK-PARTITION-FOR-WRITE LM-PARTITION NIL LM-UNIT))
+    ;; We lose.
+    (WHEN (NULL PBASE)
+      (NOTIFY "No ~A partition;  Can't initialize file system." LM-PARTITION)
+      (*THROW 'BOOT-FILE-SYSTEM NIL))
+    ;; From the size of the partition, compute the size of the PUT
+    (SETQ NECESSARY-PUT-SIZE (QUOTIENT-CEILING (* 2 PSIZE) PAGE-SIZE-IN-BITS))
+    ;; Setup the PUT variables.
+    (SETQ PUT-RQB (CONDITION-BIND ((RQB-TOO-LARGE #'LM-PUT-RQB-TOO-LARGE))
+		    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+	  PAGE-USAGE-TABLE (GET-RQB-ARRAY PUT-RQB 2)
+	  PUT-LOCK NIL
+	  PUT-MODIFIED NIL
+	  PUT-SCANNING-INDEX 1)
+    ;; Setup the DISK-CONFIGURATION structure.
+    (SETF (DC-VERSION) LM-VERSION)
+    (SETQ LM-PARTITION-BASE PBASE)
+    (SETF (DC-PARTITION-SIZE) PSIZE)
+    ;; Put the PUT at the beginning of the partition for now.
+    (SETF (DC-PUT-BASE) 1)
+    (SETF (DC-PUT-SIZE) NECESSARY-PUT-SIZE)
+    ;; Make an root directory.
+    (SETF (DC-ROOT-DIRECTORY)
+	  (CREATE-NEW-DIRECTORY NIL LMFS-ROOT-DIRECTORY-NAME))
+    ;; Now zero the PUT
+    (COPY-ARRAY-CONTENTS "" (RQB-BUFFER PUT-RQB))
+    ;; Set it to PUT-CONSISTENT before entering USING-PUT
+    (ASET PUT-CONSISTENT PAGE-USAGE-TABLE 0)
+    (REINITIALIZE-PUT-USAGE-ARRAY)
+    (USING-PUT
+      (CHANGE-BLOCK-DISK-SPACE 1 NECESSARY-PUT-SIZE PUT-FREE PUT-USED)
+      (ASET PUT-CONSISTENT PAGE-USAGE-TABLE 0)
+      (LOCKING DISK-CONFIGURATION-LOCK
+	(LM-WRITE-CONFIGURATION)
+	;; Update the comment to say what's in the partition.
+	(UPDATE-PARTITION-COMMENT LM-PARTITION "LM File System" LM-UNIT)))))
+
+(DEFUNP BOOT-FILE-SYSTEM (&AUX PSIZE-FROM-PARTITION ACTUAL-PSIZE
+			  NECESSARY-PUT-SIZE ACTUAL-PUT-SIZE
+			  TEM-PUT-RQB NEW-PUT-BASE OLD-PUT-BASE
+			  OLD-CONFIGURATION-KLUDGE MUST-SALVAGE)
+  (*CATCH 'BOOT-FILE-SYSTEM
+    (DISMOUNT-FILE-SYSTEM)
+    ;; Setup pathnames.
+    (ADD-FILE-COMPUTER SI:LOCAL-HOST)
+    (SEND SI:LOCAL-HOST :DETERMINE-ACCESS)
+    ;; Setup the auxiliary DISK-CONFIGURATION variables.
+    (SETQ DISK-CONFIGURATION-LOCK NIL
+	  DISK-CONFIGURATION-RQB (GET-DISK-RQB)
+	  DISK-CONFIGURATION-BUFFER (GET-RQB-ARRAY DISK-CONFIGURATION-RQB 8))
+    (FIND-LM-BAND)
+    ;; Notify if something different than normal behaviour is going on.
+    (IF (OR (NOT (EQUAL LM-PARTITION (SECOND (FIRST LM-PARTITION-POSSIBILITIES))))
+	    (NOT (EQUAL LM-UNIT (FIRST (FIRST LM-PARTITION-POSSIBILITIES)))))
+	(NOTIFY "Booting on unit ~D, partition ~A" LM-UNIT LM-PARTITION))
+    ;; Setup DISK-CONFIGURATION, but don't make it global until
+    ;; everything has been booted without error.
+    (SETQ DISK-CONFIGURATION
+	  (LET ((DISK-CONFIGURATION (MAKE-DISK-CONFIGURATION)))
+	    ;; Setup the DISK-CONFIGURATION structure.
+	    (SETQ PSIZE-FROM-PARTITION (LM-READ-CONFIGURATION)
+		  ACTUAL-PSIZE (DC-PARTITION-SIZE))
+	    (COND (( PSIZE-FROM-PARTITION ACTUAL-PSIZE)
+		   (NOTIFY "~A Partition has been ~:[compacted~;expanded~] ~D. pages."
+			   LM-PARTITION
+			   (< PSIZE-FROM-PARTITION ACTUAL-PSIZE)
+			   (ABS (- PSIZE-FROM-PARTITION ACTUAL-PSIZE)))))
+	    ;; Now setup the put.
+	    (SETQ NECESSARY-PUT-SIZE (QUOTIENT-CEILING (* 2 ACTUAL-PSIZE)
+						       PAGE-SIZE-IN-BITS)
+		  ACTUAL-PUT-SIZE (DC-PUT-SIZE))
+	    ;; Temporarily make up for old configuration blocks.
+	    (COND ((AND (= PSIZE-FROM-PARTITION ACTUAL-PSIZE)
+			(< NECESSARY-PUT-SIZE ACTUAL-PUT-SIZE))
+		   (NOTIFY "Label has old configuration.")
+		   (SETQ OLD-CONFIGURATION-KLUDGE T)))
+	    (SETQ PUT-RQB (CONDITION-BIND ((RQB-TOO-LARGE #'LM-PUT-RQB-TOO-LARGE))
+			    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+		  PAGE-USAGE-TABLE (GET-RQB-ARRAY PUT-RQB 2)
+		  PUT-LOCK NIL
+		  PUT-MODIFIED NIL
+		  PUT-SCANNING-INDEX 1)
+	    (COND ((< ACTUAL-PUT-SIZE NECESSARY-PUT-SIZE)
+		   ;; The partition has expanded enough to force an expansion of the PUT.
+		   ;; Try and do so...
+		   (NOTIFY "Trying to expand Page Usage Table")
+		   ;; First setup the new put.
+		   (UNWIND-PROTECT
+		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+			    (LM-DISK-READ TEM-PUT-RQB (DC-PUT-BASE))
+			    ;; This will set the new space to PUT-FREE (0).
+			    (COPY-ARRAY-CONTENTS (RQB-BUFFER TEM-PUT-RQB)
+						 (RQB-BUFFER PUT-RQB)))
+		     (RETURN-DISK-RQB TEM-PUT-RQB))
+		   (REINITIALIZE-PUT-USAGE-ARRAY)
+		   ;; This is what can fail.
+		   (SETQ NEW-PUT-BASE (FIND-DISK-BLOCK NECESSARY-PUT-SIZE))
+		   (USING-PUT
+		     (CHANGE-BLOCK-DISK-SPACE NEW-PUT-BASE NECESSARY-PUT-SIZE
+					      PUT-FREE PUT-USED)
+		     (SETQ OLD-PUT-BASE (DC-PUT-BASE))
+		     (SETF (DC-PUT-BASE) NEW-PUT-BASE)
+		     (SETF (DC-PUT-SIZE) NECESSARY-PUT-SIZE)
+		     (ASET PUT-CONSISTENT PAGE-USAGE-TABLE 0)
+		     (LOCKING DISK-CONFIGURATION-LOCK
+		       (LM-WRITE-CONFIGURATION))
+		     (CHANGE-BLOCK-DISK-SPACE OLD-PUT-BASE ACTUAL-PUT-SIZE
+					      PUT-USED PUT-FREE))
+		   (SETQ MUST-SALVAGE ( (AREF PAGE-USAGE-TABLE 0) PUT-CONSISTENT)))
+		  ((OR (> PSIZE-FROM-PARTITION ACTUAL-PSIZE) OLD-CONFIGURATION-KLUDGE)
+		   ;; The partition has compacted.  Make sure nothing was lost.
+		   (UNWIND-PROTECT
+		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+			    (LM-DISK-READ TEM-PUT-RQB (DC-PUT-BASE))
+			    ;; This may not be zero in old configurations.
+			    (OR OLD-CONFIGURATION-KLUDGE
+				(COND ((STRING-SEARCH-NOT-CHAR PUT-FREE
+							       (GET-RQB-ARRAY TEM-PUT-RQB 2)
+							       ACTUAL-PSIZE)
+				       (RETURN-DISK-RQB TEM-PUT-RQB)
+				       (NOTIFY
+					 "Data was lost compacting file system.  Aborting.")
+				       (*THROW 'BOOT-FILE-SYSTEM NIL)))))
+		     (RETURN-DISK-RQB TEM-PUT-RQB))
+		   (COND ((< NECESSARY-PUT-SIZE ACTUAL-PUT-SIZE)
+			  (NOTIFY "Compacting the Page Usage Table")))
+		   (SETQ MUST-SALVAGE (READ-PAGE-USAGE-TABLE))
+		   (USING-PUT
+		     (SETF (DC-PUT-SIZE) NECESSARY-PUT-SIZE)
+		     (ASET PUT-CONSISTENT PAGE-USAGE-TABLE 0)
+		     (LOCKING DISK-CONFIGURATION-LOCK
+		       (LM-WRITE-CONFIGURATION))
+		     (CHANGE-BLOCK-DISK-SPACE (+ (DC-PUT-BASE) NECESSARY-PUT-SIZE)
+					      (- ACTUAL-PUT-SIZE NECESSARY-PUT-SIZE)
+					      PUT-USED PUT-FREE)))
+		  (T (SETQ MUST-SALVAGE (READ-PAGE-USAGE-TABLE))))
+	    (AND MUST-SALVAGE (LM-SALVAGE NIL))
+	    DISK-CONFIGURATION))))
+
+(DEFUN FIND-DISK-BLOCK (SIZE)
+  (PROG ((LIM (DC-PARTITION-SIZE)) (I 1) (COUNT 0))
+     L  (COND ((> I LIM)
+	       (NOTIFY "Can't find a large enough contiguous block for PUT.  Aborting.")
+	       (*THROW 'BOOT-FILE-SYSTEM NIL))
+	      ((= (AREF PAGE-USAGE-TABLE I) PUT-FREE)
+	       (SETQ COUNT (1+ COUNT))
+	       (COND (( COUNT SIZE) (RETURN (1+ (- I COUNT))))))
+	      (T (SETQ COUNT 0)))
+	(SETQ I (1+ I))
+	(GO L)))
+
+(DEFUN LM-PUT-RQB-TOO-LARGE (&REST IGNORE)
+  (NOTIFY "Partition is too large to construct PUT-RQB.  Aborting.")
+  (*THROW 'BOOT-FILE-SYSTEM NIL))
+
+(DEFUN DISMOUNT-FILE-SYSTEM ()
+  ;; Declared later in this file.
+  (DECLARE (SPECIAL SALVAGER-TABLE))
+  (COND ((BOUNDP 'DISK-CONFIGURATION)
+	 (LMFS-CLOSE-ALL-FILES)
+	 (SAVE-DIRECTORY-TREE ':FIND-ALL)	;Make sure directories written out.
+	 (COND ((BOUNDP 'DISK-CONFIGURATION-RQB)
+		(RETURN-DISK-RQB DISK-CONFIGURATION-RQB)
+		(MAKUNBOUND 'DISK-CONFIGURATION-RQB)))
+	 (COND ((BOUNDP 'PUT-RQB)
+		(RETURN-DISK-RQB PUT-RQB)
+		(MAKUNBOUND 'PUT-RQB)))
+	 (MAKUNBOUND 'DISK-CONFIGURATION)
+	 (SETQ SALVAGER-TABLE NIL)
+	 (SI:RESET-TEMPORARY-AREA LOCAL-FILE-SYSTEM-AREA))))
+
+(DEFSUBST REQUIRE-DISK-CONFIGURATION ()
+  (IF (NOT (BOUNDP 'DISK-CONFIGURATION))
+      (LM-SIGNAL-ERROR 'NO-FILE-SYSTEM)))
+
+(DEFUN SET-LM-BAND (&OPTIONAL (PARTITION "FILE") (UNIT 0))
+  (CHECK-ARG-TYPE UNIT :FIXNUM)
+  (DISMOUNT-FILE-SYSTEM)
+  (SETQ LM-PARTITION-POSSIBILITIES
+	(CONS (LIST UNIT PARTITION)
+	      (DELETE (LIST UNIT PARTITION) LM-PARTITION-POSSIBILITIES)))
+  (BOOT-FILE-SYSTEM)
+  (VALUES LM-UNIT LM-PARTITION))
+
+(DEFUN FIND-LM-BAND ()
+  "Try all of the unit-partition pairs in LM-PARTITION-POSSIBILITIES, in
+order, and use the first one that exists."
+  (DOLIST (POSS LM-PARTITION-POSSIBILITIES)
+    (LET ((UNIT (FIRST POSS))
+	  (PARTITION-NAME (SECOND POSS)))
+      (WHEN (FIND-DISK-PARTITION PARTITION-NAME NIL UNIT)
+	(SETQ LM-UNIT UNIT)
+	(SETQ LM-PARTITION PARTITION-NAME)
+	(RETURN POSS)))))
+
+(DEFUN NOTIFY (FORMAT-STRING &REST REST)
+  (FORMAT ERROR-OUTPUT "~&[File System: ")
+  (LEXPR-FUNCALL #'FORMAT ERROR-OUTPUT FORMAT-STRING REST)
+  (FORMAT ERROR-OUTPUT "]~&"))
+
+;;;; Salvager
+
+(DEFVAR SALVAGER-BAD-ITEMS NIL)
+(DEFVAR SALVAGER-TABLE NIL)
+(DEFVAR SALVAGER-ERRORS)
+(DEFVAR SALVAGER-VERBOSE-P)	;This being NIL only clamps the long-winded stuff...
+
+(DEFUN LM-SALVAGE (&OPTIONAL (SALVAGER-VERBOSE-P T)
+		   &AUX (SIZE (DC-PARTITION-SIZE)) (SALVAGER-ERRORS 0))
+  (SETQ SALVAGER-BAD-ITEMS NIL)
+  (IF (AND SALVAGER-TABLE (= (ARRAY-ACTIVE-LENGTH SALVAGER-TABLE) SIZE))
+      (FILLARRAY SALVAGER-TABLE '(NIL))
+    (SETQ SALVAGER-TABLE (MAKE-ARRAY SIZE ':AREA LOCAL-FILE-SYSTEM-AREA)))
+  (NOTIFY "Flushing out any unsaved directories")
+  (SAVE-DIRECTORY-TREE ':FIND-ALL)
+  (USING-PUT
+    (LOCKING DISK-CONFIGURATION-LOCK
+      (NOTIFY "Beginning salvage")
+      (SALVAGER-ADD-BLOCK 0 1 'CONFIGURATION-BLOCK)
+      (SALVAGER-ADD-BLOCK (DC-PUT-BASE) (DC-PUT-SIZE) 'PAGE-USAGE-TABLE)
+      (LET ((ROOT (DC-ROOT-DIRECTORY)))
+	(SALVAGER-ADD-MAP (FILE-MAP ROOT) ROOT)
+	(LM-SALVAGE-DIRECTORY ROOT))
+      (COND ((ZEROP SALVAGER-ERRORS)
+	     (NOTIFY "Salvage Completed.  Updating Page Usage Table.")
+	     (SALVAGE-RECONSTRUCT-PUT)
+	     (SETQ OLD-STATE PUT-CONSISTENT	;See USING-PUT
+		   PUT-MODIFIED T)
+	     (NOTIFY "Page Usage Table Updated."))
+	    (T (NOTIFY "Salvage Completed.  ~D. error~:P; Page Usage Table not updated."
+		       SALVAGER-ERRORS))))))
+
+(DEFUN LM-SALVAGE-DIRECTORY (DIR)
+  (DOLIST (FILE (READ-DIRECTORY-FILES DIR))
+    (COND ((FILE-OVERWRITE-FILE FILE)
+	   (SETQ FILE (FILE-OVERWRITE-FILE FILE))
+	   (AND SALVAGER-VERBOSE-P
+		(FORMAT ERROR-OUTPUT "~%File overwriting ~A eliminated."
+			(LM-NAMESTRING NIL NIL
+				       (DIRECTORY-NAME DIR)
+				       (FILE-NAME FILE)
+				       (FILE-TYPE FILE)
+				       (FILE-VERSION FILE)))))
+	  ((NULL (FILE-CLOSED? FILE))
+	   (FORMAT ERROR-OUTPUT "~%File ~A has not been closed. Closing it."
+		   (LM-NAMESTRING NIL NIL
+				  (DIRECTORY-NAME DIR)
+				  (FILE-NAME FILE)
+				  (FILE-TYPE FILE)
+				  (FILE-VERSION FILE)))
+	   (SET-FILE-ATTRIBUTE FILE T ':CLOSED)))
+    (SALVAGER-ADD-MAP (FILE-MAP FILE) FILE)
+    (IF (DIRECTORY? FILE)
+	(LM-SALVAGE-DIRECTORY FILE))))
+
+(DEFUN SALVAGER-ADD-BLOCK (BASE NPAGES THING)
+  (LOOP WITH LIM = (+ BASE NPAGES)
+	FOR I FROM BASE BELOW LIM
+	AS ENTRY = (AREF SALVAGER-TABLE I)
+	WHEN ENTRY DO
+	(AND SALVAGER-VERBOSE-P
+	     (FORMAT ERROR-OUTPUT "~%Address ~O contains both ~A and ~A" I ENTRY THING))
+	(OR (SYMBOLP ENTRY)
+	    (MEMQ ENTRY SALVAGER-BAD-ITEMS)
+	    (PUSH ENTRY SALVAGER-BAD-ITEMS))
+	(OR (SYMBOLP THING)
+	    (MEMQ THING SALVAGER-BAD-ITEMS)
+	    (PUSH THING SALVAGER-BAD-ITEMS))
+	(INCF SALVAGER-ERRORS)
+	ELSE DO (ASET THING SALVAGER-TABLE I)))
+
+(DEFUN SALVAGER-ADD-MAP (MAP THING)
+  (LOOP WITH NBLOCKS = (MAP-NBLOCKS MAP)
+	FOR I FROM 0 BELOW NBLOCKS
+	DO (SALVAGER-ADD-BLOCK (MAP-BLOCK-LOCATION MAP I)
+			       (QUOTIENT-CEILING (MAP-BLOCK-SIZE MAP I) PAGE-SIZE-IN-BITS)
+			       THING)))
+
+(DEFUN SALVAGE-RECONSTRUCT-PUT (&AUX NEW-PUT-RQB)
+  (UNWIND-PROTECT
+    (PROGN
+      (SETQ NEW-PUT-RQB (GET-DISK-RQB (RQB-NPAGES PUT-RQB)))
+      (LET ((NEW-PUT (GET-RQB-ARRAY NEW-PUT-RQB 2))
+	    (NEW-PUA (MAKE-ARRAY 4 ':TYPE 'ART-32B)))
+	(COPY-ARRAY-CONTENTS "" (RQB-BUFFER NEW-PUT-RQB))
+	(SETF (AREF NEW-PUA PUT-FREE) 0)
+	(SETF (AREF NEW-PUA PUT-RESERVED) 0)
+	(SETF (AREF NEW-PUA PUT-USED) 0)
+	(SETF (AREF NEW-PUA PUT-UNUSABLE) 0)
+	(ASET PUT-CONSISTENT NEW-PUT 0)
+	(DOTIMES (I (DC-PARTITION-SIZE))
+	  (LET ((OLD-STATUS (AREF PAGE-USAGE-TABLE I))
+		(THING (AREF SALVAGER-TABLE I)))
+	    (LET ((NEW-STATUS
+		    (COND ((NULL THING)
+			   (COND ((EQ OLD-STATUS PUT-UNUSABLE) PUT-UNUSABLE)
+				 (T PUT-FREE)))
+			  ((SYMBOLP THING) PUT-USED)
+			  ((FILE-DELETED? THING) PUT-RESERVED)
+			  (T PUT-USED))))
+	      (ASET NEW-STATUS NEW-PUT I)
+	      (INCF (AREF NEW-PUA NEW-STATUS))
+	      (COND ((AND SALVAGER-VERBOSE-P
+			  (NOT (= OLD-STATUS NEW-STATUS)))
+		     (FORMAT ERROR-OUTPUT
+			     "~%Address ~7O ~[free~;reserved~;used~;bad~] ==> ~
+				~[free~;reserved~;used~;bad~]~@[  (~A)~]"
+			     I OLD-STATUS NEW-STATUS THING))))))
+	;; This stuff isn't long-winded.
+	(FUNCALL STANDARD-OUTPUT ':FRESH-LINE)
+	(DOTIMES (I 4)
+	  (COND (( (AREF NEW-PUA I) (AREF PUT-USAGE-ARRAY I))
+		 (FORMAT ERROR-OUTPUT
+			 "~%Pages ~[free~;reserved~;used~;bad~]: ~D ==> ~D"
+			 I (AREF PUT-USAGE-ARRAY I) (AREF NEW-PUA I)))))
+	(WITHOUT-INTERRUPTS
+	  (PSETQ PUT-RQB NEW-PUT-RQB
+		 PAGE-USAGE-TABLE NEW-PUT
+		 PUT-USAGE-ARRAY NEW-PUA
+		 NEW-PUT-RQB PUT-RQB))))
+    (RETURN-DISK-RQB NEW-PUT-RQB)))
+
+;;;; Read/Write Configuration
+
+;;; The locking order for using LM-WRITE-CONFIGURATION is:
+;;;
+;;; 1. Lock PUT-LOCK (use USING-PUT).
+;;; 2. Lock DISK-CONFIGURATION-LOCK.
+;;;
+;;; Make SURE that it is done in this order!!
+;;; As far as I know, this is the only case when it is necessary for
+;;; a single process to lock two things.
+
+;; Only called when booting -- No locks.  Returns the number of pages which the
+;; configuration block thought made up the partition, so that BOOT-FILE-SYSTEM
+;; can check the consistency.
+(DEFUN LM-READ-CONFIGURATION (&AUX PBASE PSIZE)
+  (LET ((DISK-CONFIGURATION-BUFFER-POINTER 0))
+    (MULTIPLE-VALUE (PBASE PSIZE)
+      (FIND-DISK-PARTITION LM-PARTITION NIL LM-UNIT))
+    (COND ((NULL PBASE)
+	   (NOTIFY "No ~A partition.  Aborting." LM-PARTITION)
+	   (*THROW 'BOOT-FILE-SYSTEM NIL)))
+    (SETQ LM-PARTITION-BASE PBASE)
+    (SETF (DC-PARTITION-SIZE) PSIZE)
+    (LM-DISK-READ DISK-CONFIGURATION-RQB 0)
+    (SETF (DC-VERSION) (GET-BYTES #'DISK-CONFIGURATION-STREAM 3))
+    (UNLESS ( LM-MINIMUM-VERSION (DC-VERSION) LM-VERSION)
+      (NOTIFY "Invalid version ~D.  Aborting." (DC-VERSION))
+      (*THROW 'BOOT-FILE-SYSTEM NIL))
+    (COND ((NOT (= (GET-BYTES #'DISK-CONFIGURATION-STREAM 3) 0))
+	   (NOTIFY "Invalid second word in configuration.  Aborting.")
+	   (*THROW 'BOOT-FILE-SYSTEM NIL)))
+    (LET ((PARTITION-SIZE (GET-BYTES #'DISK-CONFIGURATION-STREAM 3)))
+      (SETF (DC-PUT-BASE) (GET-BYTES #'DISK-CONFIGURATION-STREAM 3))
+      (SETF (DC-PUT-SIZE) (GET-BYTES #'DISK-CONFIGURATION-STREAM 3))
+      (LET ((ROOT-DIRECTORY (CREATE-NEW-DIRECTORY NIL LMFS-ROOT-DIRECTORY-NAME)))
+	(IF (= (DC-VERSION) 3)
+	    (SETUP-OLD-ROOT-DIRECTORY ROOT-DIRECTORY (MAP-READ #'DISK-CONFIGURATION-STREAM))
+	  (SETUP-NEW-ROOT-DIRECTORY ROOT-DIRECTORY (MAP-READ #'DISK-CONFIGURATION-STREAM)))
+	(SETF (DC-ROOT-DIRECTORY) ROOT-DIRECTORY))
+      PARTITION-SIZE)))
+
+(DEFUN LM-WRITE-CONFIGURATION ()
+  (REQUIRE-LOCK PUT-LOCK)
+  (REQUIRE-LOCK DISK-CONFIGURATION-LOCK)
+  (LET ((DISK-CONFIGURATION-BUFFER-POINTER 0)
+	(VERSION (DC-VERSION))
+	(PARTITION-SIZE (DC-PARTITION-SIZE))
+	(PUT-BASE (DC-PUT-BASE))
+	(PUT-SIZE (DC-PUT-SIZE)))
+    (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 VERSION)
+    (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 0)	;Obsolete.
+    (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 PARTITION-SIZE)
+    (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 PUT-BASE)
+    (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 PUT-SIZE)
+    (MAP-WRITE #'DISK-CONFIGURATION-STREAM (FILE-MAP (DC-ROOT-DIRECTORY)))
+    (WRITE-PUT)
+    (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)))
+
+;;; New, consistent directory structure.
+;;; This is completely incompatible with the old structure.
+;;; Install when it is reasonable to do so.
+
+(DEFUN SETUP-NEW-ROOT-DIRECTORY (ROOT-DIRECTORY MAP)
+  (SETF (FILE-MAP ROOT-DIRECTORY) MAP)
+  (SETF (DIRECTORY-FILES ROOT-DIRECTORY) ':DISK))
+
+;;; Old, inconsistent directory structure.
+;;; This restricts the root directory to contain only subdirectories.
+;;; Flush whenever possible.
+
+(DEFVAR DMM-CHECK 132435. "Checkword for obsolete Directory Map Map concept.")
+
+(DEFUN SETUP-OLD-ROOT-DIRECTORY (ROOT-DIRECTORY DMM)
+  (LET ((FILES '()))
+    (WITH-MAP-STREAM-IN (STREAM DMM)
+      (LET ((CHECKWORD (GET-BYTES STREAM 3)))
+	(IF (NOT (= CHECKWORD DMM-CHECK))
+	    (FERROR NIL "Directory Map Map is garbage")))
+      (DO-FOREVER
+	(LET ((FILE (READ-OLD-ROOT-DIRECTORY-ENTRY STREAM ROOT-DIRECTORY)))
+	  (IF (NULL FILE)
+	      (RETURN)
+	      (PUSH FILE FILES)))))
+    (SETF (FILE-MAP ROOT-DIRECTORY) DMM)
+    (SETF (DIRECTORY-FILES ROOT-DIRECTORY) (NREVERSE FILES))))
+
+(DEFUN GET-OLD-ROOT-DIRECTORY-MAP (ROOT-DIRECTORY)
+  (LET ((WRITING-INTERNAL-STRUCTURES T))
+    (WITH-MAP-STREAM-OUT (STREAM)
+      (PUT-BYTES STREAM 3 DMM-CHECK)
+      (DOLIST (DIRECTORY (DIRECTORY-FILES ROOT-DIRECTORY))
+	(WRITE-OLD-DIRECTORY-ENTRY STREAM DIRECTORY)))))
+
+(DEFUN READ-OLD-ROOT-DIRECTORY-ENTRY (STREAM DIRECTORY)
+  (MULTIPLE-VALUE-BIND (NAME EOF?)
+      (SEND STREAM ':LINE-IN T)
+    (AND (NOT EOF?)
+	 (LET ((SUBDIRECTORY (CREATE-NEW-DIRECTORY DIRECTORY NAME)))
+	   (SETF (DIRECTORY-MAP SUBDIRECTORY) (MAP-READ STREAM))
+	   (SETF (DIRECTORY-FILES SUBDIRECTORY) ':DISK)
+	   SUBDIRECTORY))))
+
+(DEFUN WRITE-OLD-DIRECTORY-ENTRY (STREAM DIRECTORY)
+  (SEND STREAM ':LINE-OUT (DIRECTORY-NAME DIRECTORY))
+  (MAP-WRITE STREAM (DIRECTORY-MAP DIRECTORY)))
+
+;;;; Page Usage Table
+
+;; Only called when booting -- No locks.
+(DEFUN READ-PAGE-USAGE-TABLE (&AUX MUST-SALVAGE)
+  (LM-DISK-READ PUT-RQB (DC-PUT-BASE))
+  (SELECT (AREF PAGE-USAGE-TABLE 0)
+    (PUT-CONSISTENT
+     (REINITIALIZE-PUT-USAGE-ARRAY))
+    (PUT-INCONSISTENT
+     ;; Don't salvage here!!  No directories exist yet.
+     (SETQ MUST-SALVAGE T))
+    (OTHERWISE
+     (CERROR T NIL NIL "Invalid state designator in page usage table")
+     (SETQ MUST-SALVAGE T)))
+  (REINITIALIZE-PUT-USAGE-ARRAY)
+  MUST-SALVAGE)
+
+(DEFUN REINITIALIZE-PUT-USAGE-ARRAY ()
+  (COPY-ARRAY-CONTENTS "" PUT-USAGE-ARRAY)
+  (DOTIMES (I (DC-PARTITION-SIZE))
+    (INCF (AREF PUT-USAGE-ARRAY (AREF PAGE-USAGE-TABLE I)))))
+
+;;;; Read/Write Directories
+
+;;; A directory is marked as needing rewriting by marking it, and then
+;;; recursively marking all of its superdirectories up to the root.
+;;; If this loop is aborted out of, then the change made to that directory
+;;; is temporarily lost, unless we are willing to search the entire tree.
+;;; For this reason we mark the tree while interrupts are off.
+
+;;; Once the directory has been marked in this way, a treewalk is started
+;;; at the root, which identifies the changed directories by walking top-down,
+;;; and then saves them walking bottom-up.  Normally we only want to search
+;;; down those paths that are marked as modified.  However, an optional
+;;; argument is provided to force the saving process to walk the entire tree,
+;;; thus guaranteeing that all modified directories are saved even if they
+;;; were improperly marked.
+
+(DEFUN WRITE-DIRECTORY-FILES (DIRECTORY)
+  "Mark all of the directories from here to the root as needing to
+be written out, then treewalk the structure, saving them."
+  (WITHOUT-INTERRUPTS
+    (DO ((DIR DIRECTORY (FILE-DIRECTORY DIR)))
+	((NULL DIR))
+      (SETF (FILE-CLOSED? DIR) NIL)))
+  (SAVE-DIRECTORY-TREE NIL))
+
+(DEFUN WRITE-DIRECTORY-OF-FILE (FILE)
+  (LOCKING (FILE-LOCK FILE)
+    (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE))))
+
+(DEFUN SAVE-DIRECTORY-TREE (&OPTIONAL DO-ALL?)
+  "Saves a directory tree out to disk.
+If DO-ALL? is NIL then only find directory changes that start at the root,
+and only write out changed directories.
+If DO-ALL? is :FIND-ALL then only write out changed directories, but find
+every changed directory by exhaustive search.
+If DO-ALL? is :SAVE-ALL then write out the entire tree independent of its
+state of modification."
+  (LET ((OLD-MAPS (SAVE-DIRECTORY-SUBTREE (DC-ROOT-DIRECTORY) DO-ALL?)))
+    (UNLESS (NULL OLD-MAPS)
+      (USING-PUT
+	(DOLIST (MAP OLD-MAPS)
+	  (CHANGE-MAP-DISK-SPACE MAP PUT-USED PUT-FREE))
+	(ASET PUT-CONSISTENT PAGE-USAGE-TABLE 0)
+	(LOCKING DISK-CONFIGURATION-LOCK
+	  (LM-WRITE-CONFIGURATION))))))
+
+(DEFUN SAVE-DIRECTORY-SUBTREE (DIRECTORY DO-ALL?)
+  (LET ((FILES (DIRECTORY-FILES DIRECTORY)))
+    (LET ((SUBDIRECTORY-RESULTS
+	    (MAPCAN #'(LAMBDA (FILE)
+			(AND (DIRECTORY? FILE)
+			     (OR DO-ALL? (NOT (FILE-CLOSED? FILE)))
+			     (SAVE-DIRECTORY-SUBTREE FILE DO-ALL?)))
+		    (COND ((NOT (EQ FILES ':DISK))
+			   FILES)
+			  ((EQ DO-ALL? ':SAVE-ALL)
+			   (READ-DIRECTORY-FILES DIRECTORY))
+			  (T '())))))
+      (IF (OR (EQ DO-ALL? ':SAVE-ALL)
+	      (NOT (FILE-CLOSED? DIRECTORY)))
+	  (CONS (LMFS-WRITE-DIRECTORY DIRECTORY) SUBDIRECTORY-RESULTS)
+	SUBDIRECTORY-RESULTS))))
+
+(DEFUN READ-DIRECTORY-FILES (DIRECTORY)
+  "Reads in the files of DIRECTORY if they aren't already."
+  (LOCKING (DIRECTORY-LOCK DIRECTORY)
+    (LET ((FILES (DIRECTORY-FILES DIRECTORY)))
+      (IF (EQ FILES ':DISK)
+	  (WITH-MAP-STREAM-IN (STREAM (FILE-MAP DIRECTORY))
+	    (LMFS-READ-DIRECTORY STREAM DIRECTORY))
+	  FILES))))
+
+(DEFUN TOP-LEVEL-DIRECTORIES ()
+  (SUBSET #'DIRECTORY? (READ-DIRECTORY-FILES (DC-ROOT-DIRECTORY))))
+
+(DEFUN LMFS-WRITE-DIRECTORY (DIRECTORY)
+  (LOCKING (DIRECTORY-LOCK DIRECTORY)
+    (LET ((OLD-MAP (FILE-MAP DIRECTORY))
+	  (NEW-MAP (IF (AND (ROOT-DIRECTORY? DIRECTORY)
+			    (= (DC-VERSION) 3))
+		       ;; Crock introduced for compatibility with old system.
+		       (GET-OLD-ROOT-DIRECTORY-MAP DIRECTORY)
+		     (LMFS-GET-NEW-DIRECTORY-MAP DIRECTORY))))
+      (SETF (FILE-MAP DIRECTORY) NEW-MAP)
+      (SETF (FILE-CLOSED? DIRECTORY) T)
+      (USING-PUT
+	(CHANGE-MAP-DISK-SPACE NEW-MAP PUT-RESERVED PUT-USED))
+      OLD-MAP)))
+
+(DEFUN LMFS-GET-NEW-DIRECTORY-MAP (DIRECTORY)
+  ;; Allow us to use up the last few free disk blocks.
+  (LET ((WRITING-INTERNAL-STRUCTURES T))
+    (WITH-MAP-STREAM-OUT (STREAM)
+      (DOLIST (FILE (DIRECTORY-FILES DIRECTORY))
+	(WRITE-DIRECTORY-ENTRY STREAM FILE)))))
+
+(DEFUN LMFS-READ-DIRECTORY (STREAM DIRECTORY)
+  (LET ((FILES '()))
+    (DO-FOREVER
+      (LET ((FILE (READ-DIRECTORY-ENTRY STREAM DIRECTORY)))
+	(COND ((NULL FILE)
+	       (SETQ FILES (NREVERSE FILES))
+	       (SETF (DIRECTORY-FILES DIRECTORY) FILES)
+	       (RETURN FILES))
+	      (T
+	       (PUSH FILE FILES)))))))
+
+(DEFUN WRITE-DIRECTORY-ENTRY (STREAM FILE)
+  (SEND STREAM ':LINE-OUT (FILE-NAME FILE))
+  (SEND STREAM ':LINE-OUT (FILE-TYPE FILE))
+  (LET ((VERSION (FILE-VERSION FILE)))
+    (PUT-BYTES STREAM 3 VERSION))
+  (PUT-BYTES STREAM 1 (FILE-DEFAULT-BYTE-SIZE FILE))
+  (SEND STREAM ':LINE-OUT (FILE-AUTHOR-INTERNAL FILE))
+  (LET ((CREATION-DATE (FILE-CREATION-DATE-INTERNAL FILE)))
+    (PUT-BYTES STREAM 4 CREATION-DATE))
+  (MAP-WRITE STREAM (FILE-MAP FILE))
+  (LET ((ATTRIBUTES (FILE-ATTRIBUTES FILE)))
+    (PUT-BYTES STREAM 2 ATTRIBUTES))
+  (WRITE-PROPERTY-LIST STREAM (FILE-PLIST FILE)))
+
+(DEFUN READ-DIRECTORY-ENTRY (STREAM DIRECTORY)
+  (MULTIPLE-VALUE-BIND (NAME EOF)
+      (SEND STREAM ':LINE-IN T)
+    (IF (NOT EOF)
+	(LET* ((TYPE (SEND STREAM ':LINE-IN T))
+	       (VERSION (GET-BYTES STREAM 3))
+	       (DEFAULT-BYTE-SIZE (GET-BYTES STREAM 1))
+	       (AUTHOR (SEND STREAM ':LINE-IN T))
+	       (CREATION-DATE (GET-BYTES STREAM 4))
+	       (MAP (MAP-READ STREAM))
+	       (ATTRIBUTES (GET-BYTES STREAM 2))
+	       (PROPERTIES (READ-PROPERTY-LIST STREAM))
+	       (FILE (MAKE-FILE NAME NAME
+				TYPE TYPE
+				VERSION VERSION
+				DEFAULT-BYTE-SIZE DEFAULT-BYTE-SIZE
+				FILES ':DISK
+				OPEN-COUNT 0
+				AUTHOR-INTERNAL AUTHOR
+				CREATION-DATE-INTERNAL CREATION-DATE
+				DIRECTORY DIRECTORY
+				MAP MAP
+				ATTRIBUTES ATTRIBUTES
+				PLIST PROPERTIES)))
+	  FILE))))
+
+;;;; Basic File Operations
+;;; Files come in four states:
+
+;;; Nonexistent: an invalid state which should never be encountered.
+;;; The storage associated with this state is FREE.
+
+;;; Unclosed:  the normal state for newly-opened output files, it is
+;;; indicated by the Closed bit being off.  The Deleted bit can be
+;;; either on or off; when closed, the file retains that property.
+;;; The storage associated with this state is RESERVED.
+
+;;; Closed:  the normal state for existing files, it is indicated by the
+;;; Closed bit being on and the Deleted bit being off.  The storage
+;;; associated with this state is USED.
+
+;;; Deleted:  a special state between closed and nonexistent, this is
+;;; indicated by the Closed bit being on and the Deleted bit being on.
+;;; The storage associated with this state is RESERVED.
+
+;;; Logically, there should be these transition functions:
+
+;;; Nonexistent <-> Unclosed
+;;; Unclosed -> Closed
+;;; Closed <-> Deleted
+;;; Deleted -> Nonexistent
+
+;;; However, the implementation is based on target states only.
+
+;;; The locking strategy is:  lock a file first, then lock its directory
+;;; or the PUT, as needed.  Never lock the file second.  There is only
+;;; one case where two files need to be locked, and one of those is
+;;; an Unclosed file; only one process should point to that file.
+
+;;; Unclosed files are in the directory; however it is not possible
+;;; to open them.  Deleted files are also in the directory, and can be opened.
+
+;;; When a file is overwritten, it is left in the directory.
+;;; It is made to point to the file which is overwriting it,
+;;; and the overwriting file is made to point to the overwritten one also.
+;;; It is possible to tell which is which on the basis of the closed bit.
+;;; The overwritten file is closed, and the overwriting file isn't.
+
+(DEFVAR LMFS-DIRECTORY-TYPE "DIRECTORY" "The file type for all directories.")
+(DEFVAR LMFS-DIRECTORY-VERSION 1 "The file version for all directories.")
+
+(DEFSUBST LMFS-DELETED-FILE? (FILE)
+  (AND (FILE-DELETED? FILE)
+       (NOT (FILE-CLOSED? FILE))))
+
+(DEFSUBST LMFS-CLOSED-FILE? (FILE)
+  (AND (FILE-CLOSED? FILE)
+       (NOT (FILE-DELETED? FILE))))
+
+(DEFSUBST LMFS-FILE-BEING-WRITTEN-OR-SUPERSEDED? (FILE)
+  (OR (MINUSP (FILE-OPEN-COUNT FILE))
+      (NOT (AND (FILE-CLOSED? FILE)
+		(NULL (FILE-OVERWRITE-FILE FILE))))))
+
+(DEFSUBST REQUIRE-CLOSED-FILE (FILE)
+  (IF (OR (NOT (FILE-CLOSED? FILE))
+	  (MINUSP (FILE-OPEN-COUNT FILE)))
+      (LM-SIGNAL-ERROR 'OPEN-OUTPUT-FILE)))
+
+(DEFSUBST REQUIRE-CLOSED-FILE-NOT-BEING-SUPERSEDED (FILE)
+  (IF (LMFS-FILE-BEING-WRITTEN-OR-SUPERSEDED? FILE)
+      (LM-SIGNAL-ERROR 'OPEN-OUTPUT-FILE)))
+
+(DEFSUBST REQUIRE-FILE-NOT-OPEN (FILE)
+  (REQUIRE-CLOSED-FILE FILE)
+  (UNLESS (ZEROP (FILE-OPEN-COUNT FILE))
+    (LM-SIGNAL-ERROR 'FILE-LOCKED)))
+
+(DEFSUBST REQUIRE-DELETABLE-FILE (FILE)
+  (IF (FILE-ATTRIBUTE FILE ':DONT-DELETE)
+      (LM-SIGNAL-ERROR 'DONT-DELETE-FLAG-SET)))
+
+(DEFSUBST REQUIRE-ZERO-OPEN-COUNT (FILE)
+  (IF (NOT (ZEROP (FILE-OPEN-COUNT FILE)))
+      (FERROR NIL "Expected zero open count for ~S." FILE)))
+
+(DEFUN LMFS-OPEN-OUTPUT-FILE (DIRECTORY LOC NAME TYPE VERSION OVERWRITTEN-FILE)
+  (WHEN (< (AREF PUT-USAGE-ARRAY PUT-FREE) PUT-MINIMUM-FREE-PAGES)
+    (LM-SIGNAL-ERROR 'NO-MORE-ROOM))
+  (REQUIRE-LOCK (DIRECTORY-LOCK DIRECTORY))
+  (LET ((FILE (CREATE-NEW-FILE DIRECTORY NAME TYPE VERSION)))
+    (SETF (FILE-OPEN-COUNT FILE) -1)
+    (SETF (FILE-CLOSED? FILE) NIL)
+    (SETF (FILE-DELETED? FILE) NIL)
+    (COND ((NULL OVERWRITTEN-FILE)
+	   (PUSH FILE (CDR LOC))
+	   (PROCESS-UNLOCK (LOCF (DIRECTORY-LOCK DIRECTORY))))
+	  (T
+	   ;; This is critical; unlock directory before locking file.
+	   (PROCESS-UNLOCK (LOCF (DIRECTORY-LOCK DIRECTORY)))
+	   (LOCKING (FILE-LOCK OVERWRITTEN-FILE)
+	     (REQUIRE-CLOSED-FILE-NOT-BEING-SUPERSEDED OVERWRITTEN-FILE)
+	     (REQUIRE-DELETABLE-FILE OVERWRITTEN-FILE)
+	     (SETF (FILE-OVERWRITE-FILE FILE) OVERWRITTEN-FILE)
+	     (INCF (FILE-OPEN-COUNT OVERWRITTEN-FILE))
+	     (SETF (FILE-OVERWRITE-FILE OVERWRITTEN-FILE) FILE))))
+    (WRITE-DIRECTORY-FILES DIRECTORY)
+    FILE))
+
+(DEFUN LMFS-OPEN-OVERWRITE-FILE (FILE)
+  (LOCKING (FILE-LOCK FILE)
+    (REQUIRE-FILE-NOT-OPEN FILE)
+    (DECF (FILE-OPEN-COUNT FILE))))
+
+(DEFUN LMFS-OPEN-INPUT-FILE (FILE)
+  (LOCKING (FILE-LOCK FILE)
+    (REQUIRE-CLOSED-FILE FILE)
+    (INCF (FILE-OPEN-COUNT FILE))))
+
+(DEFUN LMFS-CLOSE-FILE (FILE)
+  "Called when one stream reading or writing FILE is closed.
+Updates FILE's open-count.  Guarantees that FILE has its Closed bit set."
+  (LOCKING (FILE-LOCK FILE)
+    (COND ((MINUSP (FILE-OPEN-COUNT FILE))
+	   (UNLESS (= (FILE-OPEN-COUNT FILE) -1)
+	     (FERROR NIL "File open count is less than -1."))
+	   (INCF (FILE-OPEN-COUNT FILE)))
+	  ((PLUSP (FILE-OPEN-COUNT FILE))
+	   (DECF (FILE-OPEN-COUNT FILE)))
+	  (T (FERROR NIL "Open count of file being closed is zero.")))
+    (UNLESS (FILE-CLOSED? FILE)
+      (REQUIRE-ZERO-OPEN-COUNT FILE)
+      (SETF (FILE-CLOSED? FILE) T)
+      (UNLESS (FILE-DELETED? FILE)
+	(USING-PUT
+	  (CHANGE-MAP-DISK-SPACE (FILE-MAP FILE) PUT-RESERVED PUT-USED)))
+      (LET ((OVERWRITTEN-FILE (FILE-OVERWRITE-FILE FILE))
+	    (DIRECTORY (FILE-DIRECTORY FILE)))
+	(UNLESS (NULL OVERWRITTEN-FILE)
+	  (LOCKING (FILE-LOCK OVERWRITTEN-FILE)
+	    (SETF (FILE-OVERWRITE-FILE FILE) NIL)
+	    (DECF (FILE-OPEN-COUNT OVERWRITTEN-FILE))
+	    (SETF (FILE-OVERWRITE-FILE OVERWRITTEN-FILE) NIL)
+	    (REPLACE-FILE-IN-DIRECTORY OVERWRITTEN-FILE FILE)
+	    (COND ((FILE-DELETED? OVERWRITTEN-FILE)
+		   (USING-PUT
+		     (CHANGE-MAP-DISK-SPACE (FILE-MAP OVERWRITTEN-FILE)
+					    PUT-RESERVED
+					    PUT-FREE)))
+		  (T
+		   (REQUIRE-DELETABLE-FILE OVERWRITTEN-FILE)
+		   (SETF (FILE-DELETED? OVERWRITTEN-FILE) T)
+		   (USING-PUT
+		     (CHANGE-MAP-DISK-SPACE (FILE-MAP OVERWRITTEN-FILE)
+					    PUT-USED
+					    PUT-FREE))))))
+	(WRITE-DIRECTORY-FILES DIRECTORY)))))
+
+(DEFUN LMFS-DELETE-FILE (FILE &OPTIONAL (WRITE-DIRECTORY T))
+  "Guarantees that FILE has its Deleted bit set."
+  (LOCKING-RECURSIVELY (FILE-LOCK FILE)
+    (REQUIRE-DELETABLE-FILE FILE)
+    (UNLESS (FILE-DELETED? FILE)
+      (SETF (FILE-DELETED? FILE) T)
+      (WHEN (FILE-CLOSED? FILE)
+	(USING-PUT
+	  (CHANGE-MAP-DISK-SPACE (FILE-MAP FILE) PUT-USED PUT-RESERVED)))
+      (WHEN WRITE-DIRECTORY (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE))))))
+
+(DEFUN LMFS-UNDELETE-FILE (FILE)
+  "Guarantees that FILE doesn't have its Deleted bit set."
+  (LOCKING-RECURSIVELY (FILE-LOCK FILE)
+    (WHEN (FILE-DELETED? FILE)
+      (SETF (FILE-DELETED? FILE) NIL)
+      (WHEN (FILE-CLOSED? FILE)
+	(USING-PUT
+	  (CHANGE-MAP-DISK-SPACE (FILE-MAP FILE) PUT-RESERVED PUT-USED)))
+      (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE)))))
+
+(DEFUN LMFS-EXPUNGE-FILE (FILE)
+  "Guarantees that FILE is in the Nonexistent state.
+Does NOT write out FILE's containing directory.  The caller must do that.
+This helps avoid lock-up when trying to create free space when disk is full."
+  (LOCKING (FILE-LOCK FILE)
+    (REQUIRE-DELETABLE-FILE FILE)
+    (COND ((FILE-CLOSED? FILE)
+	   (IF (ZEROP (FILE-OPEN-COUNT FILE))
+	       (REMOVE-FILE-FROM-DIRECTORY FILE)
+	     (FERROR NIL "File being expunged is still open.")))
+	  (T
+	   (INCF (FILE-OPEN-COUNT FILE))
+	   (REQUIRE-ZERO-OPEN-COUNT FILE)
+	   (SETF (FILE-CLOSED? FILE) T)
+	   (IF (FILE-OVERWRITE-FILE FILE)
+	       ;; This file was overwriting another, and therefore
+	       ;; not actually in the directory.
+	       ;; Make the other file forget this one was overwriting it.
+	       (LET ((OTHER-FILE (FILE-OVERWRITE-FILE FILE)))
+		 (DECF (FILE-OPEN-COUNT OTHER-FILE))
+		 (SETF (FILE-OVERWRITE-FILE OTHER-FILE) NIL))
+	     ;; This file was not overwriting another,
+	     ;; so it really is in the directory.  Remove it.
+	     (REMOVE-FILE-FROM-DIRECTORY FILE))))
+    (USING-PUT
+      (CHANGE-MAP-DISK-SPACE (FILE-MAP FILE)
+			     (IF (FILE-DELETED? FILE) PUT-RESERVED PUT-USED)
+			     PUT-FREE))
+    (SETF (FILE-DELETED? FILE) T)
+;    (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE))
+))
+
+;;; Helper Functions.
+
+(DEFUN REMOVE-FILE-FROM-DIRECTORY (FILE)
+  (LET ((DIRECTORY (FILE-DIRECTORY FILE)))
+    (LOCKING (DIRECTORY-LOCK DIRECTORY)
+      (DO ((TAIL (LOCF (DIRECTORY-FILES DIRECTORY))
+		 (LOCF (CDR (CDR TAIL)))))
+	  ((NULL TAIL)
+	   (FERROR NIL "The existing file ~S is missing from its directory." FILE))
+	(COND ((EQ FILE (CADR TAIL))
+	       (RPLACD TAIL (CDDR TAIL))
+	       (RETURN)))))))
+
+(DEFUN REPLACE-FILE-IN-DIRECTORY (FILE NEW-FILE)
+  (LET ((DIRECTORY (FILE-DIRECTORY FILE)))
+    (LOCKING (DIRECTORY-LOCK DIRECTORY)
+      (RPLACA (OR (MEMQ FILE (DIRECTORY-FILES DIRECTORY))
+		  (FERROR NIL "The existing file ~S is missing from its directory." FILE))
+	      NEW-FILE))))
+
+(DEFUN CREATE-NEW-FILE (DIRECTORY NAME TYPE VERSION)
+  "Create a new file.  Sets up the default properties, and records
+the author and creation-date."
+  ;; Crock introduced for compatibility with old system.
+  (IF (ROOT-DIRECTORY? DIRECTORY)
+      (LM-SIGNAL-ERROR 'TOP-LEVEL-FILE NIL NIL ':OPEN))
+  (MAKE-FILE DIRECTORY DIRECTORY
+	     NAME NAME
+	     TYPE TYPE
+	     VERSION VERSION
+	     AUTHOR-INTERNAL USER-ID
+	     CREATION-DATE-INTERNAL (TIME:GET-UNIVERSAL-TIME)
+	     OPEN-COUNT 0
+	     DEFAULT-BYTE-SIZE 8
+	     MAP (MAP-CREATE)
+	     ATTRIBUTES 0
+	     PLIST NIL))
+
+(DEFUN CREATE-NEW-DIRECTORY (DIRECTORY NAME)
+  "Create a new directory.  Like CREATE-NEW-FILE except that
+the file's properties are setup differently."
+  (LET ((FILE (MAKE-FILE DIRECTORY DIRECTORY
+			 NAME NAME
+			 TYPE LMFS-DIRECTORY-TYPE
+			 VERSION LMFS-DIRECTORY-VERSION
+			 AUTHOR-INTERNAL USER-ID
+			 CREATION-DATE-INTERNAL (TIME:GET-UNIVERSAL-TIME)
+			 OPEN-COUNT 0
+			 DEFAULT-BYTE-SIZE 8
+			 MAP (MAP-CREATE)
+			 ATTRIBUTES 0
+			 PLIST NIL)))
+    (SETF (DIRECTORY? FILE) T)
+    (SETF (FILE-CLOSED? FILE) T)
+    (SETF (FILE-DELETED? FILE) NIL)
+    FILE))
+
+;;;; Lookups
+
+;;; This is the basic lookup function.
+;;; OBJ is the object which you're looking up.
+;;; LOC is a locative pointer into the list you're using
+;;; COMP is a function which compares OBJ with an element of the list.
+;;;   It should return  a positive number if OBJ > ELEM
+;;;		    or  0 if OBJ = ELEM
+;;;		    or  a negative number if OBJ < ELEM
+;;; Values returned are ELEM and LOC.
+;;; ELEM is a list element found if successful, or NIL.
+;;; LOC is a locative (actually a sublist, usually) into which OBJ can be
+;;;  pushed and still preserve the sorting of the list.  (It will be pushed
+;;;  before ELEM, if one was found.  Note that this program does not understand
+;;;  duplicates, however, and duplicates should not be entered in the list.)
+
+(DEFUN LOOKUP (OBJ LOC COMP)
+  (DECLARE (RETURN-LIST ELEM LOC))
+  (DO ((LEN (LENGTH (CDR LOC)))
+       (S-LOC LOC)
+       S-LEN S-COM VAL)
+      ((ZEROP LEN)
+       (RETURN NIL S-LOC))
+    (SETQ S-LEN (FLOOR LEN 2)
+	  S-COM (NTHCDR S-LEN S-LOC)
+	  VAL (FUNCALL COMP OBJ (CADR S-COM)))
+    (COND ((ZEROP VAL)
+	   (RETURN (CADR S-COM) S-COM))
+	  ((PLUSP VAL)
+	   (SETQ LEN (1- (- LEN S-LEN))
+		 S-LOC (CDR S-COM)))
+	  (T (SETQ LEN S-LEN)))))
+
+;;;; File Lookup
+
+;;; loc --> Previous file
+;;;         Requested file
+;;;         Next file
+
+(DEFUN LOOKUP-NAMED-FILE (DIRECTORY &REST OBJ)
+  (LOOKUP OBJ (LOCF (DIRECTORY-FILES DIRECTORY)) #'LOOKUP-FILE-COMPARE))
+
+(DEFUNP LOOKUP-FILE-COMPARE (LIST FILE &AUX TEM)
+  (SETQ TEM (STRING-COMPARE (CAR LIST) (FILE-NAME FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ TEM (STRING-COMPARE (CADR LIST) (FILE-TYPE FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (- (CADDR LIST) (FILE-VERSION FILE)))
+
+;;; loc --> Previous file
+;;;         File with highest non-deleted version
+;;;         Next file
+;;; loc is unpredictable if all versions are deleted.
+
+(DEFVAR NEWEST-VERSION-SEEN)
+
+(DEFUN LOOKUP-NEWEST-NON-DELETED-FILE (DIRECTORY &REST OBJ)
+  (MULTIPLE-VALUE-BIND (FILE LOC OLDEST-VERSION)
+      (LEXPR-FUNCALL #'LOOKUP-OLDEST-FILE DIRECTORY OBJ)
+    (IF (NULL OLDEST-VERSION)
+	(VALUES FILE LOC OLDEST-VERSION)
+      (LET ((SAVED-LOC NIL))
+	(DO-FOREVER
+	  (LET ((FILE (CADR LOC)))
+	    (COND ((NOT (STRING-EQUAL (FIRST OBJ) (FILE-NAME FILE)))
+		   (RETURN NIL))
+		  ((NOT (STRING-EQUAL (SECOND OBJ) (FILE-TYPE FILE)))
+		   (RETURN NIL))
+		  ((AND (NOT (FILE-DELETED? FILE))
+			(FILE-CLOSED? FILE))
+		   (SETQ SAVED-LOC LOC)))
+	    (COND ((NULL (CDDR LOC))
+		   (RETURN NIL))))
+	  (SETQ LOC (CDR LOC)))
+	(IF (NULL SAVED-LOC)
+	    (VALUES NIL LOC NIL)
+	  (VALUES (CADR SAVED-LOC)
+		  SAVED-LOC
+		  (FILE-VERSION (CADR SAVED-LOC))))))))
+
+;;; loc --> Previous file
+;;;         File with highest version, if any
+;;;         Next file
+
+(DEFUN LOOKUP-NEWEST-FILE (DIRECTORY &REST OBJ)
+  (LET ((NEWEST-VERSION-SEEN NIL))
+    (MULTIPLE-VALUE-BIND (IGNORE LOC)
+	(LOOKUP OBJ (LOCF (DIRECTORY-FILES DIRECTORY)) #'LOOKUP-FILE-COMPARE-NEWEST)
+      (VALUES (AND NEWEST-VERSION-SEEN (CAR LOC))
+	      (IF NEWEST-VERSION-SEEN
+		  (NLEFT 1 (LOCF (DIRECTORY-FILES DIRECTORY)) LOC)
+		LOC)
+	      NEWEST-VERSION-SEEN))))
+
+(DEFUNP LOOKUP-FILE-COMPARE-NEWEST (LIST FILE &AUX TEM)
+  (SETQ TEM (STRING-COMPARE (CAR LIST) (FILE-NAME FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ TEM (STRING-COMPARE (CADR LIST) (FILE-TYPE FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ NEWEST-VERSION-SEEN (FILE-VERSION FILE))
+  1)
+
+;;; loc --> Previous file
+;;;         File with lowest version
+;;;         Next file
+
+(DEFVAR OLDEST-VERSION-SEEN)
+
+(DEFUN LOOKUP-OLDEST-NON-DELETED-FILE (DIRECTORY &REST OBJ)
+  (MULTIPLE-VALUE-BIND (FILE LOC OLDEST-VERSION)
+      (LEXPR-FUNCALL #'LOOKUP-OLDEST-FILE DIRECTORY OBJ)
+    (IF (NULL OLDEST-VERSION)
+	(VALUES FILE LOC OLDEST-VERSION)
+      (DO-FOREVER
+	(LET ((FILE (CADR LOC)))
+	  (COND ((NOT (STRING-EQUAL (FIRST OBJ) (FILE-NAME FILE)))
+		 (RETURN NIL LOC NIL))
+		((NOT (STRING-EQUAL (SECOND OBJ) (FILE-TYPE FILE)))
+		 (RETURN NIL LOC NIL))
+		((AND (NOT (FILE-DELETED? FILE))
+		      (FILE-CLOSED? FILE))
+		 (RETURN FILE LOC (FILE-VERSION FILE)))
+		((NULL (CDDR LOC))
+		 (RETURN NIL LOC NIL))))
+	(SETQ LOC (CDR LOC))))))
+
+(DEFUN LOOKUP-OLDEST-FILE (DIRECTORY &REST OBJ)
+  (LET ((OLDEST-VERSION-SEEN NIL))
+    (MULTIPLE-VALUE-BIND (IGNORE LOC)
+	(LOOKUP OBJ (LOCF (DIRECTORY-FILES DIRECTORY)) #'LOOKUP-FILE-COMPARE-OLDEST)
+      (VALUES (AND OLDEST-VERSION-SEEN (CADR LOC))
+	      LOC
+	      OLDEST-VERSION-SEEN))))
+
+(DEFUNP LOOKUP-FILE-COMPARE-OLDEST (LIST FILE &AUX TEM)
+  (SETQ TEM (STRING-COMPARE (CAR LIST) (FILE-NAME FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ TEM (STRING-COMPARE (CADR LIST) (FILE-TYPE FILE)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ OLDEST-VERSION-SEEN (FILE-VERSION FILE))
+  -1)
+
+(DEFUN FILE-LESSP (F1 F2)
+  (MINUSP (FILE-COMPARE F1 F2)))
+
+(DEFUNP FILE-COMPARE (F1 F2 &AUX TEM)
+  (SETQ TEM (STRING-COMPARE (FILE-NAME F1) (FILE-NAME F2)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (SETQ TEM (STRING-COMPARE (FILE-NAME F1) (FILE-NAME F2)))
+  (OR (ZEROP TEM) (RETURN TEM))
+  (- (FILE-VERSION F1) (FILE-VERSION F2)))
+
+(DEFUN LOOKUP-FILE (DIRSPEC NAME TYPE VERSION
+		    &OPTIONAL IF-DOES-NOT-EXIST IF-EXISTS (REALLY-OPEN ':DIRECTORY-OK)
+		    (DELETED? T))
+  "The basic function for finding files.
+If REALLY-OPEN is T, we increment the open count of the file,
+and get an error if it is a directory.
+If REALLY-OPEN is :DIRECTORY-OK (the default), we increment but allow directories.
+If REALLY-OPEN is NIL, we do not increment the open count.
+DELETED? non-NIL means deleted files can be opened."
+  (%STORE-CONDITIONAL (LOCF DIRSPEC) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF NAME) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF TYPE) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF TYPE) ':UNSPECIFIC "")
+  (%STORE-CONDITIONAL (LOCF VERSION) ':UNSPECIFIC ':NEWEST)
+  (LET ((DIRECTORY (IF (NAMED-STRUCTURE-P DIRSPEC) DIRSPEC
+		     (LOOKUP-DIRECTORY DIRSPEC)))
+	NO-NEW-VERSION
+	USE-EXISTING
+	OLD-FILE)
+    (BLOCK WIN
+      (LM-LOOKUP-ERROR
+	;; Must not allow recursive locking -- see LMFS-OPEN-OUTPUT-FILE.
+	(LOCKING (DIRECTORY-LOCK DIRECTORY)
+	  (*CATCH 'LOOKUP-FILE-ERROR
+	    (MULTIPLE-VALUE-BIND (FILE LOC LAST-VERSION-SEEN)
+		(COND ((AND (EQ VERSION ':NEWEST) (EQ IF-EXISTS ':NEW-VERSION))
+		       (MULTIPLE-VALUE-BIND (FILE LOC LAST-VERSION-SEEN)
+			   (LOOKUP-NEWEST-FILE DIRECTORY NAME TYPE)
+			 (VALUES FILE
+				 (IF FILE (CDR LOC) LOC)
+				 LAST-VERSION-SEEN)))
+		      ((MEMQ VERSION '(:NEWEST 0))
+		       (IF DELETED?
+			   (LOOKUP-NEWEST-FILE DIRECTORY NAME TYPE)
+			 (LOOKUP-NEWEST-NON-DELETED-FILE DIRECTORY NAME TYPE)))
+		      ((EQ VERSION ':OLDEST)
+		       (IF (OR DELETED? (EQ IF-EXISTS ':NEW-VERSION))
+			   (LOOKUP-OLDEST-FILE DIRECTORY NAME TYPE)
+			 (LOOKUP-OLDEST-NON-DELETED-FILE DIRECTORY NAME TYPE)))
+		      ;; Depends on extra vars in MULTIPLE-VALUE-BIND
+		      ;; becoming bound to NIL.
+		      ((MINUSP VERSION)
+		       (LET ((NEWEST (LOOKUP-NEWEST-FILE DIRECTORY NAME TYPE)))
+			 (IF (NULL NEWEST)
+			     (*THROW 'LOOKUP-FILE-ERROR 'FILE-NOT-FOUND))
+			 (LOOKUP-NAMED-FILE DIRECTORY NAME TYPE
+					    (+ (FILE-VERSION NEWEST) VERSION))))
+		      (T
+		       (LOOKUP-NAMED-FILE DIRECTORY NAME TYPE VERSION)))
+	      (IF (AND FILE (DIRECTORY? FILE) REALLY-OPEN
+		       (NEQ REALLY-OPEN ':DIRECTORY-OK))
+		  (*THROW 'LOOKUP-FILE-ERROR 'FILE-IS-SUBDIRECTORY))
+	      (IF (OR (NULL FILE)
+		      (AND (NOT DELETED?)
+			   (FILE-DELETED? FILE)))
+		  ;; File "does not exist".
+		  (ECASE IF-DOES-NOT-EXIST
+		    ((NIL) (RETURN-FROM WIN NIL))
+		    (:ERROR
+		     (*THROW 'LOOKUP-FILE-ERROR
+			     (IF FILE 'OPEN-DELETED-FILE 'FILE-NOT-FOUND)))
+		    (:CREATE NIL))
+		;; File "exists".  Should we use it?
+		(ECASE IF-EXISTS
+		  ((NIL)
+		   (SETQ USE-EXISTING T))
+		  (:NEW-VERSION
+		   (UNLESS (MEMQ VERSION '(:NEWEST :OLDEST)) (SETQ USE-EXISTING T)))
+		  (:SUPERSEDE (SETQ NO-NEW-VERSION T) (SETQ USE-EXISTING T))
+		  ((:OVERWRITE :TRUNCATE :APPEND)
+		   (UNLESS (ZEROP (FILE-OPEN-COUNT FILE))
+		     (*THROW 'LOOKUP-FILE-ERROR 'FILE-LOCKED))
+		   (SETQ USE-EXISTING T))
+		  (:ERROR
+		   (*THROW 'LOOKUP-FILE-ERROR 'FILE-ALREADY-EXISTS))
+		  ((:RENAME :RENAME-AND-DELETE)
+		   (SETQ OLD-FILE FILE))))
+	      (RETURN-FROM WIN
+		(IF USE-EXISTING
+		    (PROGN
+		      (IF REALLY-OPEN
+			  (IF (MEMQ IF-EXISTS '(:OVERWRITE :TRUNCATE :APPEND))
+			      (LMFS-OPEN-OVERWRITE-FILE FILE)
+			    (LMFS-OPEN-INPUT-FILE FILE)))
+		      FILE)
+		  (VALUES
+		    (LMFS-OPEN-OUTPUT-FILE
+		      DIRECTORY LOC NAME TYPE
+		      (COND ((EQ VERSION ':NEWEST)
+			     (IF (NULL LAST-VERSION-SEEN)
+				 1
+			       (IF NO-NEW-VERSION
+				   LAST-VERSION-SEEN
+				 (1+ LAST-VERSION-SEEN))))
+			    ((EQ VERSION ':OLDEST)
+			     (IF (NULL LAST-VERSION-SEEN)
+				 1
+			       (IF NO-NEW-VERSION
+				   LAST-VERSION-SEEN
+				 (1- LAST-VERSION-SEEN))))
+			    ((NUMBERP VERSION)
+			     (COND ((MINUSP VERSION)
+				    (*THROW 'LOOKUP-FILE-ERROR 'FILE-NOT-FOUND))
+				   ((NOT (< VERSION 1_16.))
+				    (*THROW 'LOOKUP-FILE-ERROR 'VERSION-TOO-LARGE))
+				   ((ZEROP VERSION)
+				    (OR LAST-VERSION-SEEN 1))
+				   (T VERSION))))
+		      (UNLESS (AND (MEMQ VERSION '(:NEWEST :OLDEST))
+				   (NOT NO-NEW-VERSION))
+			FILE))
+		    OLD-FILE))))))
+	DIRECTORY NAME TYPE VERSION))))
+
+;;;; Directory Lookup
+
+(DEFUN LOOKUP-DIRECTORY (NAME &OPTIONAL OK-IF-NOT-THERE)
+  "Find a named directory and make sure that it is read in."
+  (COND ((AND (TYPEP NAME 'FILE)
+	      (DIRECTORY? NAME))
+	 NAME)
+	((CONSP NAME)
+	 (LOOKUP-SUBDIRECTORY (LOOKUP-ROOT-DIRECTORY) NAME OK-IF-NOT-THERE))
+	((MEMQ NAME '(NIL :ROOT))
+	 (LOOKUP-ROOT-DIRECTORY))
+	((STRINGP NAME)
+	 (LOOKUP-DIRECTORY (LIST NAME) OK-IF-NOT-THERE))
+	(T
+	 (LM-SIGNAL-ERROR 'INVALID-DIRECTORY-NAME NAME))))
+
+(DEFUN LOOKUP-ROOT-DIRECTORY ()
+  (REQUIRE-DISK-CONFIGURATION)
+  (READ-DIRECTORY-FILES (DC-ROOT-DIRECTORY))
+  (DC-ROOT-DIRECTORY))
+
+(DEFUN LOOKUP-SUBDIRECTORY (NODE SUBPATH OK-IF-NOT-THERE)
+  (IF (NULL (CDR SUBPATH))
+      (LOOKUP-SUBDIRECTORY-STEP NODE
+				(CAR SUBPATH)
+				OK-IF-NOT-THERE)
+      (LOOKUP-SUBDIRECTORY (LOOKUP-SUBDIRECTORY-STEP NODE
+						     (CAR SUBPATH)
+						     NIL)
+			   (CDR SUBPATH)
+			   OK-IF-NOT-THERE)))
+
+(DEFUN LOOKUP-SUBDIRECTORY-STEP (NODE STEP OK-IF-NOT-THERE)
+  (READ-DIRECTORY-FILES NODE)
+  (LOCKING (DIRECTORY-LOCK NODE)
+    (MULTIPLE-VALUE-BIND (FILE LOC)
+	(LOOKUP-NAMED-FILE NODE
+			   STEP
+			   LMFS-DIRECTORY-TYPE
+			   LMFS-DIRECTORY-VERSION)
+      (COND ((NOT (NULL FILE))
+	     (LOCKING (FILE-LOCK FILE)
+	       (IF (NOT (DIRECTORY? FILE))
+		   (FERROR NIL "~S: expected a Directory." FILE))
+	       (IF (LMFS-FILE-BEING-WRITTEN-OR-SUPERSEDED? FILE)
+		   (LM-LOOKUP-ERROR 'OPEN-UNFINISHED-DIRECTORY
+				    NODE
+				    STEP
+				    LMFS-DIRECTORY-TYPE
+				    LMFS-DIRECTORY-VERSION))
+	       (IF (FILE-DELETED? FILE)
+		   (LM-LOOKUP-ERROR 'OPEN-DELETED-DIRECTORY
+				    NODE
+				    STEP
+				    LMFS-DIRECTORY-TYPE
+				    LMFS-DIRECTORY-VERSION)))
+	     (READ-DIRECTORY-FILES FILE)	;make sure files are read in.
+	     FILE)
+	    (LM-AUTOMATICALLY-CREATE-DIRECTORIES
+	     (LET ((DIRECTORY (CREATE-NEW-DIRECTORY NODE STEP)))
+	       (PUSH DIRECTORY (CDR LOC))
+	       (PROCESS-UNLOCK (LOCF (DIRECTORY-LOCK NODE)))
+	       (WRITE-DIRECTORY-FILES NODE)
+	       DIRECTORY))
+	    ((NOT OK-IF-NOT-THERE)
+	     (LM-SIGNAL-ERROR 'DIRECTORY-NOT-FOUND))))))
+
+;;;; Wildcarded Lookup
+
+(DEFUN LOOKUP-FILES (DIRECTORY NAME TYPE VERSION &OPTIONAL (DELETED? T))
+  (%STORE-CONDITIONAL (LOCF DIRECTORY) ':UNSPECIFIC '())
+  (%STORE-CONDITIONAL (LOCF NAME) ':UNSPECIFIC ':WILD)
+  (%STORE-CONDITIONAL (LOCF TYPE) ':UNSPECIFIC ':WILD)
+  (%STORE-CONDITIONAL (LOCF VERSION) ':UNSPECIFIC ':NEWEST)
+  (IF (AND (EQ NAME ':WILD) (EQ TYPE ':WILD) (EQ VERSION ':WILD))
+      ;; Optimize simple case.
+      (MAPCAN #'(LAMBDA (DIR)
+		  (IF DELETED?
+		      (COPYLIST (READ-DIRECTORY-FILES DIR))
+		      (SUBSET #'LMFS-CLOSED-FILE? (READ-DIRECTORY-FILES DIR))))
+	      (LOOKUP-DIRECTORIES DIRECTORY))
+      (MAPCAN #'(LAMBDA (DIR) (LOOKUP-DIRECTORY-FILES DIR NAME TYPE VERSION DELETED?))
+	      (LOOKUP-DIRECTORIES DIRECTORY))))
+
+(DEFUN LOOKUP-DIRECTORIES (NAME)
+  (REQUIRE-DISK-CONFIGURATION)
+  (COND ((MEMQ NAME '(NIL :ROOT))
+	 (LIST (DC-ROOT-DIRECTORY)))
+	((CONSP NAME)
+	 (LOOKUP-SUBDIRECTORIES (DC-ROOT-DIRECTORY) NAME))
+	((EQ NAME ':WILD)
+	 (LOOKUP-SUBDIRECTORIES (DC-ROOT-DIRECTORY) NAME))
+	((STRINGP NAME)
+	 (LOOKUP-SUBDIRECTORIES (DC-ROOT-DIRECTORY) (LIST NAME)))
+	(T
+	 (LM-SIGNAL-ERROR 'INVALID-DIRECTORY-NAME NAME))))
+
+(DEFUN LOOKUP-SUBDIRECTORIES (NODE PATH)
+  (MAPCAN #'(LAMBDA (FILE)
+	      (COND ((NOT (DIRECTORY? FILE)) '())
+		    ((EQ PATH ':WILD) (LIST FILE))
+		    ((WILDCARD-MATCH (CAR PATH) (DIRECTORY-NAME FILE))
+		     (IF (NULL (CDR PATH))
+			 (LIST FILE)
+			 (LOOKUP-SUBDIRECTORIES FILE (CDR PATH))))
+		    (T '())))
+	  (READ-DIRECTORY-FILES NODE)))
+
+;;; This isn't as clean as everything else because it wants to implement
+;;; all the possible version tokens.  Also, it could be made faster
+;;; by incorporating more knowledge of the directory structure here.
+
+(DEFUN LOOKUP-DIRECTORY-FILES (DIR NAME TYPE VERSION DELETED?)
+  (LET ((FILES '()))
+    (DOLIST (FILE (READ-DIRECTORY-FILES DIR))
+      (IF (AND (WILDCARD-MATCH NAME (FILE-NAME FILE))
+	       (WILDCARD-MATCH TYPE (FILE-TYPE FILE))
+	       (OR (NOT (NUMBERP VERSION))
+		   (NOT (PLUSP VERSION))
+		   (= VERSION (FILE-VERSION FILE))))
+	  (IF (OR DELETED? (LMFS-CLOSED-FILE? FILE))
+	      (PUSH FILE FILES))))
+    (SETQ FILES (NREVERSE FILES))
+    (IF (OR (EQ VERSION ':WILD)
+	    (AND (NUMBERP VERSION)
+		 (> VERSION 0)))
+	FILES
+	(LOOP FOR FILE IN FILES BY #'NEXT-GENERIC-FILE
+	      AS NEW-FILE = (LOOKUP-FILE DIR (FILE-NAME FILE) (FILE-TYPE FILE) VERSION
+					 NIL NIL NIL DELETED?)
+	      WHEN NEW-FILE COLLECT NEW-FILE))))
+
+;;; Special Matcher for Wildcards
+
+(DEFUN WILDCARD-MATCH (WILD-STRING STRING &OPTIONAL (START 0) (END (STRING-LENGTH STRING)))
+  (OR (EQ WILD-STRING ':WILD)
+      (EQUAL WILD-STRING "*")
+      (LOOP WITH WILD-LENGTH = (STRING-LENGTH WILD-STRING)
+	    FOR COMPARE-INDEX = START THEN (+ COMPARE-INDEX (- STAR-INDEX MATCH-INDEX))
+	    FOR MATCH-INDEX = 0 THEN (1+ STAR-INDEX)
+	    FOR STAR-INDEX = (STRING-SEARCH-CHAR #/* WILD-STRING MATCH-INDEX)
+	    WHEN (NULL STAR-INDEX)			;Rest must match
+	      RETURN (LET* ((WILD-LEFT  (- WILD-LENGTH MATCH-INDEX))
+			    (STARTCMP (IF (ZEROP MATCH-INDEX)
+					  COMPARE-INDEX
+					  (- END WILD-LEFT))))
+		       (AND (= (- END STARTCMP) WILD-LEFT)
+			    (%STRING-EQUAL WILD-STRING MATCH-INDEX
+					   STRING STARTCMP
+					   (- WILD-LENGTH MATCH-INDEX))))
+	    ALWAYS (IF (ZEROP MATCH-INDEX)		;No star to the left
+		       (%STRING-EQUAL WILD-STRING MATCH-INDEX STRING COMPARE-INDEX
+				      (- STAR-INDEX MATCH-INDEX))
+		       (LET* ((KEY (SUBSTRING WILD-STRING MATCH-INDEX STAR-INDEX))
+			      (IDX (STRING-SEARCH KEY STRING COMPARE-INDEX END)))
+			 (RETURN-ARRAY KEY)
+			 (SETQ COMPARE-INDEX IDX))))))
+
+;;;; Directory Operations
+
+(DEFUN LMFS-CREATE-DIRECTORY (NAME)
+  "Create a directory given its NAME."
+  (LET ((LM-AUTOMATICALLY-CREATE-DIRECTORIES T))
+    (LOOKUP-DIRECTORY NAME)))
+
+(DEFUN LMFS-EXPUNGE-DIRECTORY (DIRECTORY NAME TYPE VERSION)
+  (%STORE-CONDITIONAL (LOCF DIRECTORY) ':UNSPECIFIC '())
+  (%STORE-CONDITIONAL (LOCF NAME) ':UNSPECIFIC ':WILD)
+  (%STORE-CONDITIONAL (LOCF TYPE) ':UNSPECIFIC ':WILD)
+  (%STORE-CONDITIONAL (LOCF VERSION) ':UNSPECIFIC ':WILD)
+  (LET ((RESULTING-BLOCKS-FREED 0)
+	DIRECTORY-FILE)
+    (DOLIST (FILE (LOOKUP-FILES DIRECTORY NAME TYPE VERSION ':DELETED))
+      (WHEN (FILE-DELETED? FILE)
+	(SETQ DIRECTORY-FILE (FILE-DIRECTORY FILE))
+	(LMFS-EXPUNGE-FILE FILE)
+	(INCF RESULTING-BLOCKS-FREED (FILE-NPAGES FILE))))
+    (WRITE-DIRECTORY-FILES DIRECTORY-FILE) 
+    RESULTING-BLOCKS-FREED))
+
+;; Nobody calls this, now.
+(DEFUN LMFS-DELETE-DIRECTORY (NAME &OPTIONAL (ERROR-P T))
+  "Delete the single directory given by NAME."
+  (IDENTIFY-FILE-OPERATION ':DELETE-DIRECTORY
+    (HANDLING-ERRORS ERROR-P
+      (LET ((DIRECTORY (LOOKUP-DIRECTORY NAME)))
+	(IF (NULL (READ-DIRECTORY-FILES DIRECTORY))
+	    (LMFS-DELETE-FILE DIRECTORY)
+	    (LM-SIGNAL-ERROR 'DIRECTORY-NOT-EMPTY))))))
+
+(DEFUN LMFS-DELETE-EMPTY-DIRECTORIES (&OPTIONAL QUERY-P (NAME '()))
+  "Locate all of the empty directories in the tree under the directory
+node given by name, and delete them from the tree.  If NAME is not
+supplied or NIL, then search the entire tree."
+  (LMFS-DELETE-EMPTY-SUBDIRECTORIES (LOOKUP-DIRECTORY NAME) QUERY-P))
+
+(DEFUN LMFS-DELETE-EMPTY-SUBDIRECTORIES (DIRECTORY QUERY-P)
+  (DOLIST (FILE (READ-DIRECTORY-FILES DIRECTORY))
+    (IF (DIRECTORY? FILE)
+	(LMFS-DELETE-EMPTY-SUBDIRECTORIES FILE QUERY-P)))
+  (LMFS-DELETE-EMPTY-DIRECTORY DIRECTORY QUERY-P))
+
+(DEFUN LMFS-DELETE-EMPTY-DIRECTORY (DIRECTORY QUERY-P)
+  (IF (NULL (DIRECTORY-FILES DIRECTORY))
+      (IF (OR (NULL QUERY-P)
+	      (Y-OR-N-P (FORMAT NIL "~&Delete ~A? " (DIRECTORY-NAME DIRECTORY))))
+	  (PROGN
+	    (FORMAT T "~&Deleting ~S ... " DIRECTORY)
+	    (LMFS-DELETE-FILE DIRECTORY)
+	    (FORMAT T "done.")))))
+
+;;;; File Operations
+
+(DEFUN LMFS-OPEN-FILE (PATHNAME DIRECTORY NAME TYPE VERSION
+		       &KEY (ERROR T) (DIRECTION ':INPUT) (CHARACTERS T)
+		       (BYTE-SIZE ':DEFAULT) DELETED PRESERVE-DATES INHIBIT-LINKS
+		       (ELEMENT-TYPE 'STRING-CHAR ELEMENT-TYPE-P)
+		       (IF-EXISTS (IF (MEMQ (PATHNAME-VERSION PATHNAME)
+					    ;; :UNSPECIFIC here is to prevent lossage
+					    ;; writing ITS files with no version numbers.
+					    '(:NEWEST :UNSPECIFIC))
+				      ':NEW-VERSION ':ERROR)
+				  IF-EXISTS-P)
+		       (IF-DOES-NOT-EXIST
+			 (COND ((MEMQ DIRECTION '(:PROBE :PROBE-DIRECTORY :PROBE-LINK))
+				NIL)
+			       ((AND (EQ DIRECTION ':OUTPUT)
+				     (NOT (MEMQ IF-EXISTS '(:OVERWRITE :APPEND))))
+				':CREATE)
+			       ;; Note: if DIRECTION is NIL, this defaults to :ERROR
+			       ;; for compatibility with the past.
+			       ;; A Common-Lisp program would use :PROBE
+			       ;; and get NIL as the default for this.
+			       (T ':ERROR)))
+		       &AUX FILE INITIAL-PLIST OLD-FILE
+		       PHONY-CHARACTERS SIGN-EXTEND-BYTES)
+  "Implements the :OPEN message for local-file pathnames."
+  INHIBIT-LINKS
+  (IDENTIFY-FILE-OPERATION ':OPEN
+    (HANDLING-ERRORS ERROR
+      (CASE DIRECTION
+	((:INPUT :OUTPUT :PROBE-DIRECTORY))
+	(:IO (FERROR 'UNIMPLEMENTED-OPTION "Bidirectional file streams are not supported."))
+	((NIL :PROBE :PROBE-LINK) (SETQ DIRECTION ':PROBE))
+	(T (FERROR 'UNIMPLEMENTED-OPTION "~S is not a valid DIRECTION argument" DIRECTION)))
+      (UNLESS (MEMQ IF-EXISTS '(:ERROR :NEW-VERSION :RENAME :RENAME-AND-DELETE
+				:OVERWRITE :APPEND :SUPERSEDE NIL))
+	(FERROR 'UNIMPLEMENTED-OPTION "~S is not a valid IF-EXISTS argument" IF-EXISTS))
+      (UNLESS (MEMQ IF-DOES-NOT-EXIST
+		    '(:ERROR :CREATE NIL))
+	(FERROR 'UNIMPLEMENTED-OPTION
+		"~S is not a valid IF-DOES-NOT-EXISTS argument" IF-EXISTS))
+      (WHEN ELEMENT-TYPE-P
+	(SETF (VALUES CHARACTERS BYTE-SIZE PHONY-CHARACTERS SIGN-EXTEND-BYTES)
+	      (DECODE-ELEMENT-TYPE ELEMENT-TYPE BYTE-SIZE)))
+      (IF (OR PHONY-CHARACTERS SIGN-EXTEND-BYTES)
+	  (FERROR 'UNIMPLEMENTED-OPTION "~S as element-type is not implemented."
+		  ELEMENT-TYPE))
+      (IF (NOT (MEMQ BYTE-SIZE '(16. 8 4 2 1 :DEFAULT)))
+	  (LM-SIGNAL-ERROR 'INVALID-BYTE-SIZE))
+      (SETF (VALUES FILE OLD-FILE)
+	    (LOOKUP-FILE DIRECTORY NAME TYPE VERSION
+			 (AND (NEQ DIRECTION ':PROBE-DIRECTORY) IF-DOES-NOT-EXIST)
+			 (AND (EQ DIRECTION ':OUTPUT) IF-EXISTS)
+			 (NEQ DIRECTION ':PROBE) DELETED))
+      (WHEN (IF FILE (OR (NEQ DIRECTION ':OUTPUT) IF-EXISTS)
+	      (OR (EQ DIRECTION ':PROBE-DIRECTORY) IF-DOES-NOT-EXIST))
+	(WHEN OLD-FILE
+	  (SELECTQ IF-EXISTS
+	    (:RENAME
+	     (LMFS-RENAME-FILE OLD-FILE DIRECTORY
+			       (STRING-APPEND "_OLD_" NAME) TYPE ':NEWEST))
+	    (:RENAME-AND-DELETE 
+	     (LMFS-RENAME-FILE OLD-FILE DIRECTORY
+			       (STRING-APPEND "_OLD_" NAME) TYPE ':NEWEST)
+	     (LMFS-DELETE-FILE OLD-FILE NIL))))
+	;; Empty out the file, if supposed to.
+	(WHEN (EQ IF-EXISTS ':TRUNCATE)
+	  (LET ((NBLOCKS (MAP-NBLOCKS (FILE-MAP FILE))))
+	    (SETF (MAP-NBLOCKS (FILE-MAP FILE)) 0)
+	    ;; Write the directory showing the file empty.
+	    (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE))
+	    (SETF (MAP-NBLOCKS (FILE-MAP FILE)) NBLOCKS)
+	    ;; Then mark the blocks free.
+	    (USING-PUT
+	      (CHANGE-MAP-DISK-SPACE (FILE-MAP FILE)
+				     (IF (FILE-DELETED? FILE) PUT-RESERVED PUT-USED)
+				     PUT-FREE))
+	    (SETF (MAP-NBLOCKS (FILE-MAP FILE)) 0)))
+	(SELECTQ DIRECTION
+	  ((:PROBE :INPUT)
+	   (IF (EQ CHARACTERS ':DEFAULT)
+	       (SETQ CHARACTERS (FILE-ATTRIBUTE FILE ':CHARACTERS)))
+	   (COND ((NULL BYTE-SIZE)
+		  (SETQ BYTE-SIZE (IF CHARACTERS 8 16.)))
+		 ((EQ BYTE-SIZE ':DEFAULT)
+		  (SETQ BYTE-SIZE (FILE-DEFAULT-BYTE-SIZE FILE)))))
+	  (:OUTPUT
+	   (IF (MEMQ BYTE-SIZE '(:DEFAULT NIL))
+	       (SETQ BYTE-SIZE (IF CHARACTERS 8 16.)))
+	   (SETF (FILE-DEFAULT-BYTE-SIZE FILE) BYTE-SIZE)
+	   (SETF (FILE-ATTRIBUTE FILE ':CHARACTERS) CHARACTERS)
+	   (UNLESS PRESERVE-DATES
+	     (SETF (FILE-CREATION-DATE-INTERNAL FILE)
+		   (TIME:GET-UNIVERSAL-TIME)))
+	   (LMFS-CHANGE-FILE-PROPERTIES FILE INITIAL-PLIST)))
+	(IF (EQ DIRECTION ':PROBE-DIRECTORY)
+	    (MAKE-INSTANCE 'LM-PROBE-STREAM
+			   ':TRUENAME (SEND PATHNAME ':NEW-PATHNAME
+					    ':NAME NIL ':TYPE NIL ':VERSION NIL)
+			   ':PATHNAME PATHNAME)
+	  (MAKE-INSTANCE
+	    (SELECTQ DIRECTION
+	      (:INPUT (IF CHARACTERS 'LM-CHARACTER-INPUT-STREAM 'LM-INPUT-STREAM))
+	      (:OUTPUT (IF CHARACTERS 'LM-CHARACTER-OUTPUT-STREAM 'LM-OUTPUT-STREAM))
+	      ((:PROBE :PROBE-DIRECTORY) 'LM-PROBE-STREAM))
+	    ':FILE FILE
+	    ':APPEND (EQ IF-EXISTS ':APPEND)
+	    ':PATHNAME PATHNAME
+	    ':BYTE-SIZE BYTE-SIZE))))))
+
+(DEFUN LMFS-RENAME-FILE (FILE NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION)
+  (IF (EQ NEW-DIRECTORY ':UNSPECIFIC) (SETQ NEW-DIRECTORY '()))
+  (IF (MEMQ NEW-NAME '(NIL :UNSPECIFIC)) (SETQ NEW-NAME ""))
+  (IF (MEMQ NEW-TYPE '(NIL :UNSPECIFIC)) (SETQ NEW-TYPE ""))
+  (IF (MEMQ NEW-VERSION '(NIL :UNSPECIFIC)) (SETQ NEW-VERSION ':NEWEST))
+  (LET ((NEW-FILE (LOOKUP-FILE NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION
+			       ':CREATE ':NEW-VERSION NIL NIL))
+	(DIRECTORY (FILE-DIRECTORY FILE)))
+    (SETQ NEW-VERSION (FILE-VERSION NEW-FILE))
+    (UNWIND-PROTECT
+      (PROGN
+	(IF (AND (DIRECTORY? FILE)
+		 (NOT (AND (EQUAL NEW-TYPE LMFS-DIRECTORY-TYPE)
+			   (EQUAL NEW-VERSION LMFS-DIRECTORY-VERSION))))
+	    (LM-RENAME-ERROR 'RENAME-DIRECTORY-INVALID-TYPE
+			     NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION))
+	(IF (NOT (EQ (FILE-DIRECTORY NEW-FILE) DIRECTORY))
+	    (LM-RENAME-ERROR 'RENAME-ACROSS-DIRECTORIES
+			     NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION))
+	(IF (NOT (NULL (FILE-OVERWRITE-FILE NEW-FILE)))
+	    (LM-RENAME-ERROR 'RENAME-TO-EXISTING-FILE
+			     NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION))
+	(LOCKING (FILE-LOCK FILE)
+	  (WHEN (FILE-OVERWRITE-FILE FILE)
+	    ;; Old file was being superseded.
+	    ;; That is no longer so, though the output file is still there.
+	    (LET ((OUTFILE (FILE-OVERWRITE-FILE FILE)))
+	      (REPLACE-FILE-IN-DIRECTORY FILE OUTFILE)
+	      (SETF (FILE-OVERWRITE-FILE FILE) NIL)
+	      (SETF (FILE-OVERWRITE-FILE OUTFILE) NIL)
+	      (DECF (FILE-OPEN-COUNT FILE))))
+	  (ALTER-FILE FILE
+		      NAME NEW-NAME
+		      TYPE NEW-TYPE
+		      VERSION NEW-VERSION)
+	  (LOCKING-RECURSIVELY (DIRECTORY-LOCK DIRECTORY)
+	    (SETF (DIRECTORY-FILES DIRECTORY) (DELQ FILE (DIRECTORY-FILES DIRECTORY)))
+	    (RPLACA (MEMQ NEW-FILE (DIRECTORY-FILES DIRECTORY))
+		    FILE))
+	  (WRITE-DIRECTORY-FILES DIRECTORY)
+	  ;; Fake out the LMFS-EXPUNGE-FILE
+	  ;; to not get an error due to NEW-FILE not being in the directory.
+	  (SETF (FILE-OVERWRITE-FILE NEW-FILE) FILE)
+	  (INCF (FILE-OPEN-COUNT FILE))))
+      (LMFS-EXPUNGE-FILE NEW-FILE)
+      (WRITE-DIRECTORY-FILES (FILE-DIRECTORY NEW-FILE))))
+  (FILE-TRUENAME FILE))
+
+(DEFPROP LM-RENAME-ERROR T :ERROR-REPORTER)
+(DEFUN LM-RENAME-ERROR (SIGNAL-NAME NEW-DIRECTORY NEW-NAME NEW-TYPE NEW-VERSION)
+  (LM-SIGNAL-ERROR SIGNAL-NAME NIL NIL
+		   (MAKE-PATHNAME ':HOST "LM" ':DEVICE "DSK"
+				  ':DIRECTORY
+				  (COND ((STRINGP NEW-DIRECTORY) NEW-DIRECTORY)
+					((LISTP NEW-DIRECTORY) NEW-DIRECTORY)
+					(T
+					 (DIRECTORY-NAME NEW-DIRECTORY)))
+				  ':NAME NEW-NAME ':TYPE NEW-TYPE
+				  ':VERSION NEW-VERSION)))
+
+;;;; Property Lists
+
+(DEFUN LMFS-DIRECTORY-LIST (PATHNAME HOST DIRECTORY NAME TYPE VERSION OPTIONS
+			    &AUX FILES RESULT)
+  "Implements the :DIRECTORY-LIST message for pathnames."
+  (LET ((ERROR-P (NOT (MEMQ ':NOERROR OPTIONS)))
+	(FASTP (MEMQ ':FAST OPTIONS))
+	(DELETED? (MEMQ ':DELETED OPTIONS))
+	(DIRECTORIES-ONLY (MEMQ ':DIRECTORIES-ONLY OPTIONS))
+	(OLD-WHOSTATE (PROCESS-WHOSTATE CURRENT-PROCESS)))
+    (SETF (PROCESS-WHOSTATE CURRENT-PROCESS) "Directory")
+    (TV:WHO-LINE-PROCESS-CHANGE CURRENT-PROCESS)
+    (UNWIND-PROTECT
+      (HANDLING-ERRORS ERROR-P
+        (IDENTIFY-FILE-OPERATION ':DIRECTORY-LIST
+	  (CONS (IF (OR FASTP DIRECTORIES-ONLY)
+		    (LIST NIL)
+		    (LMFS-DIRECTORY-LIST-HEADER PATHNAME))
+		(IF DIRECTORIES-ONLY
+		    (LMFS-ALL-DIRECTORIES HOST ERROR-P)
+		    (SETQ FILES (LOOKUP-FILES DIRECTORY NAME TYPE VERSION DELETED?))
+		    (SETQ RESULT (MAKE-LIST (LENGTH FILES)))
+		    (DO ((F FILES (CDR F))
+			 (R RESULT (CDR R)))
+			((NULL F) RESULT)
+		      (SETF (CAR R)
+			    (IF FASTP
+				(LIST (FILE-TRUENAME (CAR F)))
+				(CONS (FILE-TRUENAME (CAR F))
+				      (LMFS-FILE-PROPERTIES (CAR F))))))))))
+      (PROGN (SETF (PROCESS-WHOSTATE CURRENT-PROCESS) OLD-WHOSTATE)
+	     (TV:WHO-LINE-PROCESS-CHANGE CURRENT-PROCESS)))))
+
+(DEFUN LMFS-ALL-DIRECTORIES (HOST ERROR-P)
+  (IDENTIFY-FILE-OPERATION ':ALL-DIRECTORIES
+    (HANDLING-ERRORS ERROR-P
+      (MAPCAR #'(LAMBDA (DIRECTORY)
+		  (LIST (MAKE-PATHNAME
+			  ':HOST HOST ':DEVICE "DSK"
+			  ':DIRECTORY (DIRECTORY-NAME DIRECTORY)
+			  ':NAME ':UNSPECIFIC ':TYPE ':UNSPECIFIC
+			  ':VERSION ':UNSPECIFIC)))
+	      (TOP-LEVEL-DIRECTORIES)))))
+
+(DEFVAR LM-UNSETTABLE-PROPERTIES
+	'(:LENGTH-IN-BLOCKS :LENGTH-IN-BYTES)
+  "Unsettable properties are those which are uniquely determined by the text of the file.")
+
+(DEFVAR LM-DEFAULT-SETTABLE-PROPERTIES
+	'(:AUTHOR :BYTE-SIZE :CREATION-DATE :DELETED :CHARACTERS
+	  :DONT-DELETE :DONT-REAP :NOT-BACKED-UP))
+
+(DEFUN LMFS-FILE-PROPERTIES (FILE &AUX DBS)
+  "Given a file, return a plist like a stream would want."
+  (LET ((PLIST (COPYLIST (FILE-PLIST FILE))))
+    (DOLIST (PROP '(:DONT-DELETE :DELETED :DONT-REAP :CHARACTERS :DIRECTORY))
+      (IF (FILE-ATTRIBUTE FILE PROP)
+	  (SETQ PLIST (LIST* PROP T PLIST))))
+    (IF (AND (NOT (FILE-ATTRIBUTE FILE ':CLOSED))
+	     (NOT (MEMQ ':DELETED PLIST)))
+	(SETQ PLIST (LIST* ':DELETED T PLIST)))
+    (IF (NOT (FILE-ATTRIBUTE FILE ':DUMPED))
+	(SETQ PLIST (LIST* ':NOT-BACKED-UP T PLIST)))	;Backasswardsness.
+    (LIST* ':BYTE-SIZE (SETQ DBS (OR (FILE-DEFAULT-BYTE-SIZE FILE) 8))
+	   ':LENGTH-IN-BLOCKS (FILE-NPAGES FILE)
+	   ':LENGTH-IN-BYTES (FLOOR (FILE-DATA-LENGTH FILE) DBS)
+	   ':AUTHOR (FILE-AUTHOR-INTERNAL FILE)
+	   ':CREATION-DATE (FILE-CREATION-DATE-INTERNAL FILE)
+	   PLIST)))
+
+(DEFUN LMFS-CHANGE-FILE-PROPERTIES (FILE PLIST)
+  (LOCKING (FILE-LOCK FILE)
+    (DO ((P PLIST (CDDR P)))
+	((NULL P)
+	 (IF (FILE-CLOSED? FILE)
+	     (WRITE-DIRECTORY-FILES (FILE-DIRECTORY FILE))))
+      (SELECTQ (CAR P)
+	(:DELETED
+	 (IF (NULL (CADR P))
+	     (LMFS-UNDELETE-FILE FILE)
+	     (LMFS-DELETE-FILE FILE)))
+	((:DONT-DELETE :DONT-REAP :CHARACTERS)
+	 (SETF (FILE-ATTRIBUTE FILE (CAR P)) (CADR P)))
+	(:NOT-BACKED-UP
+	 (SETF (FILE-ATTRIBUTE FILE ':DUMPED) (NOT (CADR P))))
+	(:BYTE-SIZE
+	 (SETF (FILE-DEFAULT-BYTE-SIZE FILE) (CADR P)))
+	(:AUTHOR
+	 (SETF (FILE-AUTHOR-INTERNAL FILE) (CADR P)))
+	(:CREATION-DATE
+	 (SETF (FILE-CREATION-DATE-INTERNAL FILE) (CADR P)))
+	(OTHERWISE
+	 (COND ((MEMQ (CAR P) LM-UNSETTABLE-PROPERTIES)
+		(LM-SIGNAL-ERROR 'UNSETTABLE-PROPERTY NIL NIL (CAR P)))
+	       ((NOT (SYMBOLP (CAR P)))
+		(LM-SIGNAL-ERROR 'INVALID-PROPERTY-NAME NIL NIL (CAR P)))
+	       ((GET (CAR P) 'ATTRIBUTE)
+		(FERROR NIL "CHANGE-FILE-PROPERTIES hasn't been updated to match the defined attributes."))
+	       (T (PUTPROP (LOCF (FILE-PLIST FILE)) (CADR P) (CAR P)))))))))
+
+(DEFUN LMFS-DIRECTORY-LIST-HEADER (PATHNAME)
+  `(NIL :DISK-SPACE-DESCRIPTION
+	,(LMFS-DISK-SPACE-DESCRIPTION (LOOKUP-DIRECTORY (PATHNAME-DIRECTORY PATHNAME)))
+	:SETTABLE-PROPERTIES ,LM-DEFAULT-SETTABLE-PROPERTIES
+	:PATHNAME ,PATHNAME))
+
+(DEFUN LMFS-DISK-SPACE-DESCRIPTION (&OPTIONAL DIRECTORY &AUX COMMA (BASE 10.) (*NOPOINT T))
+  (WITH-OUTPUT-TO-STRING (STREAM)
+    (LOOP FOR SYM IN '(PUT-FREE PUT-RESERVED PUT-USED PUT-UNUSABLE)
+	  FOR STRING IN '("Free=" "Reserved=" "Used=" "Unusable=")
+	  AS TEM = (AREF PUT-USAGE-ARRAY (SYMEVAL SYM))
+	  WHEN (PLUSP TEM)
+	    DO (AND COMMA (FUNCALL STREAM ':STRING-OUT ", "))
+	       (FUNCALL STREAM ':STRING-OUT STRING)
+	       (SI:PRINT-FIXNUM TEM STREAM)
+	       (SETQ COMMA T))
+    (COND (DIRECTORY	;If a directory is given, list pages used in that directory.
+	   (FORMAT STREAM " (~D page~:P used in ~A)"
+		   (+ (MAP-NPAGES (FILE-MAP DIRECTORY))
+		      (LOOP FOR FILE IN (READ-DIRECTORY-FILES DIRECTORY)
+			    SUM (MAP-NPAGES (FILE-MAP FILE))))
+		   (LM-NAMESTRING NIL NIL (DIRECTORY-FULL-NAME DIRECTORY) NIL NIL NIL))))))
+
+;;;; Completion
+
+(DEFUN LMFS-COMPLETE-PATH (DIR NAME TYPE DEFAULT-NAME DEFAULT-TYPE OPTIONS)
+  "Implements the :COMPLETE-STRING message for pathnames."
+  (%STORE-CONDITIONAL (LOCF DIR) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF NAME) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF TYPE) ':WILD "*")
+  (%STORE-CONDITIONAL (LOCF TYPE) ':UNSPECIFIC "")
+  (MULTIPLE-VALUE-BIND (NEW-DIR NEW-NAME NEW-TYPE NIL COMPLETION)
+      (COMPLETE-PATH DIR NAME TYPE)
+    (AND (EQUAL NEW-NAME "")
+	 (COND ((MEMQ ':WRITE OPTIONS)
+		(SETQ NEW-NAME DEFAULT-NAME)
+		(SETQ COMPLETION ':NEW))
+	       (T (SETQ NEW-NAME NIL))))
+    (AND (EQUAL NEW-TYPE "")
+	 (COND ((MEMQ ':WRITE OPTIONS)
+		(SETQ NEW-TYPE DEFAULT-TYPE)
+		(SETQ COMPLETION ':NEW))
+	       ((AND (LOOKUP-DIRECTORY NEW-DIR T)
+		     (LOOKUP-FILE NEW-DIR NEW-NAME DEFAULT-TYPE ':NEWEST NIL NIL NIL NIL))
+		(SETQ NEW-TYPE DEFAULT-TYPE)
+		(SETQ COMPLETION ':OLD))
+	       (T (SETQ NEW-TYPE NIL))))
+    (VALUES NEW-DIR NEW-NAME NEW-TYPE COMPLETION)))
+
+;;; Given a list of directory components, complete them all
+;;; and return a list of completed directory components.
+;;; Second value is non-nil if we added anything to what we were given.
+
+(DEFUN TRY-COMPLETE-DIRECTORY (DIRECTORY &AUX COMPLETION-SO-FAR)
+  (DO ((DIRLEFT DIRECTORY (CDR DIRLEFT)))
+      ((NULL DIRLEFT) (VALUES COMPLETION-SO-FAR T))
+    (LET* ((DIR-COMPONENT (CAR DIRLEFT))
+	   (COMPLETED-DIRECTORY
+	     (OR (LOOKUP-DIRECTORY (APPEND COMPLETION-SO-FAR (LIST DIR-COMPONENT)) T)
+		 (MULTIPLE-VALUE-BIND (TEM NIL DIRECTORY-COMPLETED)
+		     (ZWEI:COMPLETE-STRING DIR-COMPONENT
+					   (IF COMPLETION-SO-FAR
+					       (MAKE-SUBDIRECTORY-ALIST COMPLETION-SO-FAR)
+					     (MAKE-DIRECTORY-ALIST))
+					   '(#/-) T)
+		   (AND DIRECTORY-COMPLETED
+			(LOOKUP-DIRECTORY (APPEND COMPLETION-SO-FAR (LIST TEM))))))))
+      (IF COMPLETED-DIRECTORY
+	  (SETQ COMPLETION-SO-FAR
+		(APPEND COMPLETION-SO-FAR (LIST (DIRECTORY-NAME COMPLETED-DIRECTORY))))
+	(RETURN (APPEND COMPLETION-SO-FAR DIRLEFT)
+		(NOT (EQUAL (APPEND COMPLETION-SO-FAR DIRLEFT) DIRECTORY)))))))
+
+;;; Although directories can be completed, in practice it is not intuitive to do so.
+;;; Therefore, completion barfs if the directory cannot complete to *something* unique.
+
+(DEFUNP COMPLETE-PATH (DIRECTORY NAME TYPE &AUX TEM
+		       COMPLETED-DIRECTORY COMPLETED-NAME COMPLETED-TYPE
+		       NAME-COMPLETIONS TYPE-COMPLETIONS
+		       DIRECTORY-COMPLETED NAME-COMPLETED TYPE-COMPLETED
+		       (DEFAULT-CONS-AREA LOCAL-FILE-SYSTEM-AREA))
+  (DECLARE (RETURN-LIST DIRECTORY NAME TYPE GENERIC-COMPLETIONS MODE))
+  (COND ((CONSP DIRECTORY)
+	 (MULTIPLE-VALUE (TEM DIRECTORY-COMPLETED)
+	   (TRY-COMPLETE-DIRECTORY DIRECTORY))
+	 (OR (SETQ COMPLETED-DIRECTORY (LOOKUP-DIRECTORY TEM T))
+	     (RETURN TEM NAME TYPE NIL (AND DIRECTORY-COMPLETED ':NEW))))
+	((SETQ COMPLETED-DIRECTORY (LOOKUP-DIRECTORY DIRECTORY T)))
+	((PROGN
+	   (MULTIPLE-VALUE (TEM NIL DIRECTORY-COMPLETED)
+	     (ZWEI:COMPLETE-STRING DIRECTORY (MAKE-DIRECTORY-ALIST) '(#/-) T))
+	   (SETQ COMPLETED-DIRECTORY (LOOKUP-DIRECTORY TEM T))))
+	(T (RETURN TEM NAME TYPE NIL (AND DIRECTORY-COMPLETED ':NEW))))
+  (MULTIPLE-VALUE (COMPLETED-NAME NAME-COMPLETIONS NAME-COMPLETED)
+    (ZWEI:COMPLETE-STRING NAME (MAKE-FILE-NAME-ALIST COMPLETED-DIRECTORY) '(#/-)))
+  (IF (AND NAME-COMPLETIONS
+	   (EQUAL COMPLETED-NAME (CAAR NAME-COMPLETIONS))
+	   (EQUAL COMPLETED-NAME (CAAR (LAST NAME-COMPLETIONS))))
+      ;; Name determined uniquely: try to complete the type.
+      (MULTIPLE-VALUE (COMPLETED-TYPE TYPE-COMPLETIONS TYPE-COMPLETED)
+	(ZWEI:COMPLETE-STRING TYPE (MAKE-FILE-TYPE-ALIST NAME-COMPLETIONS) '(#/-)))
+    (SETQ COMPLETED-TYPE TYPE))
+  (VALUES (DIRECTORY-FULL-NAME COMPLETED-DIRECTORY) COMPLETED-NAME COMPLETED-TYPE
+	  (MAPCAR #'CDR TYPE-COMPLETIONS)
+	  (AND (OR DIRECTORY-COMPLETED NAME-COMPLETED TYPE-COMPLETED)
+	       (IF (AND (ASSOC COMPLETED-NAME NAME-COMPLETIONS)
+			(ASSOC COMPLETED-TYPE TYPE-COMPLETIONS))
+		   ':OLD ':NEW))))
+
+;;; The code here deals only with strings.
+;;; The pathname code is responsible for interpreting it correctly
+
+(DEFUN MAKE-DIRECTORY-ALIST ()
+  (LET* ((TOP-DIRECTORIES (TOP-LEVEL-DIRECTORIES))
+	 (LENGTH (LENGTH TOP-DIRECTORIES))
+	 (ARRAY (MAKE-ARRAY LENGTH ':TYPE 'ART-Q-LIST)))
+    (LOOP FOR D IN TOP-DIRECTORIES
+	  FOR I FROM 0
+	  DOING (ASET (CONS (DIRECTORY-NAME D) D) ARRAY I))
+    ARRAY))
+
+(DEFUN MAKE-SUBDIRECTORY-ALIST (DIRECTORY)
+  (SETQ DIRECTORY (LOOKUP-DIRECTORY DIRECTORY))
+  (LOCKING (DIRECTORY-LOCK DIRECTORY)
+    (LET* ((LENGTH (LENGTH (DIRECTORY-FILES DIRECTORY)))
+	   (ARRAY (MAKE-ARRAY LENGTH ':TYPE 'ART-Q-LIST ':LEADER-LENGTH 1)))
+      (STORE-ARRAY-LEADER 0 ARRAY 0)
+      (LOOP FOR F IN (DIRECTORY-FILES DIRECTORY) BY #'NEXT-GENERIC-FILE
+	    WHEN (FILE-ATTRIBUTE F ':DIRECTORY)
+	    DOING (ARRAY-PUSH ARRAY (CONS (FILE-NAME F) F)))
+      ARRAY)))
+
+(DEFUN MAKE-FILE-NAME-ALIST (DIRECTORY)
+  (LOCKING (DIRECTORY-LOCK DIRECTORY)
+    (LET* ((LENGTH (LENGTH (DIRECTORY-FILES DIRECTORY)))
+	   (ARRAY (MAKE-ARRAY LENGTH ':TYPE 'ART-Q-LIST ':LEADER-LENGTH 1)))
+      (STORE-ARRAY-LEADER 0 ARRAY 0)
+      (LOOP FOR F IN (DIRECTORY-FILES DIRECTORY) BY #'NEXT-GENERIC-FILE
+	    DOING (ARRAY-PUSH ARRAY (CONS (FILE-NAME F) F)))
+      ARRAY)))
+
+(DEFUN MAKE-FILE-TYPE-ALIST (FILE-NAME-ALIST)
+  (LOOP FOR ELEM IN FILE-NAME-ALIST
+	COLLECTING (CONS (FILE-TYPE (CDR ELEM)) (CDR ELEM))))
+
+(DEFUN NEXT-GENERIC-FILE (LIST)
+  (LET ((NAME (FILE-NAME (CAR LIST)))
+	(TYPE (FILE-TYPE (CAR LIST))))
+    (DO ((L (CDR LIST) (CDR L)))
+	((NULL L))
+      (IF (NOT (AND (STRING-EQUAL NAME (FILE-NAME (CAR L)))
+		    (STRING-EQUAL TYPE (FILE-TYPE (CAR L)))))
+	  (RETURN L)))))
+
+;;;; Debugging Code
+;;; This deserves a little reorganization...
+
+;;; "Peek"
+
+(DEFUN DEBUG ()
+  (REQUIRE-DISK-CONFIGURATION)
+  (FORMAT T "~&Disk Configuration, version ~D~%~%"
+	  (DC-VERSION))
+  (FORMAT T "Lock: ~S~% Psize: ~S~% PUT-Base: ~S~% PUT-Size: ~S~%~%"
+	  DISK-CONFIGURATION-LOCK
+	  (DC-PARTITION-SIZE)
+	  (DC-PUT-BASE)
+	  (DC-PUT-SIZE))
+  (FORMAT T "The PUT is ~:[unlocked~;locked by ~0G~S~] and is ~:[in~;~]consistent."
+	  PUT-LOCK
+	  (= (AREF PAGE-USAGE-TABLE 0) PUT-CONSISTENT))
+  (DBG-ROOM)
+  (IF (Y-OR-N-P "Would you like to examine the directory structure? ")
+      (DBG-EDIT))
+  (IF (Y-OR-N-P "Would you like to list the PUT? ")
+      (DBG-LIST-PUT)))
+
+(DEFUN DBG-ROOM ()
+  (FORMAT T "~&Free: ~D~%Reserved: ~D~%Used: ~D~%Unusable: ~D~%"
+	  (AREF PUT-USAGE-ARRAY 0)
+	  (AREF PUT-USAGE-ARRAY 1)
+	  (AREF PUT-USAGE-ARRAY 2)
+	  (AREF PUT-USAGE-ARRAY 3)))
+
+(DEFUN DBG-LIST-PUT (&AUX SALV)
+  (AND SALVAGER-TABLE
+       (PROGN (FORMAT T "~&Look at salvager table too? ")
+	      (Y-OR-N-P))
+       (SETQ SALV T))
+  (FORMAT T "~&Currently scanning at ~S~%" PUT-SCANNING-INDEX)
+  (DO ((I 1 (1+ I))
+       (BLOCK-START 1)
+       (CONTENTS (AREF PAGE-USAGE-TABLE 1))
+       (SALV-CONTENTS (AND SALV (AREF SALVAGER-TABLE 1))))
+      (NIL)
+    (COND ((OR ( I (DC-PARTITION-SIZE))
+	       ( (AREF PAGE-USAGE-TABLE I) CONTENTS)
+	       (AND SALV (NEQ (AREF SALVAGER-TABLE I) SALV-CONTENTS)))
+	   (IF (= BLOCK-START (1- I))
+	       (PRINC BLOCK-START)
+	     (FORMAT T "~S-~S" BLOCK-START (1- I)))
+	   (FORMAT T ": ~19T~[Unused~;Reserved~;Used~;Unusable~]" CONTENTS)
+	   (AND SALV SALV-CONTENTS
+		(FORMAT T "~30T(~A)"
+			(COND ((TYPEP SALV-CONTENTS 'DIRECTORY)
+			       (FORMAT NIL "Directory ~A" (DIRECTORY-NAME SALV-CONTENTS)))
+			      ((TYPEP SALV-CONTENTS 'FILE)
+			       (IF (DIRECTORY? SALV-CONTENTS)
+				   SALV-CONTENTS
+				   (FILE-TRUENAME SALV-CONTENTS)))
+			      (T SALV-CONTENTS))))
+	   (TERPRI)
+	   (AND ( I (DC-PARTITION-SIZE)) (RETURN))
+	   (SETQ CONTENTS (AREF PAGE-USAGE-TABLE I) BLOCK-START I)
+	   (AND SALV (SETQ SALV-CONTENTS (AREF SALVAGER-TABLE I)))))))
+
+(DEFUN DBG-EDIT ()
+  (LET ((DIRECTORY NIL)
+	(FILES NIL)
+	(NFILES NIL)
+	(NFILE NIL)
+	(CURRENT-FILE NIL))
+    (MULTIPLE-VALUE (DIRECTORY FILES NFILES NFILE)
+      (DBG-EXAMINE-SELECT-DIRECTORY (DC-ROOT-DIRECTORY) NIL))
+    (DO-FOREVER
+      (FORMAT T "~%~%~S~:[~;[Locked by ~1G~S]~]:" DIRECTORY (DIRECTORY-LOCK DIRECTORY))
+      (IF (NULL NFILE)
+	  (FORMAT T "No files.")
+	  (PROGN
+	    (SETQ CURRENT-FILE (NTH NFILE FILES))
+	    (FORMAT T "File #~D of ~D file~:[s~]." (1+ NFILE) NFILES (= NFILES 1))
+	    (DBG-EXAMINE-SHOW-FILE CURRENT-FILE)))
+      (FORMAT T "~%Command: ")
+      (SELECTQ (TYI)
+	((#/P #/p)
+	 (IF (ROOT-DIRECTORY? DIRECTORY)
+	     (FORMAT T "~%Already at root directory.")
+	     (MULTIPLE-VALUE (DIRECTORY FILES NFILES NFILE)
+	       (DBG-EXAMINE-SELECT-DIRECTORY (FILE-DIRECTORY DIRECTORY) DIRECTORY))))
+	((#/N #/n)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (DBG-REQUIRE-DIRECTORY CURRENT-FILE)
+	      (MULTIPLE-VALUE (DIRECTORY FILES NFILES NFILE)
+		(DBG-EXAMINE-SELECT-DIRECTORY CURRENT-FILE NIL))))
+	((#/F #/f)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (IF (= (SETQ NFILE (1+ NFILE)) NFILES)
+		  (SETQ NFILE 0))))
+	((#/B #/b)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (SETQ NFILE
+		    (1- (IF (= NFILE 0) NFILES NFILE)))))
+	((#/C #/c)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (SETF (FILE-CLOSED? CURRENT-FILE)
+		    (NOT (FILE-CLOSED? CURRENT-FILE)))))
+	((#/D #/d)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (SETF (FILE-DELETED? CURRENT-FILE)
+		    (NOT (FILE-DELETED? CURRENT-FILE)))))
+	((#/M #/m)
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (LET ((NEW-STATUS (DBG-NEW-STATUS-QUERY)))
+		(USING-PUT
+		  (SET-MAP-DISK-SPACE (FILE-MAP CURRENT-FILE) NEW-STATUS)))))
+	((#/W #/w)
+	 (WRITE-DIRECTORY-FILES DIRECTORY))
+	(#/+
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (INCF (FILE-OPEN-COUNT CURRENT-FILE))))
+	(#/-
+	 (AND (DBG-REQUIRE-CURRENT-FILE CURRENT-FILE)
+	      (DECF (FILE-OPEN-COUNT CURRENT-FILE))))
+	((#/Q #/q)
+	 (RETURN T))
+	((#/? #\HELP)
+	 (FORMAT T "~%Available commands:~
+~%P = up to the parent directory.~
+~%N = down to the currently selected subdirectory.~
+~%F = forward one file.~
+~%B = backward one file.~
+~%C = toggle the Closed bit.~
+~%D = toggle the Deleted bit.~
+~%M = modify the disk-space map.~
+~%+ = increment the Open count.~
+~%- = decrement the Open count.~
+~%W = write out the current directory.~
+~%Q = quit.~
+~%? = this stuff."))
+	(OTHERWISE
+	 (FORMAT T "~%Invalid."))))))
+
+(DEFUN DBG-REQUIRE-CURRENT-FILE (CURRENT-FILE)
+  (OR (NOT (NULL CURRENT-FILE))
+      (PROGN (FORMAT T "~%No current file.") NIL)))
+
+(DEFUN DBG-REQUIRE-DIRECTORY (FILE)
+  (OR (DIRECTORY? FILE)
+      (PROGN (FORMAT T "~%Current file not a directory.") NIL)))
+
+(DEFUN DBG-EXAMINE-SELECT-DIRECTORY (DIRECTORY CURRENT-FILE-OR-NIL)
+  (IF (AND (EQ (DIRECTORY-FILES DIRECTORY) ':DISK)
+	   (Y-OR-N-P "Directory not in core; read it in? "))
+      (READ-DIRECTORY-FILES DIRECTORY))
+  (LET ((FILES (DIRECTORY-FILES DIRECTORY)))
+    (IF (EQ FILES ':DISK) (SETQ FILES '()))
+    (LET ((NFILES (LENGTH FILES))
+	  (NFILE (IF (NULL CURRENT-FILE-OR-NIL)
+		     (AND FILES 0)
+		     (FIND-POSITION-IN-LIST CURRENT-FILE-OR-NIL FILES))))
+      (VALUES DIRECTORY FILES NFILES NFILE))))
+
+(DEFUN DBG-NEW-STATUS-QUERY ()
+  (FQUERY `(:CHOICES (((,PUT-USED "Used.") #/U #/u)
+		      ((,PUT-RESERVED "Reserved.") #/R #/r)
+		      ((,PUT-FREE "Free.") #/F #/f)
+		      ((,PUT-UNUSABLE "Bad.") #/B #/b)))
+	  "~%Select the new status: "))
+
+(DEFUN DBG-EXAMINE-SHOW-FILE (CURRENT-FILE &OPTIONAL (DEBUG-P T)
+			      &AUX FILE
+			      NAMESTRING SECONDS MINUTES HOURS DAY MONTH YEAR MAP TEM
+			      (DEFAULT-CONS-AREA LOCAL-FILE-SYSTEM-AREA))
+  (UNLESS (NULL CURRENT-FILE)
+    (SETQ FILE CURRENT-FILE)
+    (SETQ NAMESTRING
+	  (LM-NAMESTRING-FOR-DIRED (FILE-NAME FILE) (FILE-TYPE FILE) (FILE-VERSION FILE)))
+    (MULTIPLE-VALUE (SECONDS MINUTES HOURS DAY MONTH YEAR)
+      (TIME:DECODE-UNIVERSAL-TIME (FILE-CREATION-DATE-INTERNAL FILE)))
+    (FORMAT T "~%~24A ~3D ~6D(~2D) ~2,'0D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D ~A"
+	    NAMESTRING
+	    (MAP-NPAGES (SETQ MAP (FILE-MAP FILE)))
+	    (OR (AND (SETQ TEM (MAP-LENGTH MAP))
+		     (FLOOR TEM (FILE-DEFAULT-BYTE-SIZE FILE)))
+		"")
+	    (FILE-DEFAULT-BYTE-SIZE FILE)
+	    MONTH DAY YEAR HOURS MINUTES SECONDS
+	    (FILE-AUTHOR-INTERNAL FILE))
+    (RETURN-ARRAY (PROG1 NAMESTRING (SETQ NAMESTRING NIL)))
+    (COND (DEBUG-P
+	   (FORMAT T " {")
+	   (DO ((I 0 (1+ I))
+		(SPACE NIL))
+	       ((> I 16.))
+	     (COND ((LDB-TEST (1+ (* I 64.))
+			      (FILE-ATTRIBUTES FILE))
+		    (IF (NOT (NULL SPACE))
+			(FUNCALL STANDARD-OUTPUT ':TYO #\SP))
+		    (SEND STANDARD-OUTPUT ':STRING-OUT
+			  (GET-PNAME (AREF ATTRIBUTES I)))
+		    (SETQ SPACE T))))
+	   (FORMAT T "}")
+	   (TV:DOPLIST ((FILE-PLIST FILE) PROP IND)
+	     (FORMAT T "~%   ~A: ~d" IND PROP))
+	   (FORMAT T "~%   Open Count: ~D" (FILE-OPEN-COUNT FILE))
+	   (FORMAT T "~%   Overwriting: ~S" (FILE-OVERWRITE-FILE FILE))
+	   (FORMAT T "~%   Directory: ~S~%" (FILE-DIRECTORY FILE))
+	   (DESCRIBE-MAP (FILE-MAP FILE))))))
+
+;;; These functions are useful for editing the directory in-core.
+
+(DEFUN DIRECTORY-TREE-IN-CORE? ()
+  (DIRECTORY-SUBTREE-IN-CORE? (DC-ROOT-DIRECTORY)))
+
+(DEFUN DIRECTORY-SUBTREE-IN-CORE? (DIRECTORY)
+  (AND (NOT (EQ (DIRECTORY-FILES DIRECTORY) ':DISK))
+       (EVERY DIRECTORY
+	      #'(LAMBDA (FILE)
+		  (AND (DIRECTORY? FILE)
+		       (DIRECTORY-SUBTREE-IN-CORE? FILE))))))
+
+(DEFUN READ-FILE-SYSTEM-INTO-CORE ()
+  "Read the entire directory tree into core."
+  (READ-DIRECTORY-SUBTREE-INTO-CORE (DC-ROOT-DIRECTORY)))
+
+(DEFUN READ-DIRECTORY-SUBTREE-INTO-CORE (DIRECTORY)
+  (DOLIST (FILE (READ-DIRECTORY-FILES DIRECTORY))
+    (IF (DIRECTORY? FILE)
+	(READ-DIRECTORY-SUBTREE-INTO-CORE FILE))))
+
+(DEFUN WRITE-CORE-FILE-SYSTEM-ONTO-DISK ()
+  "Given a consistent directory tree in core, write the entire
+structure out to disk."
+  (SAVE-DIRECTORY-TREE ':SAVE-ALL))
+
+(DEFUN LMFS-LIST-DIRECTORIES (&REST DIRECTORIES)
+  (OR DIRECTORIES (SETQ DIRECTORIES (TOP-LEVEL-DIRECTORIES)))
+  (LOOP FOR DIRECTORY IN DIRECTORIES
+	AS LOOKUP = (LOOKUP-DIRECTORY DIRECTORY T)
+	WHEN LOOKUP DO (FORMAT T "~%~A" (DIRECTORY-NAME LOOKUP))
+	ELSE DO (FORMAT T "~%~A No Such Directory." DIRECTORY)))
+
+(DEFUN LMFS-LIST-FILES (&REST DIRECTORIES)
+  (COND ((BOUNDP 'DISK-CONFIGURATION)
+	 (OR DIRECTORIES (SETQ DIRECTORIES (TOP-LEVEL-DIRECTORIES)))
+	 (LOOP FOR DIRECTORY IN DIRECTORIES
+	       AS LOOKUP = (LOOKUP-DIRECTORY DIRECTORY T)
+	       WHEN LOOKUP DO (FORMAT T "~%~A:" (DIRECTORY-NAME LOOKUP))
+			      (DOLIST (FILE (DIRECTORY-FILES LOOKUP))
+				(DBG-EXAMINE-SHOW-FILE FILE NIL))
+			      (FORMAT T "~%~%")
+	       ELSE DO (FORMAT T "~%~A:  No Such Directory.~%~%" DIRECTORY)))
+	(T (FORMAT T "~%File system not mounted -- do (FS:BOOT-FILE-SYSTEM)"))))
+
+(DEFUN LMFS-CLOSE-ALL-FILES (&OPTIONAL (ABORTP ':ABORT))
+  (LOOP AS STREAM = (WITHOUT-INTERRUPTS (POP LM-FILE-STREAMS-LIST))
+	UNTIL (NULL STREAM)
+	DO (CATCH-ERROR (FUNCALL STREAM ':CLOSE ABORTP))))
+
+(ADD-INITIALIZATION "Boot File System" '(BOOT-FILE-SYSTEM) '(WARM))
+(ADD-INITIALIZATION "Dismount File System" '(DISMOUNT-FILE-SYSTEM) '(BEFORE-COLD))
+(ADD-INITIALIZATION "Dismount File System" '(DISMOUNT-FILE-SYSTEM) '(FULL-GC))
+
+;; Call this to remove all obsolete properties in a file system.
+
+;;;; ***** These are broken since the file system was redesigned *****
+
+(DEFUN REMOVE-OBSOLETE-PROPERTIES ()
+  (READ-FILE-SYSTEM-INTO-CORE)
+  (DOLIST (DIR (TOP-LEVEL-DIRECTORIES))
+    (DOLIST (FILE (DIRECTORY-FILES DIR))
+      (SETF (FILE-ATTRIBUTE FILE ':LISP) NIL)
+      (SETF (FILE-ATTRIBUTE FILE ':TEXT) NIL)
+      ;; Make an educated guess as to the :CHARACTERS status of the files.
+      (SETF (FILE-ATTRIBUTE FILE ':CHARACTERS) NIL)
+      (AND (= (FILE-DEFAULT-BYTE-SIZE FILE) 8)
+	   ;; Image files are not characters.
+	   (NOT (GET (LOCF (FILE-PLIST FILE)) ':NAME))
+	   (SETF (FILE-ATTRIBUTE FILE ':CHARACTERS) T))
+      (DOLIST (PROP '(:FONTS :PATCH-FILE :BASE :LOWERCASE :MODE :PACKAGE
+		      :COMPILE-DATA :QFASL-SOURCE-FILE-UNIQUE-ID))
+	(REMPROP (LOCF (FILE-PLIST FILE)) PROP))))
+  (WRITE-CORE-FILE-SYSTEM-ONTO-DISK))
+
+;; Call this to set up necessary properties without ruining old ones.
+(DEFUN SETUP-NECESSARY-PROPERTIES ()
+  (READ-FILE-SYSTEM-INTO-CORE)
+  (DOLIST (DIR (TOP-LEVEL-DIRECTORIES))
+    (DOLIST (FILE (DIRECTORY-FILES DIR))
+      ;; Make an educated guess as to the :CHARACTERS status of the files.
+      (SETF (FILE-ATTRIBUTE FILE ':CHARACTERS) NIL)
+      (AND (= (FILE-DEFAULT-BYTE-SIZE FILE) 8)
+	   ;; Image files are not characters.
+	   (NOT (GET (LOCF (FILE-PLIST FILE)) ':NAME))
+	   (SETF (FILE-ATTRIBUTE FILE ':CHARACTERS) T))))
+  (WRITE-CORE-FILE-SYSTEM-ONTO-DISK))
+
+;; Compression of file bands.
+;; This function copies one file band to another, optimally compressing
+;; as it goes.
+
+;;;; ******** Band operations are broken since the file system was redesigned ******
+
+(DEFUN LM-COPY-BAND (TO-BAND &OPTIONAL (TO-UNIT 0)
+			      &AUX TBASE TSIZE TSIZE-NECESSARY T-PUT-SIZE T-PUT-RQB T-PUT
+			      T-DC T-DC-DIRECTORIES T-DMM T-OUTPUT-CLOSURE T-PUA
+			      (WRITING-INTERNAL-STRUCTURES T))
+  (DECLARE (SPECIAL T-OUTPUT-STREAM T-OUTPUT-CLOSURE))
+  (BLOCK NIL
+    (UNWIND-PROTECT
+      (LOCKING DISK-CONFIGURATION-LOCK
+	(MULTIPLE-VALUE (TBASE TSIZE)
+	  (FIND-DISK-PARTITION-FOR-WRITE TO-BAND NIL TO-UNIT))
+	(SETQ TSIZE-NECESSARY (AREF PUT-USAGE-ARRAY PUT-USED))
+	(COND ((< TSIZE TSIZE-NECESSARY)
+	       (FERROR NIL "~A is too small.  Need at least ~D pages."
+		       TO-BAND TSIZE-NECESSARY))
+	      ((> (+ PUT-MINIMUM-FREE-PAGES TSIZE-NECESSARY) TSIZE)
+	       (FORMAT T "~%~A has only ~D pages to spare.  Compression may not work."
+		       TO-BAND (- TSIZE TSIZE-NECESSARY))
+	       (OR (Y-OR-N-P "Continue anyway? ")
+		   (RETURN NIL))))
+	;; Now fake up the new environment
+	(SETQ T-PUT-SIZE (QUOTIENT-CEILING (* 2 TSIZE) PAGE-SIZE-IN-BITS)
+	      T-PUT-RQB (GET-DISK-RQB T-PUT-SIZE)
+	      T-PUT (GET-RQB-ARRAY T-PUT-RQB 2)
+	      T-DC (MAKE-DISK-CONFIGURATION PARTITION-SIZE TSIZE)
+	      T-PUA (MAKE-ARRAY 4 ':TYPE 'ART-32B)
+	      T-OUTPUT-CLOSURE (LET-CLOSED ((PAGE-USAGE-TABLE T-PUT)
+					    (LM-PARTITION-BASE TBASE)
+					    (PUT-SCANNING-INDEX 0)
+					    (DISK-CONFIGURATION T-DC)
+					    (PUT-USAGE-ARRAY T-PUA))
+				 #'(LAMBDA (&REST REST)
+				     (APPLY T-OUTPUT-STREAM REST))))
+	(COPY-ARRAY-CONTENTS "" T-PUT)
+	(ASET (1- TSIZE) T-PUA PUT-FREE)
+	;; Reserve area for the configuration and PUT
+	(LOOP FOR I FROM 0 TO T-PUT-SIZE DO (ASET PUT-RESERVED T-PUT I))
+	;; Copy over the directories and cons up new core structure.
+	(SETQ T-DC-DIRECTORIES
+	      (LOOP FOR DIR IN (TOP-LEVEL-DIRECTORIES)
+		    DO (FORMAT T "~%Copying ~A" (DIRECTORY-NAME DIR))
+		    COLLECT (MAKE-DIRECTORY NAME (DIRECTORY-NAME DIR)
+					    FILES (LM-COPY-DIRECTORY-FILES DIR))))
+	(FORMAT T "~%Building the internal structures.")
+	;; Write the directories.
+	(DOLIST (DIR T-DC-DIRECTORIES)
+	  (LM-COPY-BAND-WRITE-DIRECTORY DIR))
+	;; Write the DMM.  Code duplicated from LM-WRITE-DMM
+	(PROG ((T-OUTPUT-STREAM (MAKE-MAP-STREAM-OUT)) DIRS)
+	      (DECLARE (SPECIAL T-OUTPUT-STREAM))
+	      (PUT-BYTES T-OUTPUT-CLOSURE 3 DMM-CHECK)
+	      (SETQ DIRS T-DC-DIRECTORIES)
+	   L  (OR DIRS (GO L1))
+	      (FUNCALL T-OUTPUT-CLOSURE ':LINE-OUT (DIRECTORY-NAME (CAR DIRS)))
+	      (MAP-WRITE T-OUTPUT-CLOSURE (FILE-MAP (CAR DIRS)))
+	      (SETQ DIRS (CDR DIRS))
+	      (GO L)
+	   L1 (CLOSE T-OUTPUT-CLOSURE)
+	      (SETQ T-DMM (FUNCALL T-OUTPUT-STREAM ':MAP)))
+	;; Write the configuration.  Code duplicated from LM-WRITE-CONFIGURATION.
+	(LET ((DISK-CONFIGURATION-BUFFER-POINTER 0)
+	      (VERSION (DC-VERSION))
+	      DISK-CONFIGURATION-RQB DISK-CONFIGURATION-BUFFER)
+	  (UNWIND-PROTECT
+	    (PROGN (SETQ DISK-CONFIGURATION-RQB (GET-DISK-RQB)
+			 DISK-CONFIGURATION-BUFFER (GET-RQB-ARRAY DISK-CONFIGURATION-RQB 8))
+		   (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 VERSION)
+		   (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 0)	; Obsolete
+		   (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 TSIZE)
+		   (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 1)
+		   (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 T-PUT-SIZE)
+		   (MAP-WRITE #'DISK-CONFIGURATION-STREAM T-DMM)
+		   (LET ((LM-PARTITION-BASE TBASE)
+			 (DISK-CONFIGURATION T-DC))
+		     (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)
+		     ;; Write the PUT.  First change all pages from reserved to used.
+		     (LOOP FOR I FROM 1 TO TSIZE
+			   WHEN (= (AREF T-PUT I) PUT-RESERVED)
+			   DO (ASET PUT-USED T-PUT I))
+		     (ASET PUT-CONSISTENT T-PUT 0)
+		     (LM-DISK-WRITE T-PUT-RQB 1)))
+	    (RETURN-DISK-RQB DISK-CONFIGURATION-RQB)))
+	(LET ((TEM (STRING-REVERSE-SEARCH-NOT-CHAR PUT-FREE T-PUT)))
+	  (FORMAT T "~%Partition ~A may be compressed to ~D (~D to be safe)."
+		  TO-BAND TEM (+ TEM PUT-MINIMUM-FREE-PAGES))))
+      ;; Unwind-Protect clauses
+      (RETURN-DISK-RQB T-PUT-RQB))))
+
+(DEFUN LM-COPY-DIRECTORY-FILES (DIR)
+  (LOOP FOR FILE IN (READ-DIRECTORY-FILES DIR)
+	WHEN (FILE-OVERWRITE-FILE FILE)
+	DO (SETQ FILE (FILE-OVERWRITE-FILE FILE))
+	COLLECT
+	(IF (AND (DIRECTORY? FILE)
+		 (FILE-CLOSED? FILE))
+	    (LET ((NEWFILE
+		    (MAKE-FILE NAME (FILE-NAME FILE)
+			       TYPE (FILE-TYPE FILE)
+			       FILES (LM-COPY-DIRECTORY-FILES FILE)
+			       VERSION (FILE-VERSION FILE)
+			       DEFAULT-BYTE-SIZE (FILE-DEFAULT-BYTE-SIZE FILE)
+			       AUTHOR-INTERNAL (FILE-AUTHOR-INTERNAL FILE)
+			       CREATION-DATE-INTERNAL (FILE-CREATION-DATE-INTERNAL FILE)
+			       MAP NIL
+			       ATTRIBUTES (FILE-ATTRIBUTES FILE)
+			       PLIST (FILE-PLIST FILE))))
+	      NEWFILE)
+	  (LET* ((MAP (FILE-MAP FILE))
+		 (STREAM (MAKE-MAP-STREAM-IN MAP))
+		 (T-OUTPUT-STREAM (MAKE-MAP-STREAM-OUT)))
+	    (DECLARE (SPECIAL T-OUTPUT-STREAM T-OUTPUT-CLOSURE))
+	    (STREAM-COPY-UNTIL-EOF STREAM T-OUTPUT-CLOSURE)
+	    (CLOSE STREAM)
+	    (CLOSE T-OUTPUT-CLOSURE)
+	    (MAKE-FILE NAME (FILE-NAME FILE)
+		       TYPE (FILE-TYPE FILE)
+		       VERSION (FILE-VERSION FILE)
+		       DEFAULT-BYTE-SIZE (FILE-DEFAULT-BYTE-SIZE FILE)
+		       AUTHOR-INTERNAL (FILE-AUTHOR-INTERNAL FILE)
+		       CREATION-DATE-INTERNAL (FILE-CREATION-DATE-INTERNAL FILE)
+		       MAP (FUNCALL T-OUTPUT-STREAM ':MAP)
+		       ATTRIBUTES (FILE-ATTRIBUTES FILE)
+		       PLIST (FILE-PLIST FILE))))))
+
+(DEFUN LM-COPY-BAND-WRITE-DIRECTORY (DIR)
+  (LET ((T-OUTPUT-STREAM (MAKE-MAP-STREAM-OUT)))
+    (DECLARE (SPECIAL T-OUTPUT-STREAM T-OUTPUT-CLOSURE))
+    ;; Code duplicated from LM-WRITE-DIRECTORY
+    (LOOP FOR FILE IN (DIRECTORY-FILES DIR)
+	  WHEN (FILE-OVERWRITE-FILE FILE)
+	  DO (SETQ FILE (FILE-OVERWRITE-FILE FILE))
+	  WHEN (FILE-CLOSED? FILE)
+	  DO (IF (DIRECTORY? FILE)
+		 (LOCKING (DIRECTORY-LOCK FILE)
+		   (LM-COPY-BAND-WRITE-DIRECTORY FILE)))
+	     (WRITE-DIRECTORY-ENTRY T-OUTPUT-CLOSURE FILE))
+    (CLOSE T-OUTPUT-CLOSURE)
+    (SETF (FILE-MAP DIR) (FUNCALL T-OUTPUT-STREAM ':MAP))))

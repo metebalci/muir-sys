@@ -1,0 +1,36 @@
+;-*- Mode:Lisp; Package:User; Lowercase:t -*-
+
+;Compare manual contents against what is on global package in machine
+;Note: Read LMMAN;.VARS > into Emacs, do mmKeep Lines-FUN |
+;      then mmReplace-FUN | | and write out to MOON;. .
+
+(defun foo ()
+  (load "MOON;. ." "global")
+  (let ((standard-output (open "MOON;. .." 'out)))
+    (mapatoms (function (lambda (x)
+		(cond ((get x 'global:just-value)
+		       (or (fboundp x)
+			   (format t "~%~S not fbound but in manual" x)))
+		      (t
+		       (and (fboundp x)
+			    (format t "~%~S fbound but not in manual" x))))))
+	      "global")
+    (close standard-output)))
+
+;Make indexes of global functions and variables
+(defun global-indices ()
+  (local-declare ((special fns vars))
+    (let ((fns nil) (vars nil))
+      (mapatoms #'(lambda (x) (and (fboundp x) (push x fns))
+			  (and (boundp x) (push x vars)))
+		"global")
+      (setq fns (sort fns #'string-lessp)
+	    vars (sort vars #'string-lessp))
+      (with-open-file (standard-output "ai:moon;. ." ':print)
+        (format standard-output "			FUNCTION INDEX~%")
+	(mapc 'print fns)
+	(terpri)
+	(funcall standard-output ':tyo #\form)
+	(format standard-output "			VARIABLE INDEX~%")
+	(mapc 'print vars))
+      nil)))
