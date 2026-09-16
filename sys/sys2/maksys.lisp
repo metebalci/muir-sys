@@ -481,7 +481,10 @@ LOADED-ONLY says ignore systems whose DEFSYSTEMs have not been executed."
 
 (DEFUN (:DEFAULTED-BATCH MAKE-SYSTEM-KEYWORD) (&AUX PATHNAME)
   (SETQ PATHNAME (OR (SYSTEM-WARNINGS-PATHNAME-DEFAULT *SYSTEM-BEING-MADE*)
-		     (SEND (FS:USER-HOMEDIR) ':NEW-PATHNAME ':NAME "CWARNS"
+		     (SEND (FS:USER-HOMEDIR) ':NEW-PATHNAME
+			   ;; name it after the system; a shared CWARNS had two
+			   ;; systems writing over each other's warnings.
+			   ':NAME (STRING-APPEND (SYSTEM-NAME *SYSTEM-BEING-MADE*) "-CWARNS")
 			   				    ':TYPE ':LISP
 							    ':VERSION ':NEWEST)))
   (SETQ INHIBIT-FDEFINE-WARNINGS ':JUST-WARN
@@ -498,7 +501,10 @@ LOADED-ONLY says ignore systems whose DEFSYSTEMs have not been executed."
 
 (DEFUN (:BATCH MAKE-SYSTEM-KEYWORD) (&AUX PATHNAME)
   (SETQ PATHNAME (OR (SYSTEM-WARNINGS-PATHNAME-DEFAULT *SYSTEM-BEING-MADE*)
-		     (SEND (FS:USER-HOMEDIR) ':NEW-PATHNAME ':NAME "CWARNS"
+		     (SEND (FS:USER-HOMEDIR) ':NEW-PATHNAME
+			   ;; name it after the system; a shared CWARNS had two
+			   ;; systems writing over each other's warnings.
+			   ':NAME (STRING-APPEND (SYSTEM-NAME *SYSTEM-BEING-MADE*) "-CWARNS")
 			   				    ':TYPE ':LISP
 							    ':VERSION ':NEWEST)))
   (FORMAT *QUERY-IO* "~&Write compiler warnings data base to file: (default ~A) " PATHNAME)

@@ -957,7 +957,10 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST SIZE-OF-HARDWARE-CONTROL-MEMORY   40000)
 (DEFCONST SIZE-OF-HARDWARE-DISPATCH-MEMORY  4000)
 (DEFCONST SIZE-OF-HARDWARE-A-MEMORY         2000)
-(DEFCONST SIZE-OF-HARDWARE-M-MEMORY         #+cadr 40 #+lambda 100 #+explorer 100)
+;;; the CADR's size only.  The three conditionals gave DEFCONST more than
+;;; one value form on a machine matching more than one feature, and this system is for
+;;; the CADR alone.
+(DEFCONST SIZE-OF-HARDWARE-M-MEMORY         40)
 (DEFCONST SIZE-OF-HARDWARE-PDL-BUFFER       2000)
 (DEFCONST SIZE-OF-HARDWARE-MICRO-STACK        40)
 (DEFCONST SIZE-OF-HARDWARE-LEVEL-1-MAP      4000)

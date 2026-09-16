@@ -34,18 +34,20 @@
        (cli:aref ,sequence (prog1 ,indexvar (incf ,indexvar)))
        (pop ,indexvar)))
 
-;;>> I'm allowed to write kludges like this. You're not.
+;;; a LET rather than %PUSH and %POP on the PDL buffer.  The old form
+;;; relied on the lambda optimization firing; where it does not, the pushes and
+;;; pops do not pair.
 (defmacro key-fetch (key sequence indexvar)
-  `(progn (%push (if (fixnump ,indexvar)	;isn't lambda optimization a wonderful thing?
-		     (cli:aref ,sequence ,indexvar)
-		     (car ,indexvar)))
-	  (if ,key (funcall ,key (%pop)) (%pop))))
+  `(let ((tem (if (fixnump ,indexvar)
+		  (cli:aref ,sequence ,indexvar)
+		  (car ,indexvar))))
+     (if ,key (funcall ,key tem) tem)))
 
 (defmacro key-fetch-inc (key sequence indexvar)
-  `(progn (%push (if (fixnump ,indexvar)
-		     (cli:aref ,sequence (prog1 ,indexvar (incf ,indexvar)))
-		     (pop ,indexvar)))
-	  (if ,key (funcall ,key (%pop)) (%pop))))
+  `(let ((tem (if (fixnump ,indexvar)
+		  (cli:aref ,sequence (prog1 ,indexvar (incf ,indexvar)))
+		  (pop ,indexvar))))
+     (if ,key (funcall ,key tem) tem)))
 
 (defmacro seq-store (sequence indexvar value)
   `(if (fixnump ,indexvar)

@@ -34,7 +34,8 @@
 		)
   "Don't analyze the values of these symbols.")
 
-(defconst analyze-area (make-area :name 'debug-inf-area :representation :structure
+;;; DEFVAR, so that reloading this file does not run MAKE-AREA again.
+(defvar analyze-area (make-area :name 'debug-inf-area :representation :structure
 				  :region-size #o100000))
 
 (set-swap-recommendations-of-area analyze-area 6)

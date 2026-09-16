@@ -320,7 +320,10 @@ remaining methods.  Calls on LEXPR-FUNCALL to do its dirty work."
 		    :LEADER-LIST '(0 NIL)))
 
 (ADD-INITIALIZATION "Condense Flavor Name Tables"
-		    '(PROGN (ZWEI:SORT-COMPLETION-AARRAY *ALL-FLAVOR-NAMES-AARRAY*)
+		    ;; a band without ZWEI has no SORT-COMPLETION-AARRAY, and this
+		    ;; initialization ran before anything could load it.
+		    '(PROGN (WHEN (FBOUNDP 'ZWEI:SORT-COMPLETION-AARRAY)
+			      (ZWEI:SORT-COMPLETION-AARRAY *ALL-FLAVOR-NAMES-AARRAY*))
 			    (IF (= (%P-CDR-CODE *ALL-FLAVOR-NAMES*) CDR-NORMAL)
 				(SETQ *ALL-FLAVOR-NAMES* (COPYLIST *ALL-FLAVOR-NAMES*))))
 		    '(:BEFORE-COLD))
