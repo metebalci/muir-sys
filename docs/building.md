@@ -86,6 +86,26 @@ So either give the server a writable home directory for the user, or ask for
 - **Two generated files are needed and not carried:** `SYS: SYS; UCINIT QFASL` (above) and `SYS: DEMO; WORMCH QFASL`, which the HACKS system loads and whose source, `demo/wormch.ast`, has no build rule yet. Both came from the release. At an error prompt, RESUME retries once the file is there; muir maps RESUME to F5.
 - **Answer the "additional systems to load" question with `()`.** In this base ZWEI and the rest are components of System and are already loaded.
 
+### Moving the new band to the site's own subnet
+
+The bootstrap ran on subnet 6 because the stock band could not route the site's
+subnet. The band it builds can, so the last step moves it:
+
+1. **Serve the site's real files** as `SYS: SITE;`, still at the bootstrap
+   addresses, and compile them with the new band:
+   `(make-system 'site :compile :noload :noconfirm :nowarn)`.
+2. **Load them**, the host table last, since it redefines OZ's address:
+   `(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: SITE; SITE QFASL") (load "SYS: SITE; LMLOCS QFASL") (load "SYS: SITE; HSTTBL QFASL"))`.
+   `(chaos:address-parse "OZ")` then answers the site's address.
+3. **Save to a partition the running world is not paging from**, such as LOD4:
+   `(si:disk-save "LOD4" t)`. The machine reboots into it at its old address,
+   finds no time server, and asks for the date; that is expected.
+4. **Stop the machine, make that partition current**, and restart the file
+   server and the machine at the site's addresses. On this site the new band
+   asked OZ at 177201 for the time within three seconds of booting at 177202,
+   and answered `(1000 "177202" 65153 256)` for its version, its address, OZ's
+   address and the size of its routing table.
+
 ## The stages
 
 A world cannot be built from nothing, so each stage runs on the one before.
