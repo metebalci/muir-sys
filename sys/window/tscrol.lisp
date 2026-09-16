@@ -235,7 +235,8 @@
   (IF (SIXTH LIST)
       (SEND SELF :SET-ITEM-GENERATOR (SIXTH LIST))
     (LET ((ARRAY (OR ITEMS (MAKE-ARRAY (LENGTH (THIRD LIST)) :FILL-POINTER 0))))
-      (DOLIST (L LIST) (VECTOR-PUSH-EXTEND L ARRAY))
+      ;; the items are the third element of the spec, not the spec itself.
+      (DOLIST (L (THIRD LIST)) (VECTOR-PUSH-EXTEND L ARRAY))
       (SEND SELF :SET-ITEMS ARRAY)))
   LIST)
 
