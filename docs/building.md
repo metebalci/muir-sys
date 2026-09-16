@@ -196,6 +196,22 @@ The cold load greets with "Lisp Machine cold load environment, beware!" (`sys/lt
 
 **Boot it cold.** muir-fpga measured that a warm boot of a System 304 band halts in the microcode about 20 milliseconds in, while a cold boot is clean. This has not been checked here. Restarting muir is a cold boot. A cold boot clears the screen only after the band has been read, about a minute in.
 
+### One generated file QLD needs
+
+`SYS: SYS; UCINIT QFASL` is not source and is not carried here: the micro
+assembler writes it (`sys/mlap.lisp:553`, `MA-WRITE-MCLAP-PROPS`), as it writes
+everything in `ubin/`. But `QLD` loads it while making System, after the
+compiler and `COLD; DEFMIC` and `DOCMIC`, and stops with
+
+```
+>>ERROR: File not found for SYS: SYS; UCINIT QFASL
+```
+
+if it is absent. So a fresh clone cannot finish a `QLD` until the microcode has
+been assembled once, or the file is taken from a release. Assembling the
+microcode is the honest answer and is not done here yet; until then the file
+comes from the System 100 release, whose copy is 2,844 bytes.
+
 ## 6. Load the rest
 
 At the cold load's console:
