@@ -2,7 +2,7 @@
 
 This is how a new world is built from the tree: compile the sources, make a cold load, boot it, load the rest of the system and save a band. It follows the tree's own code, and each claim cites a file and line.
 
-**Status:** verified end to end on the System 100 base on 2026-09-16. Bootstrapped from LM-3's `system-100-0` pack, SYSTEM compiled in 2 h 11 min, `MAKE-COLD` built a cold load in five minutes, `QLD` loaded the world to "Experimental System version 1000. loaded" and a partition size of 20913 blocks, and `(si:disk-save "LOD5" t)` wrote a band that boots to "LMI System, band 5 ... Experimental System 1000.0" and answers `(3 1000 256)` to `(list (+ 1 2) (si:get-system-version "System") chaos:routing-table-size)` over TELNET.
+**Status:** verified end to end twice on 2026-09-16. First from a stock System 100 band on the bootstrap subnet; then, the same night, by the 1000 band rebuilding the final tree on the site's own subnet 376, from a tree with every compiled file removed. That second build compiled SYSTEM, made a cold load, loaded it with `QLD` to a partition size of 20842 blocks, and saved a band that boots as "LMI System, band 1 of LISPM-1 / Experimental System 1000 / Microcode 323" and answers `(1000 "177202" 65153 256)`.
 
 | Step | Result |
 |---|---|
@@ -105,6 +105,28 @@ subnet. The band it builds can, so the last step moves it:
    asked OZ at 177201 for the time within three seconds of booting at 177202,
    and answered `(1000 "177202" 65153 256)` for its version, its address, OZ's
    address and the size of its routing table.
+
+### What the self-hosted rebuild added
+
+- **Compile the readtables even when nothing else seems to need them.** `MAKE-COLD` reads `SYS: IO; RDTBL QFASL` and `CRDTBL QFASL`, which `si:rtc-file` makes and `MAKE-SYSTEM` does not; with compiled output cleared, the cold load stops at "File not found" for them.
+- **Nothing else may log in while a build runs.** A Lisp Machine has one user, and `LOGIN` logs out first, closing every file connection; a second TELNET session's login killed a SYSTEM compile mid-write.
+- **A long compile can exhaust the band.** Near the end of SYSTEM, in the demos, the machine halted in `TRAP`'s recursive-error check. A reboot and `(make-system 'system :compile :noload :noconfirm :nowarn :no-increment-patch)` finished the rest, compiling only what was missing. Reboot again before `MAKE-COLD`, which also needs room.
+
+### Writing a release pack
+
+A release pack has muir's default layout and only the microcode and the band loaded (`diskpack`, muir `daefb0c` or later):
+
+```
+initialize                               2 MCR, PAGE, 4 LOD of 49419 blocks
+name LISPM-1
+comment 1000
+load-from MCR1 <build pack> MCR1         the microcode the band was verified with
+modify MCR1 keep UCADR 323
+load-from LOD1 <build pack> LOD5         the saved band
+modify LOD1 keep Exp 1000
+```
+
+`load-from` copies blocks, not partition comments, hence the two `modify` steps. Take the release's checksum from a pack that has never been booted: a running machine writes its own pack.
 
 ## The stages
 
