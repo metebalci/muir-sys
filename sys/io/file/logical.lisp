@@ -243,7 +243,10 @@ Otherwise, ACTUAL-PATHNAME is returned."
 (DEFMETHOD (LOGICAL-HOST :SYSTEM-TYPE) ()
   :LOGICAL)
 
-;;;---!!! Is (LOGICAL-HOST :HOST) still used anywhere?
+;;; the bring-up asked whether (LOGICAL-HOST :HOST) is still used.  Nothing
+;;; in the tree sends it, and on a running 1000.0 band an instrumented copy was
+;;; never reached by probing, translating, listing and reading through SYS:.  It
+;;; is kept as the old name for :PHYSICAL-HOST, for code outside the tree.
 ;;; old name
 (defmethod (logical-host :host) () physical-host)
 

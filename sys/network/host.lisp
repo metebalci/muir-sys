@@ -141,12 +141,14 @@ is the one for the /"source file/" of that type.")
   PHYSICAL-HOST PHYSICAL-DEVICE PHYSICAL-DIRECTORY
   NIL)
 
-;;;---!!! Are the followin actually methods used still?
-;;;---!!!    (BASIC-HOST :DEFAULT :DEFAULT-DEVICE)
-;;;---!!!    (BASIC-HOST :ENABLE-CAPABILITIES)
-;;;---!!!    (BASIC-HOST :DISABLE-CAPABILITIES)
+;;; the bring-up asked whether these are still used.  :PRIMARY-DEVICE is:
+;;; HOST-TOPS20-MIXIN sends it (:371) and the other mixins answer it, so this is
+;;; the default for hosts that do not.  :ENABLE-CAPABILITIES and
+;;; :DISABLE-CAPABILITIES are too: FS:ENABLE-CAPABILITIES and
+;;; FS:DISABLE-CAPABILITIES send them to a host (IO; FILE; OPEN:1698, :1705), so
+;;; a host with no capabilities must still answer.  :DEFAULT-DEVICE was not:
+;;; nothing in the tree sends it, so its method is gone.
 
-(DEFMETHOD (BASIC-HOST :DEFAULT :DEFAULT-DEVICE) () :UNSPECIFIC)
 (DEFMETHOD (BASIC-HOST :DEFAULT :PRIMARY-DEVICE) () :UNSPECIFIC)
 (DEFMETHOD (BASIC-HOST :ENABLE-CAPABILITIES) (&REST IGNORE) NIL)
 (DEFMETHOD (BASIC-HOST :DISABLE-CAPABILITIES) (&REST IGNORE) NIL)
