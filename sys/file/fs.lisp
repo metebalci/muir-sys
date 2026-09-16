@@ -10,7 +10,7 @@
   (:NAME "Local-File")
   (:SHORT-NAME "FS")
   (:PATHNAME-DEFAULT "SYS: FILE;")
-  (:PATCHABLE NIL "FS")
+  ;; not patchable.  This system makes releases, never patches; only System keeps a patch directory, for its release number.
   (:NOT-IN-DISK-LABEL)
   (:PACKAGE FILE-SYSTEM)
   (:MODULE DEFS "FSDEFS")
@@ -41,7 +41,7 @@
   (:NAME "FILE-Server")
   (:NICKNAMES "Server")
   (:PATHNAME-DEFAULT "SYS: FILE;")
-  (:PATCHABLE NIL "Server")
+  ;; not patchable.  This system makes releases, never patches; only System keeps a patch directory, for its release number.
   (:NOT-IN-DISK-LABEL)
   (:PACKAGE FILE-SYSTEM)
   (:COMPILE-LOAD ("SERVER")))

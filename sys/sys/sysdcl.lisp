@@ -367,8 +367,8 @@
 (DEFSYSTEM CADR
   (:NAME "CADR")
   (:PATHNAME-DEFAULT "SYS:CC;")
-  (:PATCHABLE "SYS: PATCH;")
-  (:INITIAL-STATUS :RELEASED)
+  ;; not patchable.  This system makes releases, never patches; only System keeps a patch directory, for its release number.
+  ;; :INITIAL-STATUS goes too; it signals an error on a system that is not patchable.
   (:NOT-IN-DISK-LABEL)
   (:PACKAGE CADR)
   (:COMPONENT-SYSTEMS CADR-MICRO-ASSEMBLER CADR-DEBUGGER))
@@ -418,7 +418,7 @@
   (:NAME "ZMail")
   (:PATHNAME-DEFAULT "SYS: ZMAIL;")
   (:SHORT-NAME "ZM")
-  (:PATCHABLE "SYS: PATCH;")
+  ;; not patchable.  This system makes releases, never patches; only System keeps a patch directory, for its release number.
   (:NOT-IN-DISK-LABEL)
   (:PACKAGE ZWEI)
   (:MODULE DEFS "DEFS")
