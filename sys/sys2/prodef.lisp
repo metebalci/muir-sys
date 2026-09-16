@@ -19,7 +19,13 @@
 (DEFVAR INHIBIT-SCHEDULING-FLAG :UNBOUND "Non-NIL inhibits clock and process-switching")
 (DEFVAR CLOCK-FUNCTION-LIST NIL)	;At clock time, each element is funcalled on the
 					; number of 60ths that have elapsed recently.
-(DEFVAR SCHEDULER-STACK-GROUP)		;The stack group in which the scheduler runs.
+;;; declared NIL rather than unbound.  A cold load runs with traps
+;;; disabled until the macrocode turns them on (UCADR; UC-COLD-DISK:651), and
+;;; PROCESS-WAIT reads this variable while deciding how to wait (SYS; LTOP:841).
+;;; Read unbound in that window, it traps, TRAP becomes ILLOP (UCADR;
+;;; UC-INTERRUPT:9) and the machine halts with nothing printed.
+;;; PROCESS-INITIALIZE still sets the real stack group (SYS2; PROCES:1068).
+(DEFVAR SCHEDULER-STACK-GROUP NIL)	;The stack group in which the scheduler runs.
 (DEFVAR SCHEDULER-EXISTS NIL)		;T if the scheduler and processes are set up.
 (DEFVAR INHIBIT-IDLE-SCAVENGING-FLAG NIL) ;If NIL scavenger runs when no processes runnable
 (DEFVAR GC-IDLE-SCAVENGE-QUANTUM 10.)	;Argument to %GC-SCAVENGE used in that case
