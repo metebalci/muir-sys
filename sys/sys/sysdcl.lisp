@@ -29,7 +29,7 @@
 		      FED
 		      COLOR
 		      EH
-		      PRESS
+;;;		      PRESS		;not carried: a Xerox Dover printer
 		      MATH
 		      HACKS
 		      METER
@@ -168,17 +168,22 @@
   (:PACKAGE SUPDUP)
   (:COMPILE-LOAD ("SYS: WINDOW; SUPDUP")))
 
-(DEFSYSTEM PRESS
-  (:PACKAGE PRESS)
-  (:PATHNAME-DEFAULT "SYS: IO1;")
-  (:MODULE RFONTW "RFONTW")
-  (:MODULE PRESS "PRESS")
-  (:MODULE FONTW "PRESS-FONTS; FONTS WIDTHS >")
-  (:COMPILE-LOAD RFONTW)
-  (:COMPILE-LOAD PRESS)
-;;;---!!! How is PRESS-FONTS; FONTS WIDTHS generated?
-;;;---!!!  (:LOAD-FONTS-WIDTHS FONTW (:FASLOAD RFONTW))
-  )
+;;; the PRESS system is not carried.  It printed to a Xerox Dover over
+;;; EFTP, hardware nobody here has, and io1/press.lisp and io1/rfontw.lisp
+;;; are gone.  That also answers the ;;;---!!! question below, which asked
+;;; how a font-widths file for that printer was made.  Call sites elsewhere
+;;; still name the PRESS package; see metebalci/muir-sys#14.
+;(DEFSYSTEM PRESS
+;  (:PACKAGE PRESS)
+;  (:PATHNAME-DEFAULT "SYS: IO1;")
+;  (:MODULE RFONTW "RFONTW")
+;  (:MODULE PRESS "PRESS")
+;  (:MODULE FONTW "PRESS-FONTS; FONTS WIDTHS >")
+;  (:COMPILE-LOAD RFONTW)
+;  (:COMPILE-LOAD PRESS)
+;;;;---!!! How is PRESS-FONTS; FONTS WIDTHS generated?
+;;;;---!!!  (:LOAD-FONTS-WIDTHS FONTW (:FASLOAD RFONTW))
+;  )
 
 (DEFSYSTEM FORMAT
   (:PACKAGE FORMAT)
