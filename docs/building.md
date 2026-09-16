@@ -13,6 +13,53 @@ This is how a new world is built from the tree: compile the sources, make a cold
 | Size of the finished world | 20614 blocks |
 | Saved band | LOD5, "Exp 1000.0", boots and answers |
 
+## Bootstrapping on the System 100 base
+
+This tree is System 100's, and a world of the same lineage is the right thing
+to compile it with. LM-3 publishes one: the `system-100-0` release, a pack
+image with a checksum, whose band is "Exp 100.0" on LOD2 with microcode 323 in
+MCR1. Fetch it, copy it somewhere of your own --- a file service pointed at a
+fetched tree will write into it --- and boot that.
+
+**Chaos addresses.** That band's routing table holds 96 subnets
+(`network/chaos/chsncp.lisp`, before the change here), so it cannot run on subnet
+376 or any subnet from 96 up: it traps as the network starts. Bootstrap on
+subnet 6, where the release's own host table already expects a file host at
+`3060` and a Lisp Machine at `3050`. Run the server as OZ at 3060 and the
+machine at 3050, and the stock band knows OZ without a site edit. The band this system
+builds has the larger table and can then move to 376.
+
+**Pointing it at the tree.** No site file is needed to compile, only the
+translations, which can be typed:
+
+```lisp
+(login "LISPM" "OZ" t)
+(fs:set-logical-pathname-host "SYS" :physical-host "OZ"
+  :translations '(("SITE;" "//site//") ("*; *; *;" "//sys//*//*//*//")
+                  ("*; *;" "//sys//*//*//") ("*;" "//sys//*//")))
+```
+
+Every slash is doubled because the TELNET listener reads traditional syntax.
+
+**There is no SYSTEM-MACROS here.** That system is a System 30x addition; this
+base does not define it, and asking for it gets "LOAD could not find any file
+related to SYS: SITE; SYSTEM-MACROS SYSTEM". The job it did --- compiling
+SYSTEM's definition files before anything tries to load them --- is done by
+hand instead, in the order SYSTEM's own ALLDEFS module lists them
+(`sys/sysdcl.lisp:10-16`):
+
+```lisp
+(qc-file "SYS: SYS2; DEFMAC LISP")   (qc-file "SYS: SYS2; STRUCT LISP")
+(qc-file "SYS: SYS2; LMMAC LISP")    (qc-file "SYS: SYS2; SETF LISP")
+(qc-file "SYS: EH; ERRMAC LISP")     (qc-file "SYS: SYS; TYPES LISP")
+```
+
+**Then the systems**, with the version left where it is:
+
+```lisp
+(make-system 'system :recompile :noload :noconfirm :defaulted-batch :no-increment-patch)
+```
+
 ## The stages
 
 A world cannot be built from nothing, so each stage runs on the one before.
