@@ -167,8 +167,10 @@ Sent: pkt <n>, ack for pkt <n>, <n> queued
 							(CAR PEEK-CHAOS-HOST)))
 					      (RPLACD PEEK-CHAOS-HOST
 						      (FORMAT NIL "~@[~A ~](~O), "
-							      (SI:GET-HOST-FROM-ADDRESS
-								(CAR PEEK-CHAOS-HOST) ':CHAOS)
+							      ;; address 0 is nobody's; ~@[ prints nothing for NIL.
+							      (UNLESS (ZEROP (CAR PEEK-CHAOS-HOST))
+								(SI:GET-HOST-FROM-ADDRESS
+								  (CAR PEEK-CHAOS-HOST) ':CHAOS))
 							      (CAR PEEK-CHAOS-HOST))))
 					 (CDR PEEK-CHAOS-HOST)))
 		 (,CONN) NIL))))

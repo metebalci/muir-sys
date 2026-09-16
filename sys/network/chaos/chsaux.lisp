@@ -171,7 +171,8 @@ IGNORE-STATES is either NIL or a list of states for which nothing is printed if 
 		    ;; Delete not only this connection, but every one to this same host, in
 		    ;; case it has multiple addresses.  One copy of the answer is enough, but
 		    ;; if it fails we would like to see all paths.
-		    (SETQ PUNT 'HOST))
+		    ;; with no host, HOSTAT waited for an answer that cannot come.
+		    (WHEN HOST (SETQ PUNT 'HOST)))
 		  (CLS-RECEIVED-STATE
 		    (UNWIND-PROTECT
 			(PROGN (SETQ PKT (GET-NEXT-PKT CONN))
@@ -1493,7 +1494,8 @@ If you want to quit, hit the ~:@C key, to end your message hit the ~:@C key."
 ;;;; Host table frobs
 
 (DEFUN GENERATE-HOST-TABLE (&OPTIONAL INPUT-FILE)
-  (LET ((DEFAULT-INPUT-FILE "SYS: CHAOS; HOSTS TEXT >")
+  ;; the host table is a site file, and lives in SYS: SITE;.
+  (LET ((DEFAULT-INPUT-FILE "SYS: SITE; HOSTS TEXT >")
 	(SI:*FORCE-PACKAGE* "CHAOS"))
     (COND ((AND (NOT INPUT-FILE)		;if not specified 
 		(NOT (PROBEF DEFAULT-INPUT-FILE)))	;and reasonable file doesn't exist
