@@ -27,44 +27,14 @@ material that is not MIT's left out. The number
 steps from 100 to 1000 to say what it is --- the same lineage, a different
 project.
 
-## What 1000.0 changes from System 100
+## What 1000 changes from System 100
 
-The sources are System 100's, with microcode 323. Two changes are cosmetic,
-three are fixes the machine needed before it would rebuild itself, and one
-removes a system whose files are not carried.
-
-- **The name and the number.** `PRINT-HERALD` always says this system
-  (`sys/io/disk.lisp`), and the system number is 1000 rather than 304
-  (`sys/patch/system.patch-directory`). Nothing depends on the number, and it
-  jumped rather than reset so that it could never be confused with MIT's.
-- **`sys/sys2/prodef.lisp`:** `SCHEDULER-STACK-GROUP` is declared `NIL` instead
-  of unbound. A cold load runs with traps disabled until `LISP-REINITIALIZE`
-  turns them on, and `PROCESS-WAIT` reads that variable inside the window; read
-  unbound there it trapped, the trap became `ILLOP`, and the machine halted
-  with nothing printed at all. ([#6](https://github.com/metebalci/muir-sys/issues/6))
-- **`sys/cold/mini.lisp`:** the "Unknown stream operation" error now names the
-  operation. It passed the operation to `MINI-BARF` already, but the format
-  string had no directive for it, so the one fact needed to diagnose the stop
-  was the one fact missing. ([#7](https://github.com/metebalci/muir-sys/issues/7))
-- **`sys/cold/mini.lisp`:** both MINI streams now answer `:SEND-IF-HANDLES`,
-  which means "send this message only if you handle it". A flavor instance
-  answers it through `VANILLA-FLAVOR`, but these streams are closures and have
-  to answer for themselves; a cold load stopped on
-  `(:SEND-IF-HANDLES :BYTE-SIZE)`, which the stream code asks of any stream.
-  ([#7](https://github.com/metebalci/muir-sys/issues/7))
-
-**What is not carried.** The tape system, which wants a drive neither muir nor
-muir-fpga has; the Xerox Press printing binaries; `cold/minisr`, the PDP-10
-MINI server, whose work ozd does now; and `doc/`, twenty-three megabytes of bug
-mail and bboard archives that nothing loads. `lm3-304` in the project's own notes
-says where a full copy of System 304 is kept, to copy from when something
-turns out to be wanted.
-
-Every change carries a comment in the source saying why. A fourth fault, the
-cold load reading site files in the wrong readtable
-([#9](https://github.com/metebalci/muir-sys/issues/9)), is worked around in this
-site's own files rather than in the system.
-[`docs/building.md`](docs/building.md) has the whole procedure.
+In short: the fault that stopped a cold load in silence and MINI's two stream
+faults are fixed; the routing table covers every subnet and MINI finds its
+file server by itself; about forty faults are fixed across the tree; the
+tape, LMFILE and Xerox printing systems are gone; every system but System is
+unpatchable; and what is not MIT's, or not wanted, was never imported.
+[`docs/release-1000.md`](docs/release-1000.md) records every change.
 
 ## The other three projects
 
