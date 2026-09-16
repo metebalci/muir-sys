@@ -65,16 +65,19 @@ FS:
   (:PACKAGE FILE-SYSTEM)
   (:COMPILE-LOAD ("DIST")))
 
-(DEFSYSTEM ITS-TAPE
-  (:NAME "ITS-Tape")
-  (:NICKNAMES "ITST" "PDP10T")
-  (:PATHNAME-DEFAULT "SYS: TAPE;")
-  (:PACKAGE FILE-SYSTEM)
-  (:COMPILE-LOAD ("PDP10")))
+;;; the tape systems are not carried, SYS: TAPE; being absent; see the
+;;; note on MagTape above.  Commented out rather than deleted so that what
+;;; was removed stays visible.
+;(DEFSYSTEM ITS-TAPE
+;  (:NAME "ITS-Tape")
+;  (:NICKNAMES "ITST" "PDP10T")
+;  (:PATHNAME-DEFAULT "SYS: TAPE;")
+;  (:PACKAGE FILE-SYSTEM)
+;  (:COMPILE-LOAD ("PDP10")))
 
-(DEFSYSTEM VMS-TAPE
-  (:NAME "VMS-Tape")
-  (:NICKNAMES "VMST")
-  (:PATHNAME-DEFAULT "SYS: TAPE;")
-  (:PACKAGE FILE-SYSTEM)
-  (:COMPILE-LOAD ("VMS")))
+;(DEFSYSTEM VMS-TAPE
+;  (:NAME "VMS-Tape")
+;  (:NICKNAMES "VMST")
+;  (:PATHNAME-DEFAULT "SYS: TAPE;")
+;  (:PACKAGE FILE-SYSTEM)
+;  (:COMPILE-LOAD ("VMS")))
