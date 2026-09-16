@@ -2,7 +2,7 @@
 
 This is how a new world is built from the tree: compile the sources, make a cold load, boot it, load the rest of the system and save a band. It follows the tree's own code, and each claim cites a file and line.
 
-**Status:** the procedure below was verified end to end on 2026-09-16, against a tree based on LM-3's System 304. It has since re-based on System 100, and the same build has not yet been run on it. The stages, the forms and the traps are the system's own and do not depend on the base; the line citations and the file list do, and are being checked as the build is repeated. The three source faults below are present in System 100 at the same places. The system compiled its whole tree, built a cold load, booted it, loaded the world through MINI and the file protocol, and saved a band that boots and answers.
+**Status:** verified end to end on the System 100 base on 2026-09-16. Bootstrapped from LM-3's `system-100-0` pack, SYSTEM compiled in 2 h 11 min, `MAKE-COLD` built a cold load in five minutes, `QLD` loaded the world to "Experimental System version 1000. loaded" and a partition size of 20913 blocks, and `(si:disk-save "LOD5" t)` wrote a band that boots to "LMI System, band 5 ... Experimental System 1000.0" and answers `(3 1000 256)` to `(list (+ 1 2) (si:get-system-version "System") chaos:routing-table-size)` over TELNET.
 
 | Step | Result |
 |---|---|
@@ -74,6 +74,17 @@ other way round.
 
 So either give the server a writable home directory for the user, or ask for
 `:NOWARN` and do without the database --- which this repository ignores anyway.
+
+### What the System 100 build met, in order
+
+- **`SYSTEM-MACROS` does not exist here**; compile SYSTEM's six ALLDEFS files by hand (above).
+- **The warnings database** goes to the login user's home directory under `:DEFAULTED-BATCH`; use `:NOWARN` or give the server a writable `/lispm/`.
+- **`COLDUT` names package COLD**, which exists only once `SYS: COLD; COLDPK LISP` is loaded, so load that first; then `qc-file` `COLDUT` and `COLDLD`, then `(make-system 'cold :compile :noconfirm)`.
+- **`MAKE-COLD`'s partition question traps over TELNET** (issue 4). Replacing `FQUERY` for the duration answers it: `(let ((old (symbol-function 'fquery))) (unwind-protect (progn (fset 'fquery (function (lambda (&rest ignore) t))) (funcall (intern "MAKE-COLD" "COLD") "LOD3")) (fset 'fquery old)))`. Check first that every file of `COLD-LOAD-FILE-LIST` has a QFASL.
+- **A cold load has no TELNET.** `(si:qld)` is typed at the console, which muir serves over RFB; a client sending key events slowly is enough.
+- **The site files must be compiled** into the directory served as `SYS: SITE;` --- `site`, `lmlocs` and the host table --- or `QLD` stops at "File not found" for `/site/site.qfasl`.
+- **Two generated files are needed and not carried:** `SYS: SYS; UCINIT QFASL` (above) and `SYS: DEMO; WORMCH QFASL`, which the HACKS system loads and whose source, `demo/wormch.ast`, has no build rule yet. Both came from the release. At an error prompt, RESUME retries once the file is there; muir maps RESUME to F5.
+- **Answer the "additional systems to load" question with `()`.** In this base ZWEI and the rest are components of System and are already loaded.
 
 ## The stages
 
