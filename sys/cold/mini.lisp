@@ -233,6 +233,16 @@
     (:GENERIC-PATHNAME 'MINI-PLIST-RECEIVER)
     (:INFO MINI-FILE-ID)
     (:CLOSE (DO () (MINI-EOF-SEEN) (MINI-BINARY-STREAM :TYI)))
+    ;; answer :SEND-IF-HANDLES instead of barfing.  It means "send this
+    ;; message only if you handle it", so a stream that signals on it turns a
+    ;; caller's optional message into a fatal error.  A flavor instance answers
+    ;; it through VANILLA-FLAVOR; these streams are closures and must answer for
+    ;; themselves.  A cold load stopped here on (:SEND-IF-HANDLES :BYTE-SIZE),
+    ;; which IO; STREAM:64 asks of any stream.
+    (:SEND-IF-HANDLES
+     (AND (MEMQ ARG1 '(:TYI :READ-BYTE :UNTYI :PATHNAME :GENERIC-PATHNAME
+		       :INFO :CLOSE :WHICH-OPERATIONS))
+	  (MINI-BINARY-STREAM ARG1 ARG2)))
     (OTHERWISE (MINI-BARF "Unknown stream operation ~S" OP))))
 
 ;;; stream which does only character input
@@ -269,6 +279,11 @@
     (:GENERIC-PATHNAME 'MINI-PLIST-RECEIVER)
     (:INFO MINI-FILE-ID)
     (:CLOSE (DO () (MINI-EOF-SEEN) (MINI-ASCII-STREAM :TYI)))
+    ;; see the note on the binary stream above.
+    (:SEND-IF-HANDLES
+     (AND (MEMQ ARG1 '(:TYI :READ-CHAR :UNTYI :UNREAD-CHAR :PATHNAME
+		       :GENERIC-PATHNAME :INFO :CLOSE :WHICH-OPERATIONS))
+	  (MINI-ASCII-STREAM ARG1 ARG2)))
     (OTHERWISE (MINI-BARF "Unknown stream operation ~S" OP))))
 
 (DEFUN MINI-BARF (&REST ARGS)
