@@ -76,6 +76,16 @@ This is the system. Three projects around it carry the machine it runs on:
 | **muir-fpga** | the hardware simulator |
 | **ozd** | the Chaosnet services daemon |
 
+## Releases
+
+**There are no patches, only releases.** Every change reaches a band through a
+full rebuild of the system from its sources, so a release is a whole number ---
+1000, 1001, 1002 --- and never 1000.1. A running band is never updated in place;
+it is replaced by the next release's band.
+
+The Lisp Machine's patch system remains in the tree, because it is what keeps
+track of the release number, but this system writes no patch files and loads none.
+
 ## Layout
 
 | | |

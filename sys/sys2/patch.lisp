@@ -673,8 +673,9 @@ With BRIEF-P, return stuff suitable for disk label comment."
 	     (IF (NOT (AND BRIEF-P (EQUALP (PATCH-NAME SYS) "System")))
 		 (FORMAT S "~A " (IF (NOT BRIEF-P) (PATCH-NAME SYS)
 				     (SYSTEM-SHORT-NAME (PATCH-NAME SYS)))))
-	     (FORMAT S "~D.~D"
-		     (PATCH-VERSION SYS) (VERSION-NUMBER (FIRST (PATCH-VERSION-LIST SYS)))))))
+	     ;; the major version only.  This system makes no patches, so every
+	     ;; release is N.0 and the minor number carries no information.
+	     (FORMAT S "~D" (PATCH-VERSION SYS)))))
     (IF (NOT BRIEF-P)
 	(FORMAT S ", microcode ~D" %MICROCODE-VERSION-NUMBER))
     (AND (PLUSP (STRING-LENGTH SYSTEM-ADDITIONAL-INFO))
@@ -702,9 +703,8 @@ The microcode version number and some other suitable information is also include
     (FORMAT S "~& ~A" (CAR NAM))
     (DOTIMES (I (- MAX (ARRAY-ACTIVE-LENGTH (CAR NAM))))
       (WRITE-CHAR #/SPACE S))
-    (FORMAT S " ~3D.~D"
-	    (PATCH-VERSION (CAR SYS))
-	    (VERSION-NUMBER (FIRST (PATCH-VERSION-LIST (CAR SYS))))))
+    ;; the major version only, as in SYSTEM-VERSION-INFO above.
+    (FORMAT S " ~3D" (PATCH-VERSION (CAR SYS))))
   (FORMAT S "~& Microcode")
   (DOTIMES (I (- MAX 9))
     (WRITE-CHAR #/SPACE S))
