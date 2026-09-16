@@ -58,12 +58,15 @@ FS:
 ;;; The following are miscellaneous systems that are to be used with the Magtape and File
 ;;; systems.  They are not patchable.
 
-(DEFSYSTEM DISTRIBUTION
-  (:NAME "Distribution")
-  (:NICKNAMES "Dis")
-  (:PATHNAME-DEFAULT "SYS: DISTRIBUTION;")
-  (:PACKAGE FILE-SYSTEM)
-  (:COMPILE-LOAD ("DIST")))
+;;; the Distribution system is not carried.  It copied the system's
+;;; directories to another host or to tape for shipping to a site; this system ships
+;;; a release as a pack and a sources tarball instead.
+;(DEFSYSTEM DISTRIBUTION
+;  (:NAME "Distribution")
+;  (:NICKNAMES "Dis")
+;  (:PATHNAME-DEFAULT "SYS: DISTRIBUTION;")
+;  (:PACKAGE FILE-SYSTEM)
+;  (:COMPILE-LOAD ("DIST")))
 
 ;;; the tape systems are not carried, SYS: TAPE; being absent; see the
 ;;; note on MagTape above.  Commented out rather than deleted so that what
