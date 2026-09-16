@@ -56,8 +56,9 @@ This will be COMTAB or a comtab that COMTAB indirects to."
 ;; not patched in 99 -- see 99.12
 (DEFUN COMMAND-STORE (COMMAND CHAR COMTAB &AUX KEYBOARD-ARRAY)
   "Store COMMAND into COMTAB for character CHAR."
-;character lossage
-  (IF (CHARACTERP CHAR) (SETQ CHAR (CHAR-INT CHAR)))
+;; COMMAND-LOOKUP keys a list comtab by character objects (:35), so
+  ;; storing integers put bindings where lookup could never find them.
+  (IF (FIXNUMP CHAR) (SETQ CHAR (INT-CHAR CHAR)))
   (SETQ KEYBOARD-ARRAY (COMTAB-KEYBOARD-ARRAY COMTAB))
   (COND ((NOT (ARRAYP KEYBOARD-ARRAY))
 	 (LET ((ELEMENT (ASSQ CHAR KEYBOARD-ARRAY)))

@@ -1338,11 +1338,12 @@ MAXIMUM-X was the largest X-position ever encountered during processing."
 	(SETQ MAXIMUM-X (MAX X MAXIMUM-X))
 	;;First, decide the most characters we want to scan over in a whack
 	(SETQ NN
-	      (MIN (1+ (TRUNCATE (- (IF ( Y STOP-Y)	;Stop-point is in this line
+	      (MIN (+ (TRUNCATE (- (IF ( Y STOP-Y)	;Stop-point is in this line
 				        STOP-X
 				        RIGHT-LIMIT)	;Stop for this line is margin
 				    X)
-				 CW))
+				 CW)
+		      I)
 		   N))				;NN is limiting value of I
 	;; Now, scan over printing characters.
 	(WHEN ( (SETQ II I) NN)		;Save initial I, and check for null loop
@@ -1522,7 +1523,7 @@ MAXIMUM-X is the largest X-position reached during processing.
      FAST
 	;; First, decide the most characters we want to scan over in a whack
 	(SETQ NN (COND ((NULL STOP-X) N)	;NN is limiting value of I
-		       ((MIN (1+ (TRUNCATE (- STOP-X X) CW))
+		       ((MIN (+ (TRUNCATE (- STOP-X X) CW) I)
 			     N))))
 	;; Now, scan over printing characters.
 	(WHEN ( (SETQ II I) NN)		;Save initial I, and check for null loop
