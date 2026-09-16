@@ -1248,8 +1248,10 @@ Signals the condition ZWEI:BARF, passing along the args to BARF."
 		      #/C-X COM-SWAP-POINT-AND-MARK
 		      #/G COM-OPEN-GET-REGISTER
 		      #/X COM-PUT-REGISTER
-		      #/S COM-SAVE-POSITION
-		      #/J COM-JUMP-TO-SAVED-POSITION
+		;; six command names here named no DEFCOM at all; the real ones are
+		;; in ZWEI; COMD and ZWEI; COMG.  The bindings did nothing.
+		      #/S COM-SAVE-POSITION-IN-REGISTER
+		      #/J COM-JUMP-TO-REGISTER-POSITION
 		      #/L COM-COUNT-LINES-PAGE
 		      #/RUBOUT COM-BACKWARD-KILL-SENTENCE
 		      #/C-/; COM-COMMENT-OUT-REGION
@@ -1266,10 +1268,10 @@ Signals the condition ZWEI:BARF, passing along the args to BARF."
 		      #/H COM-MARK-WHOLE
 		      #/C-C COM-QUIT
 		      #/C-J COM-CHANGE-FONT-REGION
-		      #/( COM-START-KBD-MACRO
-		      #/) COM-END-KBD-MACRO
-		      #/E COM-CALL-LAST-KBD-MACRO
-		      #/Q COM-KBD-MACRO-QUERY
+		      #/( COM-START-KEYBOARD-MACRO
+		      #/) COM-END-KEYBOARD-MACRO
+		      #/E COM-CALL-LAST-KEYBOARD-MACRO
+		      #/Q COM-KEYBOARD-MACRO-QUERY
 		      #/ COM-REPEAT-MINI-BUFFER-COMMAND
 		      #/C-T COM-EXCHANGE-LINES
 		      #/T COM-EXCHANGE-REGIONS
