@@ -1718,7 +1718,8 @@ of the last expression in it are returned.
   (prog ((vars-left places-and-values))
      bindloop
    	(when vars-left
-	  (%push (with-stack-list ((tem 'locf (caar vars-left)))
+	  ;; WITH-STACK-LIST takes (var . elements), not a doubled binding list.
+	  (%push (with-stack-list (tem 'locf (caar vars-left))
 		   (eval1 tem)))
 	  (%push (eval1 (cadar vars-left)))
 	  (pop vars-left)
@@ -1737,7 +1738,7 @@ of the last expression in it are returned.
   (prog ((vars-left places-and-values))
      bindloop
    	(when vars-left
-	  (%bind (with-stack-list ((tem 'locf (caar vars-left)))
+	  (%bind (with-stack-list (tem 'locf (caar vars-left))
 		   (eval1 tem))
 		 (eval1 (cadar vars-left)))
 	  (pop vars-left)

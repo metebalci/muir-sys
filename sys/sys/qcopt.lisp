@@ -1365,7 +1365,7 @@ of a list satisfies the test. Eg (EQ . MEMQ)")
 (defun (:property make-list style-checker) (form)
   (if (= (length form) 3)
       (let ((*print-length* 3) (*print-level* 2))
-	(warn 'obsolete ':obsolete "~S is an obsolete calling seqence.
+	(warn 'obsolete ':obsolete "~S is an obsolete calling sequence.
    use (~S ~S~@[ ~*~S ~2:*~S~]) instead."
 	      form
 	      'make-list (third form)

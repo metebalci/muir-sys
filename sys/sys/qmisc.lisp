@@ -341,7 +341,8 @@ no longer contains the element removed. Signals an error if ARRAY is empty
 Uses GLOBAL:AREF, so will pop fixnums out of strings."
   (WITHOUT-INTERRUPTS
     (LET* ((INDEX (1- (FILL-POINTER ARRAY)))	;1- because fill-pointer is # active elements
-	   (ARRAY-TYPE (AREF (SYMBOL-FUNCTION ARRAY-TYPES)
+	   ;; (FUNCTION ARRAY-TYPES), as SYS; QRAND:1512 does it; SYMBOL-FUNCTION is wrong here.
+	   (ARRAY-TYPE (AREF (FUNCTION ARRAY-TYPES)
 			     (%P-LDB-OFFSET %%ARRAY-TYPE-FIELD ARRAY 0)))
 	   VAL)
       (WHEN (MINUSP INDEX)
