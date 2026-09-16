@@ -1249,5 +1249,6 @@ Note that changing this may not take affect in existing servers.")
 ;; to do, but when asked it should perform promptly.
 ;; ** Bogus: in fact the control process does all opens, and when doing probes
 ;; really hard can use up the whole machine.  So, let it compete with the rest. **
-(add-initialization "File Server" '(PROCESS-RUN-FUNCTION "File Server" 'file-server)
+;;; the initialization's name is the Chaos contact name, so it must be FILE.
+(add-initialization "FILE" '(PROCESS-RUN-FUNCTION "File Server" 'file-server)
 		    nil 'chaos:server-alist)

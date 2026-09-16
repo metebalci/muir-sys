@@ -168,7 +168,8 @@
         b    (setq decomp (caar (cond ((atom (car rules))
 			         (cond ((eq (car rules)
 					'zap)
-				      (quit)))
+				      ;; there is no QUIT function; leave ANALYZE instead.
+				      (return-from analyze t)))
 			         (setq rules (get (car rules)
 					      'rules)))
 			        (t rules))))
