@@ -25,11 +25,22 @@
 (DEFVAR MINI-FASLOAD-FILENAME)
 
 ;;; Compile time chaosnet address lookup and routing.
+;;; restored from the tape content (System 99.32), which works the
+;;; address out instead of naming it.  System 100 replaced this with OZ's
+;;; own address, #o3060 on subnet 6, which is right for one machine at MIT
+;;; and wrong everywhere else, here included.  The macro asks the host of
+;;; the file being compiled --- mini.lisp is read from SYS: COLD;, so the
+;;; answer is whichever server the compiling machine takes its sources from
+;;; --- and reads that host's routing entry.  Both values are baked into
+;;; mini.qfasl, because a cold load has to reach the server before it has a
+;;; host table to look anything up in.  MINI-OPEN-CONNECTION overrides the
+;;; routing address anyway when server and machine share a subnet (:71).
+;;; To bypass the lookup, SETQ both variables by hand before QLD.
 (DEFMACRO GET-INTERESTING-CHAOSNET-ADDRESSES ()
-;;;---!!! This hard coded to OZ (with new Chaosnet address), and on
-;;;---!!!    the same subnet as LM1.
-  `(SETQ MINI-DESTINATION-ADDRESS #o3060
-	 MINI-ROUTING-ADDRESS 6))
+  (LET* ((HOST (SEND (SEND SI::FDEFINE-FILE-PATHNAME :TRANSLATED-PATHNAME) :HOST))
+	 (ADDRESS (CHAOS::ADDRESS-PARSE HOST)))
+    `(SETQ MINI-DESTINATION-ADDRESS ,ADDRESS
+	   MINI-ROUTING-ADDRESS ,(AREF CHAOS::ROUTING-TABLE (LDB #o1010 ADDRESS)))))
 
 (GET-INTERESTING-CHAOSNET-ADDRESSES)
 
