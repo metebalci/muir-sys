@@ -1,0 +1,3 @@
+# Never convert line endings: the Lisp Machine reads these files byte for
+# byte (its own character set, Zmacs font escapes, compiled files).
+* -text
