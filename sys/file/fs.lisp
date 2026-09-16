@@ -19,19 +19,23 @@
   (:COMPILE-LOAD MAIN
    ((:FASLOAD DEFS))))
 
-(DEFSYSTEM MAGTAPE
-  (:NAME "MagTape")
-  (:SHORT-NAME "MT")
-  (:PATHNAME-DEFAULT "SYS: TAPE;")
-  (:PATCHABLE NIL "MagTape")
-  (:NOT-IN-DISK-LABEL)
-  (:PACKAGE FILE-SYSTEM)
-  (:MODULE DEFS ("MTDEFS"))
-  (:MODULE STREAM ("MTSTR"))
-  (:MODULE MAIN ("TAPE;FDUMP-DEF" "COPY" "MTAUX" "ODUMP")) ; ODUMP gone soon
-  (:COMPILE-LOAD DEFS)
-  (:COMPILE-LOAD STREAM (:FASLOAD DEFS))
-  (:COMPILE-LOAD MAIN (:FASLOAD DEFS STREAM)))
+;;; the MagTape system is not carried.  Its files live in SYS: TAPE;,
+;;; which wants a tape drive that neither muir nor muir-fpga has, so the
+;;; definition below is commented out rather than left to fail on missing
+;;; files.  SYS; SYSDCL has the matching change.
+;(DEFSYSTEM MAGTAPE
+;  (:NAME "MagTape")
+;  (:SHORT-NAME "MT")
+;  (:PATHNAME-DEFAULT "SYS: TAPE;")
+;  (:PATCHABLE NIL "MagTape")
+;  (:NOT-IN-DISK-LABEL)
+;  (:PACKAGE FILE-SYSTEM)
+;  (:MODULE DEFS ("MTDEFS"))
+;  (:MODULE STREAM ("MTSTR"))
+;  (:MODULE MAIN ("TAPE;FDUMP-DEF" "COPY" "MTAUX" "ODUMP")) ; ODUMP gone soon
+;  (:COMPILE-LOAD DEFS)
+;  (:COMPILE-LOAD STREAM (:FASLOAD DEFS))
+;  (:COMPILE-LOAD MAIN (:FASLOAD DEFS STREAM)))
 
 (DEFSYSTEM FILE-SERVER
   (:NAME "FILE-Server")
