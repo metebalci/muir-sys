@@ -474,7 +474,7 @@
   (DO () (())
     (SPACEWAR-GAME)))
 
-(DEFVAR SPACEWAR-PROCESS (PROCESS-CREATE "Spacewar"))
+(DEFVAR SPACEWAR-PROCESS (MAKE-PROCESS "Spacewar"))	;PROCESS-CREATE does not exist; MAKE-PROCESS (SYS2; PROCES:82) does
 
 ;; Start playing spacewar.
 (DEFUN SPACEWAR ()

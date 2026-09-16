@@ -1696,7 +1696,8 @@ specified by PATHNAME."
   ;; merge name type and version hirsutely
   (when (or (null (pathname-name pathname))
 	    always-merge-name)
-    (setq new-version (if default-name-specified-p
+    ;; this clause computes the name, and set NEW-VERSION by mistake.
+    (setq new-name (if default-name-specified-p
 			  default-name
 			  (pathname-name default))
 	  merge-name-p t))
