@@ -330,7 +330,8 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 	DIR))))
 
 (DEFMETHOD (BASIC-ACCESS :DELETE-MULTIPLE-FILES) (ERROR-P FILES)
-  (MAPCAR #'FUNCALL FILES (CIRCULAR-LIST :DELETE) ERROR-P))
+  ;; the MAPCAR passed ERROR-P as a list, one element per file.
+  (LOOP FOR FILE IN FILES COLLECT (SEND FILE :DELETE ERROR-P)))
 
 ;;; This is currently here to abstract the usual file access protocol maintenance issues.
 ;;; It is not neccessary to use this, but it will be easier in many cases.

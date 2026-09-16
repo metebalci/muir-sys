@@ -445,6 +445,10 @@ or /"CC/" which refers to the machine being debugged by this one."
      (PROGN (WITHOUT-INTERRUPTS
 	     (SETQ LE-RQB (GET-DISK-LABEL-RQB)))
 	    (LE-INITIALIZE-LABEL LE-RQB (CAR PACK-TYPES))
+	    ;; editing an existing label showed a fresh one, the label never
+	    ;; having been read.
+	    (IF (NULL INIT-P)
+		(READ-DISK-LABEL LE-RQB LE-UNIT))
 	    (LE-DISPLAY-LABEL LE-RQB LE-UNIT T)
 	    (FORMAT T "Use Control-R to read and edit existing label; hit HELP for help.~%")
 	    (PRINC "Label Edit Command: ")
