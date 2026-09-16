@@ -108,7 +108,7 @@ while its row is blank.
 | Commit | File | Fixes | Ruling |
 |---|---|---|---|
 | 57a47ae | qdefs.lisp | typo | + |
-| 48634b1 | qcom.lisp | `SIZE-OF-HARDWARE-M-MEMORY`, nested `#+/#-` returned multiple values | |
+| 48634b1 | qcom.lisp | `SIZE-OF-HARDWARE-M-MEMORY`, nested `#+/#-` returned multiple values | + |
 | abcb2a2 | global.lisp | `WITH-LIST` and `WITH-LIST*` never exported | + |
 
 ### sys/
@@ -116,9 +116,9 @@ while its row is blank.
 | Commit | File | Fixes | Ruling |
 |---|---|---|---|
 | ade79f7, 3175b7b | qmisc.lisp | `ARRAY-POP` typo | + |
-| f44580b | genric.lisp | `KEY-FETCH`, wrong LAMBDA optimisation | |
+| f44580b | genric.lisp | `KEY-FETCH`, wrong LAMBDA optimisation | + |
 | ff43599 | qcfile.lisp | `COMPILE-FILE` keyword name not Common Lisp's | + |
-| 96d031e | ltop.lisp | `LISP-REINITIALIZE` typo | |
+| 96d031e | ltop.lisp | `LISP-REINITIALIZE` typo | asked |
 | d607c71 | eval.lisp | `LETF`/`LETF*`, stray parens round `WITH-STACK-LIST` | + |
 | 405f037 | qcopt.lisp | typo in a warning string | + |
 
@@ -130,23 +130,23 @@ while its row is blank.
 | 4190c02 | resour.lisp | `DEFRESOURCE` deinitializer typo | + |
 | cd210c8 | defsel.lisp | `DEFSELECT-INTERNAL` `SETF` typo | + |
 | d1ca3e1 | cmany.lisp | missing `;` on the attribute line | + |
-| 94c738c | flavor.lisp | guard `ZWEI:SORT-COMPLETION-AARRAY` | |
-| b30b74f | analyze.lisp | `MAKE-AREA` ran twice *[imported file]* | |
+| 94c738c | flavor.lisp | guard `ZWEI:SORT-COMPLETION-AARRAY` | + |
+| b30b74f | analyze.lisp | `MAKE-AREA` ran twice *[imported file]* | + |
 | c7aa8f0 | analyze.lisp | wrong data-type constant scanning FEFs *[imported file]* | n/a |
-| b6e3469 | login.lisp | hard error when the home directory is absent *[imported file]* | |
+| b6e3469 | login.lisp | hard error when the home directory is absent *[imported file]* | + |
 | ad3ced8 | maksys.lisp | `CANONICALIZE-PATHNAME` unspecified type *[imported file]* | decide |
-| ef01571, c55eac6 | maksys.lisp | CWARNS file name collision *[imported file]* | |
+| ef01571, c55eac6 | maksys.lisp | CWARNS file name collision *[imported file]* | + |
 
 ### io/, io1/
 
 | Commit | File | Fixes | Ruling |
 |---|---|---|---|
-| 5490cea, b6212bc | file/pathnm.lisp | `DEFAULT-PATHNAME` broken when not logged in | |
+| 5490cea, b6212bc | file/pathnm.lisp | `DEFAULT-PATHNAME` broken when not logged in | + |
 | 988bbb6 | file/pathnm.lisp | `merge-pathname-components` typo | + |
-| bec8aa9 | file/open.lisp | `pathname-completion-list` case bug | |
+| bec8aa9 | file/open.lisp | `pathname-completion-list` case bug | + |
 | 712df11 | file/pathst.lisp | missing `UNIX-PATHNAME-MIXIN :STRING-FOR-DIRECTORY` | + |
-| 54df5e4 | file/access.lisp | `:DELETE-MULTIPLE-FILES` | |
-| bb1f448 | dledit.lisp | `EDIT-DISK-LABEL` never read the label | |
+| 54df5e4 | file/access.lisp | `:DELETE-MULTIPLE-FILES` | + |
+| bb1f448 | dledit.lisp | `EDIT-DISK-LABEL` never read the label | + |
 | fab8159 | dledit.lisp | END character encoding | see below |
 | ddc80cc | io1/swar.lisp | `PROCESS-CREATE` → `MAKE-PROCESS` | + |
 | e71b341 | io1/time.lisp | run `INITIALIZE-TIMEBASE` on `:WARM` and `:NOW` *[imported file]* | n/a |
@@ -156,10 +156,10 @@ while its row is blank.
 | Commit | File | Fixes | Ruling |
 |---|---|---|---|
 | 9cc9b5d, 9c27c1a, 36af1e4 | chuse.lisp | `CHAOS-UNKNOWN-HOST-FUNCTION` typos, numeric host names | + |
-| 6b34da1 | chsaux.lisp | `POLL-HOSTS` hung HOSTAT on an unknown host | |
-| 9f3c0e9 | peekch.lisp | host lookup for address 0 | |
+| 6b34da1 | chsaux.lisp | `POLL-HOSTS` hung HOSTAT on an unknown host | + |
+| 9f3c0e9 | peekch.lisp | host lookup for address 0 | + |
 | a59f26c | peekch.lisp | `HOSTAT-FORMAT-ANS` argument order | + |
-| 3a4a2f9, 7ca0409 | --- | HOSTS TEXT moved to `SYS: SITE;` | |
+| 3a4a2f9, 7ca0409 | --- | HOSTS TEXT moved to `SYS: SITE;` | + |
 | fc0d7c4, 9de205d | chsncp.lisp | retransmission TIME variable scope *[imported file]* | decide |
 | ffa42f2, 29726be | host.lisp | ZWEI host wrongly used as `ASSOCIATED-MACHINE` *[imported file]* | decide |
 | c594ed8 | host.lisp | two fixes in one: `CLI:SOME` absent in the cold load, and a true-return bug. Split when applying *[imported file]* | decide |
@@ -170,7 +170,7 @@ while its row is blank.
 |---|---|---|---|
 | 812356a, 2eb4710 | menu.lisp | `:MOUSE-MOVES` crash | + |
 | 2fc7825 | tscrol.lisp | `:SETUP` typo | + |
-| 0300fb4 | shwarm.lisp | Control-N motion bug | |
+| 0300fb4 | shwarm.lisp | Control-N motion bug | + |
 | 66438e6 | shwarm.lisp | `SI::VIDEO-BOARD-TYPE` undefined | n/a |
 | a0a0ef2 | wholin.lisp | prints NIL state | decide |
 | c2f1469, a8511d6 | --- | run-light initialisation on the CADR | decide |
@@ -185,9 +185,9 @@ while its row is blank.
 
 | Commit | File | Fixes | Ruling |
 |---|---|---|---|
-| 7b08eef, 2eab7b6, 69665b1 | comtab.lisp | `COMMAND-LOOKUP`/`COMMAND-STORE` character lossage | |
+| 7b08eef, 2eab7b6, 69665b1 | comtab.lisp | `COMMAND-LOOKUP`/`COMMAND-STORE` character lossage | + |
 | 9b8d890 | comtab.lisp | command-name typos | + |
-| fde0942 | pated.lisp | `FINISH-PATCH` interleaved Reason lines | |
+| fde0942 | pated.lisp | `FINISH-PATCH` interleaved Reason lines | later |
 | ff2c2e7 | come.lisp | END character encoding | see below |
 
 ### file/, demo/, sysdcl
@@ -198,7 +198,7 @@ while its row is blank.
 | 0086355 | demo/cafe.lisp | wrong `color:` entry point | n/a |
 | 10aa70b | sys/sysdcl.lisp | FED missing host | n/a |
 | d98d9bd | file/server.lisp | `ADD-INITIALIZATION` name must match the Chaos RFC *[imported file]* | + |
-| c1f37f7 | file2/server.lisp | `SI:PARSE-HOST` barfs during QC *[imported file]* | |
+| c1f37f7 | file2/server.lisp | `SI:PARSE-HOST` barfs during QC *[imported file]* | later |
 
 ## Applied so far
 
@@ -220,9 +220,28 @@ source; and LM-3's two corrected files disagree with each other, one holding
 an encoding accident rather than a considered fix. Both sites are display
 strings, so nothing depends on it. Left as the tape has it.
 
-Rows marked **decide** need a ruling that is not mechanical; rows marked
-**n/a** do not apply, because System 100 does not contain the fault --- the
-code is already correct, or exists in 304 only because of an import.
+**A second pass on 2026-09-16 applied fifteen more**, the ones that change
+behaviour in ways worth a sentence, in five commits (`1bbfd52` through
+`0c76fd8`). Two of them were fixed in more places than upstream fixed them:
+`shwarm.lisp` has the same motion-limit fault in a second scanning loop, and
+`pathnm.lisp` has the same before-login faults in `DEFAULT-HOST` as in
+`DEFAULT-PATHNAME`. Upstream fixed each where it had been reported; both were
+found by reading the neighbouring code.
+
+`qcom.lisp` was taken in this system's own form: the CADR's value alone, since this
+system is for the CADR.
+
+Rows marked **decide** need a ruling that is not mechanical; **asked** means a
+question is with the maintainer; **later** means deferred with a reason; and
+**n/a** means System 100 does not contain the fault --- the code is already
+correct, or exists in 304 only because of an import.
+
+Deferred, with reasons: `fde0942` (ZWEI's patch-file writer repeats its Reason
+line and nests one FORMAT inside another's arguments) is a real fault but not a
+one-line edit, and this system does not write patch files yet; `c1f37f7`
+(`*FILE-SERVER-FILE-HOST*` calls `SI:PARSE-HOST` at load time and breaks
+compilation) needs a decision about what host it should name, its own docstring
+saying "THIS SHOULD BE A SITE VARIABLE".
 
 ## Features, for the record
 
