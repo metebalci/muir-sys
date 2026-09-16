@@ -250,7 +250,13 @@ and the time at which the record was made.")
 ;;; Don't use this table unless you are sure that the packet is not going to
 ;;; a host on THIS subnet!
 ;;; These tables are filled in by code in INITIALIZE-NCP-ONCE.
-(DEFCONST ROUTING-TABLE-SIZE 96. "the number of subnets in the routing table")
+;;; 256 subnets rather than 96, which is every subnet an address can
+;;; name.  A Chaos address is 16 bits and its subnet is the high byte, read
+;;; with (LDB #o1010 ADDRESS), so the range is 0 to 255 and a table of 96
+;;; leaves two thirds of it unreachable: a machine on subnet 96 or above
+;;; traps as soon as the network starts.  This site is on subnet 376,
+;;; and muir-fpga's boards are on 376 as well.
+(DEFCONST ROUTING-TABLE-SIZE 256. "the number of subnets in the routing table")
 (DEFVAR ROUTING-TABLE (MAKE-ARRAY ROUTING-TABLE-SIZE
 				  :TYPE 'ART-16B :AREA PERMANENT-STORAGE-AREA))
 (DEFVAR ROUTING-TABLE-COST (MAKE-ARRAY ROUTING-TABLE-SIZE
