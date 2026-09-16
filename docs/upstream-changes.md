@@ -187,7 +187,7 @@ while its row is blank.
 |---|---|---|---|
 | 7b08eef, 2eab7b6, 69665b1 | comtab.lisp | `COMMAND-LOOKUP`/`COMMAND-STORE` character lossage | + |
 | 9b8d890 | comtab.lisp | command-name typos | + |
-| fde0942 | pated.lisp | `FINISH-PATCH` interleaved Reason lines | later |
+| fde0942 | pated.lisp | `FINISH-PATCH` interleaved Reason lines | - |
 | ff2c2e7 | come.lisp | END character encoding | see below |
 
 ### file/, demo/, sysdcl
@@ -236,9 +236,9 @@ question is with the maintainer; **later** means deferred with a reason; **1001*
 **n/a** means System 100 does not contain the fault --- the code is already
 correct, or exists in 304 only because of an import.
 
-Deferred, with reasons: `fde0942` (ZWEI's patch-file writer repeats its Reason
-line and nests one FORMAT inside another's arguments) is a real fault but not a
-one-line edit, and this system does not write patch files yet; `c1f37f7`
+Refused: `fde0942` (ZWEI's patch-file writer repeats its Reason line and nests
+one FORMAT inside another's arguments) is a real fault in a tool this system has decided
+never to use, since this system makes only major releases and no patches. Deferred: `c1f37f7`
 (`*FILE-SERVER-FILE-HOST*` calls `SI:PARSE-HOST` at load time and breaks
 compilation) needs a decision about what host it should name, its own docstring
 saying "THIS SHOULD BE A SITE VARIABLE".
