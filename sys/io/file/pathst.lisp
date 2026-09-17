@@ -3,83 +3,18 @@
 
 ; logical pathnames moved to IO; FILE; LOGICAL
 
-;;;; ITS support
+;;;; Support that stays: generic pathname-string helpers
+;; ITS support (ITS-PATHNAME-MIXIN, ITS-DEVICE-STRING,
+;; ITS-FN2-STRING, SIX-SIXBIT-CHARACTERS) removed; this system never talks to an
+;; ITS host. ITS-FN1-STRING, STRING-OR-WILD, QUOTE-COMPONENT-STRING,
+;; NUMERIC-P and *ITS-UNINTERESTING-TYPES* stay: despite their names, they
+;; are generic and have callers outside the old ITS support, chiefly
+;; IO; FILE; LOGICAL's LOGICAL-NAME-STRING (which is literally
+;; ITS-FN1-STRING) and ZWEI's FILE-LOADED-TRUENAME (ZWEI; ZMACS), which
+;; reads *ITS-UNINTERESTING-TYPES* to compare file types.
 
-;;; An FN2 can be either a version, if it is all numbers, or a type otherwise.
-(DEFFLAVOR ITS-PATHNAME-MIXIN () ()
-  (:REQUIRED-FLAVORS PATHNAME))
+(DEFVAR *ITS-UNINTERESTING-TYPES* '("LISP" "TEXT" NIL :UNSPECIFIC))
 
-;;; These messages are careful to cons only the actual string in PATHNAME-AREA.
-;;; See comment by PATHNAME-AREA.
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :STRING-FOR-HOST) ()
-  (LET ((DIR (STRING-OR-WILD DIRECTORY))
-	(XDEV (ITS-DEVICE-STRING T))
-	(FN1 (ITS-FN1-STRING))
-	(FN2 (ITS-FN2-STRING))
-	(DEFAULT-CONS-AREA PATHNAME-AREA))
-    (FORMAT NIL "~A: ~A; ~A ~A" XDEV DIR FN1 FN2)))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :STRING-FOR-PRINTING) ()
-  (LET ((DEV (ITS-DEVICE-STRING))
-	(DIR (STRING-OR-WILD DIRECTORY))
-	(FN1 (ITS-FN1-STRING))
-	(FN2 (ITS-FN2-STRING))
-	(DEFAULT-CONS-AREA PATHNAME-AREA))
-    (FORMAT NIL "~A: ~:[~A;~:[ ~]~;~2*~]~@[~A~]~@[ ~A~]"
-	    DEV (MEMQ DIRECTORY '(NIL :UNSPECIFIC)) 
-	    DIR (AND (MEMQ NAME '(NIL :UNSPECIFIC))
-		     (MEMQ TYPE '(NIL :UNSPECIFIC))
-		     (MEMQ VERSION '(NIL :UNSPECIFIC)))
-	    FN1 FN2)))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :STRING-FOR-EDITOR) ()
-  (LET ((FN1 (ITS-FN1-STRING))
-	(FN2 (ITS-FN2-STRING))
-	(DIR (STRING-OR-WILD DIRECTORY))
-	(DEFAULT-CONS-AREA PATHNAME-AREA))
-    (FORMAT NIL "~A ~:[~A ~;~*~]~:[~A: ~;~*~]~A; ~A:"
-	    FN1
-	    ;; Do we really have a significant type or version worth printing?
-	    (NOT (OR (AND TYPE (NEQ TYPE ':UNSPECIFIC))
-		     (AND VERSION (NEQ VERSION ':UNSPECIFIC))))
-	    FN2
-	    (OR (SI:MEMBER-EQUAL DEVICE '("DSK" NIL :UNSPECIFIC))
-		(EQUAL DEVICE (SEND HOST :NAME-AS-FILE-COMPUTER)))
-	    DEVICE DIR
-	    (SEND HOST :NAME-AS-FILE-COMPUTER))))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :STRING-FOR-DIRECTORY) ()
-  (LET ((DIR (STRING-OR-WILD DIRECTORY))
-	(DEFAULT-CONS-AREA PATHNAME-AREA))
-    (FORMAT NIL "~:[~A: ~;~*~]~A;"
-	    (SI:MEMBER-EQUAL DEVICE '("DSK" NIL :UNSPECIFIC))
-	    DEVICE DIR)))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :STRING-FOR-DIRED) ()
-  (LET ((FN1 (ITS-FN1-STRING T))
-	(FN2 (ITS-FN2-STRING T))
-	(DEFAULT-CONS-AREA PATHNAME-AREA))
-    (FORMAT NIL "~6A ~A" FN1 FN2)))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :FN1) ()
-  (ITS-FN1-STRING T T))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :FN2) ()
-  (ITS-FN2-STRING T T))
-
-;;; If the device is DSK, avoid printing it.
-(DEFUN ITS-DEVICE-STRING (&OPTIONAL OMIT-HOST &AUX HOSTS PRINT-HOSTS)
-  (DECLARE (:SELF-FLAVOR ITS-PATHNAME-MIXIN))
-  (SETQ HOSTS (SEND HOST :NAME-AS-FILE-COMPUTER))
-  (SETQ PRINT-HOSTS (IF OMIT-HOST "DSK" HOSTS))
-  (IF (OR (SI:MEMBER-EQUAL DEVICE '("DSK" NIL :UNSPECIFIC))
-	  (EQUAL DEVICE HOSTS))
-      PRINT-HOSTS
-      (STRING-APPEND PRINT-HOSTS ": " DEVICE)))
-
-;;; If name is a list, its first component is the FN1 and second is FN2
-;;; If only FN2 is present, FN1 is placeholder ""
 (DEFUN ITS-FN1-STRING (&OPTIONAL NO-QUOTE-P NO-PLACEHOLDER)
   (DECLARE (:SELF-FLAVOR PATHNAME))
   (COND	((NULL NAME)
@@ -89,22 +24,6 @@
 	((CONSP NAME) (IF NO-QUOTE-P (CAR NAME)
 			  (QUOTE-COMPONENT-STRING (CAR NAME))))
 	(T (STRING-OR-WILD NAME NO-QUOTE-P))))
-
-(DEFUN ITS-FN2-STRING (&OPTIONAL NO-QUOTE-P NO-PLACEHOLDER)
-  (DECLARE (:SELF-FLAVOR ITS-PATHNAME-MIXIN))
-  (COND ((AND (CONSP NAME) (CDR NAME))
-	 (IF NO-QUOTE-P (CADR NAME) (QUOTE-COMPONENT-STRING (CADR NAME))))
-	((AND (NULL TYPE) (NULL VERSION))
-	 (IF NO-PLACEHOLDER NIL ""))
-	((AND (MEMQ TYPE '(NIL :UNSPECIFIC))
-	      (MEMQ VERSION '(NIL :UNSPECIFIC)))
-	 NIL)
-	((EQ VERSION ':OLDEST) "<")
-	((EQ VERSION ':WILD) "*")
-	((OR (EQ VERSION ':UNSPECIFIC) (NOT (SI:MEMBER-EQUAL TYPE *ITS-UNINTERESTING-TYPES*)))
-	 (STRING-OR-WILD TYPE NO-QUOTE-P))
-	((NOT (MEMQ VERSION '(NIL :UNSPECIFIC :NEWEST))) (FORMAT NIL "~D" VERSION))
-	(T ">")))
 
 (DEFUN STRING-OR-WILD (FIELD &OPTIONAL NO-QUOTE-P SPECIALS REPLACED-BY)
   "Convert FIELD, a pathname component, to a string to appear in a printed representation.
@@ -150,157 +69,6 @@ is replaced by the corresponding char in REPLACED-BY, not quoted."
 		    (NTH (FIND-POSITION-IN-LIST (AREF NSTRING I) SPECIALS) REPLACED-BY))))
 	  (RETURN (OR NSTRING STRING))))))
 
-(DEFMETHOD (ITS-PATHNAME-MIXIN :QUOTE-CHARACTER) ()
-  #/)
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :CHARACTER-NEEDS-QUOTING-P) (CH)
-  (MEMQ CH '(#/; #/: #/SPACE #/; #/: #/SPACE)))
-
-(DEFVAR *ITS-UNINTERESTING-TYPES* '("LISP" "TEXT" NIL :UNSPECIFIC))
-
-;; Differs from the default method in that if both type and version are specified
-;; we clobber one of them to :UNSPECIFIC.
-;; If only one is specified, we clobber the other to :UNSPECIFIC.
-;; Exception: if either of them is :WILD, both of them are :WILD.
-(DEFMETHOD (ITS-PATHNAME-MIXIN :NEW-PATHNAME)
-	   (&REST OPTIONS
-	    &KEY STARTING-PATHNAME
-	    	 ((:VERSION -VERSION-) NIL VERSION-P)
-	    &ALLOW-OTHER-KEYS
-	    &AUX -TYPE- TYPE-P)
-  (SETQ -TYPE- (CADR (GETL (LOCF OPTIONS) '(:TYPE :CANONICAL-TYPE))))
-  (COND ((EQ -TYPE- ':WILD)
-	 (SETQ -VERSION- ':WILD VERSION-P T))
-	((EQ -VERSION- ':WILD)
-	 (SETQ -TYPE- ':WILD TYPE-P T))
-	((AND (NOT (MEMQ -TYPE- '(NIL :UNSPECIFIC)))
-	      (NOT (MEMQ -VERSION- '(NIL :UNSPECIFIC))))
-	 (IF (MEM #'STRING-EQUAL -TYPE- *ITS-UNINTERESTING-TYPES*)
-	     (SETQ -TYPE- ':UNSPECIFIC TYPE-P T)
-	   (SETQ -VERSION- ':UNSPECIFIC VERSION-P T)))
-	((NOT (MEMQ -TYPE- '(NIL :UNSPECIFIC)))
-	 (SETQ -VERSION- ':UNSPECIFIC VERSION-P T))
-	((NOT (MEMQ -VERSION- '(NIL :UNSPECIFIC)))
-	 (SETQ -TYPE- ':UNSPECIFIC TYPE-P T)))
-  (APPLY #'MAKE-PATHNAME-1
-	 (IF TYPE-P :TYPE) -TYPE-
-	 (IF VERSION-P :VERSION) -VERSION-
-	 :STARTING-PATHNAME (OR STARTING-PATHNAME SELF)
-	 :PARSING-PATHNAME SELF
-	 OPTIONS))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :AFTER :INIT) (IGNORE)
-  (AND (NOT (MEMQ TYPE '(NIL :UNSPECIFIC)))
-       (NOT (MEMQ VERSION '(NIL :UNSPECIFIC)))
-       (NOT (AND (EQ TYPE ':WILD) (EQ VERSION ':WILD)))
-       (FERROR NIL "ITS-PATHNAME created with type ~S and version ~S." TYPE VERSION)))
-
-;;; For most components, just upcase the string
-(DEFMETHOD (ITS-PATHNAME-MIXIN :PARSE-COMPONENT-SPEC) (SPEC)
-  (COND ((CONSP SPEC) (MAPCAR #'(LAMBDA (X)
-				  (SEND SELF :PARSE-COMPONENT-SPEC X))
-			      SPEC))
-	((STRINGP SPEC) (SIX-SIXBIT-CHARACTERS SPEC))
-	(T SPEC)))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :PARSE-NAME-SPEC) (SPEC)
-  (COND ((STRINGP SPEC) (SEND SELF :PARSE-COMPONENT-SPEC SPEC))
-	((AND (CONSP SPEC)
-	      (STRINGP (CAR SPEC))
-	      (CONSP (CDR SPEC))
-	      (STRINGP (CADR SPEC))
-	      (NULL (CDDR SPEC)))
-	 ;; Allow list of length two as name component.
-	 (SEND SELF :PARSE-COMPONENT-SPEC SPEC))
-	((AND (CONSP SPEC)
-	      (STRINGP (CAR SPEC))
-	      (NULL (CDR SPEC)))
-	 (SEND SELF :PARSE-COMPONENT-SPEC (CAR SPEC)))
-	((MEMQ SPEC '(NIL :UNSPECIFIC :WILD)) SPEC)
-	(T "FOO")))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :PARSE-VERSION-SPEC) (SPEC)
-  (IF (OR (AND (FIXNUMP SPEC) (> SPEC 0))
-	  (MEMQ SPEC '(NIL :UNSPECIFIC :WILD :NEWEST :OLDEST)))
-      SPEC
-      ':NEWEST))
-
-;;; Parse an its pathname string.   and  are quoting characters.
-(DEFMETHOD (ITS-PATHNAME-MIXIN :PARSE-NAMESTRING) (HOST-SPECIFIED NAMESTRING
-					     &OPTIONAL (START 0) END)
-  (OR END (SETQ END (STRING-LENGTH NAMESTRING)))
-  (DO ((I START)
-       (J START (1+ J))
-       (CH) (TEM)
-       (DEV (AND HOST-SPECIFIED "DSK"))
-       (DIR) (FN1) (FN1P) (FN2)
-       (TYP) (VERS))
-      ((> J END)
-       (COND ((NULL FN2))
-	     ((SETQ TEM (NUMERIC-P FN2))
-	      (SETQ VERS TEM TYP ':UNSPECIFIC))
-	     ((EQUAL FN2 ">")
-	      (SETQ VERS ':NEWEST TYP ':UNSPECIFIC))
-	     ((EQUAL FN2 "<")
-	      (SETQ VERS ':OLDEST TYP ':UNSPECIFIC))
-	     ((EQUAL FN2 "*")
-	      (SETQ TYP ':WILD VERS ':WILD))
-;	     ((SI:MEMBER-EQUAL FN2 *ITS-UNINTERESTING-TYPES*)
-;	      (SETQ TYP FN2 VERS ':UNSPECIFIC))
-	     (T
-	      ;; Used to use :NEWEST here.
-	      (SETQ TYP FN2 VERS ':UNSPECIFIC)))
-       (VALUES DEV DIR FN1 TYP VERS))
-    (SETQ CH (IF (= J END) #/SPACE (CHAR NAMESTRING J)))
-    (COND ((MEMQ CH '(#/ #/))
-	   (INCF J))
-	  ((MEMQ CH '(#/: #/; #/ #/SP #/TAB))
-	   (COND (( I J)
-		  (SETQ TEM (SIX-SIXBIT-CHARACTERS NAMESTRING T I J))
-		  (CASE CH
-		    (#/: (SETQ DEV TEM))
-		    (#/; (SETQ DIR TEM))
-		    (OTHERWISE
-		     (COND (FN2)
-			   (FN1P (SETQ FN2 TEM))
-			   (T (SETQ FN1 TEM FN1P T)))))))
-	   (IF (CHAR= CH #/) (SETQ FN1P T))
-	   (SETQ I (1+ J))))))
-
-;;; Truncate to six characters
-(DEFUN SIX-SIXBIT-CHARACTERS (STRING &OPTIONAL QUOTE-P (START 0) (END (STRING-LENGTH STRING)))
-  "Truncate STRING to six characters and make sure they are all SIXBIT characters.
-START and END specify the part of STRING to use (default is all).
-QUOTE-P non-NIL says insert quoting characters where appropriate."
-  (DO ((I START (1+ I))
-       (NCH 0) (CH)
-       (NEED-COPY NIL))
-      ((OR ( I END) (= NCH 6))
-       (COND ((AND (= START 0) (= I (STRING-LENGTH STRING)) (NOT NEED-COPY))
-	      STRING)				;To avoid consing
-	     ((NOT NEED-COPY)
-	      (SUBSTRING STRING START I))
-	     (T
-	      (DO ((NSTRING (MAKE-STRING NCH))
-		   (J 0)
-		   (K START (1+ K))
-		   (CH))
-		  (( K I) NSTRING)
-		(SETQ CH (CHAR STRING K))
-		(COND ((NOT (AND QUOTE-P (MEMQ CH '(#/ #/))))
-		       (SETQ CH (CHAR-INT CH))
-		       (SETQ CH (INT-CHAR (COND ((< CH #o40) (+ CH #o40))
-						((< CH #o140) CH)
-						(T (- CH #o40)))))
-		       (SETF (CHAR NSTRING J) CH)
-		       (INCF J)))))))
-    (SETQ CH (CHAR STRING I))
-    (IF (AND QUOTE-P (MEMQ CH '(#/ #/)))
-	(SETQ NEED-COPY T)
-	(INCF NCH))
-    (OR (CHAR #/SPACE CH CH #/_)		;Already legal SIXBIT
-	(SETQ NEED-COPY T))))
-
 (DEFUN NUMERIC-P (STRING &OPTIONAL PARTIAL-OK SIGN-OK)
   "If STRING is a printed representation of a number, return the number, else NIL.
 PARTIAL-OK non-NIL says, if the number is not the whole of STRING,
@@ -328,51 +96,6 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 		(RETURN (AND NUM (* NUM SIGN)) I))
 	       (T (RETURN NIL))))))
 
-(DEFMETHOD (ITS-PATHNAME-MIXIN :INIT-FILE) (PROGRAM-NAME)
-  (SEND SELF :NEW-PATHNAME :NAME USER-ID
-			   :TYPE PROGRAM-NAME))
-
-;;; These are for things like the microcode files that need to compact both a name and a type
-;;; into one pathname.
-(DEFMETHOD (ITS-PATHNAME-MIXIN :NEW-TYPE-AND-VERSION) (NEW-TYPE NEW-VERSION)
-  (SEND SELF :NEW-PATHNAME :TYPE (SIX-SIXBIT-CHARACTERS (FORMAT NIL "~D~A"
-								     (\ NEW-VERSION 1000.)
-								     NEW-TYPE))))
-
-(DEFMETHOD (ITS-PATHNAME-MIXIN :TYPE-AND-VERSION) (&AUX TYP VERS I)
-  (COND ((STRINGP TYPE)
-	 (MULTIPLE-VALUE (VERS I) (NUMERIC-P TYPE T))
-	 (AND I (SETQ TYP (SUBSTRING TYPE I)))
-	 (VALUES TYP VERS))
-	(T (VALUES TYPE TYPE))))
-
-;;; Patch system interface, more kludges for only six character filenames
-(DEFMETHOD (ITS-PATHNAME-MIXIN :PATCH-FILE-PATHNAME) (NAM SAME-DIRECTORY-P PATOM TYP
-						      &REST ARGS)
-  (CASE TYP
-    (:SYSTEM-DIRECTORY
-     (SEND SELF :NEW-PATHNAME :NAME (IF SAME-DIRECTORY-P PATOM
-					(IF SAME-DIRECTORY-P PATOM
-					  (IF (< (STRING-LENGTH NAM) 7.)
-					      NAM
-					    (SI::SYSTEM-SHORT-NAME NAM))))
-	   		      :TYPE "(PDIR)"))
-    (:VERSION-DIRECTORY
-     (SEND SELF :NEW-PATHNAME :NAME (WITH-OUTPUT-TO-STRING (STREAM)
-					(LET ((SNAME (IF SAME-DIRECTORY-P PATOM
-						       (SI::SYSTEM-SHORT-NAME NAM))))
-					  (DOTIMES (I (MIN (STRING-LENGTH SNAME) 3))
-					    (SEND STREAM :TYO (AREF SNAME I))))
-					(LET ((*PRINT-BASE* 10.) (*NOPOINT T))
-					  (PRIN1 (\ (CAR ARGS) 1000.) STREAM)))
-	   		       :TYPE "(PDIR)"))
-    (:PATCH-FILE
-     (SEND SELF :NEW-PATHNAME :NAME (FORMAT NIL "~:[~*~;~C~]~D.~D"
-					      SAME-DIRECTORY-P PATOM
-					      (\ (CAR ARGS) 100.)
-					      (\ (CADR ARGS)
-						 (IF SAME-DIRECTORY-P 100. 1000.)))
-			       :TYPE (CADDR ARGS)))))
   
 ;; TENEX-family pathname support (TENEX-FAMILY-PATHNAME-MIXIN, the
 ;; shared base of TOPS-20, TENEX and VMS pathnames) and TOPS-20 support
@@ -744,17 +467,14 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 
 ;;; Here are the pathnames that we support
 
-(DEFFLAVOR ITS-PATHNAME () (FS:ITS-PATHNAME-MIXIN HOST-PATHNAME))
-
-;; TOPS20-PATHNAME and TENEX-PATHNAME went with TOPS-20 and Tenex
-;; support.
+;; ITS-PATHNAME went with ITS support; TOPS20-PATHNAME and
+;; TENEX-PATHNAME went with TOPS-20 and Tenex support.
 (DEFFLAVOR UNIX-PATHNAME () (FS:UNIX-PATHNAME-MIXIN HOST-PATHNAME))
 
 (DEFFLAVOR LMFS-PATHNAME () (FS:LMFS-PATHNAME-MIXIN HOST-PATHNAME))
 (DEFPROP :LMFS LMFS-PATHNAME LISPM-PATHNAME-FLAVOR)
 
-(COMPILE-FLAVOR-METHODS ITS-PATHNAME
-			UNIX-PATHNAME
+(COMPILE-FLAVOR-METHODS UNIX-PATHNAME
 			LMFS-PATHNAME)
 
 

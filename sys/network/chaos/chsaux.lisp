@@ -510,7 +510,6 @@ SPEC can be a user name, or user@host."
 ;yes, I've heard of selectq! - change this lossage to METHODS, except for :WAITS
 (DEFVAR HOST-FINGER-PROTOCOL-ALIST
 	'((:LISPM . PARSE-LISPM-FINGER)
-	  (:ITS . PARSE-ITS-FINGER)
 	  (:WAITS . PARSE-WAITS-FINGER)
 	  (:UNIX . PARSE-UNIX-FINGER)
 	  (:TOPS-10 . PARSE-TENEX-FINGER))
@@ -535,12 +534,8 @@ SPEC can be a user name, or user@host."
   (IGNORE USER)
   (IF (STRING-SEARCH "Logged in" FINGER-INFO) T)) ;catch all
 
-(DEFUN PARSE-ITS-FINGER (USER FINGER-INFO)
-  "Return T if the USER is logged to a ITS site, based on the finger info we have."  
-  (IGNORE USER)
-  (AND (NOT (STRING-SEARCH "Last logout" FINGER-INFO)) ;not logged in
-       (NOT (STRING-SEARCH "user" FINGER-INFO))        ;"No users" -- no such user
-       ))
+;; PARSE-ITS-FINGER removed with ITS support; this system never talks to an
+;; ITS host.
 
 (DEFUN PARSE-LISPM-FINGER (USER FINGER-INFO)
   "Return T if the USER is logged into a Lispm, based on the finger info we were given."

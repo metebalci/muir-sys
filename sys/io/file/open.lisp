@@ -1084,20 +1084,18 @@ To avoid loading your init file, ~<~%~:;follow by <space>T : ~>"
 	(LOGIN USER HOST DONT-READ-INIT))))
 
 (DEFVAR USER-UNAMES NIL "Alist mapping host objects into usernames.")
+;; :LMFILE is gone from this test with the LMFILE file computer, and
+;; the :ITS test (recording a uname as ITS rather than the host, since all
+;; ITS's shared one set of unames) went with ITS support.
 (DEFUN FILE-HOST-USER-ID (UID HOST)
   "Specify the user-id UID for use on host HOST."
-  ;; :LMFILE is gone from this test with the LMFILE file computer.
-  (AND (EQ (SEND HOST :SYSTEM-TYPE) :ITS)
-       ;; All ITS's have the same set of unames, so record as ITS rather than the host.
-       (SETQ HOST 'ITS
-	     UID (SUBSTRING UID 0 (MIN (STRING-LENGTH UID) 6))))
   (LET ((AE (ASSQ HOST USER-UNAMES)))
        (IF AE
 	   (RPLACD AE UID)
 	   (PUSH (CONS HOST UID) USER-UNAMES))))
 
 (DEFUN UNAME-ON-HOST (HOST)			; Must be a host object
-  (CDR (ASSQ (IF (EQ (SEND HOST :SYSTEM-TYPE) :ITS) 'ITS HOST) USER-UNAMES)))
+  (CDR (ASSQ HOST USER-UNAMES)))
 
 (ADD-INITIALIZATION "File Host User ID" '(FILE-HOST-USER-ID USER-ID USER-LOGIN-MACHINE)
 		    '(LOGIN))

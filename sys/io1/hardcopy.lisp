@@ -135,9 +135,9 @@ LEFT, TOP, RIGHT, BOTTOM specify the part of the array to print,
 							    (SI:PARSE-HOST (SECOND PRINTER))
 							  SI:ASSOCIATED-MACHINE)))
   (WITH-OPEN-FILE-CASE
+    ;; the :ITS clause here went with ITS support.
     (STREAM (FS:MAKE-PATHNAME :HOST HOST
 			      :DEVICE (SELECTQ (SEND HOST :SYSTEM-TYPE)
-					 (:ITS "TPL")
 					 (:UNIX :UNSPECIFIC)
 					 (OTHERWISE "LPT"))
 			      :DIRECTORY (IF (EQ (SEND HOST :SYSTEM-TYPE) :UNIX) '("lpr")))
