@@ -1520,30 +1520,6 @@ SYMBOL can actually be anything you can GET from.")
 ;  "")
 ;;arglist = (ARRAY SUBSCRIPT)
 
-;(SETF (DOCUMENTATION '%MULTIBUS-READ-16 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR)
-
-;(SETF (DOCUMENTATION '%MULTIBUS-WRITE-16 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR WORD)
-
-;(SETF (DOCUMENTATION '%MULTIBUS-READ-8 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR)
-
-;(SETF (DOCUMENTATION '%MULTIBUS-WRITE-8 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR WORD)
-
-;(SETF (DOCUMENTATION '%MULTIBUS-READ-32 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR)
-
-;(SETF (DOCUMENTATION '%MULTIBUS-WRITE-32 'FUNCTION)
-;  "")
-;;arglist = (MULTIBUS-BYTE-ADR WORD)
-
 (SETF (DOCUMENTATION 'SET-AR-1 'FUNCTION)
   "Internal primitive version of SETF of AREF for 1-dimensional arrays.
 You should never need to use this, as the compiler optimizes into this as appropriate")
@@ -1622,34 +1598,6 @@ This value could be used as the second argument of AR-1-FORCE to access that ele
 (SETF (DOCUMENTATION 'COMMON-LISP-LISTP 'FUNCTION)
   "T if OBJECT is a cons or NIL")
 ;arglist = (OBJECT)
-
-;(SETF (DOCUMENTATION '%NUBUS-READ 'FUNCTION)
-;  "")
-;;arglist = (NUBUS-SLOT SLOT-BYTE-ADR)
-
-;(SETF (DOCUMENTATION '%NUBUS-WRITE 'FUNCTION)
-;  "")
-;;arglist = (NUBUS-SLOT SLOT-BYTE-ADR WORD)
-
-;(SETF (DOCUMENTATION '%MICROSECOND-TIME 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%FIXNUM-MICROSECOND-TIME 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%IO-SPACE-READ 'FUNCTION)
-;  "")
-;;arglist = (IO-ADDR)
-
-;(SETF (DOCUMENTATION '%IO-SPACE-WRITE 'FUNCTION)
-;  "")
-;;arglist = (IO-ADDR WORD)
-
-;(SETF (DOCUMENTATION '%NUBUS-PHYSICAL-ADDRESS 'FUNCTION)
-;  "")
-;;arglist = (APPARENT-PHYSICAL-PAGE)
 
 (SETF (DOCUMENTATION 'VECTORP 'FUNCTION)
   "T if OBJECT is a vector: an array of rank 1.")
@@ -1836,66 +1784,6 @@ be so used. Use CLI://, RATIONAL or RATIONALIZE instead.")
 This can be used to construct non-canonicalized complex numbers, and so should not normally
 be used. Use COMPLEX instead.")
 ;;arglist = (NUMERATOR DENOMINATOR)
-
-;(SETF (DOCUMENTATION '%MICRO-PAGING 'FUNCTION)
-;  "")
-;;arglist = (ARG)
-
-;(SETF (DOCUMENTATION '%PROCESSOR-SWITCHES 'FUNCTION)
-;  "")
-;;arglist = (ARG)
-
-;(SETF (DOCUMENTATION '%COLD-BOOT 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%TEST-MULTIPLY-RETURN-LOW 'FUNCTION)
-;  "")
-;;arglist = (N1 N2)
-
-;(SETF (DOCUMENTATION '%TEST-MULTIPLY-RETURN-HIGH 'FUNCTION)
-;  "")
-;;arglist = (N1 N2)
-
-;(SETF (DOCUMENTATION '%MULT-16 'FUNCTION)
-;  "")
-;;arglist = (N1 N2)
-
-;(SETF (DOCUMENTATION '%MULT-32 'FUNCTION)
-;  "")
-;;arglist = (N1 N2)
-
-;(SETF (DOCUMENTATION '%QUART-TRANSFER 'FUNCTION)
-;  "")
-;;ARGLIST = (QUART-FLAGS ARRAY N-BLOCKS)
-
-;(SETF (DOCUMENTATION '%NUBUS-READ-8 'FUNCTION)
-;  "")
-;;ARGLIST = (NUBUS-SLOT SLOT-BYTE-ADR)
-
-;(SETF (DOCUMENTATION '%NUBUS-WRITE-8 'FUNCTION)
-;  "")
-;;ARGLIST = (NUBUS-SLOT SLOT-BYTE-ADR WORD)
-
-;(SETF (DOCUMENTATION '%LAMBDA-RG-QUAD-SLOT 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%LAMBDA-TV-QUAD-SLOT 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%LAMBDA-MOUSE-BUTTONS 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%SYS-CONF-PHYSICAL-PAGE 'FUNCTION)
-;  "")
-;;arglist = ()
-
-;(SETF (DOCUMENTATION '%LAMBDA-SDU-QUAD-SLOT 'FUNCTION)
-;  "")
-;;arglist = ()
 
 ;(SETF (DOCUMENTATION 'UNBIND-0 'FUNCTION)
 ;  "")
