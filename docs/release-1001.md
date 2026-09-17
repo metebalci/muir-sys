@@ -304,5 +304,10 @@ file saying why.
   reading a character and pushing it back, and the stream cannot push back
   the Return that CR LF becomes. The TELNET and EVAL servers peek at the
   next byte instead (#2).
+- **`io/stream.lisp`:** after a CR not followed by LF, an ASCII-translating
+  stream lost the next two bytes, because it sent `:UNTYI` to the
+  continuation of its `:TYI` methods, which read again, rather than to the
+  stream. It pushes the byte back onto the stream now, and a CR at end of
+  file no longer signals (#2).
 
 ## Around the system

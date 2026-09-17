@@ -610,8 +610,12 @@ into lisp machine character set for :TYI method."))
     (#o11 #/TAB)
     (#o12 #/LINE)
     (#o14 #/FF)
+    ;; push a byte that is not LF back with SELF's :UNTYI (#2).  ASCII-STREAM is the
+    ;; continuation of the :TYI methods, not a stream, so sending it :UNTYI read another
+    ;; byte, and the two bytes after a bare CR were lost.  At end of file CH1 is NIL,
+    ;; on which = signalled.
     (#o15 (LET ((CH1 (SEND ASCII-STREAM :TYI)))
-	    (OR (= CH1 #o12) (SEND ASCII-STREAM :UNTYI CH1)))
+	    (OR (NULL CH1) (EQ CH1 #o12) (SEND SELF :UNTYI CH1)))
 	  #/NEWLINE)
     (#o177 #/RUBOUT)
     (T CH)))
