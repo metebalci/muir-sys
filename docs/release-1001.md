@@ -66,6 +66,10 @@ file saying why.
 
   `cold/export.lisp` still names PRESS symbols, so the PRESS package stays
   until the cold-load cleanup.
+- **EFTP** (`network/chaos/eftp.lisp`), the PUP file transfer that sent
+  Press files to the Dover and files to and from Xerox Altos, and its module
+  in the CHAOS system (`sys/sysdcl.lisp`). `cold/export.lisp` still names its
+  symbols, which is harmless and left for the cold-load cleanup.
 - **`io1/xgp.lisp`**, screen hardcopy to MIT's XGP printer. Nothing loaded it,
   and its last user was ZMail's XGP device.
 
