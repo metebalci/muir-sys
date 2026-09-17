@@ -294,6 +294,100 @@ file saying why.
   was a module only of the MagTape system, so nothing loaded it once that
   went; `COPY-FILE` itself is `io/file/open.lisp`'s.
 
+- **Host operating systems this system will never talk to:** it talks to exactly
+  two kinds of file host, UNIX (the `ozd` file server) and LISPM (the
+  local file system), plus logical hosts. Multics, VMS, TOPS-20, Tenex and
+  ITS support are gone, smallest first:
+  - **Multics:** `MULTICS-PATHNAME-MIXIN` and the `MULTICS-PATHNAME` flavor
+    (`io/file/pathst.lisp`), `HOST-MULTICS-MIXIN` (`network/host.lisp`),
+    `FILE-HOST-MULTICS-MIXIN` and `MULTICS-HOST` (`io/file/access.lisp`),
+    and the Multics finger parser (`network/chaos/chsaux.lisp`). The
+    Multics-only password-guessing special case in `GUESS-PASSWORD-MAYBE`
+    (`io/file/access.lisp`) goes too, now dead code for a host type that
+    can no longer exist.
+  - **VMS:** `VMS-PATHNAME-MIXIN` and the `VMS-PATHNAME` flavor
+    (`io/file/pathst.lisp`), `HOST-VMS-MIXIN` (`network/host.lisp`),
+    `FILE-HOST-VMS-MIXIN` and `VMS-HOST` (`io/file/access.lisp`), the VMS
+    finger parser (`network/chaos/chsaux.lisp`), the dead `:VMS`
+    surface-type clauses in the canonical-type tables
+    (`io/file/pathnm.lisp`, ZMail's `zmail/comnds.lisp`), and ZMail's VMS
+    mail-file format: `VMS-MAIL-FILE-MIXIN`, `VMS-MAIL-FILE-BUFFER`,
+    `VMS-INBOX-BUFFER` and the `FS:VMS-PATHNAME-MIXIN` methods that offered
+    and detected it (`zmail/mfhost.lisp`, `zmail/cometh.lisp`). Unlike
+    ITS's, nothing else used the VMS mail format, so it goes whole.
+  - **TOPS-20, Tenex and Twenex:** `TENEX-FAMILY-PATHNAME-MIXIN` (the
+    shared base of TOPS-20, Tenex and VMS pathnames), `TOPS20-PATHNAME-MIXIN`
+    and `TENEX-PATHNAME-MIXIN` (`io/file/pathst.lisp`); `HOST-TOPS20-MIXIN`
+    and `HOST-TENEX-MIXIN` (`network/host.lisp`); `FILE-HOST-TOPS20-MIXIN`,
+    `FILE-HOST-TENEX-MIXIN`, `TOPS20-HOST` and `TENEX-HOST`
+    (`io/file/access.lisp`); the Twenex finger parser
+    `PARSE-TWENEX-FINGER` (`network/chaos/chsaux.lisp`;
+    `PARSE-TENEX-FINGER` is a different, still-used parser, for `:TOPS-10`,
+    which this system keeps); the dead `(:TOPS-20 :TENEX)` surface-type clauses
+    (`io/file/pathnm.lisp`); and ZMail's Tenex/TOPS-20 mail format
+    (`TENEX-MAIL-FILE-MIXIN` and friends, and the
+    `FS:TENEX-FAMILY-PATHNAME-MIXIN`/`FS:TOPS20-PATHNAME-MIXIN`/
+    `FS:TENEX-PATHNAME-MIXIN`/`SI:HOST-TOPS20-MIXIN` methods that offered
+    and detected it, in `zmail/mfhost.lisp` and `zmail/cometh.lisp`).
+    `DEFAULT-DIRECTORY-PATHNAME-AS-FILE` stays in `pathst.lisp`: it is
+    generic, and `UNIX-PATHNAME-MIXIN` uses it too. ZMail's `zmail/mail.lisp`
+    loses a dead `MEMQ` against the same two host-type keywords.
+  - **ITS,** the last: `ITS-PATHNAME-MIXIN` and the `ITS-PATHNAME` flavor
+    (`io/file/pathst.lisp`), `HOST-ITS-MIXIN` (`network/host.lisp`),
+    `FILE-HOST-ITS-MIXIN` and `ITS-HOST` (`io/file/access.lisp`), the ITS
+    finger parser `PARSE-ITS-FINGER` (`network/chaos/chsaux.lisp`), the
+    dead `:ITS` surface-type clauses (`io/file/pathnm.lisp`, ZMail's
+    `zmail/comnds.lisp`), the dead `:ITS` device clause in the LPT hardcopy
+    stream (`io1/hardcopy.lisp`), and the ITS-specific branches in
+    `DETERMINE-USER-ID-AND-PASSWORD` (`io/file/access.lisp`) and
+    `FILE-HOST-USER-ID`/`UNAME-ON-HOST` (`io/file/open.lisp`), which asked
+    for or recorded one uname shared by all ITS hosts.
+    `ITS-FN1-STRING`, `STRING-OR-WILD`, `QUOTE-COMPONENT-STRING`,
+    `NUMERIC-P` and `*ITS-UNINTERESTING-TYPES*` stay in `pathst.lisp`
+    despite their names: they are generic pathname-string helpers with
+    callers outside the old ITS support, chiefly `io/file/logical.lisp`'s
+    `LOGICAL-NAME-STRING` (literally `ITS-FN1-STRING`) and ZWEI's
+    `FILE-LOADED-TRUENAME` (`zwei/zmacs.lisp`), which reads
+    `*ITS-UNINTERESTING-TYPES*`. `ITS-DEVICE-STRING`, `ITS-FN2-STRING` and
+    `SIX-SIXBIT-CHARACTERS` had no such callers and go.
+  - **The ZMail mail-file trap:** `RMAIL-FILE-BUFFER` and
+    `BABYL-MAIL-FILE-BUFFER` inherit `ITS-MAIL-FILE-MIXIN`
+    (`zmail/mfhost.lisp`), which is a mail *format*, not host support, and
+    has no required flavor on the pathname or host system. It stays
+    unchanged, along with `PARSE-ITS-MSG-HEADERS`, `OUTPUT-ITS-HEADER` and
+    the other ITS-format mail-header code in `zmail/mail.lisp`. Only the
+    methods that offered and detected the format on the pathname and host
+    flavors themselves (`FS:ITS-PATHNAME-MIXIN`'s
+    `:MAIL-FILE-FORMAT-COMPUTER` and friends, `SI:HOST-ITS-MIXIN`'s
+    `:GMSGS-PATHNAME`) go, since those flavors are gone. This is the
+    smaller, safer of the two ways to resolve the trap, and keeps ZMail
+    working unchanged for RMAIL and BABYL files on UNIX and LISPM hosts.
+  - **Left as comments, not code, because a host-type keyword still names
+    something else:** ZMail's mail-header-format code (`:ITS` as a header
+    tag in `zmail/mail.lisp` and a `*LOCAL-MAIL-HEADER-FORCE*` menu choice
+    in `zmail/defs.lisp`), a fallback uname lookup keyed on the bare symbol
+    `ITS` in `FILE-HOST-LISPM-MIXIN` (`io/file/access.lisp:827`, kept
+    because it is a harmless alist key, never populated once ITS support
+    is gone), and doc-comment examples naming `:ITS`
+    (`network/host.lisp:27,176`, `io/file/pathnm.lisp:62,632`).
+  - **Not touched, reported instead:** `cold/export.lisp` still exports
+    `SI::HOST-ITS-MIXIN`, `SI::HOST-MULTICS-MIXIN`, `SI::HOST-TENEX-MIXIN`,
+    `SI::HOST-TOPS20-MIXIN`, `SI::HOST-VMS-MIXIN` and
+    `FS::*ITS-UNINTERESTING-TYPES*` (the last is still a real export, since
+    the variable stays); left for the cold-load cleanup, as with the
+    similarly dangling patch-machinery exports above.
+    `window/supdup.lisp:969` tests a host's `:SYSTEM-TYPE` against
+    `(:MULTICS :WAITS)` to decide whether SUPDUP needs character
+    identification; that is the SUPDUP terminal protocol talking to a
+    remote host as a terminal, not the file-host system this cleanup
+    covers, so it is left for its own decision. `io1/timpar.lisp`'s
+    `PARSE-TWENEX-TIME` and `file/lmpars.lisp`'s
+    `*LMFS-USE-TWENEX-SYNTAX*` are generic date-format and local-syntax
+    helpers named for Twenex, not Twenex host support, and `file/` is
+    this system's own local file system, out of scope for this cleanup; both are
+    left. `sys/sys/clpack.lisp` defines no package for any of these five
+    systems, so there was nothing to remove there.
+
 ## Faults fixed
 
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
