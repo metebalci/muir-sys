@@ -169,6 +169,15 @@ file saying why.
     offer to undefine it no longer looks past patch files.
   - `file/fs.lisp`: `LOAD-SYSTEMS` no longer loads patches after the systems,
     and the WHAT demo loses "me load patches" (`demo/what.lisp`).
+  - `sys2/patch.lisp`: `LOAD-PATCHES`, `LOAD-AND-SAVE-PATCHES` and its
+    incremental variant, and `RESERVE-PATCH`, `CONSUMMATE-PATCH`,
+    `ABORT-PATCH` and `VIEW-UNFINISHED-PATCHES`. What stays reads and writes
+    the patch directories for the release number, and prints the versions:
+    `ADD-PATCH-SYSTEM`, `INCREMENT-PATCH-SYSTEM-MAJOR-VERSION`,
+    `GET-SYSTEM-VERSION`, `SYSTEM-VERSION-INFO`, `DESCRIBE-SYSTEM-VERSIONS`,
+    `GET-NEW-SYSTEM-VERSION`, `PRINT-PATCHES` and `SET-SYSTEM-STATUS`.
+    `cold/global.lisp` still exports `LOAD-PATCHES` and
+    `LOAD-AND-SAVE-PATCHES`, which is left for the cold-load cleanup.
 
 ## Faults fixed
 
