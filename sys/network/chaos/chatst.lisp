@@ -478,7 +478,7 @@ used for everything, rather than the default."
       (CADR:DBG-WRITE ADR DATA)
       (%UNIBUS-WRITE ADR DATA)))
 
-(IF-IN-CADR (SET-BASE-ADDRESS))
+(SET-BASE-ADDRESS)				;was IF-IN-CADR; this system runs only on a CADR.
 
 (defun chatst-continuous-test (&optional (file)
 					 (record-errors-this-many-packets (* 10. 60. 5))

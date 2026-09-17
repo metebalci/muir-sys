@@ -33,9 +33,7 @@ Returns T if the band was set as specified, NIL if not
 	(DECODE-UNIT-ARGUMENT UNIT
 	         (FORMAT NIL "(SET-CURRENT-~:[BAND~;MICROLOAD~] ~D)" MICRO-P BAND)))
   (UNWIND-PROTECT
-   (PROG ((UCODE-NAME (SELECT-PROCESSOR
-			(:CADR "MCR")
-			(:LAMBDA "LMC"))))
+   (PROG ((UCODE-NAME "MCR"))			;the Lambda's LMC is gone.
     (SETQ RQB (GET-DISK-LABEL-RQB))
     (SETQ BAND (COND ((OR (SYMBOLP BAND) (STRINGP BAND))
 		      (STRING-UPCASE (STRING BAND)))
@@ -115,11 +113,8 @@ The bootstrap prom only looks at the first page.  Sorry.")
 
 (DEFUN FIND-MICROCODE-PARTITION (RQB MICROCODE-VERSION
 				 &AUX N-PARTITIONS WORDS-PER-PART DESIRED-COMMENT)
-  (SETQ DESIRED-COMMENT (FORMAT NIL "~A ~D"
-				(select-processor
-				  (:cadr "UCADR")
-				  (:lambda "ULAMBDA"))
-				MICROCODE-VERSION))
+  ;; the CADR's names only; the Lambda's ULAMBDA and LMC are gone.
+  (SETQ DESIRED-COMMENT (FORMAT NIL "~A ~D" "UCADR" MICROCODE-VERSION))
   (SETQ N-PARTITIONS (GET-DISK-FIXNUM RQB 200))
   (SETQ WORDS-PER-PART (GET-DISK-FIXNUM RQB 201))
   (IF ( WORDS-PER-PART 3)			;Partition comment
@@ -135,10 +130,7 @@ The bootstrap prom only looks at the first page.  Sorry.")
 	     (> (+ LOC WORDS-PER-PART) #o400)))
       (SETQ PARTITION-NAME (GET-DISK-STRING RQB LOC 4))
       (SETQ COMMENT (GET-DISK-STRING RQB (+ LOC 3) 16.))
-      (AND (STRING-EQUAL PARTITION-NAME (select-processor
-					  (:cadr "MCR")
-					  (:lambda "LMC"))
-			 0 0 3 3)
+      (AND (STRING-EQUAL PARTITION-NAME "MCR" 0 0 3 3)
 	   (STRING-EQUAL COMMENT DESIRED-COMMENT 0 0 LEN LEN)
 	   (RETURN PARTITION-NAME)))))
 

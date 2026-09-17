@@ -1814,10 +1814,9 @@ If KEY is non-NIL, it is a function to apply to each element
 
 (defun machine-type ()
   "Return the generic name for the hardware that we are running on, as a string.
-It is /"CADR/" or /"LAMBDA/"."
-  (select-processor
-    (:cadr "CADR")
-    (:lambda "LAMBDA")))
+It is /"CADR/"."
+  ;; this system runs only on a CADR.
+  "CADR")
 
 (defun machine-version ()
   "Return a string that identifies which hardware and special microcode we are using."
