@@ -1,4 +1,7 @@
 ;-*-Mode:Midas-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 
 (SETQ UC-ARRAY '(
 ;;; ARRAYS
@@ -130,8 +133,7 @@ XAP-1-A
 ;Misc insns opcodes 0-17 do AR-1, 20-37 do ARRAY-LEADER, 40-57 do %INSTANCE-REF.
 ;Misc insns opcodes 100-17 do AR-1, 120-37 do ARRAY-LEADER, 140-57 do %INSTANCE-REF.
 AREFI
-#+cadr	((M-C) M-INST-ADR)
-#+lambda((M-C) MACRO-IR-ADR)
+	((M-C) M-INST-ADR)
 	(DISPATCH-XCT-NEXT (BYTE-FIELD 2 4) M-C D-AREFI)
        ((M-A) Q-TYPED-POINTER PDL-POP)
 
@@ -179,8 +181,7 @@ AREFI-ARRAY
     (ERROR-TABLE BAD-ARRAY-TYPE M-B)
        (NO-OP)
 AREFI-RETURN
-#+cadr	(DISPATCH M-INST-DEST QMDTBD)
-#+lambda(DISPATCH MACRO-IR-DEST QMDTBD)
+	(DISPATCH M-INST-DEST QMDTBD)
        ((PDL-PUSH) DPB M-T Q-TYPED-POINTER (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NEXT)))
 
 AREFI-ASET
@@ -188,8 +189,7 @@ AREFI-ASET
        (CALL XAS-1-X)
 
 AREFI-NEW
-#+cadr	((M-C) M-INST-ADR)
-#+lambda((M-C) MACRO-IR-ADR)
+	((M-C) M-INST-ADR)
 	(DISPATCH-XCT-NEXT (BYTE-FIELD 3 6) M-C D-AREFI-NEW)
        ((M-Q) LDB (BYTE-FIELD 6 0) M-C)
 

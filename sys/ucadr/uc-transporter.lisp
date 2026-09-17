@@ -1,4 +1,7 @@
 ;-*-Mode:Midas-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 
 (SETQ UC-TRANSPORTER '(
 ;;; THE TRANSPORTER
@@ -133,8 +136,7 @@ TRANS-TRAP
 ;Assume that VMA and MD haven't been modified, or have been saved and restored.
 TRANS-DROP-THROUGH	
 	(POPJ-AFTER-NEXT NO-OP)
-#+cadr ((OA-REG-LOW) DPB (M-CONSTANT -1) OAL-DISP A-ZERO)	;FORCE DISP TO LOC 3777
-#+lambda  ((OA-REG-HIGH) DPB (M-CONSTANT -1) OAH-DISP A-ZERO)	;FORCE DISP TO LOC 7777
+	((OA-REG-LOW) DPB (M-CONSTANT -1) OAL-DISP A-ZERO)	;FORCE DISP TO LOC 3777
 
 
 ;Since MD is not saved in the stack group state, save it elsewhere (on the stack)
@@ -524,10 +526,9 @@ EXTRA-PDL-TRAP-0
 	((PDL-BUFFER-INDEX) ADD PDL-BUFFER-INDEX (A-CONSTANT 1))
 	((A-PDL-BUFFER-HEAD) PDL-BUFFER-INDEX)
 	((MD) Q-R)				;Address the map
-#+cadr	((VMA-WRITE-MAP) DPB M-1		;Restore the map for this page
+	((VMA-WRITE-MAP) DPB M-1		;Restore the map for this page
 		MAP-WRITE-SECOND-LEVEL-MAP
 		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
-#+lambda((L2-MAP-CONTROL) M-1)
 	;; EXTRA-PDL-TRAP-1 will clean up garbage in VMA.
 	((MD) SETA A-TRANS-MD			;Restore dubious MD
 		MICRO-STACK-PNTR-AND-DATA-POP)	;and flush useless return address

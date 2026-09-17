@@ -1,4 +1,7 @@
 ;-*-Mode:MIDAS-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 ;Written by RMS.  You are welcome to use this,
 ;though it is not likely to do you much good.
 
@@ -123,11 +126,8 @@ ENSURE-STACK-ENV-COPIED
 ;Is this cell already copied?  If so, return.
 	((VMA-START-READ M-A) MD)
 	(CHECK-PAGE-READ)
-#+cadr	((M-TEM) Q-DATA-TYPE READ-MEMORY-DATA)
-#+cadr	(POPJ-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTERNAL-VALUE-CELL-POINTER)))
-#+lambda(popj-data-type-equal md
-		 (a-constant (byte-value q-data-type dtp-external-value-cell-pointer)))
- ;** there isnt a check-data-type frob for this yet.
+	((M-TEM) Q-DATA-TYPE READ-MEMORY-DATA)
+	(POPJ-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTERNAL-VALUE-CELL-POINTER)))
 ;Not already copied => push its car, then its cdr.
 	((PDL-PUSH M-TEM) Q-TYPED-POINTER MD)
 	((VMA-start-read) M+1 VMA)
@@ -212,8 +212,7 @@ STACK-CLOSURE-DISCONNECT-FIRST
 ;; in a frame whose stack closure vector is empty (that is, T).
 
 STACK-CLOSURE-DISCONNECT
-#+cadr	((M-A) M-INST-ADR)
-#+lambda((M-A) MACRO-IR-ADR)
+	((M-A) M-INST-ADR)
 	(CALL STACK-CLOSURE-CLEAR)
 	(POPJ-EQUAL M-E A-V-NIL)
 ;Now M-E has the copied stack closure just cleared.
@@ -388,8 +387,7 @@ STACK-CLOSURE-UNSHARE
 ;M-T has list of stack closure vector copies to unshare.
 	((PDL-INDEX) SUB PDL-INDEX (A-CONSTANT 1))
 ;M-J has the stack closure vector of this frame.
-#+cadr	((M-B) M-INST-ADR)
-#+lambda((M-B) MACRO-IR-ADR)
+	((M-B) M-INST-ADR)
 	((M-K) ADD C-PDL-BUFFER-INDEX A-B)
 ;M-K has the memory address of this local's slot in the stack closure vector.
 	(CALL LOAD-PDL-BUFFER-INDEX)
@@ -614,8 +612,7 @@ MAKE-STACK-CLOSURE
 	((M-2) C-PDL-BUFFER-INDEX)
 	((C-PDL-BUFFER-INDEX) DPB M-MINUS-ONE (LISP-BYTE %%LP-ENS-UNSAFE-REST-ARG) A-2)
 ;Put in M-T the memory address of the first slot.
-#+cadr	((M-K) M-INST-ADR)
-#+lambda((M-K) MACRO-IR-ADR)
+	((M-K) M-INST-ADR)
 	((PDL-INDEX M-K) ADD M-K A-LOCALP)
 	(CALL CONVERT-PDL-BUFFER-ADDRESS)
 	((PDL-PUSH M-J) DPB M-K Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-STACK-CLOSURE)))

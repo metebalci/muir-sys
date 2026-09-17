@@ -1,4 +1,7 @@
 ;-*-Mode:Midas-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 
 (SETQ UC-STORAGE-ALLOCATION '(
 
@@ -1216,9 +1219,8 @@ SCAV-STRUCTURE-INFO
 
 STRUCTURE-INFO
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;Ensure validity of meta bits
-#+cadr	((M-K) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;FOR DISPATCH BELOW, AND
+	((M-K) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;FOR DISPATCH BELOW, AND
 						; RETURNED TO CALLER.  NOTE 0 IN SIGN BIT.
-#+lambda((m-k) dpb l2-map-control (lisp-byte %%region-map-bits) a-zero)
 	((VMA-START-READ) Q-POINTER MD)		;FETCH FIRST WORD
 	(CHECK-PAGE-READ)
 	((M-3) (A-CONSTANT 0))			;INITIALIZE RETURN VALUES
