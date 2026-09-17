@@ -58,10 +58,15 @@
       (DUMP-MEM-ARRAY D-MEM RADMO OUT-FILE)
       (DUMP-MEM-ARRAY A-MEM RAAMO OUT-FILE)
       (TERPRI OUT-FILE)
+      ;; the array dump belongs inside the UNLESS, after the -3 and the
+      ;; area origin that announce it.  Outside, a symbol vector that is empty,
+      ;; as it is for DCFU and MEMD, was written as a run of NILs with no -3,
+      ;; which CC-UCODE-LOADER (SYS: CC; CADLD) cannot read, and System 100's
+      ;; own DCFU ULOAD and MEMD ULOAD have none.
       (unless (NULL (AREF MICRO-CODE-SYMBOL-IMAGE 0))	;IF HAVE WIPED SYMBOL VECTOR
 	(PRINT -3 OUT-FILE)			;DUMP MICRO-CODE-SYMBOL AREA
-	(PRINT (CONS-DUMP-FIND-AREA-ORIGIN 'MICRO-CODE-SYMBOL-AREA) OUT-FILE))
-      (CONS-DUMP-ARRAY MICRO-CODE-SYMBOL-IMAGE OUT-FILE)
+	(PRINT (CONS-DUMP-FIND-AREA-ORIGIN 'MICRO-CODE-SYMBOL-AREA) OUT-FILE)
+	(CONS-DUMP-ARRAY MICRO-CODE-SYMBOL-IMAGE OUT-FILE))
       (PRINT -2 OUT-FILE)			;NOW DUMP SYMBOLS
       (TERPRI OUT-FILE)
       (CONS-DUMP-SYMBOLS OUT-FILE)

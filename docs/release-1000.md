@@ -72,6 +72,10 @@ repository for anything that turns out to be wanted.
 - **`cold/mini.lisp`:** "Unknown stream operation" names the operation. (#7)
 - **`cold/mini.lisp`:** both MINI streams answer `:SEND-IF-HANDLES`, which a
   cold load's QLD sends to every stream. (#7)
+- **`sys/cdmp.lisp`:** `CONS-DUMP-MEMORIES` dumps the microcode symbol image
+  only after the `-3` that announces it. It wrote an empty image as a run of
+  `NIL`s the loader cannot read, so `DCFU ULOAD` and `MEMD ULOAD` could not be
+  made again as System 100 has them.
 
 ## The network and the cold load
 
