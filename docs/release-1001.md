@@ -295,5 +295,9 @@ file saying why.
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
   whose wait whostate is NIL; it shows the run whostate then. The fix is
   LM-3's, marked for 1001 in `docs/upstream-changes.md`.
+- **`io/stream.lisp`:** an ASCII-translating stream, such as a TELNET
+  session's, sent a Return character object as octal 215 instead of CR LF,
+  so FORMAT's `~%` broke no line. The translation compares the character's
+  code now, so character objects and fixnums translate alike (#1).
 
 ## Around the system

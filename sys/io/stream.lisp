@@ -630,9 +630,13 @@ the lisp machine character set into ASCII for the :TYO method."))
 			    . ,BODY)
 			CH))
 
+;;; compare the character's code, so that a character object translates as its
+;;; fixnum does (#1).  CASE compares with EQL, and a character object is not EQL to the
+;;; number in the keys below, so FORMAT's ~%, which sends a Return character object,
+;;; reached the stream untranslated as octal 215 instead of CR LF.
 (DEFUN TYO-TO-ASCII-STREAM (ASCII-STREAM CH)
   (SEND ASCII-STREAM :TYO
-	(CASE CH
+	(CASE (IF (CHARACTERP CH) (CHAR-INT CH) CH)
 	  (#/BS #o10)
 	  (#/TAB #o11)
 	  (#/LINE #o12)
