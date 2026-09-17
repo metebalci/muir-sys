@@ -299,9 +299,8 @@ Type Rubout to exit." ()
 							:TYPE :WILD
 							:VERSION :WILD)))
 
-(DEFCOM COM-VIEW-DOVER-QUEUE "List DOVER queue." ()
-  (PRESS:PRINT-DOVER-QUEUE)
-  DIS-NONE)
+;;; COM-VIEW-DOVER-QUEUE is gone.  It called PRINT-DOVER-QUEUE in package PRESS, and the
+;;; PRESS system went with Dover printing.  ZWEI; COMTAB no longer lists it.
   
 ;; fucking commercial fascism makes us all lose.
 ;;  ie the news distribution was pulled on us because we weren't paying the fuckheads. sigh.

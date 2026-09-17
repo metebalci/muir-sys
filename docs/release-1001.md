@@ -54,6 +54,20 @@ file saying why.
   `network/chaos/chsncp.lisp` names UNIX ones.
 - **The UNIX system** in `sys/sysdcl.lisp`, the Lambda's interface to its
   Unix processor, over a `SYS: UNIX;` directory that does not exist.
+- **What still called the PRESS package outside the cold load** (#14):
+  - `zmail/mfiles.lisp`: ZMail's XGP, Press and Dover hardcopy devices. TPL
+    remains.
+  - `zwei/comh.lisp`, `zwei/comtab.lisp`: the command View Dover Queue.
+  - `sys2/maksys.lisp`: `LOAD-FONT-WIDTHS-1` and the `:LOAD-FONTS-WIDTHS`
+    transformation, which only the PRESS system used.
+  - `io1/fntcnv.lisp`, `window/fed.lisp`: reading and writing AC files, the
+    Xerox printers' font format, and FED's AC choices. KST, AST, AL, KS and
+    QFASL remain.
+
+  `cold/export.lisp` still names PRESS symbols, so the PRESS package stays
+  until the cold-load cleanup.
+- **`io1/xgp.lisp`**, screen hardcopy to MIT's XGP printer. Nothing loaded it,
+  and its last user was ZMail's XGP device.
 
 ## Faults fixed
 
