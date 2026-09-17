@@ -286,8 +286,8 @@ Usually DEFINITION-TYPE is DEFUN and OBJECT-DEFINED is a function spec."
       ;; If we are doing the whole file, offer to undefine any methods deleted from the file.
       (DO ((DEFS DEFINITIONS (CDR DEFS))) ((NULL DEFS))
 	(SETF (CAR DEFS) (COPY-LIST (CAR DEFS))))
-      (UNLESS (SEND GENERIC-PATHNAME :GET ':PATCH-FILE)
-	(DOLIST (OLD-DEF OLD-DEFINITIONS)
+      ;; no file is a patch file now, so the checks for patch files are gone.
+      (DOLIST (OLD-DEF OLD-DEFINITIONS)
 	  (AND (EQ (CDR-SAFE OLD-DEF) 'DEFUN)
 	       (SETQ OLD-FUN (CAR OLD-DEF))
 	       (EQ (CAR-SAFE OLD-FUN) :METHOD)
@@ -301,26 +301,17 @@ Usually DEFINITION-TYPE is DEFUN and OBJECT-DEFINED is a function spec."
 	       (MULTIPLE-VALUE-BIND (NAME TYPE)
 		   (SI:FUNCTION-PARENT OLD-FUN)
 		 (NOT (MEMBER-EQUAL (CONS NAME TYPE) DEFINITIONS)))
-	       (LET* ((FILES (CDR (ASSQ 'DEFUN (GET-ALL-SOURCE-FILE-NAMES OLD-FUN))))
-		      (FILES-1 FILES))
-		 (DO () ((NOT (AND FILES-1 (SEND (CAR FILES-1) :GET ':PATCH-FILE))))
-		   (POP FILES-1))
-		 (AND (EQ (CAR FILES-1) GENERIC-PATHNAME)
+	       (LET ((FILES (CDR (ASSQ 'DEFUN (GET-ALL-SOURCE-FILE-NAMES OLD-FUN)))))
+		 (AND (EQ (CAR FILES) GENERIC-PATHNAME)
 		      (PROGN
-			(IF (EQ FILES FILES-1)
-			    (FORMAT *QUERY-IO*
-				    "~&File ~A no longer contains a definition of ~S.~%"
-				    ACCESS-PATHNAME OLD-FUN)
-			  (FORMAT *QUERY-IO*
-				  "~&File ~A no longer contains a definition of ~S.
-It was more recently redefined by patch file ~A, but no other non-patch file.~%"
-				  ACCESS-PATHNAME OLD-FUN
-				  (SEND (CAR FILES) :SOURCE-PATHNAME)))
+			(FORMAT *QUERY-IO*
+				"~&File ~A no longer contains a definition of ~S.~%"
+				ACCESS-PATHNAME OLD-FUN)
 			(PROG1 (WITH-TIMEOUT ((* 60. 60.)
 					      (FORMAT *QUERY-IO* " ... Yes by timeout.") T)
 				 (Y-OR-N-P "Undefine it? (60 sec timeout for Yes) "))
 			       (TERPRI *QUERY-IO*)))))
-	       (FUNDEFINE OLD-FUN)))))))
+	       (FUNDEFINE OLD-FUN))))))
 
 (DEFUN FASL-NIBBLE-SLOW ()
   (COND (FASL-STREAM-BYPASS-P

@@ -281,11 +281,7 @@ ALREADY-RESECTIONIZED-FLAG should be T to inhibit resectionization."
   (LET ((SI:*ALL-FREE-INTERPRETER-VARIABLE-REFERENCES-SPECIAL* T))
     (MULTIPLE-VALUE-BIND (VARS VALS) (SEND *INTERVAL* :ATTRIBUTE-BINDINGS)
       (PROGV VARS VALS
-	(WHEN FS:THIS-IS-A-PATCH-FILE
-	  ;; If compiling out of the editor buffer of a patch file,
-	  ;; make sure the file itself is marked
-	  ;; so that Meta-. will behave right.
-	  (PUTPROP GENERIC-PATHNAME T :PATCH-FILE))
+	;; a buffer is never a patch file now, so nothing marks its pathname as one.
 	;; Bind off this flag -- our stream is not generating font changes
 	;; so READ should not try to remove any.
 	(LET ((SI:READ-DISCARD-FONT-CHANGES NIL))
