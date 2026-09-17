@@ -15,49 +15,6 @@ at compile time, but the argument is #,~S,
 whose type is not known until load time"
 	      MACRO (CDR OBJECT))))
 
-;;;; Macros which look at the processor type at run time.
-
-(DEFPROP :CADR #.CADR-TYPE-CODE PROCESSOR-TYPE-CODE)
-(DEFPROP :LAMBDA #.LAMBDA-TYPE-CODE PROCESSOR-TYPE-CODE)
-(DEFPROP :EXPLORER #.EXPLORER-TYPE-CODE PROCESSOR-TYPE-CODE)
-
-(DEFMACRO SELECT-PROCESSOR (&REST CLAUSES)
-  "CLAUSES begin with :CADR, :LAMBDA or :EXPLORER (ugh!)"
-  `(CASE PROCESSOR-TYPE-CODE
-     ,@(MAPCAR #'(LAMBDA (CLAUSE)
-		   (IF (MEMQ (CAR CLAUSE) '(T OTHERWISE))
-		       CLAUSE
-		     (CONS (MAPCAR #'(LAMBDA (X)
-				       (OR (GET X 'PROCESSOR-TYPE-CODE)
-					   (FERROR NIL "~S is an unknown processor-type" X)))
-				   (IF (CLI:LISTP (CAR CLAUSE))
-				       (CAR CLAUSE) (LIST (CAR CLAUSE))))
-			   (CDR CLAUSE))))
-	       CLAUSES)))
-
-(DEFMACRO IF-IN-CADR (&BODY FORMS)
-  "Uses FORMS only if running or compiling on a CADR."
-  `(WHEN (EQ PROCESSOR-TYPE-CODE #.CADR-TYPE-CODE)
-    ,@FORMS))
-
-(DEFMACRO IF-IN-LAMBDA (&BODY FORMS)
-  "Uses FORMS only if running or compiling on a Lambda machine."
-  `(WHEN (EQ PROCESSOR-TYPE-CODE #.LAMBDA-TYPE-CODE)
-    ,@FORMS))
-
-(DEFMACRO IF-IN-CADR-ELSE-LAMBDA (CADR-FORM &BODY LAMBDA-FORMS)
-  "Uses CADR-FORM if running or compiling on a CADR.  Otherwise uses LAMBDA-FORMS."
-  `(IF (EQ PROCESSOR-TYPE-CODE #.CADR-TYPE-CODE)
-      ,CADR-FORM
-    ,@LAMBDA-FORMS))
-(compiler:make-obsolete if-in-cadr-else-lambda "use SI:SELECT-PROCESSOR")
-(DEFMACRO IF-IN-LAMBDA-ELSE-CADR (LAMBDA-FORM &BODY CADR-FORMS)
-  "Uses LAMBDA-FORM if running or compiling on a LAMBDA.  Otherwise uses CADR-FORMS."
-  `(IF (EQ PROCESSOR-TYPE-CODE #.LAMBDA-TYPE-CODE)
-       ,LAMBDA-FORM
-     ,@CADR-FORMS))
-(compiler:make-obsolete if-in-lambda-else-cadr "use SI:SELECT-PROCESSOR")
-
 ;; sigh
 (DEFMACRO SEND (OBJECT OPERATION &REST ARGUMENTS)
   "Send a message to OBJECT, with operation OPERATION and ARGUMENTS."

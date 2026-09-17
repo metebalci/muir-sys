@@ -8,13 +8,10 @@
 ;;; Note that this file has to be in the SYSTEM-INTERNALS (SI) package
 ;;; rather than TV because it is part of the cold-load.
 
-;compare these with SI:PROCESSOR-TYPE-CODE to conditionalize code for a specific machine.
+;;; only the CADR's code is left.  SI:PROCESSOR-TYPE-CODE, which the
+;;; microcode sets, is always this on muir and muir-fpga, and no code tests it.
 (DEFCONST CADR-TYPE-CODE 1
   "The value which SI:PROCESSOR-TYPE-CODE has when you run on a CADR.")
-(DEFCONST LAMBDA-TYPE-CODE 2
-  "The value which SI:PROCESSOR-TYPE-CODE has when you run on a LAMBDA.")
-(DEFCONST EXPLORER-TYPE-CODE 3
-  "The value which SI:PROCESSOR-TYPE-CODE has when you run on an Explorer.")
 
 (SETQ TV:MORE-PROCESSING-GLOBAL-ENABLE T)
 

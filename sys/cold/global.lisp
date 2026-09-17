@@ -951,10 +951,6 @@
  IF-FOR-LISPM					;obsolete
  IF-FOR-MACLISP					;obsolete
  IF-FOR-MACLISP-ELSE-LISPM			;obsolete
- IF-IN-CADR
- IF-IN-CADR-ELSE-LAMBDA				;obsolete
- IF-IN-LAMBDA
- IF-IN-LAMBDA-ELSE-CADR				;obsolete
  IF-IN-LISPM					;obsolete
  IF-IN-MACLISP					;obsolete
  IF						;common
@@ -1492,7 +1488,6 @@
  SECOND						;common
  SELECT
  SELECT-MATCH
- SELECT-PROCESSOR
  SELECTOR
  SELECTQ
  SELECTQ-EVERY
