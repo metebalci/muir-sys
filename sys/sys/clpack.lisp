@@ -1693,7 +1693,7 @@ and by random processes that don't bind *PACKAGE*."
     ("COLOR" :size 250. :use ("GLOBAL" "SYS"))
     ("COMPILER" :size 2800. :use ("GLOBAL" "SYS"))
     ("FILE-SYSTEM" :size 1800. :use ("GLOBAL" "SYS") :nicknames ("FS") :prefix-name "FS")
-    ("TAPE" :size 500. :use ("GLOBAL"))
+    ;; no TAPE package.  SYS: TAPE; is not carried and no source names the package.
     ("QFASL-REL" :size 300. :use ("GLOBAL" "SYS")
 	         :shadow ("READ-BYTE" "WRITE-BYTE" "WRITE-STRING"))
     ("METER" :size 300. :use ("GLOBAL" "SYS"))

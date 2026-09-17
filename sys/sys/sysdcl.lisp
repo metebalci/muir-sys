@@ -29,7 +29,6 @@
 		      FED
 		      COLOR
 		      EH
-;;;		      PRESS		;not carried: a Xerox Dover printer
 		      MATH
 		      HACKS
 		      METER
@@ -167,23 +166,6 @@
 (DEFSYSTEM SUPDUP
   (:PACKAGE SUPDUP)
   (:COMPILE-LOAD ("SYS: WINDOW; SUPDUP")))
-
-;;; the PRESS system is not carried.  It printed to a Xerox Dover over
-;;; EFTP, hardware nobody here has, and io1/press.lisp and io1/rfontw.lisp
-;;; are gone.  That also answers the ;;;---!!! question below, which asked
-;;; how a font-widths file for that printer was made.  Call sites elsewhere
-;;; still name the PRESS package; see metebalci/muir-sys#14.
-;(DEFSYSTEM PRESS
-;  (:PACKAGE PRESS)
-;  (:PATHNAME-DEFAULT "SYS: IO1;")
-;  (:MODULE RFONTW "RFONTW")
-;  (:MODULE PRESS "PRESS")
-;  (:MODULE FONTW "PRESS-FONTS; FONTS WIDTHS >")
-;  (:COMPILE-LOAD RFONTW)
-;  (:COMPILE-LOAD PRESS)
-;;;;---!!! How is PRESS-FONTS; FONTS WIDTHS generated?
-;;;;---!!!  (:LOAD-FONTS-WIDTHS FONTW (:FASLOAD RFONTW))
-;  )
 
 (DEFSYSTEM FORMAT
   (:PACKAGE FORMAT)
@@ -438,21 +420,8 @@
 ; (:FASLOAD FONTS)
   (:COMPILE-LOAD COMETH (:FASLOAD DEFS MAIN)))
 
-(defsystem unix
-  (:name "Unix-Interface")
-  (:short-name "unix")
-  (:package unix)
-  (:pathname-default "sys:unix;")
-  (:patchable nil "unix99-patch")
-  (:module config ("sys;lam-config") :package si)
-  (:module main ("lamtty" "share-chaos" "iomsg"))
-  (:compile-load config)
-  (:compile-load main (:fasload config)))
-
 ;;; Systems defined elsewhere
 
-;;; :MAGTAPE dropped from this list; SYS: TAPE; is not carried, and
-;;; FILE; FS has the matching change.
 (LOOP FOR SYSTEM IN '(:FILE-SYSTEM-UTILITIES :LOCAL-FILE :FILE-SERVER)
       DO (SET-SYSTEM-SOURCE-FILE SYSTEM "SYS: FILE; FS"))
 
