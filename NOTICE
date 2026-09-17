@@ -1,0 +1,90 @@
+muir-sys
+
+Copyright notices and terms
+===========================
+
+Where the sources come from
+---------------------------
+
+The system in sys/ is the Lisp Machine system of the Massachusetts Institute
+of Technology, System 99.32, as recovered from TID/671 by MIT's Tapes of Tech
+Square project: a backup of the machine OZ.
+
+LM-3 brought that content up as System 100 (https://tumbleweed.nu/r/sys) and,
+in its release note for System 100, declared:
+
+    Everything is now licensed under the terms of the GNU Affero General
+    Public License as published by the Free Software Foundation, either
+    version 3 of the License, or (at your option) any later version.
+
+This system is forked from System 100 and is distributed under the same terms. The
+full licence text is in LICENSE.
+
+Changes made here
+-----------------
+
+Copyright (C) 2026 Mete Balci.
+
+The changes here to System 100, its build procedure, its documents and its site
+files are licensed under the GNU Affero General Public License, version 3 or
+(at your option) any later version. docs/release-1000.md lists the changes
+release 1000 makes to System 100.
+
+Notices in the files
+--------------------
+
+The files keep the notices they were written with; nothing here removes or
+replaces them. Most carry the copyright of the Massachusetts Institute of
+Technology. The others are listed below, quoted as they stand.
+
+Symbolics, Inc., with rights acquired by MIT:
+
+    sys/cc/ccwhy.lisp, sys/io/stream.lisp, sys/io/unibus.lisp,
+    sys/io1/serial.lisp
+
+    ** (C) Copyright 1981, Symbolics, Inc.
+    The Massachusetts Institute of Technology has acquired the rights from
+    Symbolics to include the Software covered by the foregoing notice of
+    copyright with its licenses of the Lisp Machine System **
+
+Glenn S. Burke and MIT:
+
+    sys/sys2/macarr.lisp
+    Copyright (c) Jan 1984 by Glenn S. Burke and Massachusetts Institute of
+    Technology.
+
+Lisp Machine Inc., with its own grant:
+
+    sys/io/format-macro.lisp
+    copyright LISP MACHINE INC.
+    permission granted to anyone to use this or modify it.
+
+Hyperbolic Systems Inc.:
+
+    sys/eh/ehc.lisp
+    Copyright (C) Hyperbolic Systems Inc., 1982.  All wrongs reversed.
+
+Cliff Lasser (Converse):
+
+    sys/io1/conver.lisp
+    ** (c) Copyright 1982 Cliff Lasser **
+
+Devon S. McCullough (the ED: hosts of ZWEI):
+
+    sys/zwei/host.lisp
+    Copyright (c) 1982 Devon S. McCullough, all rights reserved.
+    I may give you permission to use this -- ask if you
+    are interested -- but I will insist that you agree to
+    return all improvements to me for redistribution.
+
+These last two were part of MIT's system as it was written, run and backed up
+at MIT, and are part of System 100 as LM-3 released it. They are carried here
+on the same footing. A holder of rights in any file who objects to its being
+carried is asked to open an issue at https://github.com/metebalci/muir-sys.
+
+Binaries
+--------
+
+The fonts in sys/fonts/, sys/demo/tvbgar.qfasl and sys/sys/ucinit.qfasl are
+MIT's, from System 100, and have no source form in this tree (docs/fonts.md).
+A release's microcode (sys/ubin/) and its band are built from these sources.

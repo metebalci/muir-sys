@@ -140,7 +140,7 @@ A world cannot be built from nothing, so each stage runs on the one before.
 
 ## What is needed
 
-- **A running band** to compile with, such as a 1000.0 band.
+- **A running band** to compile with, such as a 1000 band.
 - **A file server for `SYS:`** that serves both FILE and MINI. ozd does.
 - **A site.** The tree has no `site/` directory, and the build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
 - **The translations file must survive the traditional readtable.** A cold load reads it with `MINI-READFILE` (`cold/mini.lisp:319`), which ignores the file's attribute list, so it is read in traditional syntax whatever the file says. There a slash escapes the next character. A file whose targets are Unix paths must therefore double every slash and name no readtable, or the cold load stops with "End of file ... in the middle of the list". MIT's own site file never met this: its targets are TOPS-20 paths with no slashes. This is metebalci/muir-sys issue 9.
@@ -153,7 +153,7 @@ Every session that reads or writes files must log in first, for example with `(l
 
 The standard readtables are not compiled by the Lisp compiler. `io/rdtbl.lisp` signals an error if it is compiled or loaded (`io/rdtbl.lisp:5-6`). The readtable compiler `SI:RTC-FILE` reads it and writes its QFASL file (`io/rtc.lisp:847-858`).
 
-The readtable compiler is in no system (`sys/sysdcl.lisp` does not name `IO; RTC`), and a 1000.0 band does not have it loaded: `(fboundp 'si:rtc-file)` is `NIL`. So compile and load it first:
+The readtable compiler is in no system (`sys/sysdcl.lisp` does not name `IO; RTC`), and a 1000 band does not have it loaded: `(fboundp 'si:rtc-file)` is `NIL`. So compile and load it first:
 
 ```lisp
 (qc-file-load "SYS: IO; RTC LISP")

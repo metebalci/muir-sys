@@ -21,7 +21,7 @@ which can be taken one at a time on their merits.
 **I do not aim to keep compatibility.** The CADR architecture may change, the
 PROM may change, the microcode may change, and the system will change.
 
-Release **1000.0** is System 100 fixed and cleaned up: the same sources and
+Release **1000** is System 100 fixed and cleaned up: the same sources and
 microcode 323, the faults that stopped it rebuilding itself repaired, the
 material that is not MIT's left out. The number
 steps from 100 to 1000 to say what it is --- the same lineage, a different
@@ -56,6 +56,10 @@ it is replaced by the next release's band.
 The Lisp Machine's patch system remains in the tree, because it is what keeps
 track of the release number, but this system writes no patch files and loads none.
 
+A release is published on this repository's Releases page as a disk pack ready
+to boot, the sources with the microcode, and the example site, with a README
+giving their checksums and how to run them.
+
 ## Layout
 
 | | |
@@ -75,7 +79,11 @@ track of the release number, but this system writes no patch files and loads non
 
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   the cold load, `QLD`, and saving a band, with what had to be changed to make
-  System 304 rebuild.
+  System 100 rebuild itself.
+- [`docs/release-1000.md`](docs/release-1000.md) --- every change release 1000
+  makes to System 100.
+- [`docs/upstream-changes.md`](docs/upstream-changes.md) --- the fixes LM-3 made
+  after System 100, and which of them were taken.
 - [`docs/fonts.md`](docs/fonts.md) --- the fonts are the last binaries with no
   source here, what became of their sources, and where copies of some survive.
 
@@ -94,5 +102,6 @@ later**; see [`LICENSE`](LICENSE). LM-3 released System 100 under those terms,
 and it continues under them.
 
 The tree's own files carry MIT's copyright notices, the code having been
-recovered from MIT's backup tapes. One file, `sys/io/format-macro.lisp`, is
-Lisp Machine Inc.'s, and its own header grants anyone use and modification.
+recovered from MIT's backup tapes, and a few carry other notices.
+[`NOTICE`](NOTICE) sets out where the sources come from, the terms they are
+distributed under, and every notice that is not MIT's.
