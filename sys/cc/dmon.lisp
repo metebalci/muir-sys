@@ -1,4 +1,6 @@
 ;;; -*- MODE: LISP; PACKAGE: CADR;Base:8.-*-
+;;; the #M and #Q choices between MacLisp and Lisp Machine code are
+;;; resolved for the Lisp Machine.
 ;;; Diagnostic "monitor"  (will be anyway. pretty simpleminded for now).
 
 (DEFVAR CC-MAIN-MEMORY-SIZE NIL)
@@ -291,7 +293,7 @@
   (CC-TV-STOP-SYNC)
   (DO ((N 2 (1- N))
        (PHASE T NIL)
-       (ONES (SUB1 #Q (DPB 1 (+ (LSH 8 6) 1) 0)  #M(EXPT 2 8)))
+       (ONES (SUB1 (DPB 1 (+ (LSH 8 6) 1) 0)))
        (ZEROS 0))
       ((= N 0))
     (DO ((BITNO 0 (1+ BITNO))

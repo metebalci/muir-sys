@@ -119,6 +119,12 @@ file saying why.
     Lisp Machine, and the setup is deleted with the Multics include macro. The
     warning that incremental compilation needed the setup evaluated first goes
     with it.
+  - `cc/`, the CADR debugger: the MacLisp alternatives written with `#M` and
+    `#Q` in `ccdisk.lisp`, `dmon.lisp`, `lcadrd.lisp` and `qf.lisp`, and the
+    MacLisp code under `IF-FOR-MACLISP` in `cc.lisp`, among it the terminal
+    handling that called `STATUS TTY` and `SSTATUS TTYINT`. `IF-FOR-LISPM`
+    no longer wraps the code in `cc.lisp`, `ccdisk.lisp` and `diags.lisp`;
+    it only bound `RUN-IN-MACLISP-SWITCH` to NIL, which is its value anyway.
 
 ## Faults fixed
 
