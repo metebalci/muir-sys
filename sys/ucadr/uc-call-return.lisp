@@ -1,4 +1,7 @@
 ;-*-Mode:Midas-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 
 (SETQ UC-CALL-RETURN '(
 ;;; Push a micro-to-macro call block (just the first 3 words, not the function)
@@ -878,11 +881,8 @@ QMEX1-COPY
 QMEX1-FIND-FORWARDS
 ;Look for a local that is a forwarded list.
 	((PDL-INDEX) M-K)
-#+CADR	((M-TEM) Q-DATA-TYPE PDL-INDEX-INDIRECT)
-#+CADR	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTERNAL-VALUE-CELL-POINTER))
-	     QMEX1-NOT-FORWARD)
-#+LAMBDA(JUMP-DATA-TYPE-NOT-EQUAL PDL-INDEX-INDIRECT 
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTERNAL-VALUE-CELL-POINTER))
+	((M-TEM) Q-DATA-TYPE PDL-INDEX-INDIRECT)
+	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTERNAL-VALUE-CELL-POINTER))
 	     QMEX1-NOT-FORWARD)
 ;Yes, find where forwarded to,
 ;and if it points at our frame's stack closure vector,
@@ -1263,8 +1263,7 @@ XUWPCON (MISC-INST-ENTRY %UNWIND-PROTECT-CONTINUE)
 ;We ignore the destination of the%UNWIND-PROTECT-CONTINUE
 ;and never push the "value" on the stack.
 XUWPCON-POP-OPEN-CALL
-#+cadr	((M-1) M-INST-DEST)
-#+lambda((M-1) MACRO-IR-DEST)
+	((M-1) M-INST-DEST)
 	(JUMP-EQUAL M-1 A-ZERO XUWPCON-POP-OPEN-CALL-1)
        ((M-GARBAGE) MICRO-STACK-DATA-POP)	;Don't store in our destination.
 XUWPCON-POP-OPEN-CALL-1
@@ -1781,8 +1780,7 @@ XSPREAD-N (MISC-INST-ENTRY %SPREAD-N)
 	((M-GARBAGE) MICRO-STACK-DATA-POP)	;DON'T STORE IN DESTINATION
 	((M-K) Q-POINTER PDL-POP)	;NUMBER OF ELEMENTS TO SPREAD.
 	((M-T) Q-TYPED-POINTER PDL-POP)	;LIST TO BE SPREAD
-#+cadr	((M-C) M-INST-DEST)
-#+lambda((M-C) MACRO-IR-DEST)
+	((M-C) M-INST-DEST)
 	((M-D) M-T)		;SAVE ORIGINAL ARGS FOR ERROR MSG.
 	((M-E) SUB M-K (A-CONSTANT 1))
 	((PDL-INDEX) M-A-1 PDL-POINTER A-AP)	;CURRENT FRAME SIZE (MOD 2000)
@@ -1815,8 +1813,7 @@ XSPREAD-N-1
 XSPREAD (MISC-INST-ENTRY %SPREAD)
 	((M-GARBAGE) MICRO-STACK-DATA-POP)	;DON'T STORE IN DESTINATION
 	((M-T) Q-TYPED-POINTER PDL-POP)	;LIST TO BE SPREAD
-#+cadr	((M-C) M-INST-DEST)
-#+lambda((M-C) MACRO-IR-DEST)
+	((M-C) M-INST-DEST)
 	((M-D) M-T)					;SAVE ORIGINAL ARG FOR ERROR MSG.
 MC-SPREAD-0						;ENTRY FOR MICROCOMPILED CODE
 	((PDL-INDEX) M-A-1 PDL-POINTER A-AP)	;CURRENT FRAME SIZE (MOD 2000)
@@ -2033,8 +2030,7 @@ LMVRB-THROW-ONE-VALUE
 ;;; destination return address, if it is present.
 ;;; Note that none of the above will work anyway when called from micro-compiled code.
 FLUSH-DESTINATION-RETURN-PC
-#+cadr	((M-TEM) M-INST-DEST)
-#+lambda((M-TEM) MACRO-IR-DEST)
+	((M-TEM) M-INST-DEST)
 	(POPJ-AFTER-NEXT POPJ-EQUAL M-TEM (A-CONSTANT D-IGNORE))
        ((M-GARBAGE) MICRO-STACK-DATA-POP)
 
@@ -2357,8 +2353,7 @@ GET-SELF-MAPPING-TABLE-1
 ;and set the bit in the open call block saying we are providing it.
 ;Destination is either D-IGNORE or D-LAST.
 XSET-SELF-MAPPING-TABLE (MISC-INST-ENTRY %SET-SELF-MAPPING-TABLE)
-#+cadr	((M-TEM) M-INST-DEST)
-#+lambda((M-TEM) MACRO-IR-DEST)
+	((M-TEM) M-INST-DEST)
 	(JUMP-EQUAL-XCT-NEXT M-TEM A-ZERO XSET-SELF-MAPPING-TABLE-1)
        ((A-SELF-MAPPING-TABLE) Q-TYPED-POINTER PDL-POP)
 ;	(JUMP-IF-BIT-CLEAR M-INST-DEST-LOW-BIT XSET-SELF-MAPPING-TABLE-1)

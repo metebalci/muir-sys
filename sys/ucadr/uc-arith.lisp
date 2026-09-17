@@ -1,4 +1,7 @@
 ;-*-Mode:Midas-*-
+;the #+CADR, #+LAMBDA, #-CADR and #-LAMBDA choices between the CADR and
+;the Lambda are resolved as the CADR's reader resolves them, and Lambda-only
+;BEGIN-COMMENT blocks are deleted.  No instruction or symbol is changed.
 
 (SETQ UC-ARITH '(
 ;;; NON-DESTINATION GROUP 1
@@ -1091,8 +1094,7 @@ QIDIV		(ERROR-TABLE RESTART QIDIV)
        ((M-1) Q-R)
 
 XFLOOR-1 (MISC-INST-ENTRY INTERNAL-FLOOR-1)
-#+cadr	((M-1) M-INST-DEST)
-#+lambda((M-1) MACRO-IR-DEST)
+	((M-1) M-INST-DEST)
 	(JUMP-EQUAL M-1 A-ZERO XFLOOR-1-C)
 	((M-GARBAGE) MICRO-STACK-DATA-POP)	;Don't store in our destination.
 XFLOOR-1-C
@@ -1100,15 +1102,13 @@ XFLOOR-1-C
 	((M-T) Q-TYPED-POINTER PDL-POP)
 ;Given args on stack and M-T, return first value of FLOOR, in M-T.
 XFLOOR-1-INTERNAL
-#+cadr	((M-1) M-INST-DEST)
-#+lambda((M-1) MACRO-IR-DEST)
+	((M-1) M-INST-DEST)
 	(JUMP-EQUAL M-T (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX) 1))
 		XFLOOR-1-A)
 	(DISPATCH M-INST-DEST D-XFLOOR-1)
     (ERROR-TABLE ILLEGAL-INSTRUCTION)
 XFLOOR-1-ROUND
-#+cadr	((MICRO-STACK-DATA-PUSH) M-INST-DEST)
-#+lambda((MICRO-STACK-DATA-PUSH) MACRO-IR-DEST)
+	((MICRO-STACK-DATA-PUSH) M-INST-DEST)
 	(CALL QDIV)  ;Clobbers M-INST-DEST, and all M-registers, if calls out to macrocode.
 	((M-1) MICRO-STACK-DATA-POP)
 ;	(NO-OP)   ;QDIV returns while pushing; avoid screw from missing pass-around path.
@@ -1174,8 +1174,7 @@ XFLOOR-1-CEIL-POSITIVE
        ((M-1) Q-R)
 
 XFLOOR-1-TRUNC
-#+cadr	((MICRO-STACK-DATA-PUSH) M-INST-DEST)
-#+lambda((MICRO-STACK-DATA-PUSH) MACRO-IR-DEST)
+	((MICRO-STACK-DATA-PUSH) M-INST-DEST)
 	(CALL QIDIV)
 	((M-1) MICRO-STACK-DATA-POP)
 	(JUMP XFLOOR-1-A)
@@ -1198,8 +1197,7 @@ XFLOOR-1-FLOOR
 ;Given two args on the stack, return two values on the stack.
 ;The destination field only says how to round (floor vs ceil vs trunc vs round).
 XFLOOR-2 (MISC-INST-ENTRY INTERNAL-FLOOR-2)
-#+cadr	((M-1) M-INST-DEST)
-#+lambda((M-1) MACRO-IR-DEST)
+	((M-1) M-INST-DEST)
 	(JUMP-EQUAL M-1 A-ZERO XFLOOR-2-A)
 	((M-GARBAGE) MICRO-STACK-DATA-POP)	;Don't store in our destination.
 XFLOOR-2-A

@@ -267,6 +267,22 @@ file saying why.
     (`io/read.lisp`). So do `LAMBDA-TYPE-CODE` and `EXPLORER-TYPE-CODE`
     (`window/cold.lisp`, `cold/system.lisp`). `CADR-TYPE-CODE` stays, to
     say what `SI:PROCESSOR-TYPE-CODE` holds.
+  - The microcode (`ucadr/uc-arith.lisp`, `uc-array.lisp`,
+    `uc-call-return.lisp`, `uc-parameters.lisp`, `uc-stack-closure.lisp`,
+    `uc-storage-allocation.lisp`, `uc-transporter.lisp`, `uc-tv.lisp`): each
+    `#+CADR` loses its conditional, each `#+LAMBDA` form goes, the
+    `#-CADR (BEGIN-COMMENT)` and `(END-COMMENT)` pairs go and leave their
+    contents, and the five `#-LAMBDA (BEGIN-COMMENT)` blocks go whole: the
+    Lambda's micro-stack bits, `M-LAM` and `A-LAM` with the `MACRO-IR`
+    fields, the two CXR dispatch tables, and four `ILLOP` entries in
+    `D-ND2`. This is what the assembler read on a CADR, so no instruction,
+    symbol or order changes, and `ucadr.mcr` should assemble byte for byte
+    as before.
+  - Kept, and listed for a later decision: the `DEFMIC`s of the Lambda's
+    miscellaneous instructions (`cold/defmic.lisp`), since removing one may
+    renumber others; the `%NUBUS-` and `%MULTIBUS-` names `cold/global.lisp`
+    exports for them; and the A-memory and communication-area slots named
+    above.
 
 ## Faults fixed
 
