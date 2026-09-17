@@ -638,6 +638,12 @@ the lisp machine character set into ASCII for the :TYO method."))
 			    . ,BODY)
 			CH))
 
+;;; an ASCII stream rings its terminal's bell with BEL, ASCII 7, which the translation
+;;; below passes as it is (#5).  No ASCII-translating stream claimed :BEEP, so FQUERY,
+;;; which beeps before asking again, signalled an unclaimed message over TELNET.
+(DEFMETHOD (ASCII-TRANSLATING-OUTPUT-STREAM-MIXIN :BEEP) (&OPTIONAL IGNORE)
+  (SEND SELF :TYO 7))
+
 ;;; compare the character's code, so that a character object translates as its
 ;;; fixnum does (#1).  CASE compares with EQL, and a character object is not EQL to the
 ;;; number in the keys below, so FORMAT's ~%, which sends a Return character object,
