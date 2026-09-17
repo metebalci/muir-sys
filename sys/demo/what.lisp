@@ -302,7 +302,7 @@ Ditto on the General Technics plaza.")
 	  ("say" NIL (:MAP . "0")) ;hack: print-sends
 	  ("are you doing" NIL "I'm CONS'ing.
 I'll give the garbage collector a fatal error before long.")
-	  ("me load patches" NIL ,#'LOAD-PATCHES)
+	  ;; "me load patches" is gone with LOAD-PATCHES.
 	  ("sys" T (:MAP . "system"))
 	  ("newio" T (:MAP . "lisp"))
 	  ("features" NIL ,#'(LAMBDA () (FORMAT:PRINT-LIST NIL "~S" *FEATURES*)))	;was (STATUS FEATURE)

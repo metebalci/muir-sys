@@ -1937,11 +1937,11 @@ Useful for arguments to the PROGV special form."
 (DEFUN (:COLD-LOAD FILE-ATTRIBUTE-BINDINGS) (IGNORE IGNORE FLAG)
   (VALUES (NCONS 'SI::FILE-IN-COLD-LOAD) (NCONS FLAG)))
 
-;;; So that functions can tell if they are being loaded out of, or compiled in, a patch file
+;;; the Patch-File attribute no longer binds this, since this system loads no
+;;; patch files, so it stays NIL.  The variable stays because SYS: SYS; QRAND
+;;; and SYS: SYS; FSPEC, which are in the cold load, still read it.
 (DEFVAR THIS-IS-A-PATCH-FILE NIL
   "Non-NIL while loading a patch file.")
-(DEFUN (:PATCH-FILE FILE-ATTRIBUTE-BINDINGS) (IGNORE IGNORE VAL)
-  (VALUES (NCONS 'THIS-IS-A-PATCH-FILE) (NCONS VAL)))
 
 (DEFUN (:READTABLE FILE-ATTRIBUTE-BINDINGS) (IGNORE IGNORE VAL)
   (VALUES (NCONS '*READTABLE*) (NCONS (SI:FIND-READTABLE-NAMED VAL :ERROR))))

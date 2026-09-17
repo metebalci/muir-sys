@@ -161,6 +161,14 @@ file saying why.
   - `sys2/maksys.lisp`: the step that loaded a patchable system's patches
     after `MAKE-SYSTEM` loaded it, and the `:NO-LOAD-PATCHES` keyword that
     turned it off. `:NO-INCREMENT-PATCH` stays.
+  - The Patch-File attribute: it no longer binds `FS:THIS-IS-A-PATCH-FILE`
+    (`io/file/open.lisp`), and the editor no longer marks a buffer's file as a
+    patch file from it (`zwei/comc.lisp`). The variable stays, always NIL,
+    because `sys/qrand.lisp` and `sys/fspec.lisp` in the cold load read it.
+  - `sys/qfasl.lisp`: when a reloaded file no longer defines a method, the
+    offer to undefine it no longer looks past patch files.
+  - `file/fs.lisp`: `LOAD-SYSTEMS` no longer loads patches after the systems,
+    and the WHAT demo loses "me load patches" (`demo/what.lisp`).
 
 ## Faults fixed
 
