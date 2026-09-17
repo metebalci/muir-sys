@@ -381,11 +381,6 @@ Returns the number of occurrences replaced."
   ( #/A (CHAR-CODE CHAR) #/Z))
 (compiler:make-obsolete char-uppercase-p "use UPPER-CASE-P")
 
-(DEFUN CHAR-LOWERCASE-P (CHAR)
-  "T if CHAR is a lower case letter."
-  ( #/a (CHAR-CODE CHAR) #/z))
-(compiler:make-obsolete char-lowercase-p "use LOWER-CASE-P")
-
 (DEFUN CASE-REPLACE (BP1 BP2 TO &OPTIONAL IN-ORDER-P &AUX BP FIRST SECOND)
   "Replace the text from BP1 to BP2 with a copy of TO, preserving case if appropriate.
 Lowercase characters in TO are converted to uppercase as needed 

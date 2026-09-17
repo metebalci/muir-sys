@@ -143,6 +143,14 @@ file saying why.
   `sys2/loop.lisp`, which adds `:LOOP`, and the WHAT demo's "features"
   answer (`demo/what.lisp`). `cold/global.lisp` still exports both names,
   which is left for the cold-load cleanup.
+- **Obsolete names that nothing calls,** with their `MAKE-OBSOLETE`
+  declarations: `CHAOS-CLOSE` (`network/chaos/chuse.lisp`), `MACRO-DISPLACE`
+  (`sys2/defmac.lisp`), `MAPHASH-EQUAL-RETURN` (`sys2/hashfl.lisp`),
+  `SHEET-STRING-OUT-EXPLICIT` (`window/shwarm.lisp`), `CHAR-LOWERCASE-P`
+  (`zwei/search.lisp`), `CLOSURE-COPY` and `PUT-ON-ALTERNATING-LIST`
+  (`sys/qmisc.lisp`), and the declaration for `WITH-RESOURCE`, which is
+  defined nowhere (`sys/qcopt.lisp`). An obsolete name stays while anything
+  calls it, and while a file in `cold/` exports or names it.
 
 ## Faults fixed
 

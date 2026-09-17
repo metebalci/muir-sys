@@ -267,8 +267,6 @@ Storing into the alist cdr's does not affect the values in the closure."
 This is suitable for use in SYS:%USING-BINDING-INSTANCES."
   (CHECK-TYPE CLOSURE (OR ENTITY CLOSURE))
   (CDR (%MAKE-POINTER DTP-LIST CLOSURE)))
-(DEFF CLOSURE-COPY 'COPY-CLOSURE)
-(compiler:make-obsolete closure-copy "the new name is COPY-CLOSURE")
 
 (DEFUN COPY-CLOSURE (CLOSURE &AUX CLOSURE1)
   "Return a new closure with the same function, variables and initial values as CLOSURE.
@@ -1632,24 +1630,6 @@ Like GET, but no initial CAR"
   (GETF L KEY))
 (COMPILER:MAKE-OBSOLETE GET-FROM-ALTERNATING-LIST "use GETF instead")
 
-(DEFUN PUT-ON-ALTERNATING-LIST (ITEM L KEY)
-  "Put ITEM on an alternating association list L
-Modifies the current association, if any.
-Otherwise adds one to the head of the list.  
-Returns the augmented list as value.
-The user should alway use this value unless he is
-certain there is a current association."
-  (PROG (PNTR)
-	(SETQ PNTR L)
-     L  (COND ((NULL L)
-	       (RETURN (CONS KEY (CONS ITEM L))))
-	      ((EQ KEY (CAR L))
-	       (SETF (CADR L) ITEM)
-	       (RETURN L)))
-	(SETQ L (CDDR L))
-	(GO L)))
-(COMPILER:MAKE-OBSOLETE PUT-ON-ALTERNATING-LIST "This function is a crock")
-
 (DEFUN CALL (FN &REST ALTERNATES
 		&AUX (MAX-ARGS #o100) (ARGS-INF (ARGS-INFO FN)))
   "The first argument is a function to call.

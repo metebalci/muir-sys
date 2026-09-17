@@ -1302,7 +1302,6 @@ of a list satisfies the test. Eg (EQ . MEMQ)")
 (make-obsolete fs:file-property-list "the new name is FS:FILE-ATTRIBUTE-LIST")
 (make-obsolete fs:file-property-bindings "the new name is FS:FILE-ATTRIBUTE-BINDINGS")
 (make-obsolete print-loaded-band "use PRINT-HERALD")
-(make-obsolete with-resource "the new name is USING-RESOURCE")
 
 (defprop maknum unimplemented style-checker)
 (defprop munkam unimplemented style-checker)
