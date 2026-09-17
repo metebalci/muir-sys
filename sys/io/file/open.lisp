@@ -1086,7 +1086,8 @@ To avoid loading your init file, ~<~%~:;follow by <space>T : ~>"
 (DEFVAR USER-UNAMES NIL "Alist mapping host objects into usernames.")
 (DEFUN FILE-HOST-USER-ID (UID HOST)
   "Specify the user-id UID for use on host HOST."
-  (AND (MEMQ (SEND HOST :SYSTEM-TYPE) '(:ITS :LMFILE))
+  ;; :LMFILE is gone from this test with the LMFILE file computer.
+  (AND (EQ (SEND HOST :SYSTEM-TYPE) :ITS)
        ;; All ITS's have the same set of unames, so record as ITS rather than the host.
        (SETQ HOST 'ITS
 	     UID (SUBSTRING UID 0 (MIN (STRING-LENGTH UID) 6))))

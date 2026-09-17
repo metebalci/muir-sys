@@ -318,8 +318,7 @@
 	       (TYPEP TO 'ITS-PATHNAME)
 	       (AND (GET 'LOCAL-FILE-PATHNAME 'SI:FLAVOR)
 		    (TYPEP TO 'LOCAL-FILE-PATHNAME))
-	       (AND (GET 'REMOTE-LMFILE-PATHNAME 'SI:FLAVOR)
-		    (TYPEP TO 'REMOTE-LMFILE-PATHNAME))
+	       ;; the REMOTE-LMFILE-PATHNAME test is gone with LMFILE.
 	       (SETQ NOT-CERTAIN T
 		     TYPE
 		     (OR (AND QFASLP "QFASL")
@@ -361,12 +360,10 @@
   (LET (OUTPROBE)
     (AND (NEQ OVERWRITE ':ALWAYS)
 	(LET (OUTCRDATE OUTEX)
-	  ;; Take note of the fact that an LMFILE pathname with a "type"
-	  ;; won't be found as a truename because the truename will have a space.
-	  (AND (OR (AND (GET 'LOCAL-FILE-PATHNAME 'SI:FLAVOR)
-			(TYPEP OUTNAME 'LOCAL-FILE-PATHNAME))
-		   (AND (GET 'REMOTE-LMFILE-PATHNAME 'SI:FLAVOR)
-			(TYPEP OUTNAME 'REMOTE-LMFILE-PATHNAME)))
+	  ;; the test for LMFILE pathnames, whose truenames did not match a
+	  ;; pathname with a type, is gone with LMFILE; local file pathnames keep it.
+	  (AND (GET 'LOCAL-FILE-PATHNAME 'SI:FLAVOR)
+	       (TYPEP OUTNAME 'LOCAL-FILE-PATHNAME)
 	       (FUNCALL OUTNAME ':TYPE)
 	       (SETQ OUTPUT-DIRECTORY-LIST NIL))
 	  (IF OUTPUT-DIRECTORY-LIST
