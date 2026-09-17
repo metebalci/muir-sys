@@ -20,6 +20,15 @@ in its release note for System 100, declared:
 This system is forked from System 100 and is distributed under the same terms. The
 full licence text is in LICENSE.
 
+Fixes from LM-3's later work
+----------------------------
+
+Some fixes were taken from the changes LM-3 made after System 100, on its way
+to System 304: each one singly, checked against these files, and none bringing
+material from LMI's or Gigamos's System 130. They are LM-3's work, covered by
+the same declaration and distributed under the same terms.
+docs/upstream-changes.md, in the repository, lists each one.
+
 Changes made here
 -----------------
 
