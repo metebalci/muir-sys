@@ -249,21 +249,19 @@ The cold load greets with "Lisp Machine cold load environment, beware!" (`sys/lt
 
 **Boot it cold.** muir-fpga measured that a warm boot of a System 304 band halts in the microcode about 20 milliseconds in, while a cold boot is clean. This has not been checked here. Restarting muir is a cold boot. A cold boot clears the screen only after the band has been read, about a minute in.
 
-### One generated file QLD needs
+### One binary file QLD needs
 
-`SYS: SYS; UCINIT QFASL` is not source and is not carried here: the micro
-assembler writes it (`sys/mlap.lisp:553`, `MA-WRITE-MCLAP-PROPS`), as it writes
-everything in `ubin/`. But `QLD` loads it while making System, after the
-compiler and `COLD; DEFMIC` and `DOCMIC`, and stops with
+`QLD` loads `SYS: SYS; UCINIT QFASL` while making System, after the compiler
+and `COLD; DEFMIC` and `DOCMIC`, and stops with
 
 ```
 >>ERROR: File not found for SYS: SYS; UCINIT QFASL
 ```
 
-if it is absent. So a fresh clone cannot finish a `QLD` until the microcode has
-been assembled once, or the file is taken from a release. Assembling the
-microcode is the honest answer and is not done here yet; until then the file
-comes from the System 100 release, whose copy is 2,844 bytes.
+if it is absent. It records the functions microcompiled into the microcode,
+and nothing here can write it again: its writer, `WRITE-INITIALLY-MICROCOMPILED-FILE`
+(`sys/mlap.lisp:552`), has no caller. So it is tracked, System 100's copy of
+2,844 bytes.
 
 ## 6. Load the rest
 
@@ -348,3 +346,49 @@ After saving, the microcode boots the saved world itself. Make that partition th
 - `QLD` ends with "OK, now do a DISK-SAVE".
 - The saved band boots and prints the herald with its system versions.
 - Over TELNET, `(+ 1 2)` returns `3`.
+
+## Assembling the microcode
+
+`sys/ubin/` is not in the repository; a release carries it, assembled from
+`sys/ucadr/`. Verified on 2026-09-17 on a 1000 band: everything it holds
+was assembled from these sources, and matches System 100's.
+
+**Load the assembler.** `(make-system 'cadr-micro-assembler :compile :noconfirm :nowarn)`
+(`sys/sysdcl.lisp:400`). It is not in the band.
+
+**UCADR, the microcode.** `sys/ucadr/ucode.lisp` defines a `UCODE` system over
+the 23 `uc-*` files, whose `MICRO-ASSEMBLE-SYSTEM-DO-IT` (`sys/cadrlp.lisp:457`)
+asks for a version number when the output has none, as on a Unix file server,
+and `WRITE-VARIOUS-OUTPUTS-SYSTEM` asks "WRITE-MCR?". Call what it calls, with
+the same list of files as truenames, the version set and the question answered:
+
+```lisp
+(setq ua:version-number 323)
+(let ((ua:file-truenames-listified (mapcar #'ua:listify-pathname files)))
+  (ua:assemble-system (send (fs:parse-pathname "SYS: UBIN; UCADR") :new-version 323)
+                      files nil nil t))
+```
+
+with `Y-OR-N-P` answering yes. Leaving `FILE-TRUENAMES-LISTIFIED` unbound
+writes an empty source list into `UCADR SYM`. Reading takes about 7 minutes
+and assembly 3 on muir's micro engine. It writes `ucadr.mcr`, `.sym`, `.tbl`
+and `.locs`: `mcr`, `tbl` and `locs` are byte for byte System 100's. `sym`
+holds the same symbols in the order of a hash table, and names its source host
+OZ, not MIT-OZ.
+
+**PROMH, the boot PROM.** `(ua:assemble "SYS: UCADR; PROMH TEXT")`, with
+standard input answering `9` for the version and `T` for "T IF FOR PROM", and
+`Y-OR-N-P` yes. It writes beside its source, in `sys/ucadr/`, and the four files
+move to `ubin/`. All four are byte for byte System 100's.
+
+**DCFU and MEMD, the disk formatter and memory test.** In a freshly booted band
+each, since a dump includes every symbol the assembler holds:
+`(ua:assemble "SYS: UCADR; DCFU TEXT")` with version `4`, or `MEMD LISP` with
+`1`, `Y-OR-N-P` answering no, then `(ua:cons-dump-memories)` with
+`*PRINT-BASE*` 8, which writes `SYS: UBIN; DCFU ULOAD` or `MEMD ULOAD`. Their
+memory images are System 100's; their symbols are the same, in another order.
+This needed a fault fixed in `sys/cdmp.lisp` first.
+
+**MCR1.** `diskpack <pack> load MCR1 sys/ubin/ucadr.mcr`, then
+`modify MCR1 keep UCADR 323`. The partition it writes is block for block the
+one LM-3's System 100 pack has.
