@@ -144,5 +144,6 @@ System 100's `;;;---!!!` questions, answered in place (#12):
 
 - **The Z54 site** in `site/`. `sys.translations` doubles its slashes and names
   no readtable, because a cold load reads it in the traditional readtable (#9).
+  `hsttbl.lisp` is not carried: the SITE system writes it from `hosts.text`.
 - **The GNU Affero General Public License, version 3 or later**, in `LICENSE`,
   continuing LM-3's declaration for System 100.

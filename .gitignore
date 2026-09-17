@@ -22,6 +22,10 @@
 *.tags
 *.idx
 
+# The host table, which the SITE system writes from site/hosts.text whenever that
+# is newer (:GENERATE-HOST-TABLE, sys/sysdcl.lisp:158-160).
+/site/hsttbl.lisp
+
 # Working notes for Claude Code: local paths and hosts, not for the repository.
 /CLAUDE.md
 
