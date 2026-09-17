@@ -426,16 +426,13 @@
   (:MODULE MAIN ("TOP" "MFILES" "MFHOST" "REFER" "LMFILE" "SYS:FILE;ZMAIL"
 		 "SYS:ZMAIL;COMNDS" "MAIL" "WINDOW" "FILTER" "PROFIL" TV))
   (:MODULE COMETH "COMETH")
-; (:MODULE PARSE "PARSE")
+  ;; ZMAIL; PARSE, a parser generator nothing used, is deleted, and its commented-out module and load steps with it.
   (:MODULE RFC733 "RFC733")
   (:MODULE LEX733 "LEX733")
 ; (:MODULE FONTS "NARROW")	;now in fonts system
   (:COMPILE-LOAD DEFS)
   (:COMPILE-LOAD MAIN (:FASLOAD DEFS))
-; (:COMPILE-LOAD PARSE)
-  (:COMPILE-LOAD RFC733
-;		 (:FASLOAD PARSE)
-		 )
+  (:COMPILE-LOAD RFC733)
 ; (:RTC-LOAD LEX733)		;Someday
   (:FASLOAD LEX733)
 ; (:FASLOAD FONTS)
