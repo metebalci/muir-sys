@@ -30,8 +30,10 @@
 # kept here but not yet tracked.
 /tools/
 
-# Working notes for Claude Code: local paths and hosts, not for the repository.
+# Working notes for Claude Code, and its agents' worktrees: local, not for the
+# repository.
 /CLAUDE.md
+/.claude/
 
 # Local copies of material the repository does not carry, each with a README of
 # its own: LM-3's releases in full, to copy from when something turns out to be
