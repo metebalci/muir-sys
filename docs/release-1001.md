@@ -258,6 +258,15 @@ file saying why.
     `SYS: IO1; PRESS`. The A-memory and system communication area slots the
     Lambda and the Ethernet used stay, because their positions are shared
     with the microcode.
+  - With no use left, the macros that chose by processor go:
+    `SELECT-PROCESSOR`, `IF-IN-CADR`, `IF-IN-LAMBDA`,
+    `IF-IN-CADR-ELSE-LAMBDA` and `IF-IN-LAMBDA-ELSE-CADR`, with their
+    processor properties (`sys2/lmmac.lisp`), their exports
+    (`cold/global.lisp`, `cold/export.lisp`) and their `MAY-SURROUND-DEFUN`
+    properties, which two never-defined `IF-FOR-` names also had
+    (`io/read.lisp`). So do `LAMBDA-TYPE-CODE` and `EXPLORER-TYPE-CODE`
+    (`window/cold.lisp`, `cold/system.lisp`). `CADR-TYPE-CODE` stays, to
+    say what `SI:PROCESSOR-TYPE-CODE` holds.
 
 ## Faults fixed
 

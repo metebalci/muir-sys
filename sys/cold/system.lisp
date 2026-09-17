@@ -117,7 +117,6 @@
 
 ;;; Processor code variables
  CADR-TYPE-CODE
- LAMBDA-TYPE-CODE
  PROCESSOR-TYPE-CODE
 
 ;;; Addresses of funny parts of virtual memory.
