@@ -299,5 +299,10 @@ file saying why.
   session's, sent a Return character object as octal 215 instead of CR LF,
   so FORMAT's `~%` broke no line. The translation compares the character's
   code now, so character objects and fixnums translate alike (#1).
+- **`network/chaos/chsaux.lisp`:** a TELNET session whose first input was
+  Return died in the error handler. The server skipped TELNET negotiation by
+  reading a character and pushing it back, and the stream cannot push back
+  the Return that CR LF becomes. The TELNET and EVAL servers peek at the
+  next byte instead (#2).
 
 ## Around the system
