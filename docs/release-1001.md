@@ -279,10 +279,12 @@ file saying why.
     symbol or order changes, and `ucadr.mcr` should assemble byte for byte
     as before.
   - Kept, and listed for a later decision: the `DEFMIC`s of the Lambda's
-    miscellaneous instructions (`cold/defmic.lisp`), since removing one may
-    renumber others; the `%NUBUS-` and `%MULTIBUS-` names `cold/global.lisp`
-    exports for them; and the A-memory and communication-area slots named
-    above.
+    miscellaneous instructions (`cold/defmic.lisp`), which the CADR's
+    microcode does not implement, with the `%NUBUS-`, `%MULTIBUS-`,
+    `%IO-SPACE-` and `%MICROSECOND-TIME` names `cold/global.lisp` exports
+    for them and the `SETF` of `%IO-SPACE-READ` (`sys2/setf.lisp`);
+    `MULTIBUS-VIRTUAL-ADDRESS` in `cold/qcom.lisp`, which nothing uses; and
+    the A-memory and communication-area slots named above.
 
 ## Faults fixed
 
