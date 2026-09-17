@@ -151,6 +151,13 @@ file saying why.
   (`sys/qmisc.lisp`), and the declaration for `WITH-RESOURCE`, which is
   defined nowhere (`sys/qcopt.lisp`). An obsolete name stays while anything
   calls it, and while a file in `cold/` exports or names it.
+- **Patches.** This system never makes or loads a patch, so the machinery for them
+  goes, and the version tracking that the herald, the band comment and
+  `:NO-INCREMENT-PATCH` rely on stays.
+  - `zwei/pated.lisp`, the editor's patch commands (Start Patch, Add Patch,
+    Finish Patch and the rest), with their entries in `zwei/zmacs.lisp` and
+    their module in `sys/sysdcl.lisp`, and Set Patch File in
+    `zwei/zmnew.lisp`.
 
 ## Faults fixed
 
