@@ -79,9 +79,6 @@
 		 "SYS: SYS2; MACARR"	;mucklisp array functions. bletch
 		 "SYS: SYS2; MAKSYS"
 		 "SYS: COLD; MINI"
-;		 "SYS: IO; ETHER-MINI"	;New ethernet.  putting both flavors of mini in
-					; won't hurt too much since its work is already
-					; done by the time the wrong one would get loaded.
 		 "SYS: SYS2; NUMER"
 		 "SYS: SYS2; PATCH"
 		 "SYS: SYS2; PLANE"
@@ -140,15 +137,6 @@
   ;; no EFTP module.  EFTP spoke PUP to Xerox Altos and the Dover printer, and is deleted.
   (:COMPILE-LOAD (NCP AUX TEST))
   (:COMPILE-LOAD (:GENERATE-HOST-TABLE (("SYS: SITE; HOSTS" "SYS: SITE; HSTTBL")))))
-
-;;; New ethernet
-(DEFSYSTEM ETHERNET
-  (:NAME "Ethernet")
-  (:SHORT-NAME "Ether")
-  (:PACKAGE ETHERNET)
-  (:PATHNAME-DEFAULT "SYS: IO;")
-  (:MODULE MAIN ("SIMPLE-ETHER" "ADDR-RES"))
-  (:COMPILE-LOAD (MAIN)))
 
 (DEFSYSTEM SITE
   (:PACKAGE SYSTEM-INTERNALS)
@@ -451,36 +439,14 @@
 	    "SYS: COLD; SYSTEM QFASL >"
 	    "SYS: COLD; LISP QFASL >"))
 
-(DEFCONST LAMBDA-COLD-LOAD-FILE-LIST
-	  '("SYS: FONTS; CPTFON QFASL"
-	    "SYS: SYS; QRAND QFASL >"
-	    "SYS: SYS; FSPEC QFASL >"
-	    "SYS: IO; QIO QFASL >"
-;	    "SYS: IO; RDTBL QFASL >"	;done specially
-;	    "SYS: IO; CRDTBL QFASL >"	;done specially
-	    "SYS: IO; READ QFASL >"
-	    "SYS: IO; PRINT QFASL >"
-	    "SYS: WINDOW; COLD QFASL >"
-	    "SYS: SYS; SGFCTN QFASL >"
-	    "SYS: SYS; EVAL QFASL >"
-	    "SYS: SYS; TYPES QFASL >"
-	    "SYS: SYS; LTOP QFASL >"
-	    "SYS: SYS; QFASL QFASL >"
-	    "SYS: NETWORK; CHAOS; ETHER-MINI QFASL >"
-	    "SYS: SYS; QFCTNS QFASL >"
-	    "SYS: SYS2; STRING QFASL >"
-	    "SYS: SYS; CLPACK QFASL >"
-	    "SYS: COLD; GLOBAL QFASL >"
-	    "SYS: COLD; SYSTEM QFASL >"
-	    "SYS: COLD; LISP QFASL >"))
-
 ;;; These variables are looked at by the cold load generator, which takes
 ;;; the translated pathnames and dumps out prototype values into the new
 ;;; world with those strings suitable for use with MINI.
 ;;; They are then used before this file gets loaded.
 (DEFCONST MINI-FILE-ALIST-LIST
+	  ;; no ETHERNET-FILE-ALIST; only a Lambda loaded the Ethernet files.
 	  '(INNER-SYSTEM-FILE-ALIST REST-OF-PATHNAMES-FILE-ALIST
-	    ETHERNET-FILE-ALIST SITE-FILE-ALIST HOST-TABLE-FILE-ALIST))
+	    SITE-FILE-ALIST HOST-TABLE-FILE-ALIST))
 
 (DEFCONST INNER-SYSTEM-FILE-ALIST
 	  '(("SYS: SYS2; DEFSEL QFASL >" "SI")	;By (resource named-structure-invoke)
@@ -520,10 +486,6 @@
 	    ("SYS: NETWORK; CHAOS; CHSNCP QFASL >" "CHAOS")
 	    ("SYS: NETWORK; CHAOS; CHUSE QFASL >" "CHAOS")
 	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")))
-
-(DEFCONST ETHERNET-FILE-ALIST
-	  '(("SYS: NETWORK; SIMPLE-ETHER QFASL >" "ETHERNET")
-	    ("SYS: NETWORK; ADDR-RES QFASL >" "ETHERNET")))
 
 (DEFCONST SITE-FILE-ALIST
 	  '(("SYS: SITE; SITE QFASL >" "SI")))
