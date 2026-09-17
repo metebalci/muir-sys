@@ -1,35 +1,8 @@
 ;;;-*- Mode: LISP; Package: FILE-SYSTEM; Base: 8. -*- 
 ;;; Directory Hacks program by HANSON -- feel free to use it.
+;;; the Symbolics copies of definitions the system already has are deleted.
 
 ;;;; Pathname Operations
-
-#+SYMBOLICS					;Already one in MIT system.
-(DEFSUBST FAST-NEW-PATHNAME (OLD-PATHNAME NEW-DEVICE NEW-DIRECTORY
-			     NEW-NAME NEW-TYPE NEW-VERSION)
-  (LET ((NARGS 1))
-    (IF (NOT (NULL NEW-DEVICE)) (INCF NARGS 2))
-    (IF (NOT (NULL NEW-DIRECTORY)) (INCF NARGS 2))
-    (IF (NOT (NULL NEW-NAME)) (INCF NARGS 2))
-    (IF (NOT (NULL NEW-TYPE)) (INCF NARGS 2))
-    (IF (NOT (NULL NEW-VERSION)) (INCF NARGS 2))
-    (%START-FUNCTION-CALL OLD-PATHNAME RETURN NARGS NIL)
-    (%PUSH ':NEW-PATHNAME)
-    (COND (NEW-DEVICE
-	   (%PUSH ':DEVICE)
-	   (%PUSH NEW-DEVICE)))
-    (COND (NEW-DIRECTORY
-	   (%PUSH ':DIRECTORY)
-	   (%PUSH NEW-DIRECTORY)))
-    (COND (NEW-NAME
-	   (%PUSH ':NAME)
-	   (%PUSH NEW-NAME)))
-    (COND (NEW-TYPE
-	   (%PUSH ':TYPE)
-	   (%PUSH NEW-TYPE)))
-    (COND (NEW-VERSION
-	   (%PUSH ':VERSION)
-	   (%PUSH NEW-VERSION)))
-    (%FINISH-FUNCTION-CALL OLD-PATHNAME RETURN NARGS NIL)))
 
 (DEFSUBST UNSPECIFIED-PATHNAME-COMPONENT? (COMPONENT)
   (MEMQ COMPONENT '(NIL :UNSPECIFIC)))
@@ -361,14 +334,6 @@ SORT-ISOMORPHIC-CLASSES instead."
 		 IN-2-ONLY ELEMENTS-IN-SET2-ONLY)))
 
 ;;;; Transfer Operators
-
-#+SYMBOLICS					;Already one in MIT system.
-(DEFCONST *COPY-FILE-KNOWN-TEXT-TYPES* '("LISP" "TEXT")
-  "Files whose names have these type fields are normally copied as characters.")
-
-#+SYMBOLICS					;Already one in MIT system.
-(DEFCONST *COPY-FILE-KNOWN-BINARY-TYPES* '("QFASL" "QBIN" "FASL")
-  "Files whose names have these type fields are normally copied as binary.")
 
 (DEFUN SETUP-CDIRECTORY-TRANSFER-MODE (DIRECTORY &OPTIONAL COPY-MODE)
   (DOLIST (CFILE (CDIRECTORY-CFILES DIRECTORY))

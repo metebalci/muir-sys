@@ -254,8 +254,7 @@ idle-time ~A, and a whostate of ~A.~%"
 	  ("disk errors" NIL ,#'SI:PRINT-DISK-ERROR-LOG)
 	  ("do you know" nil "Everything.")
 	  ("version" NIL ,#'(LAMBDA () (LET ((BASE 10.)) (SI:GET-SYSTEM-VERSION))))
-	  ("brand" NIL ,#'(LAMBDA () (FORMAT STANDARD-OUTPUT
-				       #+MIT "Brand M" #+symbolics "Brand S")))
+	  ("brand" NIL ,#'(LAMBDA () (FORMAT STANDARD-OUTPUT "Brand M")))	;no #+SYMBOLICS answer
 	  ("randomness" NIL ,#'WHAT-RANDOMNESS)
 	  ("demons" NIL ,#'WHAT-PRINT-DEMONS)
 	  ("demon" NIL (:MAP . "demons"))

@@ -1,4 +1,6 @@
 ;;;   -*- Mode:LISP; Package:COMPILER; Base:8; Readtable:T -*-
+;;; the #M and #Q choices between MacLisp and Lisp Machine code are
+;;; resolved for the Lisp Machine.
 ;;; This is pass 2 of the Lisp machine Lisp compiler
 
 ;	** (c) Copyright 1980 Massachusetts Institute of Technology **
@@ -2241,9 +2243,9 @@ word has EXTEND as a source.")
 (DEFUN GET-ARGDESC-PROP-FROM-Q-ARGS-PROP (ARG-PROP FN-NAME &AUX ANS MIN-ARGS OPT-ARGS)
   (IF ( 0 (LOGAND %ARG-DESC-FEF-QUOTE-HAIR ARG-PROP))
       (GET-ARGDESC-PROP-FROM-ADL (GET-MACRO-ARG-DESC-POINTER (FSYMEVAL FN-NAME))))
-  (IF ( 0 (SETQ MIN-ARGS (#M LOGLDB #Q LDB %%ARG-DESC-MIN-ARGS ARG-PROP)))
+  (IF ( 0 (SETQ MIN-ARGS (LDB %%ARG-DESC-MIN-ARGS ARG-PROP)))
       (SETQ ANS (NCONC ANS (LIST (CONS MIN-ARGS '((FEF-ARG-REQ FEF-QT-EVAL)))))))
-  (IF ( 0 (SETQ OPT-ARGS (- (#M LOGLDB #Q LDB %%ARG-DESC-MAX-ARGS ARG-PROP) MIN-ARGS)))
+  (IF ( 0 (SETQ OPT-ARGS (- (LDB %%ARG-DESC-MAX-ARGS ARG-PROP) MIN-ARGS)))
       (SETQ ANS (NCONC ANS (LIST (CONS OPT-ARGS '((FEF-ARG-OPT FEF-QT-EVAL)))))))
   (IF ( 0 (LOGAND %ARG-DESC-QUOTED-REST ARG-PROP))
       (SETQ ANS (NCONC ANS (LIST '(1 (FEF-ARG-REST FEF-QT-QT))))))

@@ -1,4 +1,6 @@
 ;;; Disk pack editor.	-*- Mode: LISP; Package: CC; Base: 8  -*-
+;;; the #M and #Q choices between MacLisp and Lisp Machine code are
+;;; resolved for the Lisp Machine.
 ;	** (c) Copyright 1980 Massachusetts Institute of Technology **
 ;;; Reading and writing disk labels over the debugging interface.
 ;;; There used to also be a label editor, but (SI:EDIT-DISK-LABEL "CC") is better.
@@ -60,7 +62,7 @@
 	(PKG-BIND 'CADR
 	  (IMPLODE (NREVERSE L))))
      (DECLARE (FIXNUM WORDS ADDR))
-     (DO ((WORD (READ-MEMORY ADDR) (#Q ASH #M LSH WORD -10))
+     (DO ((WORD (READ-MEMORY ADDR) (ASH WORD -10))
 	  (CH)
 	  (I (COND ((= WORDS 1) (1+ (\ (1- NCHARS) 4))) (T 4)) (1- I)))
 	 ((ZEROP I))
