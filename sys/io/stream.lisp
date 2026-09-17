@@ -125,11 +125,15 @@ which all streams, input or output, are required to handle."))
 ; (:select-method-order :read-char :tyi)
   (:required-methods :tyi))
 
-(defmethod (input-character-stream :default :read-char) ()
-  (let ((tem (send self :tyi)))
-    (if (fixnump tem)
-	(int-char tem)
-        tem)))
+;;; take :READ-CHAR's arguments, EOF-ERROR-P and EOF-VALUE, as the string stream
+;;; (sys/qmisc.lisp) and STREAM-DEFAULT-HANDLER (io/qio.lisp) do (#4).  This method took
+;;; none, so UNBUFFERED-LINE-INPUT-STREAM's :LINE-IN, which sends two, trapped with
+;;; too many arguments on every stream that inherits it, such as the Chaos ASCII streams.
+(defmethod (input-character-stream :default :read-char) (&optional (eof-error-p t) eof-value)
+  (let ((tem (send self :tyi eof-error-p)))
+    (cond ((null tem) eof-value)
+	  ((fixnump tem) (int-char tem))
+	  (t tem))))
 
 ;; These are only here for consistency with any-tyi-no-hang being a method of input-stream
 ;;  Sigh

@@ -309,5 +309,9 @@ file saying why.
   continuation of its `:TYI` methods, which read again, rather than to the
   stream. It pushes the byte back onto the stream now, and a CR at end of
   file no longer signals (#2).
+- **`io/stream.lisp`:** `:LINE-IN` trapped with too many arguments on the
+  Chaos ASCII streams, because the default `:READ-CHAR` it sends took no
+  arguments. That method takes EOF-ERROR-P and EOF-VALUE now, as the other
+  `:READ-CHAR` methods do (#4).
 
 ## Around the system
