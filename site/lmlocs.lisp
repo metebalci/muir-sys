@@ -1,6 +1,6 @@
 ;;; -*- Mode: Lisp; Package: SYSTEM-INTERNALS; Base: 10.; Readtable:T -*-
 
-;;; Where each Lisp Machine of the Z54 site is.
+;;; Where each Lisp Machine of the MIT site is.
 ;;;
 ;;; Format is
 ;;; (name machine-name finger-location (building floor) associated-machine
@@ -8,5 +8,5 @@
 
 (DEFCONST MACHINE-LOCATION-ALIST
  '(
-   ("LISPM-1" "Lisp Machine One" "Z54" (Z54 1) "OZ")
+   ("LISPM-1" "Lisp Machine One" "MUIR" (MUIR 1) "OZ")
    ))
