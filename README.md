@@ -1,8 +1,7 @@
 # muir-sys
 
 **This system makes the Lisp Machine usable today:** on current hardware,
-with current displays and networks, and developed the way software is developed
-now.
+with current displays and networks, and with today's tools and practices.
 
 The starting point is the MIT CADR and its system as MIT last left it. **System
 release 99.32** is the content of a backup of OZ recovered by the
