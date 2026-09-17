@@ -24,6 +24,27 @@ file saying why.
   program (`io1/ukbd.lisp`), the 8748 and 8751 assemblers
   (`io1/as8748.lisp`, `io1/as8751.lisp`) and the PROM programmer driver
   (`io1/promp.lisp`). No system loads them, and they call only each other.
+- **Files no system loads, superseded or never finished:**
+  - `file/login.lisp`, the init file of the LMFILE file computer.
+  - `file/clear.lisp` and `file/hogs.lisp`, which zeroed partitions and
+    listed large directories of the local file system. Local-File does not
+    load them.
+  - `sys/compat.lisp`, MacLisp declarations for the micro assembler, whose
+    two real functions `sys/cadrlp.lisp` and `sys/cdmp.lisp` define
+    themselves.
+  - `sys2/let.lisp`, an old destructuring `LET` that the system's own
+    replaced.
+  - `sys/recom.lisp`, recompilation hacks for building worlds at MIT.
+  - `io/find-plausible-partitions.lisp`, an older copy of the function
+    `io/disk.lisp` defines.
+  - `zmail/parse.lisp`, a parser generator that `zmail/rfc733.lisp` no longer
+    uses. `sys/sysdcl.lisp` loses the ZMail module and load steps that were
+    already commented out.
+  - `zmail/lm.lisp`, Local-File's mail file methods on a flavor that no longer
+    carries them; `file/zmail.lisp` replaced it.
+  - `eh/she.lisp`, a byte-identical copy of `eh/ehw.lisp`.
+  - `io/strmdoc.lisp` and `window/winddoc.lisp`, operation documentation
+    written with a `DEFOPERATION` that is defined nowhere.
 
 ## Faults fixed
 
