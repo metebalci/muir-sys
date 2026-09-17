@@ -20,5 +20,4 @@
 		      "UC-METER" "UC-HACKS" "UC-TV" "UC-TRACK-MOUSE"
 		      "UC-PAGE-FAULT" "UC-DISK" "UC-INTERRUPT" 
 		      "UC-CHAOS" "UC-STACK-GROUPS" "UC-COLD-DISK" "UC-MC"
-;		      "UC-PUP"
 		      )))
