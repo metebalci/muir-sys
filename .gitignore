@@ -26,6 +26,10 @@
 # is newer (:GENERATE-HOST-TABLE, sys/sysdcl.lisp:158-160).
 /site/hsttbl.lisp
 
+# The machine-control tools (tools/: lispm.py over TELNET, console.py over RFB),
+# kept here but not yet tracked.
+/tools/
+
 # Working notes for Claude Code: local paths and hosts, not for the repository.
 /CLAUDE.md
 
