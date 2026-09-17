@@ -9,6 +9,8 @@
 ;;; The current Lisp machine copy is in SYS:SYS2;STRUCT LISP
 ;;;    (OZ:PS:<L.SYS2>STRUCT.LISP at MIT)
 ;;; this version implements common-lisp-style-defstruct for mit lisp machine lisp
+;;; the MacLisp, Multics and NIL versions are deleted, and the #+ and #-
+;;; conditionals that chose among the dialects are resolved for the Lisp Machine.
 
 ;;; These are the original bawden sources for this code
 ;;;   -- they have not been munged for common lisp
@@ -51,176 +53,32 @@
 ;;; Fascism and bickering are alive and well. Sigh.
 ;;; I just wrote the code. Richard Mlynarik. (mly@random-place)
 
-
-1#-(and lispm mit)
-(eval-when (eval compile)*
-  1(cond ((and (status feature MacLisp) (status feature PDP10))*
-        1(sstatus feature MacLisp-10))*
-       1(t (sstatus nofeature MacLisp-10))))
-
-#-(and lispm mit)
-(eval-when (compile)*
-  1(cond ((status feature ITS)*
-        1(load '|alan;lspenv init|))*
-       1((status feature Multics)*
-        1(load '|>udd>Mathlab>Bawden>lspenv.lisp|))))
-
-#+MacLisp-10
-(cond ((status nofeature noldmsg)
-       (terpri msgfiles)
-       (princ '#.(and (status feature MacLisp-10)*
-		 1(maknam (nconc (exploden ";Loading DEFSTRUCT ")*
-			     1(exploden (caddr (truename infile))))))*
-	   1msgfiles)))
-
-#+NIL
-(herald defstruct)
-
-#+Multics
-(declare (genprefix defstruct-internal-)*
-       1(macros t))
-
-#+MacLisp
-(eval-when (eval compile)*
-  1(setsyntax #/: (ascii #\space) nil))
-
-#-(and lispm mit)
-(eval-when (eval)*
-  1;;So we may run the thing interpreted we need the simple*
-  1;;defstruct that lives here:*
-  1(cond ((status feature ITS)*
-        1(load '|alan;struct initial|))*
-       1((status feature Multics)*
-        1(load '|>udd>Mathlab>Bawden>initial_defstruct|))))
-
-#-(and lispm mit)
-(eval-when (compile)*
-  1;;To compile the thing this probably is an old fasl: (!)*
-  1(cond ((status feature ITS)*
-        1(load '|alan;struct boot|))*
-       1((status feature Multics)*
-        1(load '|>udd>Mathlab>Bawden>boot_defstruct|))))
 
-#+Multics
-(defun nth (n l)*
-  1(do ((n n (1- n))*
-      1(l l (cdr l)))*
-     1((zerop n) (car l))))
-
-#+Multics
-(defun nthcdr (n l)*
-  1(do ((n n (1- n))*
-      1(l l (cdr l)))*
-     1((zerop n) l)))
-
-#+Multics
-(defun displace (x y)*
-  1(cond ((atom y)*
-        1(rplaca x 'progn)*
-	1(rplacd x (list y)))*
-       1(t*
-        1 (rplaca x (car y))*
-        1 (rplacd x (cdr y))))*
-  1x)*
-
 (eval-when (eval compile load)
 
-1#+MacLisp
-(defun defstruct-retry-keyword (x)*
-  1(let ((l (exploden x)))*
-    1(if (= (car l) #/:)*
-       1(implode (cdr l))*
-      1x)))*
-
-#+LispM
 (defun defstruct-retry-keyword (x)
   (intern (symbol-name x) si:pkg-keyword-package))
 
-1#+NIL
-(defmacro defstruct-retry-keyword (x)*
-  1`(to-keyword ,x))*
-
-#+(or (and LispM MIT) NIL)
 (defsubst defstruct-divide (x y) (truncate x y))
 
-1#-(or (and LispM MIT) nil)
-(defsubst defstruct-divide (x y) (// x y))*
-
-#+(AND LISPM MIT)
 (DEFSUBST DEFSTRUCT-LISTP (X) (CLI:LISTP X))
-
-1#+(AND LISPM (NOT MIT))
-(DEFSUBST DEFSTRUCT-LISTP (X) (CL-LISTP X))
-
-#+NIL
-(DEFSUBST DEFSTRUCT-LISTP (X) (LISTP X))*
 
 );End of eval-when (eval compile load)
 
 (eval-when (eval compile load)
-#+LispM
 (defun defstruct-append-symbols (&rest args)
   (intern (apply 'string-append args)))
 )
 
 ;;; Eval this before attempting incremental compilation
-(eval-when #+(AND LISPM MIT) (EVAL COMPILE LOAD)	;less lossage for patching
-	   1#-(AND LISPM MIT) (eval compile)
+(eval-when (EVAL COMPILE LOAD)	;less lossage for patching
 
-#+MacLisp-10
-(defmacro defstruct-append-symbols args*
-  1(do ((l (reverse args) (cdr l))*
-      1(x)*
-      1(a nil (if (or (atom x)*
-		  1(not (eq (car x) 'quote)))*
-	       1(if (null a)*
-		  1`(exploden ,x)*
-		 1`(nconc (exploden ,x) ,a))*
-	     1(let ((l (exploden (cadr x))))*
-	       1(cond ((null a) `',l)*
-		    1((= 1 (length l)) `(cons ,(car l) ,a))*
-		    1(t `(append ',l ,a)))))))*
-     1((null l) `(implode ,a))*
-    1(setq x (car l))))
-
-#+Multics
-(defmacro defstruct-append-symbols args*
-  1`(make_atom (catenate ,@args)))
-
-#+NIL
-(defmacro defstruct-append-symbols args*
-  1`(symbolconc ,@args))*
-
-#+(and lispm mit)
 (defmacro defstruct-putprop-compile-time (sym val ind)
   `(push `(defdecl ,,sym ,,ind ,,val) returns))
-
-#-(and lispm mit)
-(defmacro defstruct-putprop-compile-time (sym val ind)
-  `(push `(eval-when (compile load eval) (defprop ,,sym ,,val ,,ind) returns)))
 
 (defmacro defstruct-putprop (sym val ind)
   `(push `(defprop ,,sym ,,val ,,ind) returns))
 
-1#+Multics
-;;;lcp gobbles (defprop ... macro) at compile time, so we have to use
-;;;putprop to be certain macro definitions make it into the object:
-(defmacro defstruct-put-macro (sym fcn)*
-  1`(push `(putprop ',,sym ',,fcn 'macro) returns))
-
-#+MacLisp-10
-(defmacro defstruct-put-macro (sym fcn)*
-  1`(push `(defprop ,,sym ,,fcn macro) returns))
-
-#+(and LispM (NOT MIT))
-(defmacro defstruct-put-macro (sym fcn)*
-  1(setq fcn (if (and (not (atom fcn))*
-		 1(eq (car fcn) 'quote))*
-	     1`'(macro . ,(cadr fcn))*
-	    1`(cons 'macro ,fcn)))*
-  1`(push `(fdefine ',,sym ',,fcn t) returns))*
-
-#+(and lispm MIT)
 (defmacro defstruct-put-macro (sym fcn)
   (setq fcn (if (and (not (atom fcn))
                      (eq (car fcn) 'quote))
@@ -228,10 +86,6 @@
               `(cons 'macro ,fcn)))
   `(push `(deff-macro ,,sym ',,fcn) returns))
 
-1#+NIL
-(defmacro defstruct-put-macro (sym fcn)*
-  1`(push `(add-macro-definition ',,sym ',,fcn) returns))*
-                                                        
 (defmacro defstruct-make-empty () `'%%defstruct-empty%%)
 
 (defmacro defstruct-emptyp (x) `(eq ,x '%%defstruct-empty%%))
@@ -239,39 +93,6 @@
 ;;; Here we must deal with the fact that error reporting works
 ;;; differently everywhere!
 
-1#+MacLisp-10
-;;;first arg is ALWAYS a symbol or a quoted symbol:
-(defmacro defstruct-error (message &rest args)*
-  1(let* ((chars (nconc (exploden (if (atom message)*
-			     1message*
-			   1(cadr message)))*
-		  1'(#/.)))*			1;"Bad frob" => "Bad frob."*
-        1(new-message*
-	  1(maknam (if (null args)*
-		   1chars*
-		  1(let ((c (car chars)))*		1;"Bad frob." => "-- bad frob."*
-		    1(or (< c #/A)*
-		       1(> c #/Z)*
-		       1(rplaca chars (+ c #o40)))*
-		    1(append '(#/- #/- #\space) chars))))))*
-    1`(error ',new-message*
-	  1,@(cond ((null args) `())*
-		1((null (cdr args)) `(,(car args)))*
-		1(t `((list ,@args)))))))
-
-#+Multics
-;;;first arg is ALWAYS a string:
-(defmacro defstruct-error (message &rest args)*
-  1`(error ,(catenate "defstruct: "*
-		 1message*
-		 1(if (null args)*
-		    1"."*
-		   1": "))*
-	1,@(cond ((null args) `())*
-	      1((null (cdr args)) `(,(car args)))*
-	      1(t `((list ,@args))))))*
-
-#+(or LispM NIL)
 ;;; first arg is ALWAYS a string:
 (defmacro defstruct-error (message &rest args)
   (do ((l args (cdr l))
@@ -303,9 +124,7 @@
              (:type :list)
              (:default-pointer description)
              (:conc-name defstruct-description-)
-             (:alterant ())
-	     1#+(AND stingy-defstruct (NOT (OR (AND LISPM MIT) NIL)))*
-             1(:eval-when (eval compile))*)
+             (:alterant ()))
   (version 'one)
   type
   dummy						;used to be the displace function
@@ -322,16 +141,13 @@
   ;; ie Don't change slots up to here in mit lispm system without changing ucode!!!
   include
   (initial-offset 0)
-  #+(OR (AND LISPM MIT) NIL)
     DUMMY                                       ;would like to flush this loser,
                                                 ; (the option itself has already gone)
 						; but that would screw up old fasdumped
 						; definitions. Sigh.
-  1#-(OR (AND LISPM MIT) NIL)*
-    1(eval-when '(eval compile load))*
   alterant
   (conc-name nil)
-  (callable-accessors 1#-(or LispM NIL) nil* #+(or LispM NIL) t)
+  (callable-accessors t)
   (size-macro nil)
   (size-symbol nil)
   (predicate nil)
@@ -358,9 +174,7 @@ you will need to recompile its definition"
              (:type :list)
              (:default-pointer slot-description)
              (:conc-name defstruct-slot-description-)
-             (:alterant ())
-	     1#+(AND stingy-defstruct (NOT (OR (AND LISPM MIT) NIL)))*
-             1(:eval-when (eval compile))*)
+             (:alterant ()))
   number
   (ppss nil)
   init-code
@@ -377,9 +191,7 @@ you will need to recompile its definition"
              (:type :list)
              (:default-pointer type-description)
              (:conc-name defstruct-type-description-)
-             (:alterant ())
-	     1#+(AND stingy-defstruct (NOT (OR (AND LISPM MIT) NIL)))*
-	     1(:eval-when (eval compile))*)
+             (:alterant ()))
   ref-expander
   ref-no-args
   cons-expander
@@ -394,16 +206,11 @@ you will need to recompile its definition"
   DOCUMENTATION
   )
 
-#+LispM
 (defprop defstruct "Structure" definition-type-name)
 
 ;;; The order of forms returned by defstruct is sometimes critical.  Keep this
 ;;; in mind when munging this code:
-1#-(AND LISPM MIT)*					1;mit lispm doc is wrong elsewhere
-(DEFMACRO DEFSTRUCT (OPTIONS &BODY ITEMS)*
-  1(DEFSTRUCT-1 OPTIONS ITEMS NIL))*
 
-#+(AND LISPM MIT)
 (DEFMACRO DEFSTRUCT (OPTIONS &BODY ITEMS)
   "(DEFSTRUCT (<name> . <options>) . <slots>) or (DEFSTRUCT <name> . <slots>)
 Options:
@@ -460,7 +267,6 @@ Options:
   (DEFSTRUCT-1 OPTIONS ITEMS NIL))
 
 ;;; this should probably be #+nil too
-#+(AND LISPM MIT)
 (DEFMACRO CLI:DEFSTRUCT (OPTIONS &BODY ITEMS)
   "(DEFSTRUCT (<name> . <options>) . <slots>) or (DEFSTRUCT <name> . <slots>)
 Options:
@@ -512,11 +318,7 @@ Options:
 		      (LIST (DEFSTRUCT-DEFINE-PRINTER NAME (DEFSTRUCT-DESCRIPTION-PRINT))))
 		  ;; Return the name symbol as our value
 		  `(',NAME)))
-    1#+(and LispM (NOT MIT))*
-    1(push `(record-source-file-name ',name 'defstruct) returns)*
-    #+(and LispM MIT)
     (push `(eval-when (load eval) (record-source-file-name ',name 'defstruct)) returns)
-    #+(OR (AND LISPM MIT) NIL)			;really any common lisp
     (AND DOC (PUSH `(SETF (DOCUMENTATION ',NAME 'STRUCTURE) ,DOC) RETURNS))
     (let ((alterant (defstruct-description-alterant))
 	  (size-macro (defstruct-description-size-macro))
@@ -564,12 +366,6 @@ Options:
 	      returns)))
     (defstruct-putprop-compile-time name description 'defstruct-description)
     ;;what defstruct returns
-    1#-(OR (AND LISPM MIT) NIL)*	;retain eval-when for others so as not to cause hidden screws
-    1`(eval-when ,(defstruct-description-eval-when)*
-       1,.(defstruct-define-ref-macros new-slots description)*
-       1,.(DEFSTRUCT-DEFINE-CONSTRUCTORS DESCRIPTION)*
-       1,.returns)*
-    #+(OR (AND LISPM MIT) NIL)			;losing eval-when flushed!! 
     `(PROGN
        ,.(defstruct-define-ref-macros new-slots description)
        ,.(DEFSTRUCT-DEFINE-CONSTRUCTORS DESCRIPTION)
@@ -578,36 +374,7 @@ Options:
 ;;; General philosophy on the :print option is to not bother the
 ;;; user if printing cannot be controlled.  This allows for
 ;;; portability without pain.  This may prove to be a bogus philosophy.
-1#+MacLisp-10
-(defun defstruct-define-printer (name rest)*
-  1(let ((stream (gensym))*
-       1(CLIP (POP REST)))*
-    1(IF CLIP*
-       1NIL*					;don't know what to do in maclisp
-      1`(defun (,name named-hunk-printer) (,name ,stream)*
-	 1(?format ,stream ,@rest)))))
 
-#+(AND LISPM (NOT MIT))*				1;losers
-(DEFUN DEFSTRUCT-DEFINE-PRINTER (NAME REST &AUX (CLIP (POP REST)))*
-  1(LET ((OP (GENSYM))*
-       1(ARGS (GENSYM)))*
-    1(IF CLIP*
-       1`(DEFUN (,NAME NAMED-STRUCTURE-INVOKE) (,OP ,NAME &REST ,ARGS)*
-	  1(SELECTQ ,OP*
-	1     (:PRINT-SELF*
-	      1(IF PRINT-READABLY (PRINT-NOT-READABLE ,NAME))*	1;not always right... Sigh*
-	      1(FUNCALL ,(CAR REST) ,NAME (CAR ,ARGS) (CADR ,ARGS)))*
-	1     (:WHICH-OPERATIONS '(:PRINT-SELF :WHICH-OPERATIONS))*
-	1     (T NIL)))*				1;don't barf on weird operations*
-      1`(DEFUN (,NAME NAMED-STRUCTURE-INVOKE) (,OP ,NAME &REST ,ARGS)*
-	 1(SELECTQ ,OP*
-	   1(:PRINT-SELF*
-	     1(IF PRINT-READABLY (PRINT-NOT-READABLE ,NAME))*
-	     1(FORMAT (CAR ,ARGS) ,@REST))*
-	1    (:WHICH-OPERATIONS '(:PRINT-SELF :WHICH-OPERATIONS))*
-	1    (T NIL))))))*
-  
-#+(AND LISPM MIT)
 (DEFUN DEFSTRUCT-DEFINE-PRINTER (STRUCTURE-NAME REST)
   (LET ((CLIP (CAR REST)))
     (IF CLIP
@@ -632,23 +399,6 @@ Options:
 	     (IF PRINT-READABLY (PRINT-NOT-READABLE ,STRUCTURE-NAME)
 	       (FORMAT ,STREAM ,@(CDR REST)))))))))
 
-1#+NIL
-(defun defstruct-define-printer (name rest)*
-  1(let ((method-function-name (symbolconc name "->PRINT-SELF#METHOD"))*
-       1(stream-var (gensym))*
-       1(gubble (gensym))*
-       1CLIP (POP REST))*
-    1(IF CLIP*
-       1NIL*					;don't know anything about nil either...
-      1`(progn 'compile*
-	    1(defun ,method-function-name (,name () () ,stream-var &rest ,gubble)*
-	      1,gubble*				1;ignored*
-	      1(format ,stream-var ,@rest))*
-	    1(add-flavor-method-info ',name ':print-self ',method-function-name)))))
-  
-#-(or LispM MacLisp-10 NIL)
-(defun defstruct-define-printer (name rest)*
-  1`(comment ,name ,@rest))*
 
 (defun defstruct-parse-options (options CLIP)
   (let ((name (if (atom options) options (car options)))
@@ -748,13 +498,6 @@ Options:
 	       (if (defstruct-emptyp val)
 		   (defstruct-append-symbols "COPY-" name)
 		 val)))
-	1#-(OR (AND LISPM MIT) NIL)*
-	1(:eval-when*
-	1 (and (defstruct-emptyp val)*
-	1      (defstruct-error*
-	       1"The :EVAL-WHEN option to DEFSTRUCT requires a value"*
-	       1name))*
-	  1(setf (defstruct-description-eval-when) val))*
 	(:alterant
 	 (setq alterant val))
 	(:but-first
@@ -874,15 +617,9 @@ Options:
 	     (cond ((EQ NAMED-P ':PHONY)
 		    ':PHONY-NAMED-VECTOR)
 		   (named-p
-		    1#+MacLisp-10 ':named-hunk*
-		    1#+Multics ':named-list*
-		    #+LispM (IF CLIP ':NAMED-VECTOR ':named-array)
-		    1#+NIL ':extend*)
+		    (IF CLIP ':NAMED-VECTOR ':named-array))
 		   (t
-		    1#+MacLisp-10 ':hunk*
-		    1#+Multics ':list*
-		    #+LispM (IF CLIP ':VECTOR ':array)
-		    1#+NIL ':vector*)))))
+		    (IF CLIP ':VECTOR ':array))))))
     (let ((type-description (or (get type 'defstruct-type-description)
 				(defstruct-error
 				  "Undefined defstruct type"
@@ -916,8 +653,7 @@ Options:
 	(OFFSET (DEFSTRUCT-DESCRIPTION-INITIAL-OFFSET))
 	(INCLUDE (DEFSTRUCT-DESCRIPTION-INCLUDE))
 	(O-SLOT-ALIST NIL)
-	(CONC-NAME (DEFSTRUCT-DESCRIPTION-CONC-NAME))
-	1#+MACLISP-10 (CHARS (EXPLODEN CONC-NAME))*)
+	(CONC-NAME (DEFSTRUCT-DESCRIPTION-CONC-NAME)))
     (OR (NULL INCLUDE)
 	(LET ((D (GET-DEFSTRUCT-DESCRIPTION (CAR INCLUDE))))
 	  (SETQ OFFSET (+ OFFSET (DEFSTRUCT-DESCRIPTION-SIZE D))) 
@@ -925,8 +661,8 @@ Options:
 		(COPYTREE (DEFSTRUCT-DESCRIPTION-SLOT-ALIST D)))
 	  (DOLIST (L O-SLOT-ALIST)
 	    (SETF (DEFSTRUCT-SLOT-DESCRIPTION-REF-MACRO-NAME (CDR L))
-		  (IF CONC-NAME 1#+MACLISP-10 (IMPLODE (APPEND CHARS (EXPLODEN (CAR L))))*
-				#-MACLISP-10 (DEFSTRUCT-APPEND-SYMBOLS CONC-NAME (CAR L))
+		  (IF CONC-NAME
+				(DEFSTRUCT-APPEND-SYMBOLS CONC-NAME (CAR L))
 		      (CAR L))))
 	  (DOLIST (L (CDR INCLUDE))
 	    (LET* ((IT (IF (CONSP L) (CAR L) L))
@@ -937,7 +673,7 @@ Options:
 		  "Unknown slot in :INCLUDEd defstruct"
 		  IT 'IN INCLUDE 'INCLUDED 'BY NAME))
 	      (DEFSTRUCT-PARSE-ONE-FIELD
-		IT NIL NIL REST CONC-NAME 1#+MACLISP-10 (EXPLODEN CONC-NAME)* SLOT-DESCRIPTION)))))
+		IT NIL NIL REST CONC-NAME SLOT-DESCRIPTION)))))
     (DO ((I OFFSET (1+ I))
 	 (L ITEMS (CDR L))
 	 (SLOT-ALIST NIL)
@@ -949,24 +685,24 @@ Options:
 	       (NCONC O-SLOT-ALIST SLOT-ALIST)))	;now returns ALL slots, not just new
       (COND ((ATOM (CAR L))
 	     (PUSH (DEFSTRUCT-PARSE-ONE-FIELD
-		     (CAR L) I NIL NIL CONC-NAME1 #+MACLISP-10 CHARS*)
+		     (CAR L) I NIL NIL CONC-NAME)
 		   SLOT-ALIST))
 	    ((ATOM (CAAR L))
 	     (PUSH (DEFSTRUCT-PARSE-ONE-FIELD
-		     (CAAR L) I NIL (CDAR L) CONC-NAME1 #+MACLISP-10 CHARS*)
+		     (CAAR L) I NIL (CDAR L) CONC-NAME)
 		   SLOT-ALIST))
 	    (T
 	     (DO ((LL (CAR L) (CDR LL)))
 		 ((NULL LL))
 	       (PUSH (DEFSTRUCT-PARSE-ONE-FIELD
 		       (CAAR LL) I (CADAR LL)
-		       (CDDAR LL) CONC-NAME1 #+MACLISP-10 CHARS*)
+		       (CDDAR LL) CONC-NAME)
 		     SLOT-ALIST)))))))
 
-(DEFUN DEFSTRUCT-PARSE-ONE-FIELD (IT NUMBER PPSS REST CONC-NAME1 #+MACLISP-10 CHARS*
+(DEFUN DEFSTRUCT-PARSE-ONE-FIELD (IT NUMBER PPSS REST CONC-NAME
 				  &OPTIONAL SLOT-DESCRIPTION)
-  (LET* ((MNAME (IF CONC-NAME 1#+MACLISP-10 (IMPLODE (APPEND CHARS (EXPLODEN IT)))*
-			      #-MACLISP-10 (DEFSTRUCT-APPEND-SYMBOLS CONC-NAME IT)
+  (LET* ((MNAME (IF CONC-NAME
+			      (DEFSTRUCT-APPEND-SYMBOLS CONC-NAME IT)
 		    IT))
 	 (TYPE T) (ALIST NIL) (READ-ONLY NIL) (BITS NIL) (DOCUMENTATION NIL)
 	 TYPEP INITP DOCP ROP
@@ -1045,13 +781,9 @@ Options:
 		   ((null l))
 		 (setq mname (defstruct-slot-description-ref-macro-name
 			       (cdar l)))
-		 #+(AND LISPM MIT)		;how do other people do this?
 		 (IF (DEFSTRUCT-SLOT-DESCRIPTION-READ-ONLY (CDAR L))
 		     (DEFSTRUCT-PUTPROP-COMPILE-TIME MNAME
 						     'UNSETFABLE 'SETF-METHOD))
-		 1#+MacLisp*
-		 1;;This must come BEFORE the defun. THINK!*
-		 1(defstruct-put-macro mname 'defstruct-expand-ref-macro)*
 		 (let ((ref (apply
 			      code
 			      (defstruct-slot-description-number (cdar l))
@@ -1059,8 +791,8 @@ Options:
 			      body))
 		       (ppss (defstruct-slot-description-ppss (cdar l)))
 		       (DOC (DEFSTRUCT-SLOT-DESCRIPTION-DOCUMENTATION (CDAR L))))
-		   (push `(#+LISPM defsubst-with-parent 1#+NIL defsubst #-(or LispM NIL) defun* 
-			   ,mname #+LISPM ,name ,args
+		   (push `(defsubst-with-parent
+			   ,mname ,name ,args
 			   ,DOC
 			   ,(if (null ppss) ref `(ldb ,ppss ,ref)))
 			 returns))
@@ -1069,27 +801,22 @@ Options:
 		   'defstruct-slot)))))))
     returns))
 
-#+LispM 
 (defprop defstruct-expand-cons-macro
 	 defstruct-function-parent
 	 macroexpander-function-parent)
 
-#+LispM 
 (defprop defstruct-expand-size-macro
 	 defstruct-function-parent
 	 macroexpander-function-parent)
 
-#+LispM 
 (defprop defstruct-expand-alter-macro
 	 defstruct-function-parent
 	 macroexpander-function-parent)
 
-#+LispM 
 (defprop defstruct-expand-ref-macro 
 	 defstruct-function-parent
 	 macroexpander-function-parent)
 
-#+LispM
 (defun defstruct-function-parent (sym)
   (values (or (getdecl sym 'defstruct-name)
 	      (car (getdecl sym 'defstruct-slot)))
@@ -1577,7 +1304,6 @@ Options:
 	  (SETQ BODY
 		(NCONC (IF INIT-LIST
 			   `((SETQ ,L (LIST . ,INIT-LIST))))
-		       #+LISPM					;needed elsewhere??
 		       (IF REST
 			   `((SETQ ,REST (COPYLIST ,REST))))	;can't trust stack lists
 		       (IF (AND (NOT BOAP) CONS-KEYWORDS)
@@ -1742,14 +1468,10 @@ OPTIONS may include:
 	(or ref-expander
 	    (defstruct-error "No :REF option in DEFSTRUCT-DEFINE-TYPE" type))
 	`(progn 'compile			;not needed in common lisps
-		#+LISPM
 		(LOCAL-DECLARE ((FUNCTION-PARENT ,TYPE DEFSTRUCT-DEFINE-TYPE))
 		  ,cons-expander
 		  ,ref-expander
 		  ,@returns)
-		1#-LISPM ,cons-expander*
-		1#-LISPM ,ref-expander*
-		1#-LISPM ,@RETURNS*
 		(defprop ,type ,type-description defstruct-type-description)
 		',TYPE))
     (cond ((atom (setq op (car options)))
@@ -1846,7 +1568,6 @@ OPTIONS may include:
 ;#+LispM
 ;(defprop :make-array t :defstruct-option)
 
-#+LispM
 (defstruct-define-type :array
   (:named :named-array)
   (:CONS-KEYWORDS :make-array :SUBTYPE)
@@ -1860,7 +1581,6 @@ OPTIONS may include:
     description		;ignored
     `(aref ,arg ,n)))
 
-#+LispM
 (defstruct-define-type :named-array
   (:CONS-KEYWORDS :make-array :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1877,25 +1597,6 @@ OPTIONS may include:
     `(defsubst ,name (x)
        (typep x ',(defstruct-description-name)))))
 
-1#+MacLisp
-(defstruct-define-type :array
-  (:cons (arg description etc) :alist
-    etc
-    (maclisp-array-for-defstruct arg description 't))
-  (:ref (n description arg)
-    description*		1;ignored
-    `(arraycall t ,arg ,n)))
-
-#+NIL
-(defstruct-define-type :array
-  (:cons (arg description etc) :alist
-    etc
-    (NIL-array-for-defstruct arg description))
-  (:ref (n description arg)
-    description*		1;ignored
-    `(aref ,arg ,n)))*
-
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :TYPED-ARRAY		;an array with the named-structure-symbol
   (:NAMED :NAMED-TYPED-ARRAY)			;(if any) in the leader
   (:CONS-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1910,7 +1611,6 @@ OPTIONS may include:
     `(AREF ,ARG ,N)))
 
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :NAMED-TYPED-ARRAY	;type in leader -- data in array
   (:CONS-KEYWORDS :MAKE-ARRAY :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1927,7 +1627,6 @@ OPTIONS may include:
     `(DEFSUBST ,NAME (X)
        (TYPEP X ',(DEFSTRUCT-DESCRIPTION-NAME)))))
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :VECTOR			;same as :TYPED-ARRAY
   (:NAMED :PHONY-NAMED-VECTOR)			;except for this
   (:CONS-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1941,7 +1640,6 @@ OPTIONS may include:
     DESCRIPTION		;ignored
     `(AREF ,ARG ,N)))
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :PHONY-NAMED-VECTOR
   (:CONS-KEYWORDS :MAKE-ARRAY :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1958,7 +1656,6 @@ OPTIONS may include:
        (AND (ARRAYP X) (ARRAY-HAS-LEADER-P X)
 	    (EQ (ARRAY-LEADER X 1) ',(DEFSTRUCT-DESCRIPTION-NAME))))))
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :NAMED-VECTOR		;same as :NAMED-TYPED-ARRAY
   (:CONS-KEYWORDS :MAKE-ARRAY :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -1975,33 +1672,7 @@ OPTIONS may include:
     `(DEFSUBST ,NAME (X)
        (TYPEP X ',(DEFSTRUCT-DESCRIPTION-NAME)))))
 
-1#+(or MacLisp-10 NIL)
-(defstruct-define-type :vector*
-  1(:named :named-vector)*
-  1(:cons (arg description etc) :list*
-        1description*				1;ignored*
-	1etc*					1;ignored*
-	1`(vector ,@arg))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(vref ,arg ,n)))
-
-#+(or MacLisp-10 NIL)
-(defstruct-define-type :named-vector*
-  1:named (:overhead 1)*
-  1(:cons (arg description etc) :list*
-        1etc*					1;ignored*
-	1`(vector ',(defstruct-description-name) ,@arg))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(vref ,arg ,(1+ n)))*
-  1(:predicate (description name)*
-	   1`(defun ,name (x)*
-	      1(and (vectorp x)*
-		  1(eq (vref x 0) ',(defstruct-description-name))))))*
-
 
-#+LispM
 (defstruct-define-type :fixnum-array
   (:CONS-KEYWORDS :make-array)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY)
@@ -2013,7 +1684,6 @@ OPTIONS may include:
     description		;ignored
     `(aref ,arg ,n)))
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :NAMED-FIXNUM-ARRAY
   (:CONS-KEYWORDS :MAKE-ARRAY)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY)
@@ -2025,16 +1695,7 @@ OPTIONS may include:
     DESCRIPTION		;ignored
     `(AREF ,ARG ,N)))
 
-1#+MacLisp
-(defstruct-define-type :fixnum-array*
-  1(:cons (arg description etc) :alist*
-        1etc*
-	1(maclisp-array-for-defstruct arg description 'fixnum))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(arraycall fixnum ,arg ,n)))*
 
-#+LispM
 (defstruct-define-type :flonum-array
   (:CONS-KEYWORDS :make-array)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY)
@@ -2046,7 +1707,6 @@ OPTIONS may include:
     description					;ignored
     `(aref ,arg ,n)))
 
-#+LISPM
 (DEFSTRUCT-DEFINE-TYPE :NAMED-FLONUM-ARRAY
   (:CONS-KEYWORDS :MAKE-ARRAY)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY)
@@ -2058,25 +1718,7 @@ OPTIONS may include:
     DESCRIPTION		;ignored
     `(AREF ,ARG ,N)))
 
-1#+MacLisp
-(defstruct-define-type :flonum-array*
-  1(:cons (arg description etc) :alist*
-        1etc*
-	1(maclisp-array-for-defstruct arg description 'flonum))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(arraycall flonum ,arg ,n)))
-
-#+MacLisp-10
-(defstruct-define-type :un-gc-array*
-  1(:cons (arg description etc) :alist*
-        1etc*					1;ignored*
-	1(maclisp-array-for-defstruct arg description nil))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(arraycall nil ,arg ,n)))*
 
-#+LispM
 (defstruct-define-type :array-leader
   (:named :named-array-leader)
   (:CONS-KEYWORDS :make-array :SUBTYPE)
@@ -2089,7 +1731,6 @@ OPTIONS may include:
     description		;ignored
     `(array-leader ,arg ,n)))
 
-#+LispM
 (defstruct-define-type :named-array-leader
   (:CONS-KEYWORDS :make-array :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :SUBTYPE)
@@ -2114,7 +1755,6 @@ OPTIONS may include:
 ;#+LispM
 ;(defprop :times t :defstruct-option)
 
-#+LispM
 (defstruct-define-type :grouped-array
   (:CONS-KEYWORDS :make-array :times :SUBTYPE)
   (:DEFSTRUCT-KEYWORDS :MAKE-ARRAY :TIMES :SUBTYPE)
@@ -2139,7 +1779,6 @@ OPTIONS may include:
 
 ;;; this is starting too get too hairy to want to evaluate every time we cons up a structure.
 ;;; more knowledge should be built into the constructors themselves, for simple cases
-#+LispM
 (defun lispm-array-for-defstruct (arg
 				  cons-init
 				  description
@@ -2240,7 +1879,6 @@ OPTIONS may include:
 	     ,creator)
 	 creator))))
 
-#+LISPM
 (DEFUN DEFSTRUCT-GROK-MAKE-ARRAY-ARGS (ARGS P)
   (DO ((L ARGS (CDDR L)))
       ((NULL L) P)
@@ -2258,7 +1896,6 @@ OPTIONS may include:
 	     (IF (EQ (CAR L) ':LENGTH)
 		 ':DIMENSIONS
 		 (CAR L)))))
-#+LISPM
 (DEFUN DEFSTRUCT-HACK-ARRAY-SUPERTYPE (DESCRIPTION)
   (OR (DEFSTRUCT-DESCRIPTION-SUBTYPE)
       (DO* ((SL (DEFSTRUCT-DESCRIPTION-SLOT-ALIST) (CDR SL))
@@ -2272,162 +1909,6 @@ OPTIONS may include:
 	(SETQ TY (ARRAY-TYPE-SUPERTYPE TY (ARRAY-CANONICALIZE-TYPE SLOT-TYPE)))))
   NIL)
 
-1#+NIL
-(defun nil-array-for-defstruct (arg description)*
-  1(do ((creator `(make-array ',(defstruct-description-size)))*
-      1(var (gensym))*
-      1(set-ups nil (if (null (cdar l))*
-		   1set-ups*
-		  1(cons `(aset ,(cdar l) ,var ,(caar l))*
-		       1set-ups)))*
-      1(l arg (cdr l)))*
-     1((null l)*
-      1(if set-ups*
-	 1`((lambda (,var)*
-	     1,@(nreverse set-ups)*
-	     1,var)*
-	   1,creator)*
-        1creator))))
-
-#+MacLisp
-(defun maclisp-array-for-defstruct (arg description type)*
-  1(do ((creator `(array nil ,type ,(defstruct-description-size)))*
-      1(var (gensym))*
-      1(no-op (caseq type*
-		 1(fixnum 0)*
-		 1(flonum 0.0)*
-		 1((t nil) nil)))*
-      1(set-ups nil (if (equal (cdar l) no-op)*
-		   1set-ups*
-		  1(cons `(store (arraycall ,type ,var ,(caar l))*
-			     1,(cdar l))*
-		       1set-ups)))*
-      1(l arg (cdr l)))*
-     1((null l)*
-      1(if set-ups*
-	 1`((lambda (,var)*
-	     1,@(nreverse set-ups)*
-	     1,var)*
-	   1,creator)*
-        1creator))))*
-
-1;#+(or MacLisp-10 NIL)
-;(defprop :sfa-function t :defstruct-option)
-
-;#+(or MacLisp-10 NIL)
-;(defprop :sfa-name t :defstruct-option)
-
-#+(or MacLisp-10 NIL)
-(defstruct-define-type :sfa*
-  1(:CONS-KEYWORDS :sfa-function :sfa-name)*
-  1(:DEFSTRUCT-KEYWORDS :SFA-NAME :SFA-FUNCTION)*
-  1(:cons (arg description etc) :alist*
-        1(do ((creator `(sfa-create ,(or (cdr (or (assq ':sfa-function etc)*
-				       1(assq ':sfa-function (defstruct-description-property-alist))))*
-				1`',(defstruct-description-name))*
-			     1,(defstruct-description-size)*
-			     1,(or (cdr (or (assq ':sfa-name etc)*
-				        1(assq ':sfa-name (defstruct-description-property-alist))))*
-				 1`',(defstruct-description-name))))*
-	    1(l arg (cdr l))*
-	    1(var (gensym))*
-	    1(set-ups nil (if (null (cdar l))*
-			 1set-ups*
-		        1(cons `(sfa-store ,var ,(caar l)*
-				      1,(cdar l))*
-			     1set-ups))))*
-	   1((null l)*
-	    1(if set-ups*
-	       1`((lambda (,var)*
-		   1,@(nreverse set-ups)*
-		   1,var)*
-		 1,creator)*
-	      1creator))))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(sfa-get ,arg ,n))*
-  1(:predicate (description name)*
-	   1`(defun ,name (x)*
-	      1(and (sfap x)*
-		  1(eq (sfa-get x 'pname)*
-		     1,(or (cdr (assq ':sfa-name (defstruct-description-property-alist)))*
-			 1`',(defstruct-description-name)))))))
-
-#+MacLisp-10
-(defstruct-define-type :hunk*
-  1(:named :named-hunk)*
-  1(:cons (arg description etc) :list*
-        1description*				1;ignored*
-	1etc*					1;ignored*
-	1(if arg*
-	   1`(hunk ,.(nconc (cdr arg) (ncons (car arg))))*
-	  1(defstruct-error "No slots in hunk type defstruct")))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(cxr ,n ,arg)))
-
-#+MacLisp-10
-(defstruct-define-type :named-hunk*
-  1:named (:overhead 1)*
-  1(:cons (arg description etc) :list*
-        1etc*					1;ignored*
-	1(if arg*
-	   1`(hunk ',(defstruct-description-name)*
-		 1,.(nconc (cdr arg) (ncons (car arg))))*
-	  1`(hunk ',(defstruct-description-name) nil)))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1(cond ((= n 0) `(cxr 0 ,arg))*
-	    1(t `(cxr ,(1+ n) ,arg))))*
-  1(:predicate (description name)*
-	   1`(defun ,name (x)*
-	      1(and (hunkp x)*
-		  1(eq (car x) ',(defstruct-description-name))))))*
-
-
-1;#+NIL
-;(defprop :class-symbol t :defstruct-option)
-
-#+NIL
-(defstruct-define-type :extend*
-  1:named*
-  1(:DEFSTUCT-KEYWORDS :CLASS-SYMBOL)*
-  1(:defstruct (description)*
-    1(if (assq ':class-symbol (defstruct-description-property-alist))*
-       1;; if class-symbol is given then assume user is setting up*
-       1;; his own class.*
-       1()*
-      1(let* ((name (defstruct-description-name))*
-	    1(class-symbol (defstruct-append-symbols name "-CLASS")))*
-        1(push (cons ':class-symbol class-symbol)*
-	     1(defstruct-description-property-alist))*
-	1`((defstruct-class-setup ,name ,class-symbol)))))*
-  1(:cons (arg description etc) :alist*
-        1etc*					1;ignored*
-	1(do ((l arg (cdr l))*
-	    1(creator `(si:make-extend*
-		      1,(defstruct-description-size)*
-		      1,(cdr (assq ':class-symbol*
-			       1(defstruct-description-property-alist)))))*
-	    1(var (gensym))*
-	    1(set-ups () (if (null (cdar l))*
-			1set-ups*
-		       1(cons `(si:xset ,var ,(caar l) ,(cdar l))*
-			    1set-ups))))*
-	   1((null l)*
-	    1(if set-ups*
-	       1`((lambda (,var)*
-		   1,.(nreverse set-ups)*
-		   1,var)*
-		 1,creator)*
-	      1creator))))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(si:xref ,arg ,n))*
-  1(:predicate (description name)*
-	   1`(defsubst ,name (x)*
-	      1(of-type x ',(defstruct-description-name)))))*
-
 (defstruct-define-type :list
   (:named :named-list)
   (:cons (arg description etc) :list
@@ -2436,16 +1917,6 @@ OPTIONS may include:
     `(list ,.arg))
   (:ref (n description arg)
     description					;ignored
-    1#+Multics*
-    1`(,(let ((i (\ n 4)))*
-	1(cond ((= i 0) 'car)*
-	     1((= i 1) 'cadr)*
-	     1((= i 2) 'caddr)*
-	     1(t 'cadddr)))*
-      1,(do ((a arg `(cddddr ,a))*
-	   1(i (// n 4) (1- i)))*
-	  1((= i 0) a)))*
-    #-Multics
     `(nth ,n ,arg))
   (:copier (description name)
 	   (do ((l `((car x)) (cons `(prog1 (car x) (setq x (cdr x))) l))
@@ -2461,24 +1932,11 @@ OPTIONS may include:
     `(list ',(defstruct-description-name) ,.arg))
   (:ref (n description arg)
     description					;ignored
-    1#+Multics*
-    1`(,(let ((i (\ (1+ n) 4)))*
-	1(cond ((= i 0) 'car)*
-	     1((= i 1) 'cadr)*
-	     1((= i 2) 'caddr)*
-	     1(t 'cadddr)))*
-      1,(do ((a arg `(cddddr ,a))*
-	   1(i (// (1+ n) 4) (1- i)))*
-	  1((= i 0) a)))*
-    #-Multics
     `(nth ,(1+ n) ,arg))
   (:predicate (description name)
 	      `(defun ,name (x)
 		 (and
-		   #-MacLisp-10
 		   (not (atom x))
-		   1#+MacLisp-10*			1;Watch out for hunks!*
-		   1(eq (typep x) 'list)*
 		   (eq (car x) ',(defstruct-description-name)))))
   (:copier (description name)
 	   (do ((l `((car x)) (cons `(prog1 (car x) (setq x (cdr x))) l))
@@ -2495,17 +1953,6 @@ OPTIONS may include:
 	 `(list* ,.arg))
   (:ref (n description arg)
 	(let ((size (1- (defstruct-description-size))))
-	  1#+Multics*
-	  1(do ((a arg `(cddddr ,a))*
-	      1(i (// n 4) (1- i)))*
-	     1((= i 0)*
-	      1(let* ((i (\ n 4))*
-		    1(a (cond ((= i 0) a)*
-			   1((= i 1) `(cdr ,a))*
-			   1((= i 2) `(cddr ,a))*
-			   1(t `(cdddr ,a)))))*
-	        1(if (< n size) `(car ,a) a))))*
-	  #-Multics
 	  (if (< n size)
 	      `(nth ,n ,arg)
 	    `(nthcdr ,n ,arg))))
@@ -2594,35 +2041,6 @@ OPTIONS may include:
     description					;ignored
     arg))
 
-1;#+Multics
-;(defprop :external-ptr t :defstruct-option)
-
-#+Multics
-(defstruct-define-type :external*
-  1(:CONS-KEYWORDS :external-ptr)*
-  1(:DEFSTRUCT-KEYWORDS :EXTERNAL-PTR)*
-  1(:cons (arg description etc) :alist*
-        1(let ((ptr (cdr (or (assq ':external-ptr etc)*
-		       1(assq ':external-ptr*
-			    1(defstruct-description-property-alist))*
-		       1(defstruct-error*
-			 1"No pointer given for external array"*
-			 1(defstruct-description-name))))))*
-	  1(do ((creator `(array nil external ,ptr ,(defstruct-description-size)))*
-	      1(var (gensym))*
-	      1(alist arg (cdr alist))*
-	      1(inits nil (cons `(store (arraycall fixnum ,var ,(caar alist))*
-				 1,(cdar alist))*
-			   1inits)))*
-	     1((null alist)*
-	      1(if (null inits)*
-		 1creator*
-	        1`((lambda (,var) ,.inits ,var)*
-		  1,creator))))))*
-  1(:ref (n description arg)*
-       1description*					1;ignored*
-       1`(arraycall fixnum ,arg ,n)))*
-
 (defvar *defstruct-examine&deposit-arg*)
 
 (defun defstruct-examine (*defstruct-examine&deposit-arg*
@@ -2646,7 +2064,6 @@ OPTIONS may include:
 		    '*defstruct-examine&deposit-arg*)
 	      '*defstruct-examine&deposit-val*)))
 
-#+LispM
 (defun defstruct-get-locative (*defstruct-examine&deposit-arg*
 			       name slot-name)
   (let ((slot-description (defstruct-examine&deposit-find-slot-description
@@ -2677,23 +2094,11 @@ OPTIONS may include:
 	    (defstruct-description-type)))
       slot-description)))
 
-#+LISPM
 (DEFUN DESCRIBE-DEFSTRUCT-DESCRIPTION (NAME)
   (DESCRIBE-DEFSTRUCT (GET-DEFSTRUCT-DESCRIPTION NAME) 'DEFSTRUCT-DESCRIPTION))
-
 
-1#+MacLisp-10
-(defprop defstruct*
-       1#.(and (status feature MacLisp-10)*
-	     1(caddr (truename infile)))*
-       1version)*
-
-#+(and lispm mit)
 ;; Don't use PUSHNEW, as that would probably use PUSH.
 (unless (memq :defstruct *features*)
   ;; Don't use PUSH; it's not loaded yet.
   (setq *features* (cons :defstruct *features*)))
-
-1#-(and lispm mit)
-(sstatus feature defstruct)
 

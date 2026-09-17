@@ -105,6 +105,13 @@ file saying why.
 - **The disabled NIL version of `STORE`** in `sys2/macarr.lisp`, with its
   bring-up note that it was not MacLisp compatible (#15). The live `STORE`
   stays, and so does the Burke and MIT notice above both.
+- **Code for other Lisp dialects,** chosen by read-time conditionals such as
+  `#+MACLISP`, `#+Multics`, `#+NIL` and `#-LISPM`. Each conditional is
+  resolved as this machine's reader resolves it: a form the reader skips is
+  deleted, and a form it reads loses its conditional. The reader therefore
+  produces the same forms as before.
+  - `sys2/struct.lisp`: DEFSTRUCT's MacLisp, Multics and NIL versions, and
+    their commented-out option declarations.
 
 ## Faults fixed
 
