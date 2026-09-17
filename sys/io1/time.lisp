@@ -530,63 +530,6 @@ If STREAM is NIL, construct and return a string."
 	  (- (TIME:GET-UNIVERSAL-TIME) TIME:*UT-AT-BOOT-TIME*)))
 
 
-#|
-;;;; Essential stuff
-(defun moonphase (&optional (ut (get-universal-time)))
-;  (multiple-value-bind (seconds minutes hours date month year nil dstp)
-;		       (decode-universal-time ut)
-;    (let* ((secs (+ seconds (* minutes 60.) (* hours 3600.)
-;		     (if dstp -3600. 0)
-;		     (* (+ date -1
-;			   (aref cumulative-month-days-table month))
-;			 86400.)))
-;	   (year-1 (1- year))
-;	   (d (+ (- (+ (* year 365.) (ash year-1 -2)) (truncate year-1 100.))
-;		 (truncate year-1 400.)
-;		 1)))
-;      ;If one wanted to waste time, it would seem to be possible to just
-;      ; change the constants which follow, and just use the universal
-;      ; time in place of all the code above and the quantity
-;      ; (+ (* d 86400.) secs) below.  Possibly even reducing it such that
-;      ; it was all fixnum arithmetic.
-  (let* ((d (ash (+ ut 690882.)
-		 2))
-	 (r (ash (remainder d 2551443.) -2)))
-    (values (ldb (byte 2 0) (truncate d 2551443.))
-	    (truncate r (* 60. 60. 24.))
-	    (\ (truncate r 3600.) 24.)
-	    (\ (truncate r 60.) 60.)
-	    (\ r 60.))))
-
-;(defun test (&optional (ut (get-universal-time)))
-;  (let* ((year (nth-value 5 (decode-universal-time ut)))
-;	 (d (* (+ (- (+ (* year 365.)
-;			(ash (1- year) -2))
-;		     (truncate (1- year) 100.))
-;		  (truncate (1- year) 400.)
-;		  1)
-;	       (* 60. 60. 24.))))
-;    (format t "~D ~D" ut d)
-;    (values ut d)))
-
-(defun print-moonphase (quarter day hour minute second
-			&optional (destination t))
-  (format destination
-	  "~A~@[+~:[~*~;~DD.~]~:[~*~;~DH.~]~:[~*~;~DM.~]~:[~*~;~DS.~]~]"
-	  (nth quarter '("NM" "FQ" "FM" "LQ"))
-	  (= (+ day hour minute second) 0)
-	  (= day 0) day (= hour 0) hour
-	  (= minute 0) minute (= second 0) second))
-
-
-(defun print-universal-moonphase (ut &optional (destination t))
-  (multiple-value-bind (quarter day hour minute second) (moonphase ut)
-    (print-moonphase quarter day hour minute second destination)))
-
-(defun print-current-moonphase (&optional (destination t))
-  (print-universal-moonphase (get-universal-time) destination))
-|#
-
 
 ;;;; Some useful strings and accessing functions.
 

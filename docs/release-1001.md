@@ -72,6 +72,21 @@ file saying why.
   symbols, which is harmless and left for the cold-load cleanup.
 - **`io1/xgp.lisp`**, screen hardcopy to MIT's XGP printer. Nothing loaded it,
   and its last user was ZMail's XGP device.
+- **Code disabled with `#|...|#`**, outside the cold load:
+  - `zwei/comf.lisp`: the Find Pattern command, which Lisp Match Search
+    replaced.
+  - `zwei/poss.lisp`: `RESECTIONIZE-BUFFER-POSSIBILITY`, and an old
+    `FIND-WARNINGS-BUFFER` and `UPDATE-WARNINGS-SECTION`.
+  - `io1/time.lisp`: the phase of the moon.
+  - `window/basstr.lisp`: an old `KBD-STATUS`.
+  - `sys2/maksys.lisp`: `GENERATE-INTERNAL-CONDITION`, marked "probably a bad
+    idea".
+
+  The `#|...|#` blocks that are documentation stay: `io1/infix.lisp`,
+  `io1/output.lisp`, `sys/qclap.lisp`, `sys/qcp1.lisp`, `sys2/encaps.lisp`,
+  `sys2/selev.lisp`, `window/baswin.lisp`, `window/choice.lisp` and
+  `window/scroll.lisp`. So does the one inside `FULL-GC` in `sys2/gc.lisp`,
+  whose note says why the code is off.
 
 ## Faults fixed
 
