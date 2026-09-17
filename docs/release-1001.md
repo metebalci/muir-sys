@@ -1,6 +1,6 @@
-# Release 1001
+# System 1001
 
-What release 1001 changes from release 1000. Its theme is a deep cleanup:
+What System 1001 changes from System 1000. Its theme is a deep cleanup:
 what will never be used is removed, not commented out, and git keeps the
 history. Every change to a source file that stays carries a comment in that
 file saying why.
@@ -289,6 +289,10 @@ file saying why.
   - Kept: `MULTIBUS-VIRTUAL-ADDRESS` in `cold/qcom.lisp`, which nothing uses,
     and the A-memory and communication-area slots named above, whose
     positions the microcode shares.
+
+- **`file/copy.lisp`**, bulk directory copying with tape-mounting hooks. It
+  was a module only of the MagTape system, so nothing loaded it once that
+  went; `COPY-FILE` itself is `io/file/open.lisp`'s.
 
 ## Faults fixed
 
