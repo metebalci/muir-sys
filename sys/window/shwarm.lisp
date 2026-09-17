@@ -48,35 +48,22 @@ but you can redefine BEEP to to different things for different beep types."
       (%BEEP BEEP-WAVELENGTH BEEP-DURATION))))
 
 
+;;; these three set the CADR's TV control register only; the Lambda's
+;;; NuBus branches are gone.
 (DEFUN BLACK-ON-WHITE (&OPTIONAL (SCREEN DEFAULT-SCREEN))
   "Set SCREEN to display one bits as black and zeros as white."
-  (SELECT-PROCESSOR
-    (:CADR
-     (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
-		    (LOGIOR 4 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN)))))
-    (:LAMBDA
-     (%NUBUS-WRITE TV:TV-QUAD-SLOT 4
-		   (LOGIOR #o20 (%NUBUS-READ TV:TV-QUAD-SLOT 4))))))
+  (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
+	       (LOGIOR 4 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN)))))
 
 (DEFUN WHITE-ON-BLACK (&OPTIONAL (SCREEN DEFAULT-SCREEN))
   "Set SCREEN to display one bits as white and zeros as black."
-  (SELECT-PROCESSOR
-    (:CADR
-     (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
-		  (LOGAND -5 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN))))) ;1's comp of 4
-    (:LAMBDA
-     (%NUBUS-WRITE TV:TV-QUAD-SLOT 4
-		   (LOGAND (LOGNOT #o20) (%NUBUS-READ TV:TV-QUAD-SLOT 4))))))
+  (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
+	       (LOGAND -5 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN))))) ;1's comp of 4
 
 (DEFUN COMPLEMENT-BOW-MODE (&OPTIONAL (SCREEN DEFAULT-SCREEN))
   "Complement whether SCREEN displays one bits as white or as black."
-  (SELECT-PROCESSOR
-    (:CADR
-     (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
-		    (LOGXOR 4 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN)))))
-    (:LAMBDA
-     (%NUBUS-WRITE TV:TV-QUAD-SLOT 4
-		   (LOGXOR #o20 (%NUBUS-READ TV:TV-QUAD-SLOT 4))))))
+  (%XBUS-WRITE (SCREEN-CONTROL-ADDRESS SCREEN)
+	       (LOGXOR 4 (%XBUS-READ (SCREEN-CONTROL-ADDRESS SCREEN)))))
 
 (DEFMETHOD (SHEET :DRAW-RECTANGLE) (RECTANGLE-WIDTH RECTANGLE-HEIGHT X Y
 				    &OPTIONAL (ALU CHAR-ALUF))
@@ -1899,20 +1886,12 @@ SHEET's cursor is not used or moved."
 
 ;;; This height may get hacked by the who-line making code if the wholine ends up
 ;;; at the bottom of the main screen (which it usually does!)
-(DEFVAR MAIN-SCREEN-WIDTH
-  (SELECT-PROCESSOR
-    (:CADR 768.)
-    (:LAMBDA #o1440)))				;LAMBDA TV IS 32. BITS WIDER.
+;;; the CADR's screen; the Lambda's sizes are gone.
+(DEFVAR MAIN-SCREEN-WIDTH 768.)
 
-(DEFVAR MAIN-SCREEN-HEIGHT
-  (SELECT-PROCESSOR
-    (:CADR 963.)				;was 896. for CPT
-    (:LAMBDA (- #o2000 8))))
+(DEFVAR MAIN-SCREEN-HEIGHT 963.)			;was 896. for CPT
 
-(DEFVAR MAIN-SCREEN-LOCATIONS-PER-LINE
-  (SELECT-PROCESSOR
-    (:CADR 24.)
-    (:LAMBDA 32.)))
+(DEFVAR MAIN-SCREEN-LOCATIONS-PER-LINE 24.)
 
 (DEFCONST MAIN-SCREEN-BUFFER-ADDRESS IO-SPACE-VIRTUAL-ADDRESS)
 (DEFCONST MAIN-SCREEN-CONTROL-ADDRESS #o377760)
@@ -1985,12 +1964,11 @@ On the CADR, it can also be the refresh frequency (default is 60.5).
 WASTED-LINES is a number of lines at the bottom of the screen that should not be used
 for output, and should be left zero, though they will be displayed on the monitor.
 This is useful if your monitor is adjusted so that some of it cannot be seen."
+  ;; the CADR's limits and default; the Lambda's are gone.
   (IF ARG
       ;; Try not to burn up the monitor
-      (SELECT-PROCESSOR
-	(:CADR (CHECK-TYPE ARG (OR (INTEGER 54. 76.) (INTEGER 7644. 1086.))))
-	(:LAMBDA (CHECK-TYPE ARG (INTEGER 101. 1024.))))
-    (SETQ ARG (SELECT-PROCESSOR (:CADR 60.5) (:LAMBDA 1024.))))
+      (CHECK-TYPE ARG (OR (INTEGER 54. 76.) (INTEGER 7644. 1086.)))
+    (SETQ ARG 60.5))
   ;; If arg is frequency, compute number of lines from it.
   (IF (< 100. ARG)
       (SETQ N-LINES ARG)
@@ -2008,8 +1986,8 @@ This is useful if your monitor is adjusted so that some of it cannot be seen."
 		   (SETQ MOUSE-SHEET NIL))
 	      (SEND WHO-LINE-SCREEN :DEEXPOSE)
 	      (SEND MAIN-SCREEN :DEEXPOSE)
-	      (IF-IN-CADR
-		(SI:SETUP-CPT
+	      ;; no longer wrapped in IF-IN-CADR; this system runs only on a CADR.
+	      (SI:SETUP-CPT
 		  (SETQ SYNC-RAM-CONTENTS	;save for possible use at LISP-REINITIALIZE.
 			(APPEND '(1.  (1 33) (5 13) 12 12 (11. 12 12) 212 113)	;VERT SYNC, CLEAR TVMA
 				'(53. (1 33) (5 13) 12 12 (11. 12 12) 212 13)	;VERT RETRACE
@@ -2022,7 +2000,7 @@ This is useful if your monitor is adjusted so that some of it cannot be seen."
 				'(7. (1 31) (5 11) #o11 #o10 (11. 0 0) #o200 #o21)
 				'(1. (1 31) (5 11) #o11 #o10 (11. 0 0) #o300 #o23)))
 		  (SCREEN-CONTROL-ADDRESS MAIN-SCREEN)
-		  T))
+		  T)
 	      ;; Move the who-line, and change the dimensions of main screen
 	      (SETQ MAIN-SCREEN-HEIGHT (- N-LINES WASTED-LINES))
 	      (SEND WHO-LINE-SCREEN
@@ -2040,8 +2018,6 @@ This is useful if your monitor is adjusted so that some of it cannot be seen."
 	      (AND SW (SEND SW :SELECT))
 	      (SETQ MOUSE-SHEET MS)
 	      ;; Zero out the words at screen bottom that we are not using.
-	      (IF-IN-LAMBDA
-		(INCF WASTED-LINES (- 1024. N-LINES)))
 	      (LET ((WASTED-WORDS (* WASTED-LINES (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN)))
 		    (PTR1 (%POINTER-PLUS (SCREEN-BUFFER MAIN-SCREEN)
 					 (* (- N-LINES WASTED-LINES)
@@ -2093,295 +2069,17 @@ This is useful if your monitor is adjusted so that some of it cannot be seen."
 	    (SETQ MOUSE-SHEET MS)))))))
 
 
-;;;; Scan line table hacking
-
-(defconst scan-line-table-begin #16r6000)
-(defconst scan-line-table-length (// #16r1000 4))
-
-(defun read-scan-line-table (adr)
-  (%nubus-read #xf8 (+ (* adr 4) scan-line-table-begin)))
-
-(defun write-scan-line-table (adr data)
-  (%nubus-write #xf8 (+ (* adr 4) scan-line-table-begin) data))
-
-(defun load-scan-line-table (words-per-line)
-  (do ((line-number 0 (1+ line-number))
-       (bit-map-pointer 0 (+ bit-map-pointer (* 2 words-per-line))))
-      ((>= line-number scan-line-table-length) ())
-    (write-scan-line-table line-number bit-map-pointer)))
+;;;; Run lights
+;;; the Lambda's scan line table is deleted, and with it SET-SCREEN-WIDTH,
+;;; LAMBDA-SET-HEIGHT, LANDSCAPE and PORTRAIT, which resized the Lambda's
+;;; screen through it.  The initialization keeps its name.
 
 (defun set-up-scan-line-table ()
   ;; on a CADR the run-light locations come from SYS; LTOP, which knows
-  ;; the screen's height and buffer; IF-IN-LAMBDA ran the Lambda's own
-  ;; arithmetic on both machines.
-  (select-processor
-    (:lambda
-     (load-scan-line-table (sheet-locations-per-line main-screen))
-     (setq %disk-run-light
-	   (+ (* (1- main-screen-height) (sheet-locations-per-line main-screen))
-	      14
-	      (lsh #o77 18.)))
-     (setq who-line-run-light-loc (+ 2 (logand %disk-run-light #o777777))))
-    (:cadr
-     (initialize-run-light-locations))))
+  ;; the screen's height and buffer.  The Lambda's branch is gone.
+  (initialize-run-light-locations))
 
 (add-initialization "Load scan line table" '(set-up-scan-line-table))
-
-;;;
-
-(defvar *words-per-line*)
-
-(defun set-screen-width (new-width-in-words)
-  (setq *words-per-line* new-width-in-words)
-  (delaying-screen-management
-    (with-mouse-usurped
-      (lock-sheet (main-screen)
-	(lock-sheet (who-line-screen)
-	  (without-interrupts
-	    (let ((ms mouse-sheet) (sw selected-window))
-	      (and (sheet-me-or-my-kid-p ms main-screen)
-		   (setq mouse-sheet nil))
-	      (send who-line-screen :deexpose)
-	      (send main-screen :deexpose)
-
-	      (setf (sheet-locations-per-line main-screen) *words-per-line*)
-	      (setf (sheet-locations-per-line who-line-screen) *words-per-line*)
-
-	      ;fix cold-load-stream
-	      (let ((new-array
-		      (make-array (list (* 32. *words-per-line*) #o1777) :type 'art-1b
-				  ; 10. is BUFFER instance variable
-				  :displaced-to (%p-contents-offset si:cold-load-stream 10.))))
-		(%p-store-contents-offset
-		  new-array si:cold-load-stream 1)			;ARRAY
-		(%p-store-contents-offset
-		  *words-per-line* si:cold-load-stream 2)		;LOCATIONS-PER-LINE
-		(%p-store-contents-offset #o1777 si:cold-load-stream 3)	;HEIGHT
-		)
-
-	      (load-scan-line-table *words-per-line*)
-
-	      (map-over-all-windows-of-sheet
-		#'(lambda (window) 
-		    (send window :eval-inside-yourself
-			  '(fix-window-width *words-per-line*)))
-		main-screen)
-
-	      (let ((array (send who-line-screen :old-screen-array)))
-		(redirect-array array
-				(array-type array)
-				(* *words-per-line* 32.)
-				(pixel-array-height array)
-				(%p-contents-offset array
-					     (+ (array-rank array)
-						(%p-ldb-offset %%array-long-length-flag array
-							       0)))
-				nil))
-
-	      (map-over-all-windows-of-sheet
-		#'(lambda (window)
-		    (cond ((neq window who-line-screen)
-			   (send window :eval-inside-yourself
-				 '(fix-window-width *words-per-line*)))))
-		who-line-screen)
-	      
-	      (send who-line-screen :change-of-size-or-margins
-				    :top (- main-screen-height
-					    (sheet-height who-line-screen)))
-	      (setq %disk-run-light
-		    (+ (* (1- main-screen-height) (sheet-locations-per-line main-screen))
-		       11.
-		       (lsh #o77 18.)))
-	      (setq who-line-run-light-loc (+ 2 (logand %disk-run-light #o777777)))
-	      (send who-line-screen :expose)
-	      (send main-screen :expose)
-	      (and sw (send sw :select))
-	      (mouse-set-sheet ms)
-	      )))))))
-
-(defun fix-window-width (words-per-line)
-  (declare (:self-flavor sheet))
-  (setq locations-per-line words-per-line)
-  (if (and (variable-boundp screen-array) screen-array)
-      (fix-array self screen-array words-per-line))
-  (if (and (variable-boundp old-screen-array) old-screen-array)
-      (fix-array self old-screen-array words-per-line))
-  (if (and (variable-boundp bit-array) bit-array)
-      (fix-array self bit-array words-per-line)))
-
-(defun fix-array (window array words-per-line)
-  (cond ((array-displaced-p array)
-	 (redirect-array array
-			 (array-type array)
-			 (* words-per-line 32.)
-			 (pixel-array-height array)
-			 ;used to be just array
-			 (%p-contents-offset array
-					     (+ (array-rank array)
-						(%p-ldb-offset %%array-long-length-flag array
-							       0)))
-			 (let ((offset (+ (send window :x-offset)
-					  (* (send window :y-offset)
-					     (* words-per-line 32.)))))
-			   (if (zerop offset) 
-			       (if (= (%p-ldb-offset si:%%array-index-length-if-short array 0)
-				      2)
-				   nil 0)
-			     offset))))
-	(t
-	 (grow-bit-array array (* words-per-line 32.) (pixel-array-height array)))))
-
-;;; Mapping over windows, allowing for devious concealment of Zmacs subwindows.
-
-(defvar *mapped-windows*)
-
-(defun map-over-all-windows-of-sheet (func sheet)
-  (setq *mapped-windows* nil)
-  (map-over-all-windows-of-sheet-1 func sheet)
-  (dolist (resource-name window-resource-names)
-    (si:map-resource #'(lambda (window ignore ignore)
-			 (cond ((and (eq (send window :status) ':deactivated)
-				     (eq sheet (sheet-get-screen window)))
-				(map-over-all-windows-of-sheet-1 func window))))
-		     resource-name)))
-
-(defun map-over-all-windows-of-sheet-1 (func sheet)
-  (cond ((null (memq sheet *mapped-windows*))
-	 (push sheet *mapped-windows*)
-	 (funcall func sheet)
-	 (cond ((and (not (typep sheet 'zwei:zwei-mini-buffer))
-		     (send sheet :send-if-handles :typeout-window))
-		(map-over-all-windows-of-sheet-1 func (send sheet :typeout-window))))
-	 (cond ((and (typep sheet 'zwei:mode-line-window)
-		     (send sheet :mini-buffer-window))
-		(map-over-all-windows-of-sheet-1 func (send sheet :mini-buffer-window))))
-	 (dolist (x (send sheet :inferiors))
-	   (map-over-all-windows-of-sheet-1 func x)))))
-
-;;;
-
-(DEFUN LAMBDA-SET-HEIGHT (&OPTIONAL (N-LINES 1024.) &AUX VALUE)
-  "Set the TV refresh rate.  The default is 60.5.  Returns the number of display lines.
-WASTED-LINES is a number of lines at the bottom of the screen that should not be used.
-This is useful if your monitor is adjusted so that some of it cannot be seen."
-  ;; Try not to burn up the monitor
-  (CHECK-TYPE N-LINES (INTEGER 100. 1024.))
-  (DELAYING-SCREEN-MANAGEMENT
-    (WITH-MOUSE-USURPED
-      (LOCK-SHEET (MAIN-SCREEN)
-	(LOCK-SHEET (WHO-LINE-SCREEN)
-	  (WITHOUT-INTERRUPTS
-	    (LET ((MS MOUSE-SHEET) (SW SELECTED-WINDOW))
-	      (AND (SHEET-ME-OR-MY-KID-P MS MAIN-SCREEN)
-		   (SETQ MOUSE-SHEET NIL))
-	      (SEND WHO-LINE-SCREEN :DEEXPOSE)
-	      (SEND MAIN-SCREEN :DEEXPOSE)
-	      ;; Move the who-line, and change the dimensions of main screen
-	      (SETQ MAIN-SCREEN-HEIGHT N-LINES)
-	      (SEND WHO-LINE-SCREEN :CHANGE-OF-SIZE-OR-MARGINS
-				    :TOP (- MAIN-SCREEN-HEIGHT
-					    (SHEET-HEIGHT WHO-LINE-SCREEN)))
-	      (SEND MAIN-SCREEN :CHANGE-OF-SIZE-OR-MARGINS
-				:HEIGHT (- MAIN-SCREEN-HEIGHT (SHEET-HEIGHT WHO-LINE-SCREEN)))
-	      (let ((line-address (* (1- main-screen-height)
-				     (sheet-locations-per-line main-screen))))
-		(setq %disk-run-light (+ (+ line-address 11.) (lsh #o77 18.)))
-		(setq who-line-run-light-loc (+ 2 (logand %disk-run-light #o777777))))
-	      (SEND WHO-LINE-SCREEN :EXPOSE)
-	      (SEND MAIN-SCREEN :EXPOSE)
-	      (AND SW (SEND SW :SELECT))
-	      (SETQ MOUSE-SHEET MS)
-	      (LET ((WASTED-WORDS (* (- 1024. n-lines)
-				     (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN)))
-		    (LAST-USED-WORD (* (+ (SHEET-HEIGHT WHO-LINE-SCREEN)
-					  (SHEET-HEIGHT MAIN-SCREEN))
-				       (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN))))
-		(DOTIMES (I WASTED-WORDS)
-		  (%P-STORE-TAG-AND-POINTER
-		    (%MAKE-POINTER-OFFSET DTP-FIX
-					  (SCREEN-BUFFER MAIN-SCREEN) (+ LAST-USED-WORD I))
-		    0 0)))
-	      (SETQ VALUE N-LINES)))))))
-  (DOLIST (RESOURCE-NAME WINDOW-RESOURCE-NAMES)
-    (SI:MAP-RESOURCE 
-      #'(LAMBDA (WINDOW &REST IGNORE)
-	  (OR (TYPEP WINDOW 'INSTANCE) (FERROR NIL "LOSSAGE"))
-	  (IF (typep window 'tv:basic-menu)
-	      (LET ((GEO (SEND WINDOW :GEOMETRY)))
-		(DO ((L GEO (CDR L))) ((NULL L))
-		  (SETF (CAR L) NIL)))
-	    (LET* ((SUPERIOR (SEND WINDOW :SUPERIOR))
-		   (BOTTOM (SEND WINDOW :HEIGHT))
-		   (SUPHEIGHT (OR (SEND SUPERIOR :SEND-IF-HANDLES :INSIDE-HEIGHT)
-				  (SEND SUPERIOR :HEIGHT))))
-	      (IF (> BOTTOM SUPHEIGHT)
-		  (SEND WINDOW :SET-SIZE (SEND WINDOW :WIDTH) SUPHEIGHT)))))
-      RESOURCE-NAME))
-  VALUE)
-
-;;; The high-level changes for the landscape.
-
-(defun landscape ()
-  "Configure all existing (primary) screens and windows for landscape monitor."
-  (lambda-set-height 798.)
-  (with-mouse-usurped
-   (lock-sheet (main-screen)
-    (lock-sheet (who-line-screen)
-      (without-interrupts
-	(let ((ms mouse-sheet) (sw selected-window))
-	  (when (sheet-me-or-my-kid-p ms main-screen) (setq mouse-sheet nil))
-	  (send who-line-screen :deexpose)
-	  (send main-screen :deexpose)
-	  (setq mouse-sheet ms)
-
-	  (send who-line-screen :change-of-size-or-margins :width 1024.)
-	  (send main-screen :change-of-size-or-margins :width 1024.)
-
-	  (configure-who-line-for-landscape)
-
-	  (mouse-set-sheet main-screen)
-	  (send main-screen :expose)
-	  (send who-line-screen :expose)
-	  (when sw (send sw :select))))))))
-
-(defun portrait ()
-  "Configure all existing (primary) screens and windows for portrait monitor."
-  (lambda-set-height 1016.)
-  (with-mouse-usurped
-   (lock-sheet (main-screen)
-    (lock-sheet (who-line-screen)
-      (without-interrupts
-	(let ((ms mouse-sheet) (sw selected-window))
-	  (when (sheet-me-or-my-kid-p ms main-screen) (setq mouse-sheet nil))
-	  (send who-line-screen :deexpose)
-	  (send main-screen :deexpose)
-	  (setq mouse-sheet ms)
-
-	  (send who-line-screen :change-of-size-or-margins :width 800.)
-	  (send main-screen :change-of-size-or-margins :width 800.)
-
-	  (configure-who-line-for-portrait)
-
-	  (mouse-set-sheet main-screen)
-	  (send main-screen :expose)
-	  (send who-line-screen :expose)
-	  (when sw (send sw :select))))))))
-
-(defun configure-who-line-for-landscape ()
-  (send who-line-run-state-sheet :change-of-size-or-margins
-	:left 328. :right 520.)
-  (send who-line-file-state-sheet :change-of-size-or-margins
-	:left 520. :right 1024.)
-  (send who-line-documentation-window :change-of-size-or-margins
-	:width 1024.))
-
-(defun configure-who-line-for-portrait ()
-  (send who-line-run-state-sheet :change-of-size-or-margins
-	:left 328. :right 480.)
-  (send who-line-file-state-sheet :change-of-size-or-margins
-	:left 480. :right 800.)
-  (send who-line-documentation-window :change-of-size-or-margins
-	:width 800.))
 
 ;;;
 

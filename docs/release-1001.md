@@ -223,6 +223,18 @@ file saying why.
     `GET-UCODE-VERSION-FROM-COMMENT`. A disk operation that did not finish
     at the address it should have is still reported: the test that the
     machine was not a Lambda, always true on a CADR, goes.
+  - `window/cold.lisp`: the keyboard buffer's NuBus setup, and the Lambda's
+    branches in `SET-MOUSE-MODE`, `VIRTUAL-UNIBUS-ADDRESS`, `SETUP-CPT` and
+    the cold-load stream's size.
+  - `window/shwarm.lisp`: the Lambda's branches in the black-on-white
+    functions, the main screen's size and `SET-TV-SPEED`; and the Lambda's
+    scan line table with everything that resized its screen through it:
+    `SET-SCREEN-WIDTH`, `FIX-WINDOW-WIDTH`, `FIX-ARRAY`,
+    `MAP-OVER-ALL-WINDOWS-OF-SHEET`, `LAMBDA-SET-HEIGHT`, `LANDSCAPE`,
+    `PORTRAIT` and their who-line helpers. The "Load scan line table"
+    initialization stays, and on a CADR it still only places the run lights.
+  - `window/wholin.lisp`, `window/mouse.lisp`, `window/color.lisp` and
+    `zwei/poss.lisp`: the CADR's branch only.
 
 ## Faults fixed
 
