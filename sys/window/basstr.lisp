@@ -852,53 +852,6 @@ OPTIONS can include either :TYPEAHEAD or :KEYBOARD-PROCESS,
 	     (AND (SETQ TEM (AREF PREVIOUSLY-SELECTED-WINDOWS 0))
 		  (SEND TEM :MOUSE-SELECT))))))
 
-#|
-(DEFUN KBD-STATUS (IGNORE &AUX W TEM)
-  "Display what the effects of typing terminal-N-s would be."
-  (USING-RESOURCE (WINDOW POP-UP-FINGER-WINDOW)
-    (SETF (SHEET-TRUNCATE-LINE-OUT-FLAG WINDOW) 1)
-    (SEND WINDOW :SET-LABEL "Information on recently selected windows.")
-    (SEND WINDOW :SET-PROCESS CURRENT-PROCESS)
-    (WINDOW-CALL (WINDOW :DEACTIVATE)
-      (LET ((*TERMINAL-IO* WINDOW))
-	(SETQ KBD-ESC-TIME NIL)
-	(FORMAT WINDOW "To select one of the windows below, type ~C <number> S~&" #/TERMINAL)
-	(DO ((I 1 (1+ I)))
-	    ((= I (ARRAY-LENGTH PREVIOUSLY-SELECTED-WINDOWS)))
-	  (OR (SETQ W (AREF PREVIOUSLY-SELECTED-WINDOWS I)) (RETURN))
-	  (IF (SETQ TEM (SEND W :NAME-FOR-SELECTION))
-	      (FORMAT WINDOW "~2D: ~A~&" (1+ I) TEM)
-	    (REMOVE-FROM-PREVIOUSLY-SELECTED-WINDOWS W)
-	    (SETQ I (1- I))))
-	(IF (NULL (SETQ W (FIND-INTERESTING-WINDOW)))
-	    (FORMAT WINDOW "~%[There is currently no /"interesting/" window]~&")
-	  (FORMAT WINDOW
-		  "~%~A is an /"interesting/" window~%   Type ~C-0-S to select it.~&"
-		  (SEND W :NAME-FOR-SELECTION) #/TERMINAL)
-	  (LET (WW)
-	    (DOLIST (P ACTIVE-PROCESSES)
-	      (WHEN (AND (SETQ P (CAR P))
-			 (TYPEP (PROCESS-STACK-GROUP P) 'STACK-GROUP)
-			 (NEQ (SETQ WW (SI::PROCESS-IS-IN-ERROR-P P)) W))
-		(FORMAT WINDOW
-			"Process ~A is in error,
-     and is awaiting selection of window ~A for typeout" (PROCESS-NAME P) WW))))
-	  (DOLIST (WW BACKGROUND-INTERESTING-WINDOWS)
-	    (WHEN (NEQ (CAR WW) W)
-	      (FORMAT WINDOW "Window ~A is awaiting selection"))))
-	(SETQ W (AREF PREVIOUSLY-SELECTED-WINDOWS 0))
-	(IF (NULL W)
-	    (FORMAT WINDOW "~2&There is currently no window selected.")
-	  (FORMAT WINDOW "~2&The currently selected window is ~:[~S~;~:*~A~]"
-		  (SEND W :NAME-FOR-SELECTION) W))
-	(FORMAT WINDOW "~2%Type a space to flush: ")
-	(PROCESS-WAIT "Keyboard" #'(LAMBDA (WINDOW)
-				     (NEQ SELECTED-WINDOW WINDOW)
-				     (SEND WINDOW :LISTEN))
-		      WINDOW)
-	(IF (EQ WINDOW SELECTED-WINDOW) (SEND WINDOW :TYI-NO-HANG))))))
-|#
-
 ;;;This is like ZWEI:ROTATE-TOP-OF-LIST but for a NIL-padded array
 ;;;Rotate nth (1-origin!) element to the front of the array, rotating the
 ;;;part of the array before it.  With a negative arg rotate the same amount

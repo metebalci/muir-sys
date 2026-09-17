@@ -1105,28 +1105,6 @@ TYPE is the type of definition (DEFUN, DEFVAR, etc). to look for,
 			 (BACKWARD-OVER-COMMENT-LINES (OR (BACKWARD-OVER-PACKAGE-PREFIX (POINT))
 							  (POINT))
 						      NIL)))))
-#|
-;If any definitions in the a buffer fail to be still real,
-;this possibility is inserted.  We offer to resectionize;
-;if the user confirms, we insert a new list of sections and try them.
-;Otherwise, we try searching through the buffer for something that looks right.
-(DEFUN RESECTIONIZE-BUFFER-POSSIBILITY (BP OBJECT BUFFER &AUX (PACKAGE PACKAGE))
-  (COMPUTE-BUFFER-PACKAGE BUFFER)
-  (AND (SEND BUFFER :GET ':DONT-SECTIONIZE)
-       (FQUERY NIL "Sectionize buffer ~A? " BUFFER)
-       (SEND BUFFER :REMPROP ':DONT-SECTIONIZE))
-  (COND ((RESECTIONIZE-BUFFER BUFFER)
-	 (REPLACE-POSSIBILITY
-	   BP
-	   (GETF (LINE-PLIST (BP-LINE BP)) ':POSSIBILITY)
-	   `(DEFINITIONS-IN-BUFFER-POSSIBILITY
-	      ,OBJECT ,BUFFER
-	      ,(ADD-PARENT-SPECS (LOOKALIKE-SPECS OBJECT))
-	      T)))
-	(T (SEARCH-THROUGH-BUFFER-POSSIBILITY BP OBJECT BUFFER))))
-(DEFPROP RESECTIONIZE-BUFFER-POSSIBILITY "Resectionize buffer ~1*@~A"
-	 POSSIBILITY-FORMAT-STRING)
-|#
 
 (DEFUN SEARCH-THROUGH-BUFFER-POSSIBILITY (BP OBJECT BUFFER)
   BP
@@ -1260,102 +1238,6 @@ all the elements of OBJECTS, and also all recorded parents of elements."
 		  (LET ((PACKAGE (BUFFER-PACKAGE BUFFER)))
 		    (GET-SECTION-NAME (BUFFER-SAVED-MAJOR-MODE BUFFER)
 				      LINE (CREATE-BP LINE 0)))))))
-
-#|
-;;; Find, or create and initialize, but do not select,
-;;; the warnings buffer for a particular file.
-;;; Does NOT update the contents.
-(DEFUN FIND-WARNINGS-BUFFER (GENERIC-PATHNAME
-			     &AUX NAME)
-  (OR GENERIC-PATHNAME (SETQ GENERIC-PATHNAME T))
-  (SETQ NAME (FORMAT NIL "Warnings for ~A"
-		     (IF (EQ GENERIC-PATHNAME T)
-			 "non-file operations"
-		       (SEND GENERIC-PATHNAME :STRING-FOR-EDITOR))))
-  (OR (FIND-BUFFER-NAMED NAME)
-      (LET ((*INTERVAL* (FIND-BUFFER-NAMED NAME T)))
-	(SETF (BUFFER-SAVED-MAJOR-MODE *INTERVAL*) 'WARNINGS-MODE)
-	(COND ((NEQ GENERIC-PATHNAME T)
-	       (SEND GENERIC-PATHNAME :PUTPROP *INTERVAL* ':WARNINGS-BUFFER)
-	       (SETF (BUFFER-FILE-ID *INTERVAL*) '(:SPECIAL-BUFFER WARNINGS))
-	       (SETF (BUFFER-PATHNAME *INTERVAL*) GENERIC-PATHNAME)
-	       (SETF (BUFFER-GENERIC-PATHNAME *INTERVAL*) GENERIC-PATHNAME)))
-	;; Initialize the contents of this buffer, if it is empty.
-	(COND ((BP-= (INTERVAL-FIRST-BP *INTERVAL*) (INTERVAL-LAST-BP *INTERVAL*))
-	       (INSERT (COPY-BP (INTERVAL-FIRST-BP *INTERVAL*))
-		       (FORMAT NIL "Warnings for ~A~%"
-			       (IF (EQ GENERIC-PATHNAME T) "non-file operations"
-				 (SEND GENERIC-PATHNAME :TRANSLATED-PATHNAME))))
-	       ;; Give it a section at the front containg the "Warnings for file FOO" lines
-	       ;; and an empty section at the end.  That empty section simplifies
-	       ;; the rest of the code.
-	       (LET* ((BEGSECT
-			(ADD-SECTION-NODE (INTERVAL-FIRST-BP *INTERVAL*)
-					  (INTERVAL-LAST-BP *INTERVAL*)
-					  NIL
-					  NIL
-					  *INTERVAL*
-					  NIL 0 0))
-		      (ENDSECT
-			(ADD-SECTION-NODE (INTERVAL-LAST-BP *INTERVAL*)
-					  (INTERVAL-LAST-BP *INTERVAL*)
-					  NIL
-					  NIL
-					  *INTERVAL*
-					  BEGSECT 0 0)))
-		 (SETF (NODE-INFERIORS *INTERVAL*)
-		       (LIST BEGSECT ENDSECT)))))
-	*INTERVAL*)))
-
-;;; Update the ZWEI section that lists the warnings from a particular operation
-;;; on a particular file.  We assume that the section already exists and contains
-;;; an obsolete list of warnings.
-(DEFUN UPDATE-WARNINGS-SECTION (SECTION FILE-WARNINGS-DATUM)
-  (SETF (SI:FILE-WARNINGS-EDITOR-BUFFER FILE-WARNINGS-DATUM)
-	SECTION)
-  (LET ((STREAM (INTERVAL-STREAM-INTO-BP (INTERVAL-FIRST-BP SECTION)))
-	;; Don't allow motion, searching, etc. outside this section.
-	(*INTERVAL* SECTION)
-	(OPERATION (SECTION-NODE-NAME SECTION)))
-    ;; Go to the end of the second line of the buffer (the empty line).
-    (SEND STREAM :SET-BP (DBP (FORWARD-LINE (INTERVAL-FIRST-BP SECTION) 3)))
-    (DO ((OBJECT-WARNINGS-LEFT
-	   (SI:FILE-WARNINGS-OBJECT-ALIST FILE-WARNINGS-DATUM)
-	   (CDR OBJECT-WARNINGS-LEFT)))
-	(())
-      ;; Throw away any following objects' info in the buffer
-      ;; that is no longer useful.
-      (DO ((I 0 (1+ I))) (())
-	(LET ((NEXT-LINE-BP (IBP (SEND STREAM :READ-BP))))
-	  (IF (OR (BP-= (INTERVAL-LAST-BP SECTION)
-			NEXT-LINE-BP)
-		  (MEMBER (SEND STREAM :NEXT-LINE-GET ':WARNINGS)
-			  OBJECT-WARNINGS-LEFT))
-	      (RETURN NIL))
-	  (DELETE-INTERVAL NEXT-LINE-BP
-			   (NEXT-LINE-WITH-PROPERTY-BP
-			     (FORWARD-CHAR NEXT-LINE-BP)
-			     ':OBJECT))))
-      ;; We check for end of warnings AFTER deleting useless old text.
-      (IF (NULL OBJECT-WARNINGS-LEFT)
-	  (RETURN))
-      ;; If what follows in the buffer now is the correct data for this object,
-      ;; skip over it.  Otherwise, write the data in the buffer.
-      (LET ((OBJW (CAR OBJECT-WARNINGS-LEFT)))
-	(IF (EQUAL OBJW (SEND STREAM :NEXT-LINE-GET ':WARNINGS))
-	    (SEND STREAM :SET-BP (DBP (NEXT-LINE-WITH-PROPERTY-BP
-					(FORWARD-CHAR (SEND STREAM :READ-BP) 2)
-					':OBJECT)))
-	  (SI:PRINT-OBJECT-WARNINGS-HEADER STREAM (SI:OBJECT-WARNINGS-NAME OBJW) OPERATION)
-	  (SEND STREAM :LINE-PUT ':OBJECT (SI:OBJECT-WARNINGS-NAME OBJW))
-	  (SEND STREAM :LINE-PUT ':WARNINGS (SI:COPY-OBJECT-WARNINGS OBJW))
-	  (SEND STREAM :LINE-PUT ':LEVEL 0)
-	  (DOLIST (W (SI:OBJECT-WARNINGS-WARNINGS OBJW))
-	    (FORMAT STREAM "~% Warning: ")
-	    (APPLY #'FORMAT STREAM
-		   (SI:WARNING-FORMAT-STRING W) (SI:WARNING-FORMAT-ARGS W))
-	    (SEND STREAM :LINE-PUT ':WARNING W)))))))
-|#
 
 (DEFVAR *LAST-WARNINGS-BUFFER* NIL
   "This is the buffer into which the most recent Edit Warnings or similar command put its warnings.")
