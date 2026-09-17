@@ -102,6 +102,10 @@ file saying why.
   - `man/manual2.bolio` and `man/manual3.bolio`, byte-identical copies of
     `man/manual.bolio`.
 
+- **The disabled NIL version of `STORE`** in `sys2/macarr.lisp`, with its
+  bring-up note that it was not MacLisp compatible (#15). The live `STORE`
+  stays, and so does the Burke and MIT notice above both.
+
 ## Faults fixed
 
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
