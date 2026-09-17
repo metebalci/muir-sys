@@ -3,6 +3,7 @@
 ; The hosts of the Z54 site, on Chaosnet subnet 376.
 ; Format: HOST name, address, status, system type, machine type, [nicknames]
 ; Addresses are octal.
+; OZ takes the subnet's first address, 177200, and LISPM-n is at 177200+n.
 
-HOST OZ,		CHAOS 177201,SERVER,UNIX,UNIX
-HOST LISPM-1,		CHAOS 177202,USER,LISPM,CADR
+HOST OZ,		CHAOS 177200,SERVER,UNIX,UNIX
+HOST LISPM-1,		CHAOS 177201,USER,LISPM,CADR
