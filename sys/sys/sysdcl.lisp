@@ -63,7 +63,8 @@
 		 "SYS: SYS2; ENCAPS"	;encapsulations
 		 "SYS: SYS; EVAL"
 		 "SYS: SYS2; FLAVOR"
-		 "SYS: SYS; FSPEC"
+		 ;; no SYS: SYS; FSPEC.  The whole file was one block comment
+		 ;; and defined nothing, so loading it did nothing (#11).
 		 "SYS: SYS2; GC"
 		 "SYS: SYS; GENRIC"	;new commonlisp functions
 		 "SYS: IO; GRIND"
@@ -418,7 +419,8 @@
 (DEFCONST COLD-LOAD-FILE-LIST
 	  '("SYS: FONTS; CPTFON QFASL >"
 	    "SYS: SYS; QRAND QFASL >"
-	    "SYS: SYS; FSPEC QFASL >"
+	    ;; no SYS: SYS; FSPEC.  The whole file was one block comment, so
+	    ;; the cold load carried a file that defined nothing (#11).
 	    "SYS: IO; QIO QFASL >"
 ;	    "SYS: IO; RDTBL QFASL >"	;done specially
 ;	    "SYS: IO; CRDTBL QFASL >"	;done specially
