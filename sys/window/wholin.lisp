@@ -195,7 +195,10 @@ The last value is remembered in the WHO-LINE-ITEM-STATE instance variable."
 				 ((NULL P)
 				  "No current process")
 				 ((ASSQ P ACTIVE-PROCESSES)
-				  (PROCESS-WHOSTATE P))
+				  ;; the wait whostate is NIL while the process runs, and the
+				  ;; who line printed NIL; show the run whostate then.  LM-3's fix.
+				  (OR (SI:PROCESS-WAIT-WHOSTATE P)
+				      (SI:PROCESS-RUN-WHOSTATE P)))
 				 ((NOT (NULL (SI:PROCESS-ARREST-REASONS P)))
 				  "Arrest")
 				 (T "Stop")))
