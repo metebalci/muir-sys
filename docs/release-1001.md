@@ -313,5 +313,8 @@ file saying why.
   Chaos ASCII streams, because the default `:READ-CHAR` it sends took no
   arguments. That method takes EOF-ERROR-P and EOF-VALUE now, as the other
   `:READ-CHAR` methods do (#4).
+- **`io/stream.lisp`:** an ASCII-translating stream did not claim `:BEEP`,
+  so over TELNET a question asked with FQUERY signalled as soon as it had to
+  ask again. These streams ring the terminal's bell with BEL now (#5).
 
 ## Around the system
