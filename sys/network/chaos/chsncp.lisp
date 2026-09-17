@@ -316,11 +316,8 @@ and the time at which the record was made.")
     (SETF (AREF ROUTING-TABLE-TYPE I) NIL))
   (SETF (AREF ROUTING-TABLE MY-SUBNET) MY-ADDRESS)
   (SETF (AREF ROUTING-TABLE-COST MY-SUBNET) 10.)
-  (SI:SELECT-PROCESSOR
-    (:CADR
-      (SETF (AREF ROUTING-TABLE-TYPE MY-SUBNET) :CHAOS))
-    (:LAMBDA
-      (SETF (AREF ROUTING-TABLE-TYPE MY-SUBNET) :ETHERNET))))
+  ;; always the Chaos board; the Lambda reached its subnet over Ethernet.
+  (SETF (AREF ROUTING-TABLE-TYPE MY-SUBNET) :CHAOS))
 
 ;;;; High Level Structures
 
@@ -752,31 +749,8 @@ The status slot is used by the NCP to remember a small amount of info about the 
   )
 
 (DEFUN SETUP-MY-ADDRESS ()
-  (SI:SELECT-PROCESSOR
-    (:CADR
-     (SETQ MY-ADDRESS (%UNIBUS-READ MY-NUMBER-REGISTER))) ;Full address of this host.
-    (:LAMBDA
-     (WHEN (FBOUNDP 'SI:FIND-PROCESSOR-CONFIGURATION-STRUCTURE)
-       (SI:FIND-PROCESSOR-CONFIGURATION-STRUCTURE))
-     (LET ((NAMES-FOR-THIS-MACHINE (MULTIPLE-VALUE-LIST (SI:GET-PACK-NAME)))
-	   MY-NAME)
-       (COND ((VARIABLE-BOUNDP SI:*MY-PROC-NUMBER*)
-	      (SETQ MY-NAME (NTH SI:*MY-PROC-NUMBER* NAMES-FOR-THIS-MACHINE)))
-	     (T
-	      (SETQ MY-NAME (CAR NAMES-FOR-THIS-MACHINE))))
-       (SETQ MY-ADDRESS NIL)
-       (IF (STRINGP MY-NAME)
-	   (SETQ MY-ADDRESS (ADDRESS-PARSE MY-NAME)))
-       (IF (NULL MY-ADDRESS)
-	   (SETQ MY-ADDRESS #o3412))		; FLAG THAT ADDRESS IS BAD
-       )
-     ;; This won't compile on the CADR in the 99 that I have.
-     ;; I don't know where to find the definition of SI:%PROCESSOR-CONF-CHAOS-ADDRESS
-  #||
-     (WHEN (FBOUNDP 'SI:FIND-PROCESSOR-CONFIGURATION-STRUCTURE)
-       (SETF (SI:%PROCESSOR-CONF-CHAOS-ADDRESS-LO SI:*LAMBDA-PROC-CONF*) MY-ADDRESS))
-   ||#
-     ))
+  ;; the address comes from the Chaos board; the Lambda took it from the disk label.
+  (SETQ MY-ADDRESS (%UNIBUS-READ MY-NUMBER-REGISTER)) ;Full address of this host.
   (SETQ MY-SUBNET (LDB #o1010 MY-ADDRESS))	;Subnet of this host.
   (LET ((EXISTING-HOST (SI:GET-HOST-FROM-ADDRESS MY-ADDRESS :CHAOS)))
     (SETQ SI:LOCAL-HOST
@@ -808,8 +782,6 @@ The status slot is used by the NCP to remember a small amount of info about the 
   ;; This will cause the initialization to happen if it hasn't already
   (ADD-INITIALIZATION "CHAOS-NCP" '(INITIALIZE-NCP-COLD) '(:COLD :FIRST))
   (SETUP-MY-ADDRESS)
-  (SI:SELECT-PROCESSOR
-    (:LAMBDA (FUNCALL (INTERN "LAMBDA-ETHER-INIT" 'ETHER))))
   (ENABLE))
 
 ;;;; Low Level PKT Management
@@ -1839,32 +1811,21 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 
 ;;;; Hardware Interface
 
+;;; these three drive the Chaos board; the Lambda, which had none, did nothing.
 (DEFUN INTERFACE-RESET-AND-ENABLE ()
-  (SI:SELECT-PROCESSOR
-    (:CADR
-     (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
-		    (DPB -1 %%CHAOS-CSR-RESET 0))
-     (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
-		    (DPB -1 %%CHAOS-CSR-INTERRUPT-ENABLES 0)))
-    (:LAMBDA
-      NIL)))
+  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+		 (DPB -1 %%CHAOS-CSR-RESET 0))
+  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+		 (DPB -1 %%CHAOS-CSR-INTERRUPT-ENABLES 0)))
 
 (DEFUN INTERFACE-RESET ()
-  (SI:SELECT-PROCESSOR
-    (:CADR
-     (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
-		    (DPB -1 %%CHAOS-CSR-RESET 0)))
-    (:LAMBDA
-      NIL)))
+  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+		 (DPB -1 %%CHAOS-CSR-RESET 0)))
 
 (DEFUN RECEIVER-RESET ()
-  (SI:SELECT-PROCESSOR
-    (:CADR
-     (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
-		    (DPB 1 %%CHAOS-CSR-RECEIVER-CLEAR
-			 (%UNIBUS-READ CONTROL-STATUS-REGISTER))))
-    (:LAMBDA
-      NIL)))
+  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+		 (DPB 1 %%CHAOS-CSR-RECEIVER-CLEAR
+		      (%UNIBUS-READ CONTROL-STATUS-REGISTER))))
 
 ;;; Top level function for receiver to be called directly from scheduler. (Instead of the
 ;;; old thing where something like this was the top level of the RECEIVER process.)
@@ -1932,8 +1893,9 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 ;;; this function can be used for debugging purposes.
 
 (DEFUN TRANSMIT-INT-PKT (INT-PKT &OPTIONAL (HOST (PKT-DEST-ADDRESS INT-PKT))
-                                           (SUBNET (PKT-DEST-SUBNET INT-PKT))
-				 &AUX HARDWARE-P LOCAL-PROC OTHER-LOCAL-PROCS)
+                                           (SUBNET (PKT-DEST-SUBNET INT-PKT)))
+  ;; the Lambda's :ETHERNET route, which shared its Ethernet board with
+  ;; the other processors on its NuBus, is gone, and its variables with it.
   ;;; Simple routing if he is not on my subnet.
   (COND ((AND (NOT (= SUBNET MY-SUBNET))
 	      (NOT (MEMQ SUBNET MY-OTHER-SUBNETS)))
@@ -1965,54 +1927,7 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 	     (RECEIVE-INT-PKT INT-PKT))))
 	(T
 	 (ECASE (AREF ROUTING-TABLE-TYPE (LDB #o1010 HOST))
-	   (:ETHERNET
-	    (COND ((AND (FBOUNDP 'SI:SHARE-MODE-ACTIVE-P)
-			(SI:SHARE-MODE-ACTIVE-P))
-		   (COND
-		     ;; broadcast -- send to everyone
-		     ((ZEROP HOST)
-		      (SETQ OTHER-LOCAL-PROCS SI:*OTHER-PROCESSORS*)
-		      (SETQ HARDWARE-P (EQ SI:*ETHERNET-HARDWARE-CONTROLLER* SI:*MY-OP*)))
-
-		     ;; if he's local, just send to him
-		     ((SETQ LOCAL-PROC (UNIX:PROCESSOR-FOR-HOST-IF-ON-MY-NUBUS HOST)))
-
-		     ;; it's definitely going out of this machine - give it to
-		     ;; the hardware controller
-		     ((EQ SI:*ETHERNET-HARDWARE-CONTROLLER* SI:*MY-OP*)
-		      (SETQ HARDWARE-P T))
-		     (T
-		      (SETQ LOCAL-PROC SI:*ETHERNET-HARDWARE-CONTROLLER*))))
-		  (T
-		   (SETQ HARDWARE-P T)))
-
-	    (COND ((NOT (NULL HARDWARE-P))
-		   (LET ((ETHER-ADDRESS (ETHERNET:GET-ETHERNET-ADDRESS HOST)))
-		     (COND ((NOT (NULL ETHER-ADDRESS))
-			    (FUNCALL (SI:SELECT-PROCESSOR
-				       (:CADR
-					 'ETHERNET:SEND-INT-PKT-VIA-UNIBUS-ETHERNET)
-				       (:LAMBDA
-					 'ETHERNET:SEND-INT-PKT-VIA-MULTIBUS-ETHERNET))
-				     INT-PKT
-				     ETHERNET:MY-ETHERNET-ADDRESS	;source
-				     ETHER-ADDRESS			;destination
-				     ETHERNET:CHAOS-ETHERNET-TYPE)
-			    (INCF ETHERNET:*ETHERNET-CHAOS-PKTS-TRANSMITTED*)
-			    (INCF PKTS-TRANSMITTED))
-			   (T
-			    (INCF ETHERNET:*ETHERNET-CHAOS-PKTS-NOT-TRANSMITTED-LACKING-ETHERNET-ADDRESS*))))))
-
-	    (DOLIST (OP OTHER-LOCAL-PROCS)
-	      (UNIX:TRANSMIT-INT-PKT-TO-SHARING-HOST INT-PKT OP))
-
-	    (IF LOCAL-PROC
-		(UNIX:TRANSMIT-INT-PKT-TO-SHARING-HOST INT-PKT LOCAL-PROC))
-
-	    (FREE-INT-PKT INT-PKT))
 	   (:CHAOS
-	    (SI:SELECT-PROCESSOR
-	      (:LAMBDA (FERROR NIL "Trying to use chaosnet hardware")))
 	    (WITHOUT-INTERRUPTS
 	      (PROG (OLD-TRANSMIT-LIST)
 		    (SETQ PKTS-TRANSMITTED (1+ PKTS-TRANSMITTED))
@@ -2062,8 +1977,6 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 
 (DEFUN STATUS ( &AUX CSR LC)
   "Print out contents of hardware registers (CADR Only)"
-  (SI:SELECT-PROCESSOR
-    (:LAMBDA (FERROR NIL "LAMBDAs don't have chaosnet boards")))
   (SETQ CSR (%UNIBUS-READ CONTROL-STATUS-REGISTER))
   (TERPRI) (TERPRI)
   (AND (LDB-TEST %%CHAOS-CSR-TIMER-INTERRUPT-ENABLE CSR)
