@@ -75,4 +75,8 @@ file saying why.
 
 ## Faults fixed
 
+- **`window/wholin.lisp`:** the who line showed NIL for a running process,
+  whose wait whostate is NIL; it shows the run whostate then. The fix is
+  LM-3's, marked for 1001 in `docs/upstream-changes.md`.
+
 ## Around the system
