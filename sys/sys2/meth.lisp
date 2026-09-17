@@ -49,38 +49,6 @@
 ; The function definition of the class-symbol is the select-method.
 
 
-;; This is the standard way of defining a method of a class,
-;; so that the code will be compiled.  Note that DEFMETHOD works for
-;; both Class methods and Flavor methods.
-;; SPEC is one of (:message), (:BEFORE :message), or (:AFTER :message),
-;; in the case where CLASS-NAME is a flavor.
-;; If in place of the lambda-list you have a symbol, and the body
-;; is null, that symbol is a function which stands in for the method.
-;;*** This has been superseded by a definition in FLAVOR
-#+NIL ;comment out next S-expression
-(DEFMACRO DEFMETHOD ((CLASS-NAME . SPEC) LAMBDA-LIST . BODY)
-  (COND ((AND (SYMBOLP LAMBDA-LIST) (NOT (NULL LAMBDA-LIST)) (NULL BODY))
-	 `(FDEFINE '(:METHOD ,CLASS-NAME ,@SPEC) ',LAMBDA-LIST))
-	((GET CLASS-NAME 'FLAVOR)
-	 `(LOCAL-DECLARE ((SPECIAL . ,(FLAVOR-INSTANCE-VARIABLES CLASS-NAME T T)))
-	    (DEFUN (:METHOD ,CLASS-NAME ,@SPEC) (.OPERATION. . ,LAMBDA-LIST)
-	      . ,BODY)))
-	(T ;; The non-flavor class system
-	   (AND (CDR SPEC) (FERROR NIL "~S bad in non-flavor DEFMETHOD"
-				       (CONS CLASS-NAME SPEC)))
-	   (LET ((OPERATION (CAR SPEC)))
-	     (COND ((ATOM OPERATION)
-		    `(PROGN 'COMPILE . ,(DEFMETHOD-1 CLASS-NAME OPERATION LAMBDA-LIST BODY)))
-		   (T
-		     (COND ((EQ (CAR OPERATION) 'QUOTE)
-			    (CERROR NIL NIL ':NO-VALUE
-				    "Quote used in front of operation ~S in DEFMETHOD of ~S"
-				    OPERATION CLASS-NAME)))
-		     `(PROGN 'COMPILE
-			. ,(MAPCAN (FUNCTION (LAMBDA (OP)
-					       (DEFMETHOD-1 CLASS-NAME OP LAMBDA-LIST BODY)))
-				   OPERATION))))))))
-
 ;; Interface from the Lisp machine's actual definition of DEFMETHOD.
 (DEFUN DEFMETHOD-1 (CLASS-SYMBOL OPERATION ARGS BODY)
   `((LOCAL-DECLARE ((SPECIAL . ,(CLASS-VARS CLASS-SYMBOL)))

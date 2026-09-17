@@ -1,4 +1,6 @@
 ;;-*- mode: lisp; package: cadr -*-
+;the #M and #Q choices between MacLisp and Lisp Machine code are
+; resolved for the Lisp Machine.
 
 ;Production check out aids.  These are mostly for freshly constructed machines
 ;  before CC-TEST-MACHINE can even do anything reasonable.
@@ -321,9 +323,9 @@
 (DEFUN DLOOP ()
   (DO () (())
   (DO I 0 (1+ I) (= I 40)	;Loc 0-37 get floating 1's
-    (PHYS-MEM-WRITE I (#M LSH #Q ASH 1 I)))
+    (PHYS-MEM-WRITE I (ASH 1 I)))
   (DO I 0 (1+ I) (= I 40)	;Loc 40-77 get floating 0's
-    (PHYS-MEM-WRITE (+ 40 I) (- (#M LSH #Q ASH 1 32.) (#M LSH #Q ASH 1 I))))
+    (PHYS-MEM-WRITE (+ 40 I) (- (ASH 1 32.) (ASH 1 I))))
   (DO I 100 (1+ I) (= I 400)	;Loc 100-377 get address pattern
     (PHYS-MEM-WRITE I (+ (LSH (LOGXOR 377 I) 8) I)))
  ; (PRINT 'WRITE)

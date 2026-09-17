@@ -125,6 +125,12 @@ file saying why.
     handling that called `STATUS TTY` and `SSTATUS TTYINT`. `IF-FOR-LISPM`
     no longer wraps the code in `cc.lisp`, `ccdisk.lisp` and `diags.lisp`;
     it only bound `RUN-IN-MACLISP-SWITCH` to NIL, which is its value anyway.
+  - `sys/qcp2.lisp`, `ucadr/praid.lisp` and `ucadr/packed.lisp`: the MacLisp
+    alternatives written with `#M` and `#Q`.
+  - `file/zmail.lisp`, `io/file/baldir.lisp` and `demo/what.lisp`: the
+    Symbolics versions under `#+SYMBOLICS`.
+  - `sys2/meth.lisp`: an old `DEFMETHOD` that `#+NIL` commented out, since
+    FLAVOR defines the one in use.
 
 ## Faults fixed
 
