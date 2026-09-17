@@ -244,7 +244,6 @@
 		 "LPARSE"			;Parsing lisp code.
 		 "MODES"			;Major and minor mode functions and commands
 		 "MOUSE"			;Mouse commands less screen interface
-		 "PATED"			;Patch commands.
 		 "PL1MOD"			;PL/I mode commands.
 		 "POSS"				;Visiting lists of things
 		 "STREAM"			;Editor stream

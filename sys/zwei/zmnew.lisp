@@ -197,15 +197,6 @@ Queries you for whether to change the attribute list in the text as well."
   ()
   (SET-ATTRIBUTE ':NOFILL "attribute Nofill"))
 
-(DEFCOM COM-SET-PATCH-FILE "Set the Patch-File attribute of this buffer.
-Anything non-NIL identifies this file as a patch file.
-The new value is read in the minibuffer.
-Applies only to this buffer, and overrides what the attribute list says.
-Queries you for whether to change the attribute list in the text as well."
-  ()
-  (SET-ATTRIBUTE ':PATCH-FILE "attribute Patch-File")
-  DIS-NONE)
-
 (DEFCOM COM-SET-TAB-WIDTH "Set the displayed width of Tab characters for this buffer.
 This is the separation of tab stops, measured in space characters.
 Applies only to this buffer, and overrides what the attribute list says.
