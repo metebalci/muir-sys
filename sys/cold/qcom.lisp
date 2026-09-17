@@ -1303,36 +1303,6 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (SI::ASSIGN-ALTERNATE CHAOS-HARDWARE-VALUES)
 (DEFCONST CHAOS-HARDWARE-SYMBOLS (SI::GET-ALTERNATE CHAOS-HARDWARE-VALUES))
 
-;;;; Ethernet
-
-;;; Offsets from the base of the ether registers to the specific registers
-(defconst ether-register-offsets '(
-  %ether-output-word-count-offset		;0
-  %ether-output-buffer-pointer-offset		;1
-  %ether-output-csr-offset 			;2
-  %ether-output-delay-offset			;3
-  %ether-input-word-count-offset		;4
-  %ether-input-buffer-pointer-offset		;5
-  %ether-input-csr-offset			;6
-  %ether-device-address				;7
-  ))
-(si::assign-values ether-register-offsets 0)
-
-;;; Offsets of the leader elements
-(defconst ether-leader-offsets '(
-  %ether-leader-thread				;0
-  %ether-leader-csr				;1
-  %ether-leader-active-length			;2
-  %ether-leader-transmit-count			;3
-  ))
-(si::assign-values ether-leader-offsets 0)
-
-;;; Random parameters
-(defconst ether-random-parameters '(
-  ether-maximum-packet-length 430		;Max length of packet in words = (// 560. 2)
-  ether-unibus-block 0				;Use unibus blocks 0-3
-  ))
-(si::assign-alternate ether-random-parameters)
 
 (DEFCONST A-MEMORY-ARRAY-LOCATIONS '(
   MOUSE-CURSOR-PATTERN	1600

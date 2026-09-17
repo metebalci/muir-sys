@@ -1191,7 +1191,8 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 (defvar evals-to-be-sent-over)
 
 ;;; User calls this to build a cold-load onto a band
-(defun make-cold (part-name &optional (lambda-p (if-in-lambda t)))
+;;; no LAMBDA-P argument; there is no Lambda cold-load file list.
+(defun make-cold (part-name)
   (when (si:find-disk-partition-for-write part-name)
     (si:update-partition-comment part-name "cold-incomplete" 0)
     (or (boundp 'big-fixnum) (load-parameters))
@@ -1203,8 +1204,7 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
     (makunbound 'cold-loaded-function-property-lists)
     (setq evals-to-be-sent-over nil)
     (unwind-protect (progn (vmem-initialize part-name)
-			   (make-cold-1 (if lambda-p si:lambda-cold-load-file-list
-					    si:cold-load-file-list))
+			   (make-cold-1 si:cold-load-file-list)
 			   (format nil "Boot off the ~A partition to test it."
 				   part-name))
       (vmem-finish))

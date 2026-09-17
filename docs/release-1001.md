@@ -12,7 +12,7 @@ file saying why.
   `network/ether-mini.lisp` and `network/ip/` (`address.lisp`,
   `hostsnic.lisp`). Nothing loaded them on a CADR: QLD loads the Ethernet
   files only on a Lambda. The ETHERNET system, its package and the cold-load
-  lists that name these files are left for the cold-load cleanup.
+  lists that name these files went later, with the Lambda support below.
 - **The generic network layer nothing loads:** `network/service.lisp`,
   `network/server.lisp`, `network/regions.lisp`, `network/symbols.lisp` and
   `network/smtp.lisp`. No system names them and no other file calls what they
@@ -50,8 +50,7 @@ file saying why.
   VMS-Tape and Distribution in `file/fs.lisp`, and Press in
   `sys/sysdcl.lisp`. `FILE-SYSTEM-UTILITIES` no longer names MAGTAPE as a
   component, and the TAPE package is gone from `sys/clpack.lisp`. The PRESS
-  and UNIX packages stay for now: `cold/export.lisp` names PRESS symbols, and
-  `network/chaos/chsncp.lisp` names UNIX ones.
+  and UNIX packages went later, with the Lambda support below.
 - **The UNIX system** in `sys/sysdcl.lisp`, the Lambda's interface to its
   Unix processor, over a `SYS: UNIX;` directory that does not exist.
 - **What still called the PRESS package outside the cold load** (#14):
@@ -64,12 +63,11 @@ file saying why.
     Xerox printers' font format, and FED's AC choices. KST, AST, AL, KS and
     QFASL remain.
 
-  `cold/export.lisp` still names PRESS symbols, so the PRESS package stays
-  until the cold-load cleanup.
+  The PRESS package went later, with the Lambda support below.
 - **EFTP** (`network/chaos/eftp.lisp`), the PUP file transfer that sent
   Press files to the Dover and files to and from Xerox Altos, and its module
-  in the CHAOS system (`sys/sysdcl.lisp`). `cold/export.lisp` still names its
-  symbols, which is harmless and left for the cold-load cleanup.
+  in the CHAOS system (`sys/sysdcl.lisp`). Its symbols left
+  `cold/export.lisp` later, with the Lambda support below.
 - **`io1/xgp.lisp`**, screen hardcopy to MIT's XGP printer. Nothing loaded it,
   and its last user was ZMail's XGP device.
 - **Code disabled with `#|...|#`**, outside the cold load:
@@ -247,6 +245,19 @@ file saying why.
     disk label; and its branches in the routing table, the interface resets
     and `STATUS`. Nothing outside the cold-load lists names `ETHERNET` or
     `UNIX` any more.
+  - The cold-load lists and packages: the ETHERNET system,
+    `LAMBDA-COLD-LOAD-FILE-LIST`, `ETHERNET-FILE-ALIST` and its place in
+    `MINI-FILE-ALIST-LIST`, and the commented-out `ETHER-MINI` in
+    `sys/sysdcl.lisp`; the ETHERNET, UNIX and PRESS packages in
+    `sys/clpack.lisp`; `MAKE-COLD`'s `LAMBDA-P` argument in
+    `cold/coldut.lisp`; the Ethernet register offsets in `cold/qcom.lisp`,
+    which no microcode or Lisp code used. `cold/export.lisp` no longer
+    exports the PRESS package's symbols or the PUP and EFTP ones in CHAOS,
+    and its notes for `DEFINE-SPECIAL-VARIABLE`, `PRINT-FILE`, `PRINT-STATUS`
+    and `PRINT-STREAM` name the files that use them rather than
+    `SYS: IO1; PRESS`. The A-memory and system communication area slots the
+    Lambda and the Ethernet used stay, because their positions are shared
+    with the microcode.
 
 ## Faults fixed
 

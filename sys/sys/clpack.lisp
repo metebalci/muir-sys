@@ -1689,7 +1689,6 @@ and by random processes that don't bind *PACKAGE*."
     ("CADR" :size 7000. :use ("GLOBAL" "SYS") :nicknames ("CC"))
     ("CHAOS" :size 1200. :use ("GLOBAL" "SYS")
 	     :shadow ("OPEN" "STATUS" "CLOSE" "LISTEN" "FINISH"))
-    ("ETHERNET" :size 800. :use ("GLOBAL" "SYS"))
     ("COLOR" :size 250. :use ("GLOBAL" "SYS"))
     ("COMPILER" :size 2800. :use ("GLOBAL" "SYS"))
     ("FILE-SYSTEM" :size 1800. :use ("GLOBAL" "SYS") :nicknames ("FS") :prefix-name "FS")
@@ -1707,7 +1706,6 @@ and by random processes that don't bind *PACKAGE*."
      		        :new-symbol-function pkg-specialize-and-auto-export-store)
     ("TIME" :size 800.)
     ("SUPDUP" :size 600.)
-    ("PRESS" :size 500.)
     ("FORMAT" :size 400.)
     ("ZWEI" :size 7000. :shadow ("SEARCH")); "FIND"
     ("MICRO-ASSEMBLER" :size 6000. :nicknames ("UA") :prefix-name "UA"
@@ -1715,7 +1713,6 @@ and by random processes that don't bind *PACKAGE*."
     ("MATH" :size 200.)
     ("HACKS" :size 2000.)
     ("SRCCOM" :size 100. :shadow ("FILE-LENGTH"))
-    ("UNIX" :size 500. :use ("GLOBAL"))
     ("USER" :size 2000.)
     ("COMMON-LISP-INCOMPATIBLE" :nicknames ("CLI") :prefix-name "CLI"
      				:size 64. :use nil :auto-export-p t
