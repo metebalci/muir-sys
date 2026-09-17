@@ -137,8 +137,8 @@
   (:MODULE NCP ("CHSNCP" "CHUSE"))
   (:MODULE AUX "CHSAUX")
   (:MODULE TEST "CHATST")
-  (:MODULE EFTP "EFTP")
-  (:COMPILE-LOAD (NCP AUX TEST EFTP))
+  ;; no EFTP module.  EFTP spoke PUP to Xerox Altos and the Dover printer, and is deleted.
+  (:COMPILE-LOAD (NCP AUX TEST))
   (:COMPILE-LOAD (:GENERATE-HOST-TABLE (("SYS: SITE; HOSTS" "SYS: SITE; HSTTBL")))))
 
 ;;; New ethernet
