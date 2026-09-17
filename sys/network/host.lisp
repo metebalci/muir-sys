@@ -399,19 +399,8 @@ to give it a chance to create a host and add it to the host table."
 (DEFMETHOD (HOST-LMFS-MIXIN :HSNAME-PATHNAME) (STRING HOST)
   (FS:MAKE-PATHNAME :HOST HOST :DIRECTORY (LIST STRING)))
 
-(DEFPROP :VMS HOST-VMS-MIXIN SYSTEM-TYPE-FLAVOR)
-;; not patched in 99 -- omits primary-device ivar
-(DEFFLAVOR HOST-VMS-MIXIN ((PRIMARY-DEVICE "USRD$")) ()
-  (:REQUIRED-FLAVORS HOST)
-  :SETTABLE-INSTANCE-VARIABLES)
-;;; I'm not sure what the right thing is here.  Maybe USRD$?  There also needs to be some
-;;; hair such that directory names are suppressed when logical names are provided with
-;;; directories.  Perhaps the file job should throw away the directory component if a
-;;; "device" includes a directory.  I'm going to have to think about this some more.  --RWK
-
-(DEFMETHOD (HOST-VMS-MIXIN :HSNAME-PATHNAME) (STRING HOST) 
-  (FS:PARSE-PATHNAME STRING HOST))
-
+;; the :VMS mixin (HOST-VMS-MIXIN) went with VMS support; this system never
+;; talks to a VMS host.
 (DEFPROP :LISPM HOST-LISPM-MIXIN SYSTEM-TYPE-FLAVOR)
 (DEFFLAVOR HOST-LISPM-MIXIN () () (:REQUIRED-FLAVORS HOST))
 

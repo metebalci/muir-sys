@@ -2329,13 +2329,13 @@ MSG has been split into."
 ;;; current-issue-number (decimal)
 ;;; volume issue date (date like 1/26/84 03:30:23)
 
+;; the :VMS surface-type clauses went with VMS support; this system never talks
+;; to a VMS file server.
 (FS:DEFINE-CANONICAL-TYPE :DIGEST "DIGEST"
-  (:UNIX "dg")
-  (:VMS "DIG"))
+  (:UNIX "dg"))
 
 (FS:DEFINE-CANONICAL-TYPE :DIGEST-STATUS "DSTATUS"
   (:UNIX "ds")
-  (:VMS "DST")
   (:ITS "DSTAT"))
 
 (DEFSTRUCT (DIGEST-STATUS (:CONC-NAME DS-) (:TYPE :LIST) (:ALTERANT NIL)

@@ -514,7 +514,6 @@ SPEC can be a user name, or user@host."
 	  (:ITS . PARSE-ITS-FINGER)
 	  (:WAITS . PARSE-WAITS-FINGER)
 	  (:UNIX . PARSE-UNIX-FINGER)
-	  (:VMS . PARSE-VMS-FINGER)
 	  (:TOPS-10 . PARSE-TENEX-FINGER))
   "This list is for use by chaos:user-logged-into-host-p.")
 
@@ -544,11 +543,6 @@ SPEC can be a user name, or user@host."
   "Return T if the USER is logged to a waits site, based on the finger info we have."  
   (IGNORE USER)
   (IF (STRING-SEARCH "Logged in" FINGER-INFO) T)) ;catch all
-
-(DEFUN PARSE-VMS-FINGER (USER FINGER-INFO)
-  "Return T if the USER is logged to a VMS site, based on the finger info we have."  
-  (IGNORE USER)
-  (IF (STRING-SEARCH "Personal Name" FINGER-INFO) T)) ;catch all
 
 (DEFUN PARSE-ITS-FINGER (USER FINGER-INFO)
   "Return T if the USER is logged to a ITS site, based on the finger info we have."  
