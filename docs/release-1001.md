@@ -45,6 +45,15 @@ file saying why.
   - `eh/she.lisp`, a byte-identical copy of `eh/ehw.lisp`.
   - `io/strmdoc.lisp` and `window/winddoc.lisp`, operation documentation
     written with a `DEFOPERATION` that is defined nowhere.
+- **The tape, Distribution and Press definitions left commented out** by
+  release 1000 are deleted outright, with their notes: MagTape, ITS-Tape,
+  VMS-Tape and Distribution in `file/fs.lisp`, and Press in
+  `sys/sysdcl.lisp`. `FILE-SYSTEM-UTILITIES` no longer names MAGTAPE as a
+  component, and the TAPE package is gone from `sys/clpack.lisp`. The PRESS
+  and UNIX packages stay for now: `cold/export.lisp` names PRESS symbols, and
+  `network/chaos/chsncp.lisp` names UNIX ones.
+- **The UNIX system** in `sys/sysdcl.lisp`, the Lambda's interface to its
+  Unix processor, over a `SYS: UNIX;` directory that does not exist.
 
 ## Faults fixed
 
