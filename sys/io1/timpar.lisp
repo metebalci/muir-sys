@@ -1820,6 +1820,3 @@ VAL can be a number of seconds, or NIL for never."
 ;;; Now that the time parser is loaded, we can fix up times remembered as strings by
 ;;; the system generator.
 (ADD-INITIALIZATION "TIME-PARSER-LOADED" '(FS:CANONICALIZE-COLD-LOADED-TIMES) '(:ONCE))
-
-(if-in-lambda  ; ***temp to keep from using SDU clock
-  (fset 'rtc-get-universal-time #'false))

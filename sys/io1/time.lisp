@@ -26,25 +26,18 @@ will return T if daylight savings time is in effect in the local timezonew at th
   "Return the current value of the microsecond clock (a bignum).
 Only differences in clock values are meaningful.
 There are 32. bits of data, so the value wraps around every few hours."
-  (SELECT-PROCESSOR
-    (:CADR
-     (LET ((LOW (%UNIBUS-READ #o764120))  ;Hardware synchronizes if you read this one first
-	   (HIGH (%UNIBUS-READ #o764122)))
-       (DPB HIGH #o2020 LOW)))
-    (:LAMBDA
-     (COMPILER:%MICROSECOND-TIME))))
+  ;; the CADR's Unibus clock; the Lambda's branch is gone.
+  (LET ((LOW (%UNIBUS-READ #o764120))  ;Hardware synchronizes if you read this one first
+	(HIGH (%UNIBUS-READ #o764122)))
+    (DPB HIGH #o2020 LOW)))
 
 (DEFUN FIXNUM-MICROSECOND-TIME (&AUX (INHIBIT-SCHEDULING-FLAG T))
   "Return the current value of the microsecond clock as two fixnums."
   (DECLARE (VALUES LOW-23-BITS TOP-9-BITS))
-  (SELECT-PROCESSOR
-    (:CADR
-     (LET ((LOW (%UNIBUS-READ #o764120))
-	   (HIGH (%UNIBUS-READ #o764122)))
-       (VALUES (DPB HIGH #o2007 LOW) (LDB #o0711 HIGH))))
-    (:LAMBDA
-     (LET ((TIME (COMPILER:%MICROSECOND-TIME)))
-       (VALUES (LDB #o0027 TIME) (LDB #o2711 TIME))))))
+  ;; the CADR's Unibus clock; the Lambda's branch is gone.
+  (LET ((LOW (%UNIBUS-READ #o764120))
+	(HIGH (%UNIBUS-READ #o764122)))
+    (VALUES (DPB HIGH #o2007 LOW) (LDB #o0711 HIGH))))
 
 (DEFCONST INTERNAL-TIME-UNITS-PER-SECOND 60.
   "60 60ths of a second in a second.")
@@ -225,16 +218,13 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
 
 (DEFUN INITIALIZE-TIMEBASE (&OPTIONAL UT)
   "Set the clock.
-Possible sources of the time include the network, the Lambda SDU clock,
+Possible sources of the time include the network,
 and, failing that, the luser who happens to be around."
+  ;; the Lambda's battery clock is no longer a source, nor set here.
   (AND (NULL UT) (NOT (SI:GET-SITE-OPTION :STANDALONE)) *NETWORK-TIME-FUNCTION* 
        (SETQ UT (FUNCALL *NETWORK-TIME-FUNCTION*)))
   (TAGBODY
       (AND (NUMBERP UT) (GO DO-IT))
-      ; don't deal with SDU clock until cold load is done ...
-      (if-in-lambda
-	(SETQ UT (RTC-GET-UNIVERSAL-TIME))
-	(IF UT (GO DO-IT)))		; change to GIVE-IT-A-SHOT if the user should be asked
    STRING
       (FORMAT *QUERY-IO* "~&Please type the date and time: ")
       (SETQ UT (READLINE *QUERY-IO*))
@@ -264,7 +254,6 @@ and, failing that, the luser who happens to be around."
 			 *LAST-TIME-DAY* *LAST-TIME-MONTH* *LAST-TIME-YEAR*
 			 *LAST-TIME-DAY-OF-THE-WEEK* *LAST-TIME-DAYLIGHT-SAVINGS-P*)
 	  (DECODE-UNIVERSAL-TIME UT))
-	(IF-IN-LAMBDA (RTC-SET-UNIVERSAL-TIME UT))
 	(RETURN-FROM INITIALIZE-TIMEBASE T))))
 
 (DEFUN SET-LOCAL-TIME (&OPTIONAL NEW-TIME)
@@ -663,186 +652,3 @@ by centuries until it is within 50 years of the present."
   '(PROGN (SETQ LAST-BOOT-TIME (TIME) WAS-NEGATIVE NIL HIGH-TIME-BITS 0)
 	  (INITIALIZE-TIMEBASE))
   '(:WARM :NOW))
-
-
-;;;; This is code to read and initialize the LAMBDA's battery clock.
-
-(defconst rtc-address-register-multibus-address #x1c124)
-(defconst rtc-data-register-multibus-address #x1c120)
-
-(defun read-rtc-reg (adr)
-  (if-in-lambda 
-    (%nubus-write #xff rtc-address-register-multibus-address adr)
-    (ldb #o0010 (%nubus-read #xff rtc-data-register-multibus-address))))
-
-(defun write-rtc-reg (adr data)
-  (if-in-lambda
-    (%nubus-write #xff rtc-address-register-multibus-address adr)
-    (%nubus-write #xff rtc-data-register-multibus-address data)))
-
-;;; 0-15 used by clock chip
-;;; 16,17 time zone
-;;; 20 34 validation string.  "time is good"  for this version.
-;;; 35 speed.  source cycles*8+execute cycles
-;;; last-boot-by  0 unknown, 1 SDU dribble, 2 SDU via serial, 3 SDU via chaos, 4 CADR via debug.
-;;; 36 rg-slot
-;;; 37 tv-slot
-;;; 40 prime-memory slot
-;;; sdu serial port availability to LAMBDA. bit 1 port A, bit 2 port B.
-;;; 41 ether exists.  bit 0, 3com ethernet board in usual place, bit 1 exelan board, etc.
-;;; 42 magtape exists.   1 cipher streamer, 2 buffered cipher, 3 Kennedy,
-;;; disk exists bitcode.  bit 0 unit 0 exists, bit 1 unit 1, etc.
-;;; disk number to boot from.
-;;; multibus serial card code.  0 none, 1 systec
-
-(defvar rtc-array (IF-IN-LAMBDA (make-array 64.)))
-
-(defconst rtc-seconds 0)
-(defconst rtc-seconds-alarm 1)
-(defconst rtc-minutes 2)
-(defconst rtc-minutes-alarm 3)
-(defconst rtc-hours 4)
-(defconst rtc-hours-alram 5)
-(defconst rtc-day-of-week 6)
-(defconst rtc-date 7)
-(defconst rtc-month #o10)
-(defconst rtc-year #o11)
-(defconst rtc-reg-a #o12)
-(defconst rtc-reg-b #o13)
-(defconst rtc-reg-c #o14)
-(defconst rtc-reg-d #o15)
-(defconst rtc-time-zone-low #o16)		;not maintained by chip
-(defconst rtc-time-zone-hi #o17)		;not maintained by chip
-;;; the rtc-cookie is written into the CMOS ram in the clock chip.  If the battery
-;;; ever fails, the string will get trashed, so we wont believe the time.
-(defconst rtc-cookie-start #o20)
-(defconst rtc-cookie "time is good")
-
-;;; Bits in reg-a
-(defconst %%rtc-update-bit #o0701)
-
-;;; Bits in reg-b
-(defconst %%rtc-set-mode #o0701)
-(defconst %%rtc-binary-mode #o0201)
-(defconst %%rtc-24-hour-mode #o0101)
-(defconst %%rtc-daylight-savings-enable #o0001)
-
-;;; Bits in reg-d
-(defconst %%rtc-valid-bit #o0701)
-
-(defun read-rtc-chip ()
-  (when (bit-test %%rtc-update-bit (read-rtc-reg rtc-reg-a))
-    (process-sleep 2)
-    (when (bit-test %%rtc-update-bit (read-rtc-reg rtc-reg-a))
-      (format *error-output* "~&Warning: update bit on clock chip seems to be stuck.")))
-  (dotimes (i 64.)
-    (aset (read-rtc-reg i) rtc-array i)))
-
-(defun write-rtc-chip ()
-  (dotimes (i 64.)
-    (write-rtc-reg i (aref rtc-array i))))
-
-;(defun print-rtc ()
-;  (read-rtc-chip)
-;  (dotimes (i 64.)
-;    (if (zerop (logand i 7)) (fresh-line))
-;    (format t "~16,2r " (aref rtc-array i))))
-
-;;;the chip turns off this bit if the battery ever dies
-;;; this would be nice, but the SDU touches it before we get a chance to ...
-;(defun rtc-valid-p ()
-;  (bit-test %%rtc-valid-bit (read-rtc-reg rtc-reg-d)))
-
-(defun rtc-valid-p ()
-  (let ((s (with-output-to-string (str)
-	     (dotimes (i (string-length rtc-cookie))
-	       (send str :tyo (aref rtc-array (+ rtc-cookie-start i)))))))
-    (string= s rtc-cookie)))
-
-(defvar lambda-number-of-source-cycles nil)
-(defvar lambda-number-of-execute-cycles nil)
-(defvar lambda-rg-slot-number nil)
-(defvar lambda-tv-slot-number nil)
-(defvar lambda-prime-memory-slot-number nil)
-(defvar lambda-ethernet-configuration-mask nil)
-(defvar lambda-magtape-configuration-mask nil)
-
-(defun get-lambda-configuration-from-rtc-chip ()
-  (unless (rtc-valid-p)
-    (ferror nil "cmos ram configuration information not set up"))
-  (read-rtc-chip)
-  (setq lambda-number-of-source-cycles (ldb #o0303 (aref rtc-array #o35)))
-  (setq lambda-number-of-execute-cycles (ldb #o0003 (aref rtc-array #o35)))
-  (setq lambda-rg-slot-number (aref rtc-array #o36))
-  (setq lambda-tv-slot-number (aref rtc-array #o37))
-  (setq lambda-prime-memory-slot-number (aref rtc-array #o40))
-  (setq lambda-ethernet-configuration-mask (aref rtc-array #o41))
-  (setq lambda-magtape-configuration-mask (aref rtc-array #o42))
-  (WHEN (or (not (member lambda-number-of-source-cycles '(1 2 3)))
-	    (not (member lambda-number-of-execute-cycles '(1 2 3)))
-	    (< lambda-rg-slot-number 0)
-	    (> lambda-rg-slot-number #o14)
-	    (< lambda-tv-slot-number 0)
-	    (> lambda-tv-slot-number #o14)
-	    (< lambda-prime-memory-slot-number 0)
-	    (> lambda-prime-memory-slot-number #o14))
-    (ferror nil "bad data in cmos configuration ram")))
-
-(defun rtc-get-universal-time ()
-  (read-rtc-chip)
-  (cond ((rtc-valid-p)
-	 (let ((tz (// (dpb (aref rtc-array rtc-time-zone-hi)
-			    #o1010
-			    (aref rtc-array rtc-time-zone-low))
-		       60.)))
-	   (unless (= tz time:*timezone*)
-	     (format *error-output* "~&warning: timezone in rtc chip is wrong")))
-	 (time:encode-universal-time
-	   (aref rtc-array rtc-seconds)
-	   (aref rtc-array rtc-minutes)
-	   (aref rtc-array rtc-hours)
-	   (aref rtc-array rtc-date)
-	   (aref rtc-array rtc-month)
-	   (+ (aref rtc-array rtc-year) 1900.)))
-	(t nil)))
-
-;(defun print-rtc-array ()
-;  (format t "~d//~d//~d ~d:~d:~d"
-;	  (aref rtc-array rtc-month)
-;	  (aref rtc-array rtc-date)
-;	  (aref rtc-array rtc-year)
-;	  (aref rtc-array rtc-hours)
-;	  (aref rtc-array rtc-minutes)
-;	  (aref rtc-array rtc-seconds)))
-
-(defun rtc-set-universal-time (ut)
-  (read-rtc-chip)
-  (write-rtc-reg rtc-reg-b (logior (dpb 1 %%rtc-set-mode 0)
-				   (dpb 1 %%rtc-binary-mode 0)
-				   (dpb 1 %%rtc-24-hour-mode 0)
-				   (dpb 1 %%rtc-daylight-savings-enable 0)))
-  (multiple-value-bind (seconds minutes hours date month year day-of-week daylight-savings-p)
-      (time:decode-universal-time ut)
-    (aset seconds rtc-array rtc-seconds)
-    (aset minutes rtc-array rtc-minutes)
-    (aset (if daylight-savings-p
-	      (1+ hours)
-	    hours) 
-	  rtc-array rtc-hours)
-    (aset date rtc-array rtc-date)
-    (aset month rtc-array rtc-month)
-    (aset (- year 1900.) rtc-array rtc-year)
-    (aset (if (= day-of-week 6)
-	      1
-	    (+ day-of-week 2)) rtc-array rtc-day-of-week))
-  (aset (ldb #o0010 (* time:*timezone* 60.)) rtc-array rtc-time-zone-low)
-  (aset (ldb #o1010 (* time:*timezone* 60.)) rtc-array rtc-time-zone-hi)
-  (dotimes (i (string-length rtc-cookie))
-    (aset (aref rtc-cookie i) rtc-array (+ i rtc-cookie-start)))
-  (write-rtc-chip)
-  ;;start time ticking
-  (write-rtc-reg rtc-reg-b (logior (dpb 1 %%rtc-binary-mode 0)
-				   (dpb 1 %%rtc-24-hour-mode 0)
-				   (dpb 1 %%rtc-daylight-savings-enable 0)))
-; (read-rtc-reg rtc-reg-d) ; reading this reg sets the valid bit
-  t)

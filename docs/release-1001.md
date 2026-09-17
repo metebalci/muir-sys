@@ -235,6 +235,11 @@ file saying why.
     initialization stays, and on a CADR it still only places the run lights.
   - `window/wholin.lisp`, `window/mouse.lisp`, `window/color.lisp` and
     `zwei/poss.lisp`: the CADR's branch only.
+  - `io1/time.lisp`: the Lambda's battery clock, read and set through the
+    SDU over the NuBus, with its CMOS layout, its configuration reader and
+    its place in `INITIALIZE-TIMEBASE`; and the Lambda's branches of
+    `MICROSECOND-TIME` and `FIXNUM-MICROSECOND-TIME`. `io1/timpar.lisp`
+    loses the Lambda's override of that clock.
 
 ## Faults fixed
 
