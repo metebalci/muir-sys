@@ -112,6 +112,13 @@ file saying why.
   produces the same forms as before.
   - `sys2/struct.lisp`: DEFSTRUCT's MacLisp, Multics and NIL versions, and
     their commented-out option declarations.
+  - `sys2/loop.lisp`: LOOP's code for PDP-10 and Multics MacLisp, NIL and
+    Franz. LOOP set up features of its own while compiling, such as
+    `Hairy-Collection` and `Common-Lisp-MACROs`, and read the rest of the file
+    under them; the conditionals are resolved as those features stood on the
+    Lisp Machine, and the setup is deleted with the Multics include macro. The
+    warning that incremental compilation needed the setup evaluated first goes
+    with it.
 
 ## Faults fixed
 
