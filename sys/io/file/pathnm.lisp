@@ -59,7 +59,9 @@
 ;;;  specifying the file in question.
 ;;;  :PARSE-NAMESTRING - takes a string and returns multiple values for various components
 ;;;  present in the string.
-;;; See ITS-PATHNAME-MIXIN and/or TOPS20-PATHNAME-MIXIN for additional details.
+;;; See ITS-PATHNAME-MIXIN and/or UNIX-PATHNAME-MIXIN for additional details.
+;;; this used to also point at TOPS20-PATHNAME-MIXIN, gone with TOPS-20
+;;; support.
 
 ;;; Interaction with host objects:
 ;;; The HOST instance variable of a pathname is a host object, as
@@ -645,23 +647,21 @@ The first surface string in each list is the preferred one for that system."
 		     (LOCF CANONICAL-TYPES)))
 	    (LIST* CTYPE ALIST NIL)))))
 
-;; the :VMS surface-type clauses below went with VMS support; this system never
-;; talks to a VMS file server.
-(DEFINE-CANONICAL-TYPE :LISP "LISP"
-  ((:TOPS-20 :TENEX) "LISP" "LSP"))
+;; the :VMS surface-type clauses below went with VMS support, and the
+;; (:TOPS-20 :TENEX) ones with TOPS-20 and Tenex support; this system never talks
+;; to any of those file servers.
+(DEFINE-CANONICAL-TYPE :LISP "LISP")
 
 (DEFINE-CANONICAL-TYPE :QFASL "QFASL")
 
-(DEFINE-CANONICAL-TYPE :MIDAS "MIDAS"
-  ((:TOPS-20 :TENEX) "MID" "MIDAS"))
+(DEFINE-CANONICAL-TYPE :MIDAS "MIDAS")
 
 (DEFINE-CANONICAL-TYPE :MAC "MAC")
 (DEFINE-CANONICAL-TYPE :TASM "TASM")
 
 (DEFINE-CANONICAL-TYPE :PALX "PALX")
 
-(DEFINE-CANONICAL-TYPE :TEXT "TEXT"
-  ((:TOPS-20 :TENEX) "TEXT" "TXT"))
+(DEFINE-CANONICAL-TYPE :TEXT "TEXT")
 
 (DEFINE-CANONICAL-TYPE :DOC "DOC")
 (DEFINE-CANONICAL-TYPE :MSS "MSS")

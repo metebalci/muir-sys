@@ -1721,8 +1721,10 @@ You specify the file with a menu." ()
 	  (SEND STREAM :TYO #/CR)
 	  (CHECK-CHAOS-MAIL-RESPONSE STREAM RCPT))
 	(SEND STREAM :TYO #/CR)		;Mark end of recipients
-	(LET ((*QUOTE-HOSTS-FOR-XMAILR* (MEMQ (SEND HOST :SYSTEM-TYPE)
-					      '(:TOPS-20 :TENEX))))
+	;; this used to test for a :TOPS-20 or :TENEX host, quoting
+	;; hostnames the way their XMAILR wanted; TOPS-20 and Tenex support
+	;; are gone, and no host is ever of either type now.
+	(LET ((*QUOTE-HOSTS-FOR-XMAILR* NIL))
 	  (OUTPUT-HEADER-AND-MSG STREAM PLIST INTERVAL TEMPLATE))
 	(CHECK-CHAOS-MAIL-RESPONSE STREAM "the body of the message" T)
 	(SEND STREAM :CLOSE :ABORT)	;Non-abort would send another EOF and wait for it.

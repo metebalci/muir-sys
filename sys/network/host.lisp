@@ -142,8 +142,9 @@ is the one for the /"source file/" of that type.")
   NIL)
 
 ;;; the bring-up asked whether these are still used.  :PRIMARY-DEVICE is:
-;;; HOST-TOPS20-MIXIN sends it (:371) and the other mixins answer it, so this is
-;;; the default for hosts that do not.  :ENABLE-CAPABILITIES and
+;;; IO; FILE; PATHNM sends it (e.g. :566, :833) and the mixins answer it, so
+;;; this is the default for hosts that do not.  (HOST-TOPS20-MIXIN used to be
+;;; cited here as a sender; it went with TOPS-20 support.)  :ENABLE-CAPABILITIES and
 ;;; :DISABLE-CAPABILITIES are too: FS:ENABLE-CAPABILITIES and
 ;;; FS:DISABLE-CAPABILITIES send them to a host (IO; FILE; OPEN:1698, :1705), so
 ;;; a host with no capabilities must still answer.  :DEFAULT-DEVICE was not:
@@ -362,25 +363,8 @@ to give it a chance to create a host and add it to the host table."
 
 (DEFMETHOD (HOST-ITS-MIXIN :PRIMARY-DEVICE) () "DSK")
 
-(DEFPROP :TOPS-20 HOST-TOPS20-MIXIN SYSTEM-TYPE-FLAVOR)
-(DEFFLAVOR HOST-TOPS20-MIXIN ((PRIMARY-DEVICE "PS")) ()
-  (:REQUIRED-FLAVORS HOST)
-  :SETTABLE-INSTANCE-VARIABLES)
-
-(DEFMETHOD (HOST-TOPS20-MIXIN :HSNAME-PATHNAME) (STRING HOST)
-  (LET ((PN (FS:PARSE-PATHNAME STRING HOST)))
-    (IF (NULL (SEND PN :DEVICE))
-	(SEND PN :NEW-DEVICE (SEND HOST :PRIMARY-DEVICE))
-      PN)))
-
-(DEFPROP :TENEX HOST-TENEX-MIXIN SYSTEM-TYPE-FLAVOR)
-(DEFFLAVOR HOST-TENEX-MIXIN () () (:REQUIRED-FLAVORS HOST))
-
-(DEFMETHOD (HOST-TENEX-MIXIN :PRIMARY-DEVICE) () "DSK")
-
-(DEFMETHOD (HOST-TENEX-MIXIN :HSNAME-PATHNAME) (STRING HOST)
-  (FS:MAKE-PATHNAME :HOST HOST :DEVICE "DSK" :DIRECTORY STRING))
-
+;; the :TOPS-20 and :TENEX mixins (HOST-TOPS20-MIXIN, HOST-TENEX-MIXIN)
+;; went with TOPS-20 and Tenex support; this system never talks to either.
 (DEFPROP :UNIX HOST-UNIX-MIXIN SYSTEM-TYPE-FLAVOR)
 (DEFFLAVOR HOST-UNIX-MIXIN () () (:REQUIRED-FLAVORS HOST))
 

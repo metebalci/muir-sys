@@ -510,24 +510,15 @@ SPEC can be a user name, or user@host."
 ;yes, I've heard of selectq! - change this lossage to METHODS, except for :WAITS
 (DEFVAR HOST-FINGER-PROTOCOL-ALIST
 	'((:LISPM . PARSE-LISPM-FINGER)
-	  (:TOPS-20 . PARSE-TWENEX-FINGER)
 	  (:ITS . PARSE-ITS-FINGER)
 	  (:WAITS . PARSE-WAITS-FINGER)
 	  (:UNIX . PARSE-UNIX-FINGER)
 	  (:TOPS-10 . PARSE-TENEX-FINGER))
   "This list is for use by chaos:user-logged-into-host-p.")
 
-(DEFUN PARSE-TWENEX-FINGER (USER FINGER-INFO)
-  "Return T if the USER is logged to a twenex site, based on the finger info we have."
-  (IGNORE USER)
-  (SETQ FINGER-INFO (STRING-UPCASE FINGER-INFO))
-  (AND (NOT (STRING-SEARCH "LOGOUT" FINGER-INFO)) ;last logged out ==> not logged in.
-       (NOT (STRING-EQUAL "" FINGER-INFO))
-;      (OR (< (STRING-LENGTH FINGER-INFO) 4)  ;;don't lose with detached jobs
-;      (NOT (STRING-EQUAL (STRING-APPEND "DET" #/CR)  ;this could be more clever
-;			  (SUBSTRING FINGER-INFO (- (STRING-LENGTH FINGER-INFO) 4)))))
-       (NOT (MEMQ (CHAR FINGER-INFO 0) '(#/? #/%)))
-       ))
+;; PARSE-TWENEX-FINGER, for :TOPS-20 hosts, removed with TOPS-20
+;; support; this system never talks to a TOPS-20 host. (PARSE-TENEX-FINGER, below,
+;; is a different parser, still used for :TOPS-10.)
 
 (DEFUN PARSE-UNIX-FINGER (USER FINGER-INFO)
   "Return T if the USER is logged to a Unix site, based on the finger info we have."  
