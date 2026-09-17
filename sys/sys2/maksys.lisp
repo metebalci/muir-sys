@@ -457,10 +457,6 @@ LOADED-ONLY says ignore systems whose DEFSYSTEMs have not been executed."
 	(APPEND '(INCREMENT-COMPILED-VERSION)
 		*TOP-LEVEL-TRANSFORMATIONS*)))
 
-(DEFINE-MAKE-SYSTEM-SPECIAL-VARIABLE *LOAD-PATCHES* T)
-(DEFUN (:NO-LOAD-PATCHES MAKE-SYSTEM-KEYWORD) ()
-  (SETQ *LOAD-PATCHES* NIL))
-
 (DEFUN (:DO-NOT-DO-COMPONENTS MAKE-SYSTEM-KEYWORD) ()
   (SETQ *TOP-LEVEL-TRANSFORMATIONS*
 	(DELQ 'DO-COMPONENTS-INTERNAL *TOP-LEVEL-TRANSFORMATIONS*)))
@@ -551,7 +547,6 @@ Commonly used keywords include:
  :NOCONFIRM - do not ask for confirmation at all.
  :NO-INCREMENT-PATCH - don't increment the patch version number of a patchable system.
  :INCREMENT-PATCH - do increment the patch version number.
- :NO-LOAD-PATCHES - do not load patches for patchable system being loaded.
  :NO-RELOAD-SYSTEM-DECLARATION - don't reload the file that contains the DEFSYSTEM.
  :PRINT-ONLY - don't load or compile anything, just say what needs to be done.
  :DESCRIBE - say when files were compiled or loaded, etc.
@@ -1630,17 +1625,11 @@ or :PATCH-FILE, with major and minor version numbers and filetype as three args.
   (MULTIPLE-VALUE (VERSION STATUS)
     (ADD-PATCH-SYSTEM NAME))
   (SETQ STATUS (CADR (ASSQ STATUS SYSTEM-STATUS-ALIST)))
+  ;; no patches are loaded after this; this system makes releases, never patches.
+  ;; MAKE-SYSTEM's :NO-LOAD-PATCHES keyword went with that step.
   (COND ((NOT *SILENT-P*)
 	 (FORMAT T "~&~A~:[ ~]~A version ~D. loaded~%"
-		 STATUS (ZEROP (ARRAY-ACTIVE-LENGTH STATUS)) NAME VERSION)))
-  (WHEN *LOAD-PATCHES*
-   (IF *SILENT-P*
-       (LOAD-PATCHES ':SYSTEMS (LIST (SYSTEM-NAME *SYSTEM-BEING-MADE*))
-		     ':SILENT)
-     (IF (EQ *QUERY-TYPE* ':SELECTIVE)
-	 (LOAD-PATCHES ':SYSTEMS (LIST (SYSTEM-NAME *SYSTEM-BEING-MADE*)))
-       (LOAD-PATCHES ':SYSTEMS (LIST (SYSTEM-NAME *SYSTEM-BEING-MADE*))
-		     ':NOSELECTIVE)))))
+		 STATUS (ZEROP (ARRAY-ACTIVE-LENGTH STATUS)) NAME VERSION))))
 
 (DEFUN PATCH-VERSION-NEWER-THAN-LOADED (&AUX NAME)
   (SETQ NAME (SYSTEM-NAME *SYSTEM-BEING-MADE*))

@@ -158,6 +158,9 @@ file saying why.
     Finish Patch and the rest), with their entries in `zwei/zmacs.lisp` and
     their module in `sys/sysdcl.lisp`, and Set Patch File in
     `zwei/zmnew.lisp`.
+  - `sys2/maksys.lisp`: the step that loaded a patchable system's patches
+    after `MAKE-SYSTEM` loaded it, and the `:NO-LOAD-PATCHES` keyword that
+    turned it off. `:NO-INCREMENT-PATCH` stays.
 
 ## Faults fixed
 
