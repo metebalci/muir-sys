@@ -647,9 +647,9 @@ The first surface string in each list is the preferred one for that system."
 		     (LOCF CANONICAL-TYPES)))
 	    (LIST* CTYPE ALIST NIL)))))
 
-;; the :VMS surface-type clauses below went with VMS support, and the
-;; (:TOPS-20 :TENEX) ones with TOPS-20 and Tenex support; this system never talks
-;; to any of those file servers.
+;; the :VMS surface-type clauses below went with VMS support, the
+;; (:TOPS-20 :TENEX) ones with TOPS-20 and Tenex support, and the :ITS ones
+;; with ITS support; this system never talks to any of those file servers.
 (DEFINE-CANONICAL-TYPE :LISP "LISP")
 
 (DEFINE-CANONICAL-TYPE :QFASL "QFASL")
@@ -669,11 +669,9 @@ The first surface string in each list is the preferred one for that system."
 
 (DEFINE-CANONICAL-TYPE :PRESS "PRESS")
 
-(DEFINE-CANONICAL-TYPE :PATCH-DIRECTORY "PATCH-DIRECTORY"
-  (:ITS "(PDIR)"))
+(DEFINE-CANONICAL-TYPE :PATCH-DIRECTORY "PATCH-DIRECTORY")
 
-(DEFINE-CANONICAL-TYPE :LOGICAL-PATHNAME-TRANSLATIONS "TRANSLATIONS"
-  (:ITS "LOGTRN"))
+(DEFINE-CANONICAL-TYPE :LOGICAL-PATHNAME-TRANSLATIONS "TRANSLATIONS")
 
 (DEFINE-CANONICAL-TYPE :QWABL "QWABL")
 

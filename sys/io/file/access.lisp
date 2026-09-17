@@ -217,20 +217,16 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 	(PUSH `((,NEW-USER-ID ,(SEND HOST :NAME)) ,PASSWORD) USER-HOST-PASSWORD-ALIST))))
 
 ;;; This function should be useful for the :LOGIN methods of host units.  UNAME-HOST and
-;;; HOST are usually the same, unless UNAME-HOST is the symbol FS:ITS
+;;; HOST are usually the same.
+;; UNAME-HOST used to also be the symbol FS:ITS, when logging in to an
+;; ITS host (all ITSes shared one set of unames); that branch, and its
+;; special ITS uname prompt, went with ITS support.
 (DEFUN DETERMINE-USER-ID-AND-PASSWORD (UNAME-HOST HOST NEED-PASSWORD
 				       &AUX PASSWORD NEW-USER-ID ENABLE-CAPABILITIES)
   (DECLARE (VALUES NEW-USER-ID PASSWORD ENABLE-CAPABILITIES))
   (SETQ NEW-USER-ID (CDR (ASSQ UNAME-HOST USER-UNAMES)))
-  (COND ((EQ UNAME-HOST 'ITS)
-	 (UNLESS NEW-USER-ID
-	   ;; This is an ITS; ask for the user name for all ITSes.
-	   (FORMAT *QUERY-IO* "~&ITS uname (default ~A): " USER-ID)
-	   (LET ((NID (READLINE-TRIM *QUERY-IO*)))
-	     (SETQ NEW-USER-ID (IF (EQUAL NID "") USER-ID NID)))))
-	;; Not an ITS: if we don't know user id or if password failed,
-	;; ask for one or both.
-	((OR NEED-PASSWORD
+  (COND (;; If we don't know user id or if password failed, ask for one or both.
+	 (OR NEED-PASSWORD
 	     ;(NULL NEW-USER-ID)
 	     )
 	 (MULTIPLE-VALUE-SETQ (NEW-USER-ID PASSWORD ENABLE-CAPABILITIES)
@@ -762,40 +758,7 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 
 ;;; *** Host flavor stuff.  Some flavors are going to go away
 ;;; Operating system particular host flavors
-(DEFFLAVOR FILE-HOST-ITS-MIXIN () (FILE-HOST-MIXIN))
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :PATHNAME-FLAVOR) () 'ITS-PATHNAME)
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :MAX-DATA-CONNECTIONS) () 3)
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :LOGIN-UNIT) (UNIT LOGIN-P)
-  (SEND UNIT :LOGIN LOGIN-P 'ITS))
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :HSNAME-INFORMATION) (UNIT STR IDX)
-  (LET* ((HOST (SEND UNIT :HOST))
-	 (DEFAULT-CONS-AREA SYS:BACKGROUND-CONS-AREA)
-	 (HSNAME (SUBSTRING STR (INCF IDX)
-			        (SETQ IDX (STRING-SEARCH-CHAR #/NEWLINE STR IDX))))
-	 (HSNAME-PATHNAME (MAKE-PATHNAME :HOST HOST :DEVICE "DSK" :DIRECTORY HSNAME))
-	 (PERSONAL-NAME (SUBSTRING STR (INCF IDX)
-				       (SETQ IDX (STRING-SEARCH-CHAR #/NEWLINE STR IDX))))
-	 (GROUP-AFFILIATION (CHAR STR (1+ IDX))))
-    (SETQ IDX (STRING-SEARCH ", " PERSONAL-NAME)
-	  STR (NSUBSTRING PERSONAL-NAME 0 IDX))
-    (AND IDX (SETQ STR (STRING-APPEND (NSUBSTRING PERSONAL-NAME (+ IDX 2)) #/SP STR)))
-    (VALUES HSNAME-PATHNAME PERSONAL-NAME GROUP-AFFILIATION STR)))
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :LOGICALLY-BACKTRANSLATE-HOST-DEV-DIR)
-	   (PHYSICAL-HOST PHYSICAL-DEVICE PHYSICAL-DIRECTORY)
-  (IF (AND (EQ PHYSICAL-HOST SELF)
-	   (MEMQ PHYSICAL-DEVICE '(NIL :UNSPECIFIC)))
-      (VALUES SELF "DSK" PHYSICAL-DIRECTORY)))
-
-(DEFMETHOD (FILE-HOST-ITS-MIXIN :GENERIC-BASE-TYPE) (FILE-TYPE)
-  (IF (ASSOC-EQUAL FILE-TYPE *GENERIC-BASE-TYPE-ALIST*)
-      :UNSPECIFIC  ;on ITS, we cant distinguish base types, since name2 is frequently
-    FILE-TYPE))	    ; used as a version number.
-
+;; FILE-HOST-ITS-MIXIN went with ITS support.
 ;; FILE-HOST-TOPS20-MIXIN and FILE-HOST-TENEX-MIXIN went with TOPS-20
 ;; and Tenex support.
 (DEFFLAVOR FILE-HOST-UNIX-MIXIN () (FILE-HOST-MIXIN))
@@ -837,11 +800,8 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 
 
 ;;;; Predefined host flavors
-(DEFFLAVOR ITS-HOST () (SI:HOST-ITS-MIXIN FILE-HOST-ITS-MIXIN SI:HOST))
-(DEFPROP :ITS ITS-HOST SI:HOST-FLAVOR)
-
-;; TOPS20-HOST and TENEX-HOST went with TOPS-20 and Tenex support.
-;; VMS-HOST went with VMS support.
+;; ITS-HOST went with ITS support; TOPS20-HOST and TENEX-HOST went with
+;; TOPS-20 and Tenex support; VMS-HOST went with VMS support.
 (DEFFLAVOR UNIX-HOST () (SI:HOST-UNIX-MIXIN FILE-HOST-UNIX-MIXIN SI:HOST))
 (DEFPROP :UNIX UNIX-HOST SI:HOST-FLAVOR)
 
@@ -850,8 +810,7 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 (DEFPROP :LISPM LISPM-HOST SI:HOST-FLAVOR)
 (DEFPROP :LISPM LISPM-HOST FILE-SYSTEM-HOST-FLAVOR)
 
-(COMPILE-FLAVOR-METHODS ITS-HOST
-			UNIX-HOST LISPM-HOST)
+(COMPILE-FLAVOR-METHODS UNIX-HOST LISPM-HOST)
 
 (DEFUN SITE-PATHNAME-INITIALIZE ()
   ;; Flush all old hosts
