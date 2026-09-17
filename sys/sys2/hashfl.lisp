@@ -466,13 +466,11 @@ the key is the code."
 (deff remhash-equal 'remhash)
 (deff swaphash-equal 'swaphash)
 (deff maphash-equal 'maphash)
-(deff maphash-equal-return 'maphash-return)
 (compiler:make-obsolete clrhash-equal "just use CLRHASH")
 (compiler:make-obsolete gethash-equal "just use GETHASH")
 (compiler:make-obsolete puthash-equal "just use PUTHASH")
 (compiler:make-obsolete swaphash-equal "just use SWAPHASH")
 (compiler:make-obsolete maphash-equal "just use MAPHASH")
-(compiler:make-obsolete maphash-equal-return "just use MAPHASH-RETURN")
 
 (defun equal-hash (key) (sxhash key t))
 (deff sxhash-for-hash-table 'equal-hash)

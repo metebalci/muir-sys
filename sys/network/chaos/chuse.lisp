@@ -523,9 +523,7 @@ on its being received."
 	     CONN (STATE CONN)))))
 
 (DEFF CLOSE 'CLOSE-CONN)
-(DEFF CHAOS-CLOSE 'CLOSE-CONN)
 (MAKE-OBSOLETE CLOSE "use CHAOS:CLOSE-CONN")
-(MAKE-OBSOLETE CHAOS-CLOSE "use CHAOS:CLOSE-CONN")
 
 ;;; Wait until either:
 ;;;  the state of CONN is not STATE  (return T), or
