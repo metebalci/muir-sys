@@ -201,6 +201,28 @@ file saying why.
 
   The manual's LMFILE sections (`man/pathnm.text`, `man/fd-hac.text`), a mail
   log (`man/bug-mail.txt`) and three comments in code stay as history.
+- **Lambda and Explorer support** (#17). This system runs on a CADR, or on muir and
+  muir-fpga, which model one; `SI:PROCESSOR-TYPE-CODE` is always 1 there. So
+  every choice made on the processor type is resolved to its CADR branch, and
+  code that only a Lambda ran is deleted. The variable itself stays, since
+  the microcode sets it.
+  - `sys/ltop.lisp`: `LISP-REINITIALIZE` no longer clears the Lambda's board
+    slots or turns on its 60 Hz interrupts over the NuBus, and `QLD` no longer
+    offers to load the Ethernet files; `TV::TV-QUAD-SLOT` goes.
+  - `sys/qrand.lisp` (`TIME`), `sys/qmisc.lisp` (`PROB-FROCESSOR`, which puts
+    `:CADR` on `*FEATURES*`), `sys/genric.lisp` (`MACHINE-TYPE`),
+    `eh/eh.lisp` (`LOAD-ERROR-TABLE`), `io/dledit.lisp`, `io1/meter.lisp` and
+    `network/chaos/chatst.lisp`: the CADR's branch only.
+  - `sys2/proces.lisp`: `PROCESS-SCHEDULER-FOR-LAMBDA` and
+    `LAMBDA-PDL-BUFFER-LENGTH`; `sys2/prodef.lisp`: `RUN-LIGHT-FOR-LAMBDA`
+    and `FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-LAMBDA`;
+    `sys2/setf.lisp`: the `SETF` of `%NUBUS-READ`.
+  - `io/disk.lisp`: `LOAD-LMC-FILE` and `COMPARE-LMC-FILE`, which put the
+    Lambda's microcode on a disk, and the Lambda's names and masks in
+    `LOAD-MCR-FILE`, `SYS-COM-PAGE-NUMBER` and
+    `GET-UCODE-VERSION-FROM-COMMENT`. A disk operation that did not finish
+    at the address it should have is still reported: the test that the
+    machine was not a Lambda, always true on a CADR, goes.
 
 ## Faults fixed
 

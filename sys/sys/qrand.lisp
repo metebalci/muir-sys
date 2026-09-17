@@ -1304,27 +1304,17 @@ Blame Common Lisp for wanting this unrelated alternate meaning."
 		"~&Evaluation of ~S took ~:D microseconds."
 		FORM (- (+ NTIME XTIME) OTIME OTIME))
 	(VALUES-LIST VALUES))
-    (SELECT-PROCESSOR
-      (:CADR
-       (WITHOUT-INTERRUPTS
-	 (LET ((LOW (%UNIBUS-READ #o764120))	;Hardware synchronizes if you read this first
-	       (HIGH (%UNIBUS-READ #o764122))
-	       (SOFT (LDB 2205 TIME-LAST-VALUE)))
-	   (LET ((LOWTIME (DPB HIGH #o0220 (LDB #o1602 LOW))))	;Low 18 bits
-	     (SETQ TIME-LAST-VALUE
-		   (DPB (IF (< LOWTIME (LDB #o0022 TIME-LAST-VALUE))
-			    (1+ SOFT)
-			  SOFT)
-			#o2205 LOWTIME))))))
-      (:LAMBDA
-       (WITHOUT-INTERRUPTS
-	 (LET ((LOWTIME (LDB #o1622 (COMPILER:%MICROSECOND-TIME)))
-	       (SOFT (LDB #o2205 TIME-LAST-VALUE)))
-	   (SETQ TIME-LAST-VALUE
-		 (DPB (IF (< LOWTIME (LDB #o0022 TIME-LAST-VALUE))
-			  (1+ SOFT)
-			SOFT)
-		      #o2205 LOWTIME))))))))
+    ;; the CADR's clock only; the Lambda's clause is gone.
+    (WITHOUT-INTERRUPTS
+      (LET ((LOW (%UNIBUS-READ #o764120))	;Hardware synchronizes if you read this first
+	    (HIGH (%UNIBUS-READ #o764122))
+	    (SOFT (LDB 2205 TIME-LAST-VALUE)))
+	(LET ((LOWTIME (DPB HIGH #o0220 (LDB #o1602 LOW))))	;Low 18 bits
+	  (SETQ TIME-LAST-VALUE
+		(DPB (IF (< LOWTIME (LDB #o0022 TIME-LAST-VALUE))
+			 (1+ SOFT)
+		       SOFT)
+		     #o2205 LOWTIME)))))))
 
 
 ;;; These two functions deal with the wrap-around lossage

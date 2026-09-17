@@ -418,13 +418,13 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 					   (AREF RQB %DISK-RQ-STATUS-HIGH))
 		       #/RESUME)
 	       (GO FULL-RETRY))
-	      ((AND ( PROCESSOR-TYPE-CODE LAMBDA-TYPE-CODE)
-		    (OR ( FINAL-CYLINDER
-			   (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER)))
-			( FINAL-SURFACE
-			   (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR)))
-			( FINAL-SECTOR
-			   (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR)))))
+	      ;; the test that this is not a Lambda is gone; on a CADR it was always true.
+	      ((OR ( FINAL-CYLINDER
+		     (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER)))
+		   ( FINAL-SURFACE
+		     (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR)))
+		   ( FINAL-SECTOR
+		     (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))))
 	       (CERROR :RETRY-DISK-OPERATION NIL 'SYS:DISK-ERROR
 		       "Disk ~A error unit ~D, cyl ~D., surf ~D., sec ~D.,~%  status ~A
  Failed to complete operation, final disk address should be ~D, ~D, ~D.
@@ -1095,9 +1095,7 @@ WHICH defaults to /"LOD/"."
 (DEFUN SYS-COM-PAGE-NUMBER (16B-BUFFER INDEX)
   (LSH
     (LOGAND
-      (SELECT-PROCESSOR
-	(:CADR (1- 1_24.))
-	(:LAMBDA -1))
+      (1- 1_24.)				;the CADR's mask; the Lambda's is gone.
       (LOGIOR (LSH (AREF 16B-BUFFER (1+ (* 2 INDEX))) #o20)
 	      (AREF 16B-BUFFER (* 2 INDEX))))
     (- %%Q-POINTER-WITHIN-PAGE)))
@@ -1383,11 +1381,8 @@ This is obsolete -- You probably want PRINT-HERALD"
 UNIT can be a disk unit number, the name of a machine on the chaosnet,
 or /"CC/" which refers to the machine being debugged by this one."
   (SETQ FILENAME (IF (NUMBERP FILENAME)
-		     (SEND (SELECT-PROCESSOR
-			     (:CADR
-			       (FS:PARSE-PATHNAME "SYS: UBIN; UCADR"))
-			     (:LAMBDA
-			       (FS:PARSE-PATHNAME "SYS: UBIN; ULAMBDA")))
+		     ;; UCADR only; there is no ULAMBDA.
+		     (SEND (FS:PARSE-PATHNAME "SYS: UBIN; UCADR")
 			   :NEW-TYPE-AND-VERSION "MCR" FILENAME)
 		   (FS:MERGE-PATHNAME-DEFAULTS FILENAME)))
   (UNLESS (EQUAL (SEND FILENAME :TYPE-AND-VERSION) "MCR")
@@ -1424,97 +1419,6 @@ or /"CC/" which refers to the machine being debugged by this one."
 		(SETF (AREF BUF16 (1+ I)) LH))))))
     (DISPOSE-OF-UNIT UNIT)
     (RETURN-DISK-RQB RQB)))
-
-;;; Put a microcode file onto my own disk, LAMBDA style.
-;;; Note that the halfwords are IN order in a LMC file (as opposed to a MCR file).
-(DEFUN LOAD-LMC-FILE (FILENAME PART &OPTIONAL (UNIT 0)
-                                    &AUX PART-BASE PART-SIZE RQB RQB-FOR-LABEL)
-  "Load microcode from file FILENAME into partition PART on unit UNIT.
-UNIT can be a disk unit number, the name of a machine on the chaosnet,
-or /"CC/" or /"LAM/" which refers to the machine being debugged by this one."
-  (SETQ FILENAME (IF (NUMBERP FILENAME)
-		     (SEND (FS:PARSE-PATHNAME "SYS: LAMBDA-UCODE; ULAMBDA")
-			   :NEW-TYPE-AND-VERSION "LMC" FILENAME)
-		     (FS:MERGE-PATHNAME-DEFAULTS FILENAME)))
-  (UNLESS (EQUAL (SEND FILENAME :TYPE-AND-VERSION) "LMC")
-    (FERROR NIL "~A is not a LMC file." FILENAME))
-  (SETQ UNIT (DECODE-UNIT-ARGUMENT UNIT
-		(FORMAT NIL "Loading ~A into ~A partition" FILENAME PART)
-		NIL
-		T))
-  (UNWIND-PROTECT
-      (PROGN
-	(SETQ RQB (GET-DISK-RQB))
-	(SETQ RQB-FOR-LABEL (GET-DISK-RQB 3))
-	(MULTIPLE-VALUE (PART-BASE PART-SIZE NIL PART)
-	  (FIND-DISK-PARTITION-FOR-WRITE PART RQB-FOR-LABEL UNIT NIL "LMC"))
-	(WITH-OPEN-FILE (FILE FILENAME :DIRECTION :INPUT :CHARACTERS NIL :BYTE-SIZE 16.)
-	  (BLOCK DONE
-	    (DO ((BUF16 (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER))
-		 (BLOCK PART-BASE (1+ BLOCK))
-		 (N PART-SIZE (1- N)))
-		((ZEROP N) (FERROR NIL "Failed to fit in partition"))
-	      (DO ((LH) (RH)
-		   (I 0 (+ I 2)))
-		  ((= I #o1000)
-		   (DISK-WRITE RQB UNIT BLOCK))
-		(SETQ RH (SEND FILE :TYI)	;note halfwords in "right" order in LMC file
-		      LH (SEND FILE :TYI))
-		(WHEN (OR (NULL LH) (NULL RH))
-		  (UPDATE-PARTITION-COMMENT
-		    PART
-		    (LET ((PATHNAME (SEND FILE :TRUENAME)))
-		      (FORMAT NIL "~A ~D" (SEND PATHNAME :NAME) (SEND PATHNAME :VERSION)))
-		    UNIT)
-		  (RETURN-FROM DONE NIL))
-	      (SETF (AREF BUF16 I) RH)
-	      (SETF (AREF BUF16 (1+ I)) LH))))))
-    (RETURN-DISK-RQB RQB)
-    (RETURN-DISK-RQB RQB-FOR-LABEL)))
-
-;;; Compare a microcode file with a partiion on me, LAMBDA style.
-;;; Note that the halfwords are IN order in a LMC file (as opposed to a MCR file).
-(DEFUN COMPARE-LMC-FILE (FILENAME PART &OPTIONAL (UNIT 0)
-			 &AUX PART-BASE PART-SIZE RQB RQB-FOR-LABEL)
-  "Compare microcode from file FILENAME with partition PART on unit UNIT.
-UNIT can be a disk unit number, the name of a machine on the chaosnet,
-or /"CC/" or /"LAM/" which refers to the machine being debugged by this one."
-  (SETQ FILENAME (IF (NUMBERP FILENAME)
-		     (SEND (FS:PARSE-PATHNAME "SYS: LAMBDA-UCODE; ULAMBDA")
-			   :NEW-TYPE-AND-VERSION "LMC" FILENAME)
-		   (FS:MERGE-PATHNAME-DEFAULTS FILENAME)))
-  (UNLESS (EQUAL (SEND FILENAME :TYPE-AND-VERSION) "LMC")
-    (FERROR NIL "~A is not a LMC file." FILENAME))
-  (SETQ UNIT (DECODE-UNIT-ARGUMENT UNIT
-				   (FORMAT NIL "Comparing ~A with ~A partition" FILENAME PART)
-				   NIL
-				   NIL))
-  (UNWIND-PROTECT
-      (PROGN
-	(SETQ RQB (GET-DISK-RQB))
-	(SETQ RQB-FOR-LABEL (GET-DISK-RQB 3))
-	(MULTIPLE-VALUE (PART-BASE PART-SIZE NIL PART)
-	  (FIND-DISK-PARTITION-FOR-READ PART RQB-FOR-LABEL UNIT NIL "LMC"))
-	(WITH-OPEN-FILE (FILE FILENAME :DIRECTION :INPUT :CHARACTERS NIL :BYTE-SIZE 16.)
-	  (BLOCK DONE
-	    (DO ((BUF16 (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER))
-		 (BLOCK PART-BASE (1+ BLOCK))
-		 (N PART-SIZE (1- N)))
-		((ZEROP N) (FORMAT T "~&File is longer than partition"))
-	      (DISK-READ RQB UNIT BLOCK)
-	      (DO ((LH) (RH)
-		   (I 0 (+ I 2)))
-		  ((= I #o1000))
-		(SETQ RH (SEND FILE :TYI)	;note halfwords in "right" order in LMC file
-		      LH (SEND FILE :TYI))
-		(COND ((OR (NULL LH) (NULL RH))
-		       (RETURN-FROM DONE NIL)))
-		(COND ((OR (NOT (= RH (AREF BUF16 I)))
-			   (NOT (= LH (AREF BUF16 (1+ I)))))
-		       (FORMAT T "~&Compare error:  adr ~O; file ~O-~O; partition ~O-~O"
-			       I LH RH (AREF BUF16 (1+ I)) (AREF BUF16 I)))))))))
-    (RETURN-DISK-RQB RQB)
-    (RETURN-DISK-RQB RQB-FOR-LABEL)))
 
 (DEFUN PARTITION-COMMENT (PART UNIT &AUX RQB DESC-LOC)
   "Return the comment in the disk label for partition PART, unit UNIT.
@@ -1562,14 +1466,11 @@ or /"CC/" which refers to the machine being debugged by this one."
 			  (GET-DISK-STRING RQB
 					   (+ DESC-LOC 3)
 					   (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3))))))
+	;; only UCADR comments; the Lambda's ULAMBDA ones are gone.
 	(AND COMMENT
-	     (SELECT-PROCESSOR
-	       (:CADR (STRING-EQUAL COMMENT "UCADR " :END1 6))
-	       (:LAMBDA (STRING-EQUAL COMMENT "ULAMBDA " :END1 8.)))
+	     (STRING-EQUAL COMMENT "UCADR " :END1 6)
 	     (LET ((*READ-BASE* 10.))
-	       (CLI:READ-FROM-STRING COMMENT T NIL :START (SELECT-PROCESSOR
-							    (:CADR 6)
-							    (:LAMBDA 8.)))))))
+	       (CLI:READ-FROM-STRING COMMENT T NIL :START 6)))))
     (AND RETURN-RQB (RETURN-DISK-RQB RQB))))
 	    
 ;;; Change the comment on a partition

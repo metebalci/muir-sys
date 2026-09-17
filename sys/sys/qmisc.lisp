@@ -929,11 +929,8 @@ Type NIL to exit (or Abort)."
 	  :CHAOS :SORT :FASLOAD :STRING :NEWIO :ROMAN :TRACE :GRINDEF :GRIND))
 
 (DEFUN PROB-FROCESSOR ()
-  (PUSHNEW
-    (SELECT-PROCESSOR
-      (:CADR :CADR)
-      (:LAMBDA :LAMBDA))
-    *FEATURES*))
+  ;; always :CADR, the only processor this system runs on.
+  (PUSHNEW :CADR *FEATURES*))
 
 (ADD-INITIALIZATION "Frob *FEATURES* per processor" '(PROB-FROCESSOR) :COLD)
 

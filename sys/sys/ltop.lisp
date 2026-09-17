@@ -60,9 +60,6 @@ Will be NIL by the time YOU get to look at it")
 (DEFVAR UNIBUS-VIRTUAL-ADDRESS :UNBOUND
   "Virtual address mapped into Unibus location 0.")
 
-(DEFCONST TV::TV-QUAD-SLOT #xF8 "Slot number for LAMBDA tv board.")
-
-
 (ADD-INITIALIZATION "Next boot is a cold boot" '(SETQ COLD-BOOTING T)
 		    '(:BEFORE-COLD))
 
@@ -111,16 +108,6 @@ Will be NIL by the time YOU get to look at it")
   "Resets various global constants and initializes the error system.
 COLD-BOOT is T if this is for a cold boot."
   (SETQ INHIBIT-SCHEDULING-FLAG T)		;In case called by the user
-  ;; make sure we don't use these until set up below
-  (select-processor
-    (:cadr
-      (setq tv::tv-quad-slot nil)
-      (setq rg-quad-slot nil)
-      (setq sdu-quad-slot nil))
-    (:lambda
-      (setq tv::tv-quad-slot (compiler::%lambda-tv-quad-slot)
-	    rg-quad-slot (compiler::%lambda-rg-quad-slot)
-	    sdu-quad-slot (compiler::%lambda-sdu-quad-slot))))
 
   (SETQ ALPHABETIC-CASE-AFFECTS-STRING-COMPARISON NIL)
   ;; If these are set wrong, all sorts of things don't work.
@@ -206,14 +193,6 @@ COLD-BOOT is T if this is for a cold boot."
   (SETQ TV::KBD-LAST-ACTIVITY-TIME (TIME))	; Booting is keyboard activity.
 
   (INITIALIZE-WIRED-KBD-BUFFER)
-
-  (select-processor
-    (:lambda;; now that the "unibus" channel is set up, turn on 60Hz interrupts
-      ;; first the vector
-      (compiler::%nubus-write tv::tv-quad-slot 8
-			      (dpb rg-quad-slot (byte 8 24.) (* 4 (+ #o400 #o260))))
-      (compiler::%nubus-write tv::tv-quad-slot 4
-			      (logior #o40 (compiler::%nubus-read tv::tv-quad-slot 4)))))
 
   ;; Flush any closure binding forwarding pointers
   ;; left around from a closure we were in when we warm booted.
@@ -314,9 +293,9 @@ COLD-BOOT is T if this is for a cold boot."
   (SETQ TV::MOUSE-WINDOW NIL)	;This gets looked at before the mouse process is turned on
   (KBD-CONVERT-NEW 1_15.)	;Reset state of shift keys
 
-  (SELECT-PROCESSOR
-    (:CADR (AND (FBOUNDP 'CADR:CLEAR-UNIBUS-MAP);clear valid bits on unibus map.
-		(CADR:CLEAR-UNIBUS-MAP))))	; and necessary if sharing Unibus with PDP11.
+  ;; no longer wrapped in SELECT-PROCESSOR; this system runs only on a CADR.
+  (AND (FBOUNDP 'CADR:CLEAR-UNIBUS-MAP)	;clear valid bits on unibus map.
+       (CADR:CLEAR-UNIBUS-MAP))		; and necessary if sharing Unibus with PDP11.
 						; Do this before SYSTEM-INITIALIZATION-LIST to
 						; avoid screwwing ETHERNET code.
   ;; These are initializations that have to be done before other initializations
@@ -910,8 +889,6 @@ Used only if you are not generating a new Lisp machine system version."
 	 ;; FS:MAKE-FASLOAD-PATHNAME until it does.
 	 (LETF (((SYMBOL-FUNCTION 'FS:MAKE-FASLOAD-PATHNAME) #'LIST))
 	   (MINI-LOAD-FILE-ALIST REST-OF-PATHNAMES-FILE-ALIST)
-	   (SELECT-PROCESSOR
-	     (:LAMBDA (MINI-LOAD-FILE-ALIST ETHERNET-FILE-ALIST)))
 	   ;; Read the site files.
 	   ;; Now that QFILE is loaded, this will work properly.
 	   (UPDATE-SITE-CONFIGURATION-INFO)	;Setup site dependent stuff

@@ -255,14 +255,10 @@ unwinding it."
   (FERROR NIL "Cannot interrupt a simple process"))
 
 (DEFCONST CADR-PDL-BUFFER-LENGTH #o2000)
-(DEFCONST LAMBDA-PDL-BUFFER-LENGTH #o4000)
 
-;; don't use select-processor, as that is not loaded when this is evaluated
-(DEFVAR PDL-BUFFER-LENGTH (COND ((= PROCESSOR-TYPE-CODE CADR-TYPE-CODE)
-				 CADR-PDL-BUFFER-LENGTH)
-				((= PROCESSOR-TYPE-CODE LAMBDA-TYPE-CODE)
-				    LAMBDA-PDL-BUFFER-LENGTH))
-  "Length of pdl buffer.  Depends on processor type.")
+;; the CADR's length; the Lambda's is gone.
+(DEFVAR PDL-BUFFER-LENGTH CADR-PDL-BUFFER-LENGTH
+  "Length of pdl buffer.")
 
 (DEFMETHOD (PROCESS :INTERRUPT) (FUNCTION &REST ARGS)
   (IF (EQ SELF CURRENT-PROCESS)
@@ -698,8 +694,7 @@ LOCK-VALUE defaults to the current process."
 ;;; they are run and the entry is deactivated.
 (DEFVAR TEMPORARILY-NO-IDLE-SCAVENGING T)
 
-;;; note: this function is duplicated so things can be open coded as opposed to
-;;; tested at run time.  PROCESS-SCHEDULER-FOR-LAMBDA is below.
+;;; PROCESS-SCHEDULER-FOR-LAMBDA, this function's twin for the Lambda, is deleted.
 (DEFUN PROCESS-SCHEDULER-FOR-CADR ()
   (WITHOUT-INTERRUPTS				;No seq breaks in the scheduler
     (DO ((REMAINING-QUANTUM 0 0)
@@ -820,124 +815,6 @@ LOCK-VALUE defaults to the current process."
       ;; So turn it back off...this is a kind of kludge, but...
       (SETF (RUN-LIGHT-FOR-CADR) NIL))))
 
-(DEFUN PROCESS-SCHEDULER-FOR-LAMBDA ()
-  (WITHOUT-INTERRUPTS				;No seq breaks in the scheduler
-    (DO ((REMAINING-QUANTUM 0 0)
-	 (NEXT-PROCESS NIL NIL)
-	 (OLD-CURRENT-PROCESS)
-	 (THIS-TIME (TIME) (TIME))
-	 (LAST-TIME (TIME) THIS-TIME)
-	 (DELTA-TIME)
-	 (NEXT-WHO-TIME 0))
-	(())
-      (SETQ DELTA-TIME (TIME-DIFFERENCE THIS-TIME LAST-TIME)
-	    OLD-CURRENT-PROCESS CURRENT-PROCESS)
-      (WHEN CURRENT-PROCESS
-	(SETF (PROCESS-QUANTUM-REMAINING CURRENT-PROCESS)
-	      (SETQ REMAINING-QUANTUM
-		    (- (PROCESS-QUANTUM-REMAINING CURRENT-PROCESS) DELTA-TIME))))
-      (WHEN (> DELTA-TIME 0)
-	;; Run clock queue no more often than every 1/60 second.
-	(DOLIST (E CLOCK-FUNCTION-LIST)
-	  (CATCH-ERROR (FUNCALL E DELTA-TIME) NIL))
-	(WHEN (MINUSP (SETQ NEXT-WHO-TIME (- NEXT-WHO-TIME DELTA-TIME)))
-	  (AND (FBOUNDP 'TV::WHO-LINE-UPDATE)
-	       (CATCH-ERROR (TV::WHO-LINE-UPDATE) NIL))
-	  (SETQ NEXT-WHO-TIME 60.)))
-      (BLOCK FOUND-PROCESS
-	(DO ((PROCS ACTIVE-PROCESSES)
-	     (THIS-PROCESS-WANTS-TO-RUN-BUTS-ITS-QUANTUM-HAS-EXPIRED)
-	     (FIRST-OF-THIS-PRIORITY)
-	     (CURRENT-PRIORITY))
-	    ((NULL (FIRST (CAR PROCS))))
-	  ;; Loop over all process of the current priority
-	  (SETQ CURRENT-PRIORITY (FOURTH (CAR PROCS))
-		FIRST-OF-THIS-PRIORITY PROCS)
-	  ;; If we find a process to run return from FOUND-PROCESS.
-	  ;; If we have looked at all processes of this priority, return from RAN-OUT.
-	  ;; This hair is equivalent to one loop with a catch around just the APPLY,
-	  ;; but it avoids entering and exiting the catch so often.
-	  (BLOCK RAN-OUT
-	    (DO (APE PRI PROC)
-		(())
-	      (CATCH 'PROCESS-WAIT-IN-SCHEDULER
-		(DO-FOREVER
-		  (SETQ APE (CAR PROCS))
-		  (AND (OR (NULL (SETQ PROC (FIRST APE)))
-			   (NOT (= (SETQ PRI (FOURTH APE)) CURRENT-PRIORITY)))
-		       ;; Hit next priority level, or ran out of processes
-		       (RETURN-FROM RAN-OUT))
-		  (AND (COND ((LET ((CURRENT-PROCESS PROC))
-				(APPLY (SECOND APE) (THIRD APE)))
-			      (SETQ THIS-PROCESS-WANTS-TO-RUN-BUTS-ITS-QUANTUM-HAS-EXPIRED PROC)
-			      T))
-		       (PLUSP (PROCESS-QUANTUM-REMAINING PROC))
-		       ;; It is runnable, and it has time remaining
-		       (RETURN-FROM FOUND-PROCESS (SETQ NEXT-PROCESS PROC)))
-		  (POP PROCS)))
-	    ;; Get here only on throw.
-	    (POP PROCS)))
-	  ;; Ran out of all processes at current priority level.  Reset their quantums.
-	  (DO ((PS FIRST-OF-THIS-PRIORITY (CDR PS)))
-	      ((EQ PS PROCS))
-	    (SETF (PROCESS-QUANTUM-REMAINING (FIRST (CAR PS)))
-		  (PROCESS-QUANTUM (FIRST (CAR PS)))))
-	  ;; If a process would have run at this priority level, but couldn't becase
-	  (AND THIS-PROCESS-WANTS-TO-RUN-BUTS-ITS-QUANTUM-HAS-EXPIRED
-	       (RETURN-FROM FOUND-PROCESS
-		 (SETQ NEXT-PROCESS THIS-PROCESS-WANTS-TO-RUN-BUTS-ITS-QUANTUM-HAS-EXPIRED)))))
-      (WHEN (NULL NEXT-PROCESS)
-	;; No process to run, do idle time stuff
-	(OR INHIBIT-IDLE-SCAVENGING-FLAG
-	    (%GC-SCAVENGE GC-IDLE-SCAVENGE-QUANTUM)))
-      (IF (NULL NEXT-PROCESS)
-	  (SETQ CURRENT-PROCESS NIL)
-	(SETF (PROCESS-WAIT-WHOSTATE NEXT-PROCESS) NIL)
-	(SET-PROCESS-WAIT NEXT-PROCESS #'TRUE NIL)
-	(SETF (RUN-LIGHT-FOR-LAMBDA) T)
-	(LET ((SG (PROCESS-STACK-GROUP (SETQ CURRENT-PROCESS NEXT-PROCESS)))
-	      (START-TIME (FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-LAMBDA))
-	      (START-DISK-TIME (FIXNUM-READ-METER-FOR-SCHEDULER %DISK-WAIT-TIME))
-	      (START-PAGE-FAULTS
-		(FIXNUM-READ-METER-FOR-SCHEDULER %COUNT-DISK-PAGE-READ-OPERATIONS)))
-	  (IF (TYPEP SG 'STACK-GROUP)
-	      (STACK-GROUP-RESUME SG NIL)
-	    (APPLY SG (CDR (PROCESS-INITIAL-FORM CURRENT-PROCESS))))
-	  (SETF (RUN-LIGHT-FOR-LAMBDA) NIL)
-	  (LET ((P CURRENT-PROCESS)
-		(END-TIME (FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-LAMBDA))
-		(END-DISK-TIME (FIXNUM-READ-METER-FOR-SCHEDULER %DISK-WAIT-TIME))
-		(END-PAGE-FAULTS
-		  (FIXNUM-READ-METER-FOR-SCHEDULER %COUNT-DISK-PAGE-READ-OPERATIONS))
-		TEM TIME-USED)
-	    (INCREMENT-PROCESS-TIME-METER
-	      (PROCESS-TOTAL-RUN-TIME P)
-	      (SETQ TIME-USED (TIME-DIFFERENCE END-TIME START-TIME)))
-	    (INCREMENT-PROCESS-TIME-METER
-	      (PROCESS-DISK-WAIT-TIME P)
-	      (TIME-DIFFERENCE END-DISK-TIME START-DISK-TIME))
-	    (INCF (PROCESS-PAGE-FAULT-COUNT P) (- END-PAGE-FAULTS START-PAGE-FAULTS))
-	    (SETF (PROCESS-PERCENT-UTILIZATION P)
-		  (WITHOUT-FLOATING-UNDERFLOW-TRAPS
-		    (+ (IF (SETQ TEM (PROCESS-LAST-TIME-RUN P))
-			   (FIX (* (PROCESS-PERCENT-UTILIZATION P)
-				   (^ PERCENT-UTILIZATION-DISCOUNT-FACTOR
-				      (TIME-DIFFERENCE THIS-TIME TEM))))
-			 0)
-		       ;; Don't use ROUND -- loses before SYS: SYS2; RAT is loaded.
-		       (TRUNCATE (+ TIME-USED 500.) 1000.))))
-	    ;; Above "^" typically takes a bit under a millisecond which is not bad
-	    ;; compared to calling TIME a few times, so it's probably not worth
-	    ;; putting in a big table of pre-computed values.
-	    (SETF (PROCESS-LAST-TIME-RUN P) THIS-TIME)
-	    ;; Remember stack group of process last run
-	    (OR (PROCESS-SIMPLE-P P)
-		(SETF (PROCESS-STACK-GROUP P)
-		      %CURRENT-STACK-GROUP-PREVIOUS-STACK-GROUP)))))
-      ;; In case we took a page fault, the microcode will turn the run light on.
-      ;; So turn it back off...this is a kind of kludge, but...
-      (SETF (RUN-LIGHT-FOR-LAMBDA) NIL))))
-
 ;;;; PROCESS-RUN-FUNCTION and associated hair
 
 ;;; This is a list of processes which may be recycled by PROCESS-RUN-FUNCTION
@@ -1128,9 +1005,8 @@ Argument of NIL means turn off sequence breaks."
     "The warm-booted process has already been reset, or there never was one."))
 
 (DEFUN APPROPRIATE-PROCESS-SCHEDULER NIL
-  (SELECT-PROCESSOR
-    (:CADR #'PROCESS-SCHEDULER-FOR-CADR)
-    (:LAMBDA #'PROCESS-SCHEDULER-FOR-LAMBDA)))
+  ;; this system runs only on a CADR.
+  #'PROCESS-SCHEDULER-FOR-CADR)
 
 
 ;;; Don't run this the first time, only when the system initializations normally get run

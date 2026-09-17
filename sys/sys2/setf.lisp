@@ -881,7 +881,6 @@ Examples:
 (defsetf %unibus-read %unibus-write)
 (defsetf %xbus-read %xbus-write)
 (defsetf %io-space-read %io-space-write)
-(defsetf %nubus-read %nubus-write)
 
 (defsetf %p-contents-offset (base offset) (value)
   `(%p-store-contents-offset ,value ,base ,offset))
