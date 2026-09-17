@@ -1199,11 +1199,12 @@ If mode is :NOTIFY, you will be notified whenever an EVAL server is created."
   (CATCH-ERROR
     (WITH-OPEN-STREAM (STREAM (MAKE-STREAM CONN :ASCII-TRANSLATION T))
       ;; Flush any number of telnet negotiations.  (We only understand the simplest kind).
+      ;; peek rather than read and :UNTYI, as the TELNET server does (#2): a
+      ;; translated character, such as the Return that CR LF becomes, cannot be pushed back.
       (DO-FOREVER
-	(LET ((CH (TYI STREAM)))
-	  (IF (= CH #o377)
-	      (PROGN (TYI STREAM) (TYI STREAM))
-	    (RETURN (SEND STREAM :UNTYI CH)))))
+	(IF (EQ (SEND STREAM :TYIPEEK) #o377)
+	    (PROGN (TYI STREAM) (TYI STREAM) (TYI STREAM))
+	  (RETURN)))
       (DO ((*TERMINAL-IO* STREAM)
 	   (INPUT))
 	  (NIL)
@@ -1244,11 +1245,14 @@ If mode is :NOTIFY, you will be notified whenever an EVAL server is created."
 	    (FORMAT STREAM "~&Telnet server here~2%")
 	    (SEND STREAM :FORCE-OUTPUT)
 	    ;; Flush any number of telnet negotiations.  (We only understand the simplest kind).
+	    ;; peek at the next byte instead of reading it and sending :UNTYI (#2).  The
+	    ;; stream reads CR LF as one Return, which :UNTYI cannot push back, so a session
+	    ;; whose first input was Return died in the error handler.  :TYIPEEK consumes
+	    ;; nothing, and IAC (#o377) is the same byte translated or not.
 	    (DO-FOREVER
-	      (LET ((CH (SEND STREAM :TYI)))
-		(IF (= CH #o377)
-		    (PROGN (SEND STREAM :TYI) (SEND STREAM :TYI))
-		    (RETURN (SEND STREAM :UNTYI CH)))))
+	      (IF (EQ (SEND STREAM :TYIPEEK) #o377)
+		  (PROGN (SEND STREAM :TYI) (SEND STREAM :TYI) (SEND STREAM :TYI))
+		(RETURN)))
 	    (SI:LISP-TOP-LEVEL1 (CLOSURE '(STREAM UNTYI-CHAR) 'ECHOING-STREAM))))
       (SYS:REMOTE-NETWORK-ERROR NIL))))
 
