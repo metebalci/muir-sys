@@ -1,4 +1,5 @@
 ;;; -*-Mode:LISP; Package:CC; Base:8.-*-
+;;; IF-FOR-LISPM no longer wraps the Lisp Machine code.
 ;;; Cadr diagnositics
 
 (DEFUN ROT32 (NUM AMT)
@@ -921,10 +922,9 @@ and 37 in the left mask which is also all 1's."
           ((= MROT 32.))
         (DECLARE (FIXNUM MROT GOOD BAD))
         (COND ((NOT (= (SETQ BAD (CC-READ-OBUS)) GOOD)) ;HA! AN ERROR, STASH STUFF AWAY
-	       (IF-FOR-LISPM
-		(COND (CC-DIAG-TRACE
-		       (FORMAT T "~&Rot: ~O, Bit: ~O, Good: ~O, Bad: ~O, Reread: ~O"
-			       MROT (ASH 1 BITNO) GOOD BAD (CC-READ-OBUS))) ))
+	       (COND (CC-DIAG-TRACE
+		      (FORMAT T "~&Rot: ~O, Bit: ~O, Good: ~O, Bad: ~O, Reread: ~O"
+			      MROT (ASH 1 BITNO) GOOD BAD (CC-READ-OBUS))))
                (ADD2L MROT ERRONEOUS-SHIFT-COUNTS)
                (DO ((J 0 (1+ J))                ;BITS OF OUTPUT
                     (GOOD GOOD (ASH GOOD -1))

@@ -1,4 +1,6 @@
 ; -*- Mode:Lisp; Package:CADR; Base:8 -*-
+;IF-FOR-LISPM no longer wraps the Lisp Machine code, and the #M and #Q
+; choices between MacLisp and Lisp Machine code are resolved for the latter.
 ;DISK HANDLER FOR CC FOR CADR
 ;	** (c) Copyright 1980 Massachusetts Institute of Technology **
 
@@ -163,7 +165,6 @@ Initial value prevents bomb-out until machine's label can be read.")
 ;Try xfer again, with all flavors of offsets, and report.
 ;Then try recalibrate, all offsets again.
 
-(IF-FOR-LISPM
 (defun cc-try-harder (&OPTIONAL CYL head sector
 		      &aux (unit 0) disk-adr)
    (cond ((null cyl)					;default from last xfer
@@ -197,9 +198,7 @@ Initial value prevents bomb-out until machine's label can be read.")
 	      (cc-disk-op 1005)     ;Recalibrate
               (cc-disk-wait-idle 4) ;wait Sel Unit Attention - recal done
 ))))
-); If-for-lispm
 
-(if-for-lispm 
 (defun cc-disk-clobber (&optional (data 5252525252) cyl head sector
                         &aux disk-adr)
   (cond ((null cyl)					;default from last xfer
@@ -217,9 +216,7 @@ Initial value prevents bomb-out until machine's label can be read.")
       (format t "~%Reading ---")
       (cc-disk-xfer-track-head-sector 0 cyl head sector 3 1)        ;read it
       ))
-); If-for-lispm
 
-(if-for-lispm
 (defun compare (&optional (adr1 1400) ( adr2 2000))
     (do ((adr1 adr1 (1+ adr1))
          (adr2 adr2 (1+ adr2))
@@ -229,7 +226,6 @@ Initial value prevents bomb-out until machine's label can be read.")
         ((= i 400))
         (cond (( (setq dat1 (phys-mem-read adr1)) (setq dat2 (phys-mem-read adr2)))
                (format t "~%~o   ~O--  ~O" adr1 dat1 dat2)))))
-); If-for-lispm
 
 (defun cc-disk-seek (fcn-bits cyl head sector)
    (cc-disk-wait-idle 1)
@@ -247,8 +243,7 @@ Initial value prevents bomb-out until machine's label can be read.")
 
 (defun cc-disk-wait-idle (bit) 		;(&optional (bit 1))
    (do () ((not (zerop (LOGAND bit (phys-mem-read cc-disk-address)))))
-       #M (SLEEP-JIFFIES 2)
-       #Q (PROCESS-SLEEP 2)
+       (PROCESS-SLEEP 2)
        ))
 
 (defun cc-disk-recalibrate nil 
@@ -295,7 +290,7 @@ That is, we assume the debugged machine's disk's label has already been read int
 	(L NIL))
        ((ZEROP WORDS)
 	(APPLY 'STRING-APPEND (NREVERSE L)))
-     (DO ((WORD (PHYS-MEM-READ ADDR) (#Q ASH #M LSH WORD -10))
+     (DO ((WORD (PHYS-MEM-READ ADDR) (ASH WORD -10))
 	  (CH)
 	  (I (COND ((= WORDS 1) (1+ (\ (1- NCHARS) 4))) (T 4)) (1- I)))
 	 ((ZEROP I))
@@ -601,10 +596,9 @@ such that a hash lookup would not find it."
 	 (FORMAT T "Run CC-DISK-ANALYZE and CC to find out why"))))
 
 ;Called on startup (analogous to the PDUMP function on the 10)
-(IF-FOR-LISPM
 (DEFUN CC-INITIALIZE-ON-STARTUP ()
   (SETQ CC-FULL-SAVE-VALID NIL)
   (SETQ CC-PASSIVE-SAVE-VALID NIL)
-  (SETQ CC-DISK-TYPE NIL)))
+  (SETQ CC-DISK-TYPE NIL))
 
-(IF-FOR-LISPM (ADD-INITIALIZATION "CADR" '(CC-INITIALIZE-ON-STARTUP) '(BEFORE-COLD)))
+(ADD-INITIALIZATION "CADR" '(CC-INITIALIZE-ON-STARTUP) '(BEFORE-COLD))

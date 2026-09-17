@@ -1,4 +1,6 @@
 ;;; -*- Mode:Lisp; Package:CADR; Base:8 -*-
+;;; the #M and #Q choices between MacLisp and Lisp Machine code are
+;;; resolved for the Lisp Machine.
 ;;; PHONEY LISP MACHINE MICROCODE -- CADR VERSION
 ;;;	** (c) Copyright 1980 Massachusetts Institute of Technology **
 
@@ -514,7 +516,7 @@ Swaps in ADR if necessary."
 				  (TRUNCATE QUANTUM BYTES-PER-WORD)))))
       (DECLARE (FIXNUM WORD))
       (SETQ WORD (LOGAND (1- (LSH 1 %ADDRESS-SPACE-MAP-BYTE-SIZE))
-			 (#M LSH #Q ASH WORD (- (* (\ QUANTUM BYTES-PER-WORD)
+			 (ASH WORD (- (* (\ QUANTUM BYTES-PER-WORD)
 						   %ADDRESS-SPACE-MAP-BYTE-SIZE)))))
       (COND ((NOT (ZEROP WORD)) WORD)
 	    (T (DO ((L (QF-INITIAL-AREA-LIST) (CDR L))
