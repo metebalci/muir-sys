@@ -240,6 +240,13 @@ file saying why.
     its place in `INITIALIZE-TIMEBASE`; and the Lambda's branches of
     `MICROSECOND-TIME` and `FIXNUM-MICROSECOND-TIME`. `io1/timpar.lisp`
     loses the Lambda's override of that clock.
+  - `network/chaos/chsncp.lisp`: the Lambda's `:ETHERNET` route in
+    `TRANSMIT-INT-PKT`, which sent Chaos packets through the `ETHERNET`
+    package's 3Com driver or to other processors sharing the NuBus through
+    the `UNIX` package; the Lambda's way of finding its address from the
+    disk label; and its branches in the routing table, the interface resets
+    and `STATUS`. Nothing outside the cold-load lists names `ETHERNET` or
+    `UNIX` any more.
 
 ## Faults fixed
 
