@@ -203,11 +203,10 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 	(SETQ USER-HOST-PASSWORD-ALIST
 	      (DELQ ALIST-ELEMENT USER-HOST-PASSWORD-ALIST)))))
 
+;; the Multics special case (never guess, since Multics would hassle the
+;; user for a wrong one) went with Multics support.
 (DEFUN GUESS-PASSWORD-MAYBE (NEW-USER-ID HOST &AUX PASSWORD)
   (OR (CADR (ASS #'EQUALP `(,NEW-USER-ID ,(SEND HOST :NAME)) USER-HOST-PASSWORD-ALIST))
-      ;; None remembered => guess, except on Multics
-      ;; since multics would hassle the guy if it's wrong.
-      (IF (EQ (SEND HOST :SYSTEM-TYPE) :MULTICS) "")
       ;; Try guessing password same as on some other host.
       (CADR (CAR USER-HOST-PASSWORD-ALIST))
       ;; Try guessing password same as uname or last part of it.
@@ -822,10 +821,6 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 
 (DEFMETHOD (FILE-HOST-UNIX-MIXIN :PATHNAME-FLAVOR) () 'UNIX-PATHNAME)
 
-(DEFFLAVOR FILE-HOST-MULTICS-MIXIN () (FILE-HOST-MIXIN))
-
-(DEFMETHOD (FILE-HOST-MULTICS-MIXIN :PATHNAME-FLAVOR) () 'MULTICS-PATHNAME)
-
 ;;; Mixin for hosts that knows how to name itself.
 (DEFFLAVOR FILE-HOST-LISPM-MIXIN () (FILE-HOST-MIXIN))
 
@@ -877,15 +872,13 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
 (DEFFLAVOR UNIX-HOST () (SI:HOST-UNIX-MIXIN FILE-HOST-UNIX-MIXIN SI:HOST))
 (DEFPROP :UNIX UNIX-HOST SI:HOST-FLAVOR)
 
-(DEFFLAVOR MULTICS-HOST () (SI:HOST-MULTICS-MIXIN FILE-HOST-MULTICS-MIXIN SI:HOST))
-(DEFPROP :MULTICS MULTICS-HOST SI:HOST-FLAVOR)
-
+;; MULTICS-HOST went with Multics support.
 (DEFFLAVOR LISPM-HOST () (SI:HOST-LISPM-MIXIN FILE-HOST-LISPM-MIXIN SI:HOST))
 (DEFPROP :LISPM LISPM-HOST SI:HOST-FLAVOR)
 (DEFPROP :LISPM LISPM-HOST FILE-SYSTEM-HOST-FLAVOR)
 
 (COMPILE-FLAVOR-METHODS ITS-HOST TOPS20-HOST TENEX-HOST VMS-HOST
-			UNIX-HOST MULTICS-HOST LISPM-HOST)
+			UNIX-HOST LISPM-HOST)
 
 (DEFUN SITE-PATHNAME-INITIALIZE ()
   ;; Flush all old hosts
