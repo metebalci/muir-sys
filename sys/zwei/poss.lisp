@@ -1189,12 +1189,9 @@ all the elements of OBJECTS, and also all recorded parents of elements."
 	      (TYPEP (FDEFINITION OBJECT) ':MICROCODE-FUNCTION)
 	      (FQUERY NIL "~S is a microcoded function.  Search through UCODE? " OBJECT))
 	 (INSERT-POSSIBILITY-BEFORE-AND-GO
+	   ;; the CADR's UCODE system; the Lambda's LAMBDA-UCODE is gone.
 	   BP `(TAGS-SEARCH-SYSTEM-POSSIBILITY
-		 ,(SELECT SYS:PROCESSOR-TYPE-CODE
-		    (SI:CADR-TYPE-CODE
-		     'UCODE)
-		    (SI:LAMBDA-TYPE-CODE
-		     'LAMBDA-UCODE))
+		 UCODE
 		 ,(FORMAT NIL "(misc-inst-entry ~A)" OBJECT))))
 	(T
 	 (OR *MINI-BUFFER-COMMAND*

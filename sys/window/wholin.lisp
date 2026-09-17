@@ -93,9 +93,7 @@
     (SETQ WHO-LINE-FILE-STATE-SHEET
 	  (WHO-LINE-FIELD :FLAVOR 'WHO-LINE-FILE-SHEET
 			  :LEFT 480.
-			  :RIGHT (SELECT-PROCESSOR
-				   (:CADR 768.)
-				   (:LAMBDA (+ 768. 32.)))
+			  :RIGHT 768.		;the CADR's width; the Lambda's is gone.
 			  :HEIGHT (SHEET-LINE-HEIGHT WHO-LINE-SCREEN)
 			  :BOTTOM (SHEET-HEIGHT WHO-LINE-SCREEN)))
     ;; Above those windows is a full line of mouse button documentation
@@ -109,11 +107,9 @@
   (OR INHIBIT-WHO-LINE
       (NULL WHO-LINE-SCREEN)
       (WITHOUT-INTERRUPTS
-	(SETQ RL (SELECT-PROCESSOR
-		   (:CADR
-		    (%XBUS-READ WHO-LINE-RUN-LIGHT-LOC))	;Don't clobber run light
-		   (:LAMBDA
-		    (COMPILER:%IO-SPACE-READ WHO-LINE-RUN-LIGHT-LOC))))
+	;; the run light is read and restored on the Xbus only; the Lambda's
+	;; I/O space branches are gone.
+	(SETQ RL (%XBUS-READ WHO-LINE-RUN-LIGHT-LOC))	;Don't clobber run light
 	(IF RUN-STATE-ONLY-P
 	    ;; The reason this is here is that this function conspires to do some
 	    ;; minor nice things for you.  This note is here to remind HIC not to
@@ -123,11 +119,7 @@
 	    (DOLIST (I (SHEET-EXPOSED-INFERIORS WHO-LINE-SCREEN))
 	      (WHEN (TYPEP I 'WHO-LINE-MIXIN)
 		(SEND I :UPDATE))))
-	(SELECT-PROCESSOR
-	  (:CADR
-	   (%XBUS-WRITE WHO-LINE-RUN-LIGHT-LOC RL))
-	  (:LAMBDA
-	   (COMPILER:%IO-SPACE-WRITE WHO-LINE-RUN-LIGHT-LOC RL)))))
+	(%XBUS-WRITE WHO-LINE-RUN-LIGHT-LOC RL)))
   T)
 
 (DEFUN WHO-LINE-CLOBBERED ()

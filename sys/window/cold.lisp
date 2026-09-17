@@ -544,9 +544,6 @@ not converted to upper case."
 ;; This is called when the machine is booted, warm or cold.  It's not an
 ;; initialization because it has to happen before all other initializations.
 (DEFUN INITIALIZE-WIRED-KBD-BUFFER ()
-  (COND ((= PROCESSOR-TYPE-CODE LAMBDA-TYPE-CODE)
-	 (%NUBUS-WRITE TV:TV-SLOT-NUMBER 4
-		       (LOGAND (LOGNOT 40) (COMPILER:%NUBUS-READ TV:TV-SLOT-NUMBER 4)))))
   (DO ((I 500 (1+ I))) ((= I 512))
     (%P-DPB 0 %%Q-LOW-HALF I)
     (%P-DPB 0 %%Q-HIGH-HALF I))
@@ -568,24 +565,16 @@ not converted to upper case."
   (SETF (SYSTEM-COMMUNICATION-AREA %SYS-COM-UNIBUS-INTERRUPT-LIST) 500)
   (SET-MOUSE-MODE 'DIRECT))
 
+;;; SET-MOUSE-MODE and VIRTUAL-UNIBUS-ADDRESS keep the CADR's branch only.
 (DEFUN SET-MOUSE-MODE (MODE)
-  (SELECT PROCESSOR-TYPE-CODE
-    (CADR-TYPE-CODE
-     (SELECTQ MODE
-       (DIRECT (%UNIBUS-WRITE 764112 4));Keyboard interrupt enable, local mouse
-       (VIA-KBD (%UNIBUS-WRITE 764112 5))
-       (OTHERWISE (FERROR NIL "UNKNOWN MOUSE MODE"))))
-    (LAMBDA-TYPE-CODE
-     NIL)))
+  (SELECTQ MODE
+    (DIRECT (%UNIBUS-WRITE 764112 4))	;Keyboard interrupt enable, local mouse
+    (VIA-KBD (%UNIBUS-WRITE 764112 5))
+    (OTHERWISE (FERROR NIL "UNKNOWN MOUSE MODE"))))
 
 ;; Translate from a Unibus address to a Lisp machine virtual address, returning a fixnum.
 (DEFUN VIRTUAL-UNIBUS-ADDRESS (ADR)
-  (SELECT PROCESSOR-TYPE-CODE
-    (CADR-TYPE-CODE
-     (%MAKE-POINTER-OFFSET DTP-FIX (LSH 7740 12.) (LSH ADR -1)))
-    (LAMBDA-TYPE-CODE
-     (%MAKE-POINTER-OFFSET DTP-FIX (LSH 7737 12.) 7777))  ;will trap if ref'ed
-    ))
+  (%MAKE-POINTER-OFFSET DTP-FIX (LSH 7740 12.) (LSH ADR -1)))
 
 (DEFVAR KBD-TRANSLATE-TABLE)
 ;Keyboard translate table is a 3 X 64 array.
@@ -1105,8 +1094,7 @@ not converted to upper case."
 (DEFUN SETUP-CPT (&OPTIONAL (SYNC-PROG CPT-SYNC2)
 			    (TV-ADR NIL)
 			    (FORCE-P NIL))
-  (SELECT PROCESSOR-TYPE-CODE
-    (CADR-TYPE-CODE
+  ;; no longer wrapped in a choice on the processor; this system runs only on a CADR.
      FORCE-P
      (IF (NULL TV-ADR) (SETQ TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
      ;; Always turn on vertical sync interrupts if this is the first TV controller.
@@ -1137,8 +1125,6 @@ not converted to upper case."
 	       (STOP-SYNC TV-ADR)
 	       (FILL-SYNC SYNC-PROG 0 TV-ADR)
 	       (START-SYNC INTERRUPT-ENABLE 1 0 TV-ADR))))))  ;Clock 0, BOW 1, VSP 0
-    (LAMBDA-TYPE-CODE
-     NIL)))
 
 (DEFUN PROM-SETUP (&OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
   (%XBUS-WRITE (+ TV-ADR 3) 0))
@@ -1252,12 +1238,9 @@ not converted to upper case."
   INSTANCE)
 
 (DEFUN COLD-LOAD-STREAM-INIT-PLIST-GENERATOR NIL
-  `(:WIDTH ,(SELECT PROCESSOR-TYPE-CODE
-	      (CADR-TYPE-CODE 1400)
-	      (LAMBDA-TYPE-CODE 1440))
-    :HEIGHT ,(SELECT PROCESSOR-TYPE-CODE
-	       (CADR-TYPE-CODE 1600)
-	       (LAMBDA-TYPE-CODE 2000))
+  ;; the CADR's size; the Lambda's is gone.
+  `(:WIDTH 1400
+    :HEIGHT 1600
     :BUFFER ,IO-SPACE-VIRTUAL-ADDRESS
     :CONTROL-ADDRESS 377760))
 
