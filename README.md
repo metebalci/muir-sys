@@ -17,9 +17,9 @@ today's sizes and kinds, and to be built, versioned and released reproducibly
 from a git repository. **Compatibility is not kept:** the CADR architecture,
 the PROM, the microcode and the system are all open to change.
 
-## Release 1000
+## System 1000
 
-Release **1000** is System 100 fixed and cleaned up: the same sources and
+**System 1000** is System 100 fixed and cleaned up: the same sources and
 microcode 323, the faults that stopped it rebuilding itself repaired, the
 material that is not MIT's left out. The number
 steps from 100 to 1000: the same lineage, a different project.
@@ -76,7 +76,7 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
-- [`docs/release-1000.md`](docs/release-1000.md) --- every change release 1000
+- [`docs/release-1000.md`](docs/release-1000.md) --- every change System 1000
   makes to System 100.
 - [`docs/upstream-changes.md`](docs/upstream-changes.md) --- the fixes LM-3 made
   after System 100, and which of them were taken.

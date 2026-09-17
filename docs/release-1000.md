@@ -1,6 +1,6 @@
-# Release 1000
+# System 1000
 
-What release 1000 changes from its base, LM-3's **System 100** --- the tape
+What System 1000 changes from its base, LM-3's **System 100** --- the tape
 content of release 99.32 as LM-3 brought it up --- with microcode 323. Every
 change to a source file carries a comment in that file saying why.
 
