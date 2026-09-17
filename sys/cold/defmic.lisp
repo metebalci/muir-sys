@@ -360,12 +360,8 @@
 (DEFMIC AR-1-CACHED-1 730 (ARRAY SUBSCRIPT) T)
 (DEFMIC AR-1-CACHED-2 731 (ARRAY SUBSCRIPT) T)
 
-(DEFMIC %MULTIBUS-READ-16 732 (MULTIBUS-BYTE-ADR) T)
-(DEFMIC %MULTIBUS-WRITE-16 733 (MULTIBUS-BYTE-ADR WORD) T)
-(DEFMIC %MULTIBUS-READ-8 734 (MULTIBUS-BYTE-ADR) T)
-(DEFMIC %MULTIBUS-WRITE-8 735 (MULTIBUS-BYTE-ADR WORD) T)
-(DEFMIC %MULTIBUS-READ-32 736 (MULTIBUS-BYTE-ADR) T)
-(DEFMIC %MULTIBUS-WRITE-32 737 (MULTIBUS-BYTE-ADR WORD) T)
+;;; 732-737 are free.  They were the Lambda's Multibus reads and writes,
+;;; which the CADR's microcode never implemented.
 
 (DEFMIC SET-AR-1 740 (ARRAY SUBSCRIPT VALUE) T)
 (DEFMIC SET-AR-2 741 (ARRAY SUBSCRIPT1 SUBSCRIPT2 VALUE) T)
@@ -386,21 +382,9 @@
 (DEFMIC RETURN-SPREAD-KEEP-CONTROL 757 (VALUE-LIST) NIL T) 
 (DEFMIC COMMON-LISP-LISTP 760 (OBJECT) T)
 
-(DEFMIC %NUBUS-READ 761 (NUBUS-SLOT SLOT-BYTE-ADR) T)
-				;SLOT is really the high 8 bits.
-				;the "top F" can be supplied via slot, avoiding bignums.
-(DEFMIC %NUBUS-WRITE 762 (NUBUS-SLOT SLOT-BYTE-ADR WORD) T)
-(DEFMIC %MICROSECOND-TIME 763 () T)		; Returns 32 bits maybe as a bignum
-(DEFMIC %FIXNUM-MICROSECOND-TIME 764 () T)
-(DEFMIC %IO-SPACE-READ 765 (IO-ADDR) T)
-				;32 bit read from HARDWARE-VIRTUAL-ADDRESS space.
-				;actual ucode is identical to that for %XBUS-READ on CADR.
-(DEFMIC %IO-SPACE-WRITE 766 (IO-ADDR WORD) T) ;actual microcode is identical to %XBUS-WRITE
-				;on CADR.
-(DEFMIC %NUBUS-PHYSICAL-ADDRESS 767 (APPARENT-PHYSICAL-PAGE) T)
-				;arg is "apparent" physical page number (gotten, for example,
-				;by shifting value from %PHYSICAL-ADDRESS).
-				;value is 22 bit NUBUS page number.
+;;; 761-767 are free.  They were the Lambda's NuBus, microsecond clock
+;;; and I/O space instructions, which the CADR's microcode never implemented;
+;;; the CADR reads its clock over the Unibus and its I/O space over the Xbus.
 
 (DEFMIC VECTORP 770 (OBJECT) T)
 (DEFMIC SIMPLE-VECTOR-P 771 (OBJECT) T)
@@ -449,28 +433,9 @@
 (DEFMIC CHAR-DOWNCASE 1041 (CHAR) T)
 (DEFMIC LOWER-CASE-P 1042 (CHAR) T)
 
-(defmic %micro-paging 1100 (arg) t)
-(DEFMIC %PROCESSOR-SWITCHES 1101 (ARG) T)
-(DEFMIC %COLD-BOOT 1102 () T)
-
-(defmic %test-multiply-return-low 1103 (n1 n2) t)	;these changed from sys 94 defs.
-(defmic %test-multiply-return-high 1104 (n1 n2) t)
-(defmic %mult-16 1105 (n1 n2) t)
-(defmic %mult-32 1106 (n1 n2) t)
-
-(defmic %quart-transfer 1107 (quart-flags array n-blocks) t)
-;;; quart-flags bit0 0-> read, 1-> write. value is number blocks transferred
-(defmic %nubus-read-8 1110 (nubus-slot slot-byte-adr) t)
-;;; SLOT is really the high 8 bits. The "top F" can be supplied via slot, avoiding bignums.
-(defmic %nubus-write-8 1111 (nubus-slot slot-byte-adr word) t)
-
-(defmic %lambda-rg-quad-slot 1112 () t)
-(defmic %lambda-tv-quad-slot 1113 () t)
-(defmic %lambda-mouse-buttons 1114 () t)
-;;; CADR can read mouse buttons directly with %unibus-read.
-;;; In LAMBDA, they live in A-mem so we need this.
-(defmic %sys-conf-physical-page 1115 () t)
-(defmic %lambda-sdu-quad-slot 1116 () t)
+;;; 1100-1116 are free.  They were declared for the Lambda's microcode
+;;; (paging, multiplication tests, disk transfer, NuBus, its board slots) and
+;;; never implemented in the CADR's.
 
 ;;; FROM HERE TO 1777 FREE
 

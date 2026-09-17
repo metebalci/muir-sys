@@ -880,7 +880,7 @@ Examples:
 (defsetf arg setarg)
 (defsetf %unibus-read %unibus-write)
 (defsetf %xbus-read %xbus-write)
-(defsetf %io-space-read %io-space-write)
+;;; no %IO-SPACE-READ; it was the Lambda's instruction, and the CADR's is %XBUS-READ.
 
 (defsetf %p-contents-offset (base offset) (value)
   `(%p-store-contents-offset ,value ,base ,offset))

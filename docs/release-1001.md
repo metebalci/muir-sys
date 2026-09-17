@@ -278,13 +278,17 @@ file saying why.
     `D-ND2`. This is what the assembler read on a CADR, so no instruction,
     symbol or order changes, and `ucadr.mcr` should assemble byte for byte
     as before.
-  - Kept, and listed for a later decision: the `DEFMIC`s of the Lambda's
-    miscellaneous instructions (`cold/defmic.lisp`), which the CADR's
-    microcode does not implement, with the `%NUBUS-`, `%MULTIBUS-`,
-    `%IO-SPACE-` and `%MICROSECOND-TIME` names `cold/global.lisp` exports
-    for them and the `SETF` of `%IO-SPACE-READ` (`sys2/setf.lisp`);
-    `MULTIBUS-VIRTUAL-ADDRESS` in `cold/qcom.lisp`, which nothing uses; and
-    the A-memory and communication-area slots named above.
+  - The 28 `DEFMIC`s of instructions the CADR's microcode never implemented
+    go from `cold/defmic.lisp`: the Lambda's Multibus (732-737), NuBus,
+    microsecond clock and I/O space (761-767) instructions, and 1100-1116
+    (micro-paging, the multiplication tests, disk transfer, board slots).
+    Their exports in `cold/global.lisp`, their commented documentation in
+    `cold/docmic.lisp` and the `SETF` of `%IO-SPACE-READ` in `sys2/setf.lisp`
+    go with them. Each opcode is written out, so no other instruction moves,
+    and the opcodes are free for its own.
+  - Kept: `MULTIBUS-VIRTUAL-ADDRESS` in `cold/qcom.lisp`, which nothing uses,
+    and the A-memory and communication-area slots named above, whose
+    positions the microcode shares.
 
 ## Faults fixed
 
