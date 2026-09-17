@@ -41,229 +41,10 @@
 ; Bugs/complaints/suggestions/solicitations-for-documentation to BUG-LOOP
 ; at any ITS site (MIT-MC preferred).
 
-
-; **********************************************************************
-; *************************** NOTE WELL ********************************
-; **********************************************************************
-;Incremental compiling of things in this file will generate wrong code
-; unless you first evaluate the 'feature' stuff on the next page
-; ("readtime environment setup").  (This mainly of Lispm interest.)
-;This source sincerely believes that it can run compatibly, WITHOUT ANY
-; TEXTUAL MODIFICATIONS AT ALL, in PDP-10 Maclisp, Multics Maclisp, Lisp
-; Machine Lisp (Zetalisp), VAX NIL, and Franz Lisp.  PLEASE do not make
-; changes to this file (the master copy) if you are in any way unsure
-; of the implications in a dialect you are not very familiar with;  let
-; a LOOP maintainer take the responsibility for breaking the master copy
-; and maintaining some semblance of sanity among the disparities.  Note
-; in particular that LOOP also runs in the PDP10 Maclisp -> Vax NIL
-; cross-compiler;  that environment requires LOOP to produce code which
-; can at the same time be interpreted in Maclisp, and compiled for NIL.
-
-
-; Bootstrap up our basic primitive environment.
-; This includes backquote, sharpsign, defmacro, let.
-
-(eval-when (eval compile)
-  (cond ((status feature Multics)
-	   (defun include-for-multics macro (x)
-	     (cons '%include (cdr x))))
-	(t (defmacro include-for-multics (&rest ignored) nil))))
-
-(include-for-multics lisp_prelude)
-(include-for-multics lisp_dcls)
-
-;;;; Readtime Environment Setup
-
-;Now set up the readtime conditionalization environment.   This won't work
-; in any compiler that reads the whole file before compiling anything.
-; It is a good idea to pretend that case matters in ALL contexts.
-; This is in fact true in Franz at the present.  Case matters to Multics
-; in symbols, except for <frob> in (status feature <frob>).
-(eval-when (eval compile)
-  #+NIL (progn
-	   (defmacro loop-featurep (f)
-	     `(featurep ',f target-features))
-	   (defmacro loop-nofeaturep (f)
-	     `(nofeaturep ',f target-features))
-	   (defmacro loop-set-feature (f)
-	     `(set-feature ',f target-features))
-	   (defmacro loop-set-nofeature (f)
-	     `(set-nofeature ',f target-features))
-	   )
-  #+(and Lispm MIT)
-        (progn
-	   (defun loop-featurep (&quote f)
-	     (xr-feature-present f))
-	   (defun loop-nofeaturep (&quote f)
-	     (not (xr-feature-present f)))
-	   (defun loop-set-feature (&quote f)
-	     (unless (mem 'string-equal f *features*)
-	       (push (intern (string f) pkg-keyword-package)
-		     *features*)))
-	   (defun loop-set-nofeature (&quote f)
-	     (setq *features*
-		   (del 'string-equal f *features*)))
-	   )
-  #-(or NIL (and Lispm MIT))
-        (progn
-	   (defmacro loop-featurep (f)
-	     `(status feature ,f))
-	   (defmacro loop-nofeaturep (f)
-	     ; Multics doesn't have (status nofeature)...
-	     `(not (status feature ,f)))
-	   (defmacro loop-set-feature (f)
-	     `(sstatus feature ,f))
-	   (defmacro loop-set-nofeature (f)
-	     ; Does this work on Multics???  I think not but we don't use.
-	     `(sstatus nofeature ,f))
-	   )
-  ;Note:  NEVER in this file is "PDP-10" a valid feature or substring of
-  ; a feature.  It is NEVER hyphenated.  Keep it that way.  (This because
-  ; of continuous lossage with not setting up one or the other of the
-  ; hyphenated/non-hyphenated one.)
-  (cond ((and (loop-featurep PDP10)
-	      (loop-featurep NILAID))
-	   ;Compiling a PDP10 -> NIL cross-compiling LOOP.
-	   ; We check the PDP10 feature first sort of gratuitously so that
-	   ; other implementations don't think we are asking about an undefined
-	   ; feature name.  (Vax-NIL specifically.)
-	   (loop-set-feature For-NIL)
-	   (loop-set-nofeature For-Maclisp)
-	   (loop-set-nofeature For-PDP10)
-	   (loop-set-feature Run-in-Maclisp)
-	   (loop-set-feature Run-on-PDP10)
-	   (loop-set-nofeature Franz))
-	((and (loop-featurep Maclisp) (loop-nofeaturep For-NIL))
-	   ; Standard in-Maclisp for-Maclisp.
-	   (loop-set-feature For-Maclisp)
-	   (loop-set-feature Run-In-Maclisp)
-	   (cond ((loop-nofeaturep Multics)
-		    (loop-set-feature For-PDP10)
-		    (loop-set-feature PDP10)
-		    (loop-set-feature Run-on-PDP10))))
-	((loop-featurep NIL)
-	   ; Real NIL
-	   (loop-set-nofeature PDP10)
-	   (loop-set-nofeature Multics)
-	   (loop-set-nofeature Run-on-PDP10)
-	   (loop-set-nofeature For-PDP10)
-	   (loop-set-nofeature Run-In-Maclisp)
-	   (loop-set-nofeature For-Maclisp))
-	((loop-featurep Lispm))
-	((loop-featurep franz)
-	   ;The "natural" case of features in franz is all lower.
-	   ; Since that is unlike the others used in here, we synonymize
-	   ; the obvious other choice.
-	   (loop-set-feature Franz))
-	(t (break loop-implementation-unknown)))
-  ;There are three mutually exclusive features which determine how LOOP
-  ; generates code for doing COLLECT and its variants.  These are
-  ; GoFoo-Collection, Hairy-Collection, and Dumb-Collection.  The most
-  ; interesting one is Hairy-Collection, which is what is used for those
-  ; implementations which support variable-location or something similar
-  ; in a general fashion (i.e., lispm) or have other system-supplied kludges
-  ; which can be used to do collection.  It also may require compiler-let.
-  ; GoFoo-Collection is for PDP-10 maclisp which has a variable-location-like
-  ; kludge, but no user-level technology by which it may be accessed;  LOOP
-  ; will jump through hoops and roll over and play dead to get it to work.
-  ; Dumb-collection is for when neither of these apply.
-  (cond ((loop-featurep For-PDP10)
-	   (loop-set-feature GoFoo-Collection)
-	   (loop-set-nofeature Hairy-Collection)
-	   (loop-set-nofeature Dumb-Collection))
-	((or (loop-featurep Lispm) (loop-featurep For-NIL))
-	   (loop-set-feature Hairy-Collection)
-	   (loop-set-nofeature GoFoo-Collection)
-	   (loop-set-nofeature Dumb-Collection))
-	(t (loop-set-feature Dumb-Collection)
-	   (loop-set-nofeature Hairy-Collection)
-	   (loop-set-nofeature GoFoo-Collection)))
-  (cond ((loop-featurep For-PDP10)
-	   (loop-set-feature System-Destructuring))
-	(t (loop-set-nofeature System-Destructuring)))
-  (cond ((or (loop-featurep For-NIL) (loop-featurep Lispm))
-	   (loop-set-feature Named-PROGs))
-	(t (loop-set-nofeature Named-PROGs)))
-  ;In the following two features, "Local" means the Lisp LOOP will be
-  ; running in, not the one it is being compiled in.  "Targeted" means
-  ; the Lisp it will be producing code for.  (All from the point of view
-  ; of the running LOOP, you see.)
-  (cond ((or (loop-featurep For-NIL) (loop-featurep Lispm))
-	   (loop-set-feature Targeted-Lisp-has-Packages))
-	(t (loop-set-nofeature Targeted-Lisp-has-Packages)))
-  (cond ((or (loop-featurep Franz) (loop-featurep Run-in-Maclisp))
-	   (loop-set-nofeature Local-Lisp-has-Packages))
-	(t (loop-set-feature Local-Lisp-has-Packages)))
-  ;Meaningful-Type-Declarations means that the declarations are (1)
-  ; implemented by the compiler and (2) used for something.
-  ; Assume minimally maclisp-like FIXNUM and FLONUM dcls, for local
-  ; variables or function results.
-  (cond ((loop-featurep Run-in-Maclisp)
-	   (loop-set-feature Meaningful-Type-Declarations))
-	(t (loop-set-nofeature Meaningful-Type-Declarations)))
-  ;Hair for 3600 cross-compilation?
-  (cond ((and (loop-featurep Lispm) (not (loop-featurep 3600.)))
-	   (loop-set-feature Loop-Small-Floatp))
-	(t (loop-set-nofeature Loop-Small-Floatp)))
-  ;Common-Lisp-PROGs is, right now, about the only recognition Loop
-  ; gives common-lisp.  It is used because of the incompatible change
-  ; made with the "block" construct (with which PROG is implemented),
-  ; such that RETURN returns from a block (prog) named NIL (= () in NIL),
-  ; rather than the innermost one.  LOOP thus needs to be careful how it
-  ; goes about returning values (when the loop is named, it must use
-  ; return-from always).
-  (cond ((or (loop-featurep For-NIL) (loop-featurep Lispm))
-	   (loop-set-feature Common-Lisp-PROGs))
-	(t (loop-set-nofeature Common-Lisp-PROGs)))
-  ;Common-Lisp-PROGs imply named-progs:
-  (cond ((and (loop-featurep Common-Lisp-PROGs)
-	      (not (loop-featurep Named-PROGs)))
-	   (error "Common-Lisp-PROGs and not Named-PROGs??")))
-  ;Do macros get a second environment argument?
-  (cond ((or (loop-featurep NIL)
-	     (and (loop-featurep Lispm) (loop-featurep MIT)))
-	   (loop-set-feature Common-Lisp-MACROs))
-	(t (loop-set-nofeature Common-Lisp-MACROs)))
-  ; -> insert more conditionals here <-
-  ())
-
-#+Franz
-(eval-when (eval compile)
-  (setsyntax #// 143.) ; Make slash be slash
-  (setsyntax #/\ 2.) ; make backslash alphabetic
-  )
-
-
-#+Run-on-PDP10
-(eval-when (compile)
-  ;Note this hack used when compiled only.
-  ;Its purpose in life is to save a bit of space in the load-time environment,
-  ; since loop doesn't actually need the PDP10 Maclisp doublequoted crocks
-  ; to remember their origin as "strings".
-  (setsyntax #/" 'macro
-	     '(lambda ()
-		(do ((ch (tyi) (tyi)) (l () (cons ch l)))
-		    ((= ch #/")
-		     (list squid (list 'quote (implode (nreverse l)))))
-		  (and (= ch #//) (setq ch (tyi)))))))
-
-
-;;;; Other basic header stuff
-
-
-; Following isn't needed on Lispm, as loop is installed there (ie, these
-; symbols are already in GLOBAL).
-#+(and Targeted-Lisp-has-Packages (not Lispm) (not NIL))
-(mapc 'globalize
-      '("LOOP"					; Major macro
-	"LOOP-FINISH"				; Handy macro
-	"DEFINE-LOOP-MACRO"
-	"DEFINE-LOOP-PATH"			; for users to define paths
-	"DEFINE-LOOP-SEQUENCE-PATH"		; this too
-	))
-
-#+(or For-NIL For-PDP10)
-(herald LOOP)
+;;; the code for PDP-10 and Multics MacLisp, NIL and Franz is deleted.
+;;; The #+ and #- conditionals that chose among them are resolved for the Lisp
+;;; Machine, and so is the readtime environment that set up their features
+;;; while compiling, which is gone with them.
 
 
 ;;;; Macro Environment Setup
@@ -272,16 +53,9 @@
 ; they are defined in the compiled output file or not.  (It is assumed
 ; that DEFMACRO forms will be.)  Making loop-macro-progn output for loading
 ; is convenient if loop will have incremental-recompilation done on it.
-; (Note, of course, that the readtime environment is NOT set up.)
 
-#+Lispm
 (defmacro loop-macro-progn (&rest forms)
   `(progn ,@forms))
-#-Lispm
-(eval-when (eval compile)
-    (defmacro loop-macro-progn (&rest forms)
-	`(eval-when (eval compile) ,@forms)))
-
 
 ; Hack up the stuff for data-types.  DATA-TYPE? will always be a macro
 ; so that it will not require the data-type package at run time if
@@ -290,9 +64,6 @@
   ; Crock for DATA-TYPE? derives from DTDCL.  We just copy it rather
   ; than load it in, which requires knowing where it comes from (sigh).
   ; 
-  #-Local-Lisp-has-Packages
-    (defmacro data-type? (x) `(get ,x ':data-type))
-  #+Local-Lisp-has-Packages
     (defmacro data-type? (frob)
       (let ((foo (gensym)))
 	`((lambda (,foo)
@@ -309,38 +80,14 @@
 	 ; Multics defaults to free-functional-variable since it is declared
 	 ; special & used as function before it is defined:
 	 (*expr loop-when-it-variable)
-	 (*expr initial-value primitive-type)
-       #+(or Maclisp Franz) (macros t) ; Defmacro dependency
-       #+Run-in-Maclisp
-	 (muzzled t)	; I know what i'm doing
-	 )
+	 (*expr initial-value primitive-type))
 
-#+Run-on-PDP10
-(declare (mapex ())
-	 (genprefix loop/|-)
-	 (special squid)
-       #+(and Run-in-Maclisp For-NIL) ; patch it up
-         (*expr stringp vectorp vref vector-length)
-         )
-
-#-Run-on-PDP10
 (declare
-  #+Lispm (setq open-code-map-switch t)
-  #+Run-in-Maclisp (mapex t)
-  #+Run-in-Maclisp (genprefix loop-iteration/|-))
-
-#+Run-on-PDP10
-(mapc '(lambda (x)
-	   (or (getl x '(subr lsubr fsubr macro fexpr expr autoload))
-	       ; This dtdcl will sort of work for NIL code generation,
-	       ; if declarations will ignored.
-	       (putprop x '((lisp) dtdcl fasl) 'autoload)))
-      '(data-type? variable-declarations initial-value primitive-type))
+  (setq open-code-map-switch t))
 
 (loop-macro-progn
  (defmacro loop-copylist* (l)
-    #+Lispm `(copylist* ,l)
-    #-Lispm `(append ,l ())))
+    `(copylist* ,l)))
 
 
 ;;;; Random Macros
@@ -351,154 +98,26 @@
 ; takes more inline code.
 (loop-macro-progn
  (defmacro loop-simple-error (unquoted-message &optional (datum () datump))
-    #+(and Run-In-Maclisp (not Multics))
-      (progn (cond ((symbolp unquoted-message))
-		   ((and (not (atom unquoted-message))
-			 compiler-state
-			 (eq (car unquoted-message) squid)
-			 (not (atom (setq unquoted-message
-					  (cadr unquoted-message))))
-			 (eq (car unquoted-message) 'quote)
-			 (symbolp (cadr unquoted-message)))
-		      (setq unquoted-message (cadr unquoted-message)))
-		   (t (error '|Uloze -- LOOP-SIMPLE-ERROR|
-			     (list 'loop-simple-error
-				   unquoted-message datum))))
-	     (cond (datump `(loop-die ',unquoted-message ,datum))
-		   (t `(error ',unquoted-message))))
-    #+(or Franz Multics)
-      (progn (or (memq (typep unquoted-message) '(string symbol))
-		 (error '|Uloze -- | (list 'loop-simple-error
-					   unquoted-message datum)))
-	     `(error ,(let ((l (list "lisp:  " unquoted-message
-				     (if datump " -- " ""))))
-			#+Franz (get_pname (apply 'uconcat l))
-			#-Franz (apply 'catenate l))
-		     . ,(and datump (list datum))))
-    #-(or Run-In-Maclisp Franz)
       `(ferror () ,(if datump (string-append "~S " unquoted-message)
 		       unquoted-message)
 	       . ,(and datump (list datum))))
  (defmacro loop-warn (unquoted-message &optional (datum nil datump))
-   ;In pdp10 maclisp, strip off that dumb squid wrapper for the pseudo-string.
-   #+(and Run-in-Maclisp (not Multics))
-     (cond ((symbolp unquoted-message))
-	   ((and (not (atom unquoted-message))
-		 compiler-state
-		 (eq (car unquoted-message) squid)
-		 (not (atom (setq unquoted-message
-				  (cadr unquoted-message))))
-		 (eq (car unquoted-message) 'quote)
-		 (symbolp (cadr unquoted-message)))
-	      (setq unquoted-message (cadr unquoted-message)))
-	   (t (error '|Uloze -- LOOP-SIMPLE-ERROR|
-		     (list 'loop-warn unquoted-message datum))))
-    ;Currently, for everywhere but Lispm, turn newlines in the error message
-    ; into "<newline>; ".
-    #-Lispm
-      (progn #+NIL
-	       (when (string-search-char #\newline unquoted-message)
-		 (let ((l (coerce unquoted-message 'list)))
-		   ;Please remember what readtable this file is in.
-		   (do ((ll l (cdr ll)))
-		       ((null ll) (setq unquoted-message (coerce l 'string)))
-		     (when (char= (car ll) ~\return)
-		       (if (char= (cadr ll) ~\linefeed)
-			   (setf (cddr ll) (list* ~/; ~\sp (cddr ll)))
-			   (setf (cdr ll) (list* ~/; ~\sp (cdr ll))))))))
-	     #-NIL
-	       (let ((l (exploden unquoted-message)))
-		 (do ((ll l (cdr ll)))
-		     ((null ll) (setq unquoted-message (implode l)))
-		   (and (= (car ll) #\newline)
-			(if (= (cadr ll) #\linefeed)
-			    (rplacd (cdr ll) (list* #/; #\sp (cddr ll)))
-			    (rplacd ll (list* #/; #\sp (cdr ll))))))))
-    ;Now, figure out how to display the message with the datum.
-    #+(and Run-In-Maclisp (not Multics))
-      (cond (datump `(format msgfiles ',(format nil '|~~&;LOOP: ~A -- ~~S~~%|
-						unquoted-message)
-			     ,datum))
-	    (t `(format msgfiles ,(format nil '|~~&;LOOP: ~A~~%|
-					  unquoted-message))))
-    #+Lispm
       `(compiler:warn () ,(if datump
 			      (string-append unquoted-message " -- ~{~S~^ ~}")
 			      unquoted-message)
-	       . ,(and datump (list datum)))
-
-    #+(or Franz Multics)
-      (progn (or (memq (typep unquoted-message) '(string symbol))
-		 (error '|Uloze -- | (list 'loop-simple-error
-					   unquoted-message datum)))
-	     `(progn
-	        (terpri)
-		(princ ,(let ((l (list "lisp:  " unquoted-message
-				       (if datump " -- " ""))))
-			  #+Franz (get_pname (apply 'uconcat l))
-			  #-Franz (apply 'catenate l)))
-		,.(and datump `((princ ,datum)))))
-    #+(and For-NIL (not Run-in-Maclisp))
-      (if datump
-	  `(warn ,(string-append "LOOP: " unquoted-message " -- ~{~S~^ ~}")
-		 ,datum)
-	  `(warn ',(string-append "LOOP: " unquoted-message)))
-    #-(or Run-In-Maclisp Franz Lispm For-NIL)
-      `(format error-output ,(string-append
-			       "~&; LOOP:  "
-			       (if datump
-				   (string-append unquoted-message
-						  " -- ~{~S~^ ~}")
-				   unquoted-message))
-	       . ,(and datump (list datum))))
- )
-
-
-#+(and Run-in-Maclisp (not Multics))
-(defun loop-die (arg1 arg2)
-    (error arg1 arg2))
-
+	       . ,(and datump (list datum)))))
 
 ; This is a KLUDGE.  But it apparently saves an average of two inline
 ; instructions per call in the PDP10 version...  The ACS prop is
 ; fairly gratuitous.
 
-#+Run-on-PDP10
-(progn 'compile
-   (lap-a-list 
-     '((lap loop-pop-source subr)
-       (args loop-pop-source (() . 0))
-	   (hlrz a @ (special loop-source-code))
-	   (hrrz b @ (special loop-source-code))
-	   (movem b (special loop-source-code))
-	   (popj p)
-       nil))
-   (eval-when (compile)
-       (defprop loop-pop-source 2 acs)
-       ))
-
-#-Run-on-PDP10
 (loop-macro-progn
  (defmacro loop-pop-source () '(pop loop-source-code)))
 
 (loop-macro-progn
  (defmacro object-that-cares-p (x)
-   #+(and Lispm Symbolics) `(listp ,x)
-   #+(or NIL (and Lispm (not Symbolics))) `(consp ,x)
-   #+PDP10 `(pairp ,x)
-   #-(or Lispm NIL PDP10) `(eq (typep ,x) 'list)))
+   `(consp ,x)))
 
-#+NIL
- (progn
-   (eval-when (eval compile)
-     (when (macro-function 'loop-gentemp) (fmakunbound 'loop-gentemp)))
-   (defun loop-gentemp (&optional (pref 'loopvar-))
-     (declare (special loop-macro-environment))
-     (if (si:compilation-macro-environment-p loop-macro-environment)
-	 (gensym)
-       (gentemp pref))))
-
-#-NIL
 (loop-macro-progn
   (defmacro loop-gentemp (&optional (pref ''loopvar-))
     (declare (ignore pref))
@@ -513,48 +132,13 @@
 ; various user-accessible variables).  DEFIVAR is for "private" variables.
 ; Note that this is moot for Lispm due to incremental-recompilation support
 ; anyway.
-;Multics lcp has some bug whereby DECLARE and (EVAL-WHEN (COMPILE) ...)
-; don't get hacked properly inside of more than one level of
-; (PROGN 'COMPILE ...).  Thus we hack around DEFVAR and DEFIVAR to bypass
-; this lossage.
-;Franz DEFVAR does not make the declaration on loading, so we redefine it.
-
-#+(or Multics Franz)
-(loop-macro-progn
- (defmacro defvar (name &optional (init nil initp) documentation
-		   &aux (dclform `(and #+Franz (getd 'special)
-				       #-Franz (status feature compiler)
-				       (special ,name))))
-    ; For some obscure reason, (DECLARE ...) doesn't take effect within 2
-    ; (PROGN 'COMPILE ...)s, but (EVAL-WHEN (COMPILE) ...) does, on Multics.
-    (eval dclform) ; sigh
-    (cond ((not initp) dclform)
-	  (t `(progn 'compile
-		     ,dclform
-		     (or (boundp ',name) (setq ,name ,init)))))))
 
 (loop-macro-progn
  ; A DEFVAR alternative - "DEFine Internal VARiable".
  (defmacro defivar (name &optional (init () initp))
     ; The Lispm choice here is based on likelihood of incremental compilation.
-    #+(or Lispm For-NIL) `(defvar ,name ,@(and initp `(,init)))
-    #+Multics (progn (apply 'special (list name))
-		     (if initp `(or (boundp ',name) (setq ,name ,init))
-			 `(progn 'compile)))
-    #-(or Lispm Multics For-NIL)
-      `(progn 'compile
-	      (declare (special ,name))
-	      . ,(and initp `((or (boundp ',name) (setq ,name ,init)))))))
+    `(defvar ,name ,@(and initp `(,init)))))
 
-#+Franz
-;Defconst is like defvar but always initializes.
-; It happens in this case that we really don't care about the global
-; declaration on loading, so actually treat it more like DEFIVAR.
-; (This is now in Multics and PDP10 Maclisp, thanks to Maclisp Extensions
-; Manual.)
-(loop-macro-progn
-  (defmacro defconst (name init &optional documentation)
-    `(progn 'compile (declare (special ,name)) (setq ,name ,init))))
 
 
 
@@ -573,7 +157,6 @@
 		      `(prog1 ,(cadr frobs)
 			      ,(loop-make-psetq (cddr frobs))))))))
 
-#-System-Destructuring
 (progn 'compile
 
 (defvar si:loop-use-system-destructuring?
@@ -594,12 +177,6 @@
   ;NIL does not support destructuring LET, however (mainly for LOOP) it
   ; supports a DESETQ special-form/macro.  We should use that to keep the
   ; interpreted code size down, and for better debugging in the interpreter.
-  #+NIL
-   (cons (do ((l x (cddr l))) ((null l) 'setq)
-	   (unless (and (not (null (car l))) (symbolp (car l)))
-	     (return 'desetq)))
-	 x)
-  #-NIL
    (if si:loop-use-system-destructuring?
        (cons (do ((l x (cddr l))) ((null l) 'setq)
 	       (or (and (not (null (car l))) (symbolp (car l)))
@@ -619,35 +196,28 @@
 				 val var loop-desetq-temporary (cddr x)))))
 	 (setq r (nconc r (loop-desetq-internal (car x) (cadr x)))))))
 
-#-NIL ;See above
 (defun loop-desetq-internal (var val)
   (cond ((null var) ())
 	((atom var) (list var val))
 	(t (nconc (loop-desetq-internal (car var) `(car ,val))
 		  (loop-desetq-internal (cdr var) `(cdr ,val))))))
-); End desetq hackery for #-System-Destructuring
+)
 
 
 (defun loop-make-setq (pairs)
     (and pairs
-	 #-System-Destructuring
-	   (loop-make-desetq pairs)
-	 #+System-Destructuring
-	   (cons (do ((l pairs (cddr l))) ((null l) 'setq)
-		   (or (and (car l) (symbolp (car l))) (return 'desetq)))
-		 pairs)))
+	   (loop-make-desetq pairs)))
 
 
 (defvar loop-when-function
-  #+For-NIL 'when #-For-NIL 'and)
+  'and)
 
 (defvar loop-unless-function
-  #+For-NIL 'unless #-For-NIL 'or)
+  'or)
 
 
 (defconst loop-keyword-alist			;clause introducers
      '(
-      #+Named-PROGs
 	(named loop-do-named)
 	(initially loop-do-initially)
 	(finally loop-do-finally)
@@ -696,25 +266,19 @@
 	(to loop-for-arithmetic to)
 	(being loop-for-being)))
 
-#+Named-PROGs
 (defivar loop-prog-names)
 
-#+Common-Lisp-MACROs
 (defivar loop-macro-environment)	;Second arg to macro functions,
 					;passed to macroexpand.
 
 (defvar loop-path-keyword-alist ())		; PATH functions
 (defivar loop-named-variables)			; see SI:LOOP-NAMED-VARIABLE
-#+GoFoo-Collection
-(defivar loop-collection-crocks)		; see LOOP-DO-COLLECT etc
 (defivar loop-variables)			;Variables local to the loop
 (defivar loop-declarations)			; Local dcls for above
 (defivar loop-nodeclare)			; but don't declare these
 (defivar loop-variable-stack)
 (defivar loop-declaration-stack)
-#-System-Destructuring
 (defivar loop-desetq-crocks)			; see loop-make-variable
-#-System-Destructuring
 (defivar loop-desetq-stack)			; and loop-translate-1
 (defivar loop-prologue)				;List of forms in reverse order
 (defivar loop-wrappers)				;List of wrapping forms, innermost first
@@ -746,17 +310,12 @@
 ;;;; Construct a value return
 
 
-#+Common-Lisp-PROGs
 (defun loop-construct-return (form)
   (if loop-prog-names
       `(return-from ,(car loop-prog-names) ,form)
       `(return ,form)))
 
 
-#-Common-Lisp-PROGs
-(loop-macro-progn
- (defmacro loop-construct-return (form)
-   ``(return ,,form)))
 
 ;;;; Token Hackery
 
@@ -764,17 +323,7 @@
 ;the second a symbol to check against.
 
 ; Consider having case-independent comparison on Multics.
-#+(or Multics Franz)
-(progn 'compile
-    (defmacro si:loop-tequal (x1 x2)
-	`(eq ,x1 ,x2))
-    (defmacro si:loop-tmember (x l)
-	`(memq ,x ,l))
-    (defmacro si:loop-tassoc (x l)
-	`(assq ,x ,l)))
 
-
-#+Lispm
 (progn 'compile
    (defun si:loop-tequal (x1 x2)
 	(and (symbolp x1) (string-equal x1 x2)))
@@ -783,51 +332,7 @@
    (defun si:loop-tmember (kwd list)
 	(and (symbolp kwd) (mem #'string-equal kwd list))))
 
-
-#+Run-on-PDP10
-(progn 'compile
-   #+For-NIL
-     (defun si:loop-tequal (x1 x2)
-	 (eq x1 x2))
-   #-For-NIL
-     (progn 'compile
-	(eval-when (load compile)
-	   (cond ((status feature complr)
-		    ; Gross me out!
-		    (setq macrolist
-			  (cons '(si:loop-tequal
-				    . (lambda (x) (cons 'eq (cdr x))))
-				(delq (assq 'si:loop-tequal macrolist)
-				      macrolist)))
-		    (*expr si:loop-tmember si:loop-tassoc))))
-	(defun si:loop-tequal (x1 x2)
-	   (eq x1 x2)))
-     (defun si:loop-tmember (kwd list)
-	 (memq kwd list))
-     (defun si:loop-tassoc (kwd alist)
-	 (assq kwd alist))
-     )
-
-#+(and For-NIL (not Run-in-Maclisp))
-(progn 'compile
-  (defun si:loop-tequal (kwd1 kwd2)
-    (and (symbolp kwd1) (string= (symbol-name kwd1) (symbol-name kwd2))))
-  (defun si:loop-tassoc (kwd alist)
-    (cond ((symbolp kwd)
-	     (setq kwd (symbol-name kwd))
-	     (do ((l alist (cdr l))) ((null l) ())
-	       (when (string= kwd (symbol-name (caar l)))
-		 (return (car l)))))))
-  (defun si:loop-tmember (token list)
-     (cond ((symbolp token)
-	      (setq token (symbol-name token))
-	      (do ((l list (cdr l))) ((null l))
-		(when (string= token (symbol-name (car l)))
-		  (return l)))))))
 
-
-#+PDP10
-(eval-when (eval compile) (setq defmacro-displace-call ()))
 
 (defmacro define-loop-macro (keyword)
   "Makes KEYWORD, which is a LOOP keyword, into a Lisp macro that may
@@ -839,42 +344,10 @@ function name."
       (si:loop-tassoc keyword loop-keyword-alist)
       (si:loop-tassoc keyword loop-iteration-keyword-alist)
       (loop-simple-error "not a loop keyword - define-loop-macro" keyword))
-  #+Common-Lisp-MACROs
-    `(setf (macro-function ',keyword) 'loop-translate)
-  #-Common-Lisp-MACROs
-    (subst keyword 'keyword
-	   '(eval-when (compile load eval)
-	      #+(or For-NIL Run-on-PDP10)
-	        (progn (flush-macromemos 'keyword ())
-		       (flush-macromemos 'loop ()))
-	      #-Run-in-Maclisp
-	        (progn
-		  #+Franz
-		    (putd 'keyword
-			  '(macro (macroarg) (loop-translate macroarg)))
-		  #+(and Lispm MIT)
-		    (deff-macro keyword '(macro . loop-translate))
-		  #-(or Franz (and Lispm MIT))
-		    (fset-carefully 'keyword '(macro . loop-translate)))
-	      #+Run-in-Maclisp
-	        (progn (defprop keyword loop-translate macro))
-	      )))
-
-#+PDP10
-(eval-when (eval compile) (setq defmacro-displace-call t))
+    `(setf (macro-function ',keyword) 'loop-translate))
 
 (define-loop-macro loop)
 
-#+Run-in-Maclisp
-(defun (loop-finish macro) (form)
-    ;This definition solves two problems:
-    ; (1) wasted address space
-    ; (2) displacing of a form which might tend to be pure.
-    ; There is little point in macro-memoizing a constant anyway.
-    (and (cdr form) (loop-simple-error "Wrong number of args" form))
-    '(go end-loop))
-
-#-Run-in-Maclisp
 (defmacro loop-finish () 
   "Causes the iteration to terminate /"normally/", the same as implicit
 termination by an iteration driving clause, or by use of WHILE or
@@ -883,12 +356,8 @@ collected result will be returned as the value of the LOOP."
   '(go end-loop))
 
 
-(defun loop-translate (x #+Common-Lisp-MACROs loop-macro-environment)
-  #+Common-Lisp-MACROs (loop-translate-1 x)
-  #-Common-Lisp-MACROs
-    (progn #-(or For-NIL Run-on-PDP10) (displace x (loop-translate-1 x))
-	   #+(or For-NIL Run-on-PDP10)
-	     (or (macrofetch x) (macromemo x (loop-translate-1 x) 'loop))))
+(defun loop-translate (x loop-macro-environment)
+  (loop-translate-1 x))
 
 
 (defun loop-end-testify (list-of-forms)
@@ -963,11 +432,9 @@ collected result will be returned as the value of the LOOP."
        (loop-nodeclare ())
        (loop-named-variables ())
        (loop-declarations ())
-     #-System-Destructuring
        (loop-desetq-crocks ())
        (loop-variable-stack ())
        (loop-declaration-stack ())
-     #-System-destructuring
        (loop-desetq-stack ())
        (loop-prologue ())
        (loop-wrappers ())
@@ -980,13 +447,9 @@ collected result will be returned as the value of the LOOP."
        (loop-conditionals ())
        (loop-when-it-variable ())
        (loop-never-stepped-variable ())
-     #-System-Destructuring
        (loop-desetq-temporary ())
-     #+Named-PROGs
        (loop-prog-names ())
        (loop-collect-cruft ())
-     #+GoFoo-Collection
-       (loop-collection-crocks ())
        (keyword)
        (tem)
        (progvars))
@@ -996,18 +459,9 @@ collected result will be returned as the value of the LOOP."
 			       (caadar loop-conditionals)))
        (loop-optimize-duplicated-code-etc)
        (loop-bind-block)
-     #+GoFoo-Collection
-       (setq progvars loop-collection-crocks)
-     #-System-Destructuring
        (and loop-desetq-temporary (push loop-desetq-temporary progvars))
-       (setq tem `(prog #+Named-PROGs ,.loop-prog-names
+       (setq tem `(prog ,.loop-prog-names
 			,progvars
-		      #+GoFoo-Collection
-		        ,.(do ((l loop-collection-crocks (cddr l))
-			       (v () (cons `(loop-collect-init
-					        ,(cadr l) ,(car l))
-					    v)))
-			      ((null l) v))
 		      ,.(nreverse loop-prologue)
 		      ,.loop-before-loop
 		   next-loop
@@ -1019,18 +473,16 @@ collected result will be returned as the value of the LOOP."
 		      ; extra code, at least in the simple example i tried,
 		      ; but it does keep it from complaining about unused
 		      ; go tag.
-	    #+Multics (go end-loop)
 		   end-loop
 		      ,.(nreverse loop-epilogue)
 		      ,.(nreverse loop-after-epilogue)))
-       (do ((vars) (dcls) #-System-Destructuring (crocks))
+       (do ((vars) (dcls) (crocks))
 	   ((null loop-variable-stack))
 	 (setq vars (car loop-variable-stack)
 	       loop-variable-stack (cdr loop-variable-stack)
 	       dcls (car loop-declaration-stack)
 	       loop-declaration-stack (cdr loop-declaration-stack)
 	       tem (ncons tem))
-	 #-System-Destructuring
 	   (and (setq crocks (pop loop-desetq-stack))
 		(push (loop-make-desetq crocks) tem))
 	 (and dcls (push (cons 'declare dcls) tem))
@@ -1075,7 +527,6 @@ collected result will be returned as the value of the LOOP."
 	    (push loop-variables loop-variable-stack)
 	    (push loop-declarations loop-declaration-stack)
 	    (setq loop-variables () loop-declarations ())
-	    #-System-Destructuring
 	      (progn (push loop-desetq-crocks loop-desetq-stack)
 		     (setq loop-desetq-crocks ())))))
 
@@ -1112,55 +563,11 @@ collected result will be returned as the value of the LOOP."
 ; QUOTIENT or DIFFERENCE of one arg.
 ;And of course one always must be careful doing textual substitution.
 (defun loop-typed-arith (substitutable-expression data-type)
-  #-(or Lispm Franz)
-    (if (setq data-type (car (si:loop-tmember (if (data-type? data-type)
-						  (primitive-type data-type)
-						  data-type)
-					      '(fixnum flonum))))
-	(sublis (cond ((eq data-type 'fixnum)
-		         #+For-NIL
-			   '((plus . +&) (add1 . 1+&)
-			     (difference . -&) (sub1 . 1-&)
-			     (quotient . //&) (remainder . \&) (times . *&)
-			     (zerop . zerop&) (plusp . plusp&)
-			     (minusp . minusp&)
-			     (greaterp . >&) (lessp . <&)
-			     (min . min&) (max . max&))
-			 #-For-NIL
-			   '((plus . +) (add1 . 1+)
-			     (difference . -) (sub1 . 1-)
-			     (quotient . //) (remainder . \) (times . *)
-			     (greaterp . >) (lessp . <)))
-		      (t #+For-NIL
-			   '((plus . +$) (difference . -$)
-			     (add1 . 1+$) (sub1 . 1-$)
-			     (quotient . //$) (times . *$)
-			     (greaterp . >$) (lessp . <$)
-			     (max . max$) (min . min$))
-			 #-For-NIL
-			   '((plus . +$) (difference . -$)
-			     (add1 . 1+$) (sub1 . 1-$)
-			     (quotient . //$) (times . *$)
-			     (greaterp . >) (lessp . <))))
-		substitutable-expression)
-	substitutable-expression)
-  #+Lispm
-    (progn data-type substitutable-expression)
-  #+Franz
-    (if (si:loop-tequal data-type 'fixnum)
-	(sublis '((add1 . 1+) (sub1 . 1-) (plus . +) (difference . -)
-		  (times . *) (quotient . //) (remainder . \))
-		substitutable-expression)
-	substitutable-expression)
-  )
+    (progn data-type substitutable-expression))
 
 (defvar loop-floating-point-types
-  #+(or For-NIL Lispm)
     '(flonum float short-float single-float double-float long-float
-	     #+Loop-Small-Floatp small-flonum)
-  #-(or For-NIL Lispm)
-    '(flonum float #+Loop-Small-Floatp small-flonum)
-  )
+	     small-flonum))
 
 (defun loop-typed-init (data-type)
   (let ((tem nil))
@@ -1168,31 +575,17 @@ collected result will be returned as the value of the LOOP."
 	  ((si:loop-tmember data-type '(fixnum integer number)) 0)
 	  ((setq tem (car (si:loop-tmember
 			    data-type loop-floating-point-types)))
-	     #+(or For-NIL Lispm)
 	       (cond ((memq tem '(flonum float)) 0.0)
-		     (t #+Run-in-Maclisp `(coerce 0 ',tem)
-			#-Run-in-Maclisp (coerce 0 tem)))
-	     #-(or For-NIL Lispm)
-	       (progn #+Loop-Small-Floatp
-			(cond ((eq data-type 'small-flonum)
-				 #.(and (loop-featurep Loop-Small-Floatp)
-					(small-float 0)))
-			      (t 0.0))
-		      #-Loop-Small-Floatp 0.0)))))
+		     (t
+			(coerce 0 tem)))))))
 
 
 (defun loop-make-variable (name initialization dtype)
   (cond ((null name)
 	   (cond ((not (null initialization))
-		    (push (list #+Lispm 'ignore
-				#+(or Multics For-NIL)
-				  (setq name (loop-gentemp 'loop-ignore-))
-				#-(or Lispm Multics NIL) ()
+		    (push (list 'ignore
 				initialization)
-			  loop-variables)
-		    #+(and For-NIL (not Run-in-Maclisp))
-		      (push `(ignore ,name) loop-declarations)
-		    #+Multics (push `(progn ,name) loop-prologue))))
+			  loop-variables))))
 	((atom name)
 	   (cond (loop-iteration-variablep
 		    (if (memq name loop-iteration-variables)
@@ -1211,10 +604,6 @@ collected result will be returned as the value of the LOOP."
 	   (push (list name (or initialization (loop-typed-init dtype)))
 		 loop-variables))
 	(initialization
-	   #+System-Destructuring
-	     (progn (loop-declare-variable name dtype)
-		    (push (list name initialization) loop-variables))
-	   #-System-Destructuring
 	     (cond (si:loop-use-system-destructuring?
 		      (loop-declare-variable name dtype)
 		      (push (list name initialization) loop-variables))
@@ -1241,20 +630,10 @@ collected result will be returned as the value of the LOOP."
     (cond ((or (null name) (null dtype)) ())
 	  ((symbolp name)
 	     (cond ((memq name loop-nodeclare))
-		 #+Multics
-		   ; local type dcls of specials lose.  This doesn't work
-		   ; for locally-declared specials.
-		   ((get name 'special))
 		   ((data-type? dtype)
 		      (setq loop-declarations
 			    (append (variable-declarations dtype name)
-				    loop-declarations)))
-		#+Meaningful-Type-Declarations
-		   (t #+For-Maclisp
-		        (and (si:loop-tmember dtype '(fixnum flonum))
-			     (push `(,dtype ,name) loop-declarations))
-		      #-For-Maclisp
-		        (push `(type ,dtype ,name) loop-declarations))))
+				    loop-declarations)))))
 	  ((object-that-cares-p name)
 	      (cond ((object-that-cares-p dtype)
 		       (loop-declare-variable (car name) (car dtype))
@@ -1265,22 +644,8 @@ collected result will be returned as the value of the LOOP."
 				(list 'loop-declare-variable name dtype)))))
 
 
-#+For-PDP10
-(declare (special squid))
-
 (defun loop-constantp (form)
-  #+(or NIL (and Lispm MIT)) (constantp form)
-  #-(or NIL (and Lispm MIT))
-    (or (null form)
-	(eq form 't)
-	(numberp form)
-	#-For-PDP10 (stringp form)
-	(and (not (atom form))
-	     #-Run-on-PDP10 (eq (car form) 'quote)
-	     #+Run-on-PDP10 (or (eq (car form) 'quote)
-				; SQUID implies quoting.
-				(and compiler-state (eq (car form) squid))))
-	))
+  (constantp form))
 
 (defun loop-maybe-bind-form (form data-type?)
     ; Consider implementations which will not keep EQ quoted constants
@@ -1349,7 +714,6 @@ collected result will be returned as the value of the LOOP."
   (loop-pseudo-body form))
 
 
-#+Named-PROGs
 (defun loop-do-named ()
     (let ((name (loop-pop-source)))
        (or (and name (symbolp name))
@@ -1358,7 +722,6 @@ collected result will be returned as the value of the LOOP."
        ; from the prog when it tries to generate such code (as is necessary
        ; under #+Common-Lisp-PROGs).
        ;Should this error check be made always?
-     #+Common-Lisp-PROGs
        (and (or loop-before-loop loop-body loop-after-epilogue)
 	    (loop-simple-error "NAMED clause occurs too late" name))
        (and (cdr (setq loop-prog-names (cons name loop-prog-names)))
@@ -1384,7 +747,7 @@ collected result will be returned as the value of the LOOP."
    (loop-pseudo-body (loop-construct-return (loop-get-form 'return))))
 
 
-;;;; Macro (and interpreter) support for #+GoFoo-Collection
+;;;; Macro support for collection
 
 ; The way we collect (list-collect) things is to bind two variables.
 ; One is the final result, and is accessible for value during the
@@ -1393,47 +756,6 @@ collected result will be returned as the value of the LOOP."
 ; such that it can be updated with RPLACD.  In other implementations,
 ; the update must be conditionalized (on whether or not the tail is NIL).
 
-; For PDP10 Maclisp:
-; The "value cell" of a special variable is a (pseudo) list cell, the CDR
-; of which is the value.  Hence the abovementioned tail variable gets
-; initialized to this.  (It happens to be the CDAR of the symbol.)
-; For local variables in compiled code, the Maclisp compiler implements
-; a (undocumented private) form of the
-; "(setq tail (variable-location var))" construct;  specifically, it
-; is of the form  (#.gofoo var tail).  This construct must appear in
-; the binding environment those variables are bound in, currently.
-; Note that this hack only currently works for local variables, so loop
-; has to check to see if the variable is special.  It is anticipated,
-; however, that the compiler will be able to do this all by itself
-; at some point.
-
-#+GoFoo-Collection
-  (progn 'compile
-     (cond ((status feature complr)
-	      (setq loop-specvar-hack ((lambda (obarray)
-					   (implode '(s p e c v a r s)))
-				       sobarray))
-	      (defun loop-collect-init-compiler (form)
-		(cond ((memq compiler-state '(toplevel maklap))
-		         ; We are being "toplevel" macro expanded.
-			 ; We MUST expand into something which can be
-			 ; evaluated without loop, in the interpreter.
-			 `(setq ,(caddr form) (munkam (value-cell-location
-						         ',(cadr form)))))
-		      ((or specials
-			   (get (cadr form) 'special)
-			   (assq (cadr form) (symeval loop-specvar-hack)))
-		         `(setq ,(caddr form) (cdar ',(cadr form))))
-		      (t (cons gofoo (cdr form)))))
-	      (push '(loop-collect-init . loop-collect-init-compiler)
-		    macrolist)))
-     (defun loop-collect-init fexpr (x)
-	(set (cadr x) (cdar (car x)))))
-
-
-;;;; Macro support for #+Hairy-Collection
-
-#+Hairy-Collection
 (progn 'compile
 
 ;This is an a-list with entries of the form (headvar tailvar), into which
@@ -1450,9 +772,6 @@ collected result will be returned as the value of the LOOP."
   ;NIL cannot do variable-location directly, and had even more trouble doing
   ; so with special variables than with locals.  However there is a hack
   ; special-form which does all this for us.
-  #+For-NIL
-    `(si:%with-list-collection ,headvar ,@body)
-  #-For-NIL
     (let ((tailvar (gensym)))
       `(compiler-let ((loop-collection-stack
 			(cons '(,headvar ,tailvar) loop-collection-stack)))
@@ -1462,9 +781,6 @@ collected result will be returned as the value of the LOOP."
 
 
 (defmacro loop-collect-rplacd (headvar form)
-  #+For-NIL
-    `(si:%list-collect-rplacd ,headvar ,form)
-  #-For-NIL
     (let* ((data (or (assq headvar loop-collection-stack)
 		     (error "What's going on here?")))
 	   (tailvar (cadr data)))
@@ -1476,8 +792,7 @@ collected result will be returned as the value of the LOOP."
 			       ,(loop-cdrify
 				  (cdr form)
 				  `(rplacd ,tailvar
-					   #+Lispm (list* ,@(cdr form) nil)
-					   #-Lispm ,form))))))
+					   (list* ,@(cdr form) nil)))))))
 	    (t ;This last may deserve modification to (setf (cdr ...) ...)
 	       ; if the implementation can return the proper value more easily.
 	       `(and (cdr (rplacd ,tailvar ,form))
@@ -1504,11 +819,6 @@ collected result will be returned as the value of the LOOP."
 			 (list ctype (car cruft))))
 		   ((and dtype (not (eq dtype (cadr cruft))))
 		      ;Conditional should be on data-type reality
-		      #+Run-in-Maclisp
-		        (loop-simple-error
-			   "Unequal data types in multiple collections"
-			   (list dtype (cadr cruft) (car cruft)))
-		      #-Run-in-Maclisp
 		        (ferror () "~A and ~A Unequal data types into ~A"
 				dtype (cadr cruft) (car cruft))))
 	     (setq dtype (car (setq cruft (cdr cruft)))
@@ -1539,21 +849,11 @@ collected result will be returned as the value of the LOOP."
 		   ((eq ctype 'list)
 		    ;For dumb collection, we need both a tail and a flag var
 		    ; to tell us whether we have iterated.
-		    #+Dumb-Collection
-		      (setq tail (loop-make-variable (loop-gentemp) nil nil)
-			    tem (loop-make-variable (loop-gentemp) nil nil))
 		    ;Gofoo-collection uses these collection crocks, and we also
 		    ; have to manipulate the tail ourselves.
-		    #+GoFoo-Collection
-		      (setq loop-collection-crocks
-			    (list* (setq tail (loop-gentemp
-						'loop-collect-tail-))
-				   var
-				   loop-collection-crocks))
 		    ;Under hairy-collection, the tail is manipulated by the
 		    ; wrapper and the included loop-collect-rplacd form(s).
 		    ; So we make no such variable here.  Just make the wrapper.
-		    #+Hairy-Collection
 		      (push `(loop-list-collector ,var) loop-wrappers)))
 	     (push (list rvar ctype dtype var tail tem)
 		   loop-collect-cruft)))
@@ -1571,7 +871,6 @@ collected result will be returned as the value of the LOOP."
 		(and tem (setq forms `((setq ,tem ,form)) form tem))
 		(setq arglist (list var form))
 		(push (if (si:loop-tmember dtype '(fixnum flonum
-						   #+Loop-Small-Floatp
 						     small-flonum))
 			  ; no contagious arithmetic
 			  `(,loop-when-function
@@ -1590,24 +889,8 @@ collected result will be returned as the value of the LOOP."
 	  (t (caseq type
 		(list (setq form (list 'list form)))
 		(append (or (and (not (atom form)) (eq (car form) 'list))
-			    (setq form #+Lispm `(copylist* ,form)
-				       #+For-NIL `(copy-list ,form)
-				       #-(or Lispm For-NIL)
-				         `(append ,form ())))))
-	   #+Hairy-Collection
-	     `(loop-collect-rplacd ,var ,form)
-	   #+GoFoo-Collection
-	     (let ((q `(rplacd ,tail ,form)))
-		(cond ((and (not (atom form)) (eq (car form) 'list)
-			    (not (null (cdr form))))
-			`(setq ,tail ,(loop-cdrify (cdr form) q)))
-		      (t `(and (cdr ,q) (setq ,tail (last (cdr ,tail)))))))
-	   #+Dumb-Collection
-	     (let ((q `(cond (,tail (cdr (rplacd ,tail ,tem)))
-			     ((setq ,var ,tem)))))
-		(if (and (not (atom form)) (eq (car form) 'list) (cdr form))
-		    `(setq ,tem ,form ,tail ,(loop-cdrify (cddr form) q))
-		    `(and (setq ,tem ,form) (setq ,tail (last ,q))))))))))
+			    (setq form `(copylist* ,form)))))
+	     `(loop-collect-rplacd ,var ,form))))))
 
 
 (defun loop-cdrify (arglist form)
@@ -1616,7 +899,6 @@ collected result will be returned as the value of the LOOP."
 	 (if (zerop size) form
 	     (list (cond ((= size 1) 'cdr) ((= size 2) 'cddr) (t 'cdddr))
 		   form)))
-      #+Meaningful-Type-Declarations (declare (fixnum size))
       (setq form (list 'cddddr form))))
 
 
@@ -1671,8 +953,8 @@ collected result will be returned as the value of the LOOP."
 (defun loop-do-always (negate?)
   (let ((form (loop-get-form 'always)))
     (loop-emit-body `(,(if negate?
-			   #+For-NIL loop-when-function #-For-NIL 'and
-			   #+For-NIL loop-unless-function #-For-NIL 'or)
+			   'and
+			   'or)
 		      ,form
 		      ,(loop-construct-return nil)))
     (push (loop-construct-return t) loop-after-epilogue)))
@@ -1688,14 +970,10 @@ collected result will be returned as the value of the LOOP."
 
 ;;;; Hacks
 
-#+Meaningful-Type-Declarations
-  (declare (fixnum (loop-simplep-1 notype)))
-
 (defun si:loop-simplep (expr)
     (if (null expr) 0
 	(*catch 'si:loop-simplep
 	    (let ((ans (si:loop-simplep-1 expr)))
-	       #+Meaningful-Type-Declarations (declare (fixnum ans))
 	       (and (< ans 20.) ans)))))
 
 (defvar si:loop-simplep
@@ -1703,16 +981,11 @@ collected result will be returned as the value of the LOOP."
 	    plus difference + - add1 sub1 1+ 1-
 	    +$ -$ 1+$ 1-$ boole rot ash ldb equal atom
 	    setq prog1 prog2 and or =)
-	  #+(or Lispm NIL) '(aref ar-1 ar-2 ar-3)
-	  #+Lispm '#.(and (loop-featurep Lispm)
-			  (mapcar 'ascii '(#/ #/ #/)))
-	  #+For-NIL '(1+& 1-& +& -& plusp& minusp& zerop& *& //& \&
-                      si:xref char schar sbit svref sgaref)
-	  ))
+	  '(aref ar-1 ar-2 ar-3)
+	  '#.(mapcar 'ascii '(#/ #/ #/))))
 
 (defun si:loop-simplep-1 (x)
   (let ((z 0))
-    #+Meaningful-Type-Declarations (declare (fixnum z))
     (cond ((loop-constantp x) 0)
 	  ((atom x) 1)
 	  ((eq (car x) 'cond)
@@ -1726,18 +999,12 @@ collected result will be returned as the value of the LOOP."
 		        (if (fixp tem) (setq z tem)
 			    (setq z (funcall tem x) x ())))
 		     ((memq fn '(null not eq go return progn)))
-		     (#+Run-on-PDP10
-		        (or (not (minusp (+internal-carcdrp fn)))
-				      (eq fn 'cxr))
-		      #-Run-on-PDP10 (memq fn '(car cdr))
+		     ((memq fn '(car cdr))
 		        (setq z 1))
-		   #-Run-on-PDP10
 		     ((memq fn '(caar cadr cdar cddr)) (setq z 2))
-		   #-Run-on-PDP10
 		     ((memq fn '(caaar caadr cadar caddr
 				 cdaar cdadr cddar cdddr))
 		        (setq z 3))
-		   #-Run-on-PDP10
 		     ((memq fn '(caaaar caaadr caadar caaddr
 				 cadaar cadadr caddar cadddr
 				 cdaaar cdaadr cdadar cdaddr
@@ -1745,18 +1012,10 @@ collected result will be returned as the value of the LOOP."
 		        (setq z 4))
 		     ((memq fn si:loop-simplep)
 		        (setq z 2))
-		   #+Hairy-Collection
 		     ((eq fn 'loop-collect-rplacd)
 		        (*throw 'si:loop-simplep-1 nil))
-		     (#+(or Lispm For-PDP10 For-NIL)
-		        (not (eq (setq tem (macroexpand-1
-					     x #+Common-Lisp-MACROs
-					         loop-macro-environment))
+		     ((not (eq (setq tem (macroexpand-1 x loop-macro-environment))
 				 x))
-		      #+Franz (not (eq (setq tem (macroexpand x)) x))
-		      #+Multics
-		        (setq tem (get (car x) 'macro))
-		      #+Multics (setq tem (funcall tem x))
 		      (setq z (si:loop-simplep-1 tem) x ()))
 		     (t (*throw 'si:loop-simplep ())))
 	       (do ((l (cdr x) (cdr l))) ((null l))
@@ -1944,11 +1203,6 @@ collected result will be returned as the value of the LOOP."
 	     (t (setq loop-named-variables (delq tem loop-named-variables))
 		(cdr tem)))))
 
-#+Run-in-Maclisp ;Gross me out
-(and (status feature #+Multics Compiler #-Multics complr)
-     (*expr si:loop-named-variable))
-
-
 ; Note:  path functions are allowed to use loop-make-variable, hack
 ; the prologue, etc.
 (defun loop-for-being (var val data-type?)
@@ -2057,10 +1311,6 @@ collected result will be returned as the value of the LOOP."
 		      loop-path-keyword-alist)))
     ())
 
-#+Run-on-PDP10
-(declare ; Suck my obarray...
-	 (own-symbol define-loop-path define-loop-sequence-path))
-
 (defmacro define-loop-path (names &rest cruft)
   "(DEFINE-LOOP-PATH NAMES PATH-FUNCTION LIST-OF-ALLOWABLE-PREPOSITIONS
 DATUM-1 DATUM-2 ...)
@@ -2069,29 +1319,10 @@ be either a symbol or a list of symbols.  LIST-OF-ALLOWABLE-PREPOSITIONS
 contains a list of prepositions allowed in NAMES. DATUM-i are optional;
 they are passed on to PATH-FUNCTION as a list."
   (setq names (if (atom names) (list names) names))
-  #-For-Maclisp
     (let ((forms (mapcar #'(lambda (name) `(loop-add-path ',name ',cruft))
 			 names)))
        `(eval-when (eval load compile)
-	    #+For-NIL (flush-macromemos 'loop ())
-	    ,@forms))
-  #+For-Maclisp
-    (subst (do ((l)) ((null names) l)
-	     (setq l (cons `(setq loop-path-keyword-alist
-				  (cons '(,(car names) . ,cruft)
-					(delq (assq ',(car names)
-						    loop-path-keyword-alist)
-					      loop-path-keyword-alist)))
-			   l)
-		   names (cdr names)))
-	   'progn
-	   '(eval-when (eval load compile)
-	     #-For-PDP10 (or (boundp 'loop-path-keyword-alist)
-			      (setq loop-path-keyword-alist ()))
-	     #+For-PDP10 (and (or (boundp 'loop-path-keyword-alist)
-				   (setq loop-path-keyword-alist ()))
-			       (flush-macromemos 'loop ()))
-	       . progn)))
+	    ,@forms)))
 
 
 (defun si:loop-sequencer (indexv indexv-type
@@ -2183,14 +1414,7 @@ they are passed on to PATH-FUNCTION as a list."
 		   (setq test (if inclusive-iteration? '(lessp . args)
 				  '(not (greaterp . args)))))
 	      (push 'difference step)))
-     (and #+(or Lispm (and For-NIL (not Run-in-Maclisp)))
-	    (and (numberp (caddr step)) (= (caddr step) 1))	;Generic arith
-	  #-(or Lispm (and For-NIL (not Run-in-Maclisp)))
-	    (member (caddr step)
-		    #+Loop-Small-Floatp
-		      '(1 1.0 #.(and (loop-featurep Loop-Small-Floatp)
-				     (small-float 1)))
-		    #-Loop-Small-Floatp '(1 1.0))
+     (and (and (numberp (caddr step)) (= (caddr step) 1))	;Generic arith
 	  (rplacd (cdr (rplaca step (if (eq (car step) 'plus) 'add1 'sub1)))
 		  ()))
      (rplaca step (loop-typed-arith (car step) indexv-type))
@@ -2228,14 +1452,6 @@ they are passed on to PATH-FUNCTION as a list."
 		 `(,fetchfun ,sequencev ,indexv) `(,sizefun ,sequencev)
 		 crap prep-phrases))))
 
-
-#+Run-on-PDP10
-(defun (define-loop-sequence-path macro) (x)
-    `(define-loop-path ,(cadr x) si:loop-sequence-elements-path
-	(of in from downfrom to downto below above by)
-	. ,(cddr x)))
-
-#-Run-on-PDP10
 (defmacro define-loop-sequence-path (path-name-or-names fetchfun sizefun
 				     &optional sequence-type element-type)
   "Defines a sequence iiteration path.  PATH-NAME-OR-NAMES is either an
@@ -2252,172 +1468,8 @@ of the sequence."
 	,fetchfun ,sizefun ,sequence-type ,element-type))
 
 
-;;;; NIL interned-symbols path
-
-#+For-NIL
-(progn 'compile
-(defun loop-interned-symbols-path (path variable data-type prep-phrases
-				   inclusive? allowed-preps data
-				   &aux statev1 statev2 statev3
-					(localp (car data)))
-   allowed-preps	; unused
-   (and inclusive? (loop-simple-error
-		      "INTERNED-SYMBOLS path doesn't work inclusively"
-		      variable))
-   (and (not (null prep-phrases))
-	(or (cdr prep-phrases)
-	    (not (si:loop-tmember (caar prep-phrases) '(in of))))
-	(ferror () "Illegal prep phrase(s) in ~A path of ~A - ~A"
-		path variable prep-phrases))
-   (loop-make-variable variable () data-type)
-   (loop-make-variable
-      (setq statev1 (loop-gentemp))
-      `(loop-find-package ,@(and prep-phrases `(,(cadar prep-phrases))))
-      ())
-   (loop-make-variable (setq statev2 (loop-gentemp)) () ())
-   (loop-make-variable (setq statev3 (loop-gentemp)) () ())
-   (push `(multiple-value (,statev1 ,statev2 ,statev3)
-	       (loop-initialize-mapatoms-state ,statev1 ',localp))
-	 loop-prologue)
-   `(() () (multiple-value (() ,statev1 ,statev2 ,statev3)
-	      (,(if localp 'loop-test-and-step-mapatoms-local
-		    'loop-test-and-step-mapatoms)
-	       ,statev1 ,statev2 ,statev3))
-     (,variable (loop-get-mapatoms-symbol ,statev1 ,statev2 ,statev3)) () ()))
-
-(defun loop-find-package (&optional (pkg () pkgp))
-  #+Run-in-Maclisp
-    (if pkgp pkg obarray)
-  #-Run-in-Maclisp
-    (if pkgp (pkg-find-package pkg) package))
-
-(defun loop-find-package-translate (form)
-  ; Note that we can only be compiling for nil-nil, so we only need
-  ; to consider that.  The run-in-maclisp conditionals in the functions
-  ; are for the benefit of running interpreted code.
-  (values (if (null (cdr form)) 'package `(pkg-find-package ,(cadr form))) 't))
-
-(putprop 'loop-find-package
-	 '(loop-find-package-translate)
-	 'source-trans)
-
-#-Run-in-Maclisp
-(defun loop-initialize-mapatoms-state (pkg localp)
-  (let* ((symtab (si:package-symbol-table pkg))
-	 (len (simple-vector-length symtab)))
-    (values pkg symtab len)))
-
-#+Run-in-Maclisp
-(defun loop-initialize-mapatoms-state (ob ())
-    (values ob (ncons nil) 511.))
-
-#-Run-in-Maclisp
-(defun loop-test-and-step-mapatoms (pkg symtab index &aux val)
-  (prog ()
-    lp (cond ((<& (setq index (1-& index)) 0)
-	        (unless (setq pkg (si:package-super-package pkg))
-		  (return (setq val t)))
-		(setq symtab (si:package-symbol-table pkg))
-		(setq index (simple-vector-length symtab))
-		(go lp))
-	     ((symbolp (svref symtab index)) (return nil))
-	     (t (go lp))))
-  (values val pkg symtab index))
-
-#+Run-in-Maclisp
-(defun loop-test-and-step-mapatoms (ob list index)
-  (loop-test-and-step-mapatoms-local ob list index))
-
-#-Run-in-Maclisp
-(defun loop-test-and-step-mapatoms-local (pkg symtab index &aux val)
-  (prog ()
-   lp (cond ((<& (setq index (1-& index)) 0) (return (setq val 't)))
-	    ((symbolp (svref symtab index)) (return nil))
-	    (t (go lp))))
-  (values val pkg symtab index))
-
-#+Run-in-Maclisp
-(defun loop-test-and-step-mapatoms-local (ob list index &aux val)
-    (declare (fixnum index))
-    (prog () 
-     lp (cond ((not (null (cdr list)))
-	         (rplaca list (cadr list))
-		 (rplacd list (cddr list))
-		 (return ()))
-	      ((minusp (setq index (1- index))) (return (setq val 't)))
-	      (t ; If this is going to run in multics maclisp also the
-		 ; arraycall should be hacked to have type `obarray'.
-		 (rplacd list (arraycall t ob index))
-		 (go lp))))
-    (values val ob list index))
-
-#-Run-in-Maclisp
-(defun loop-get-mapatoms-symbol (pkg symtab index)
-  (declare (ignore pkg))
-  (svref symtab index))
-
-#+Run-in-Maclisp
-(defun loop-get-mapatoms-symbol (ob list index)
-    (declare (ignore ob index))
-    (car list))
-
-(and #+Run-in-Maclisp (status feature complr)
-     (*expr loop-get-mapatoms-symbol
-	    loop-initialize-mapatoms-state
-	    loop-test-and-step-mapatoms
-	    loop-test-and-step-mapatoms-local))
-)
-
-
-;;;; Maclisp interned-symbols path
-
-#+For-Maclisp
-(defun loop-interned-symbols-path (path variable data-type prep-phrases
-				   inclusive? allowed-preps data
-				   &aux indexv listv ob)
-   allowed-preps data	; unused vars
-   (and inclusive? (loop-simple-error
-		      "INTERNED-SYMBOLS path doesn't work inclusively"
-		      variable))
-   (and (not (null prep-phrases))
-	(or (cdr prep-phrases)
-	    (not (si:loop-tmember (caar prep-phrases) '(in of))))
-	(loop-simple-error
-	   "Illegal prep phrase(s) in INTERNED-SYMBOLS LOOP path"
-	   (list* variable 'being path prep-phrases)))
-   (loop-make-variable variable () data-type)
-   (loop-make-variable
-      (setq ob (gensym)) (if prep-phrases (cadar prep-phrases) 'obarray) ())
-   ; Multics lisp does not store single-char-obs in the obarray buckets.
-   ; Thus, we need to iterate over the portion of the obarray
-   ; containing them also.  (511. = (ascii 0))
-   (loop-make-variable
-      (setq indexv (loop-gentemp)) #+Multics 639. #-Multics 511. 'fixnum)
-   (loop-make-variable (setq listv (loop-gentemp)) () ())
-   `(() ()
-     (and #-Multics (null ,listv)
-	  #+Multics (or (> ,indexv 510.) (null ,listv))
-	  (prog ()
-	   lp (cond ((minusp (setq ,indexv (1- ,indexv)))
-		       ,(loop-construct-return t))
-		    ((setq ,listv (arraycall ; The following is the kind of
-					     ; gratuity that pisses me off:
-					     #+Multics obarray #-Multics t
-					     ,ob ,indexv))
-		       ,(loop-construct-return nil))
-		    ((go lp)))))
-     (,variable
-       #+Multics (cond ((> ,indexv 510.) ,listv)
-		       (t (prog2 () (car ,listv) (setq ,listv (cdr ,listv)))))
-       #-Multics (car ,listv))
-      ()
-     #+Multics () #-Multics (,listv (cdr ,listv))))
-
-
-
 ;;;; MIT/LMI interned-symbols path
 
-#+(and Lispm MIT)
 (progn 'compile
 
  (defun loop-interned-symbols-path (path variable data-type prep-phrases
@@ -2484,103 +1536,13 @@ of the sequence."
 
 ;;;; Symbolics interned-symbols path
 
-#+(and Lispm Symbolics)
-(progn 'compile
-
- (defun loop-interned-symbols-path (path variable data-type prep-phrases
-				    inclusive? allowed-preps data
-				    &aux statev1 statev2 statev3
-					 (localp (car data)))
-    path data-type allowed-preps			; unused vars
-    (and inclusive? (loop-simple-error
-		       "INTERNED-SYMBOLS path doesn't work inclusively"
-		       variable))
-    (and (not (null prep-phrases))
-	 (or (cdr prep-phrases)
-	     (not (si:loop-tmember (caar prep-phrases) '(in of))))
-	   (ferror () "Illegal prep phrase(s) in ~A path of ~A - ~A"
-		   path variable prep-phrases))
-    (loop-make-variable variable () data-type)
-    (loop-make-variable
-       (setq statev1 (loop-gentemp))
-       (if prep-phrases `(pkg-find-package ,(cadar prep-phrases)) 'package)
-       ())
-    (loop-make-variable (setq statev2 (loop-gentemp)) () ())
-    (loop-make-variable (setq statev3 (loop-gentemp)) () ())
-    (push `(multiple-value (,statev1 ,statev2 ,statev3)
-		  (loop-initialize-mapatoms-state ,statev1 ,localp))
-	    loop-prologue)
-    `(() () (multiple-value (nil ,statev1 ,statev2 ,statev3)
-	       (,(if localp 'loop-test-and-step-mapatoms-local
-		     'loop-test-and-step-mapatoms)
-		,statev1 ,statev2 ,statev3)) 
-      (,variable (loop-get-mapatoms-symbol ,statev1 ,statev2 ,statev3))
-      () ()))
-
-;The functions loop-initialize-mapatoms-state, loop-test-and-step-mapatoms,
-; and loop-test-and-step-mapatoms-local are all provided by the package
-; system.
-
- (defsubst loop-get-mapatoms-symbol (index temp pkg)
-    index pkg ; ignored
-    temp)
- )
 
 ;;;; LOOP iteration path for hash tables (NIL & Lispm)
 
-#+(or Lispm NIL)
 (progn 'compile
-
-#+NIL
-;Not yet defined in NIL.  Will it ever be?
-(eval-when (eval compile)
- (defmacro selector (item pred &body clauses &aux (var (gensym)))
-   `(let ((,var ,item))
-      (cond ,@(loop for (k . consequents) in clauses
-		    collect
-		     (cons (cond ((memq k '(t otherwise :otherwise)) t)
-				 ((atom k) `(,pred ,var ,k))
-				 (t (cons 'or (mapcar #'(lambda (x)
-							  `(,pred ,var ,x))
-						      k))))
-			   consequents))))))
-
 
 (define-loop-path hash-elements loop-hash-elements-path (of with-key))
 
-
-#-(and Lispm MIT)
-;The loop path for NIL and symbolics Lispm systems.
-(defun loop-hash-elements-path (path variable data-type prep-phrases
-				inclusive? allowed-preps data
-				&aux (key-var (loop-gentemp 'loop-hash-key-))
-				(hash-tbl nil))
-  path data-type allowed-preps data	;ignored
-  ;; Now parse the prep phrases
-  (loop for (prep expr) in prep-phrases
-	do (selector prep loop-tequal
-	     (('of) (setq hash-tbl expr))
-	     (('with-key) (setq key-var expr))
-	     (otherwise
-	       (ferror "~S is not a known preposition for the HASH-ELEMENTS path" prep))))
-  (if (null hash-tbl) (ferror "The hash table must be specified (the OF clause was missing)"))
-  (if inclusive? (ferror "Inclusive stepping is not supported by the HASH-ELEMENTS path."))
-  (push '(inhibit-gc-flips) loop-wrappers)
-  (let* ((step-var (loop-gentemp 'loop-hash-step-))
-	 (bindings `((,step-var)
-		     (,key-var)
-		     (,variable)))
-	 (prologue `())
-	 (iterspec `(()
-		     (,variable (progn (multiple-value (,step-var ,key-var ,variable)
-					 (send ,hash-tbl ':next-element ,step-var))
-				       ,variable))
-		     (null ,step-var)
-		     ())))
-    (list* bindings prologue iterspec)))
-
-
-#+(and Lispm MIT)
 ;MIT version of above.
 (defun loop-hash-elements-path (ignore variable ignore prep-phrases
 				inclusive? ignore ignore)
@@ -2634,15 +1596,12 @@ of the sequence."
 				      loop-path-keyword-alist))))
 		(car x)))
       '(
-      #+(or For-NIL For-Maclisp Lispm)
 	((interned-symbols interned-symbol)
 	   loop-interned-symbols-path (in))
-      #+(or For-NIL Lispm)
 	((local-interned-symbols local-interned-symbol)
 	   loop-interned-symbols-path (in) t)
 	))
 
-#-Multics ; none defined yet
 (mapc #'(lambda (x)
 	  (mapc #'(lambda (y)
 		    (setq loop-path-keyword-alist
@@ -2654,41 +1613,10 @@ of the sequence."
 					y loop-path-keyword-alist)
 				      loop-path-keyword-alist))))
 		(car x)))
-      '(#+Lispm
-        ((array-element array-elements) ar-1-force array-active-length)
-        #+(and For-NIL (not Run-in-Maclisp))
-	  ((array-element array-elements) aref-rmoi array-total-size array)
-	#+(or Lispm (and For-NIL (not Run-in-Maclisp)))
-	  ((element elements) elt length sequence)
-	;The following should be done by using ELEMENTS and type dcls...
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((vector-element vector-elements) aref vector-length vector)
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((simple-vector-element simple-vector-elements
-	    simple-general-vector-element simple-general-vector-elements)
-	   svref simple-vector-length simple-vector)
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((bits bit bit-vector-element bit-vector-elements)
-	     bit bit-vector-length bit-vector bit)
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((simple-bit-vector-element simple-bit-vector-elements)
-	     sbit simple-bit-vector-length simple-bit-vector bit)
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((character characters string-element string-elements)
-	   char string-length string string-char)
-	#+(and Lispm MIT)
-	  ((character characters string-element string-elements)
-	    char length string string-char)
-	#+(and For-NIL (not Run-in-Maclisp))
-	  ((simple-string-element simple-string-elements)
-	   schar simple-string-length simple-string string-char)
-	)
+      '(((array-element array-elements) ar-1-force array-active-length)
+	((element elements) elt length sequence)
+	((character characters string-element string-elements)
+	    char length string string-char))
       )
 
-;Sigh. (c.f. loop-featurep, note macro-expansion lossage.)
-; Note that we end up doing both in the PDP10 NIL version, in which they
-; are different.
-#+(or (not For-NIL) Run-in-Maclisp)
   (or (status feature loop) (sstatus feature loop))
-#+For-NIL
-  (set-feature 'loop 'local)
