@@ -135,7 +135,8 @@ file saying why.
   `IF-FOR-MACLISP`, `IF-FOR-LISPM` and `IF-FOR-MACLISP-ELSE-LISPM`
   (`sys2/lmmac.lisp`), obsolete since the MacLisp cross-compiler went, once
   the debugger no longer used them. `cold/global.lisp` still exports their
-  names, which is harmless and left for the cold-load cleanup.
+  names, which is harmless and left for the cold-load cleanup. Their
+  `MAY-SURROUND-DEFUN` properties in `io/read.lisp` go with them.
 
 ## Faults fixed
 
