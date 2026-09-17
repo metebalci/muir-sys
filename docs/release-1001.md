@@ -87,6 +87,20 @@ file saying why.
   `sys2/selev.lisp`, `window/baswin.lisp`, `window/choice.lisp` and
   `window/scroll.lisp`. So does the one inside `FULL-GC` in `sys2/gc.lisp`,
   whose note says why the code is off.
+- **Notes nothing reads:**
+  - `zmail/poop.text`, an early ZMail chapter that `zmail/manual/` superseded.
+  - `zmail/info.mail` and `file/bugs.mail`, INFO-ZMAIL and Local-File mailing
+    list traffic from 1982.
+  - `zwei/bugs.status` and `zwei/emacs.comdif`, ZWEI's change notes and a
+    list of its commands against EMACS.
+  - `file/fs.improv` and `window/task.list`, to-do lists for Local-File and
+    the window system.
+  - `zwei/atsign.xfile`, a listing command for printing ZWEI's sources on the
+    Dover, and `zwei/grind.definition`, an empty file.
+  - `ucadr/chaos.test`, a few forms for poking the Chaos board over the
+    Unibus.
+  - `man/manual2.bolio` and `man/manual3.bolio`, byte-identical copies of
+    `man/manual.bolio`.
 
 ## Faults fixed
 
