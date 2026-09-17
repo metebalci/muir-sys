@@ -900,27 +900,6 @@ of a list satisfies the test. Eg (EQ . MEMQ)")
 		      (otherwise (return nil)))))))))
       form))
 
-(defoptimizer status-optimizer status () (form)
-  (let ((status-function (cadr form))
-	(item-p (cddr form)))
-    (selector status-function string-equal
-      (('feature 'features) (if item-p
-				(if (and (not (cdddr form))
-					 (symbolp (caddr form)))
-				    `(not (not (memq ',(intern (symbol-name (caddr form))
-							       si:pkg-keyword-package)
-						     *features*)))
-				  form)
-			      `*features*))
-      (('tabsize) `8)
-      (('userid) `user-id)
-      (('site) `local-host-name)
-      (('opsys) `':lispm)
-      (otherwise (or (mem 'string-equal status-function si:status-status-list)
-		     (warn 'unknown-status-function ':impossible "Unknown STATUS function ~A."
-			   status-function))
-		 form))))
-
 ;;; Next two are here mainly to avoid getting an error message from
 ;;;  GETARGDESC about random FSUBR.
 (defoptimizer comment-expand declare)

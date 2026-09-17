@@ -137,6 +137,12 @@ file saying why.
   the debugger no longer used them. `cold/global.lisp` still exports their
   names, which is harmless and left for the cold-load cleanup. Their
   `MAY-SURROUND-DEFUN` properties in `io/read.lisp` go with them.
+- **MacLisp's `STATUS` and `SSTATUS`** (`sys/qmisc.lisp`), with the
+  compiler's optimizer for `STATUS` (`sys/qcopt.lisp`). Their last users read
+  or changed the feature list, and now use `*FEATURES*` directly:
+  `sys2/loop.lisp`, which adds `:LOOP`, and the WHAT demo's "features"
+  answer (`demo/what.lisp`). `cold/global.lisp` still exports both names,
+  which is left for the cold-load cleanup.
 
 ## Faults fixed
 
