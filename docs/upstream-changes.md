@@ -50,8 +50,8 @@ than answered:
 
 | File | What the note says |
 |---|---|
-| `sys/fspec.lisp` ([#11](https://github.com/metebalci/muir-sys/issues/11)) | **the whole file disabled** with `#\|`, because loading `SYS2; DEFSEL QFASL` during `SI:QLD` barfed in `INTERNAL-FUNCTION-SPEC-HANDLER` |
-| `sys/qmisc.lisp` ([#11](https://github.com/metebalci/muir-sys/issues/11)) | the functions above "should be moved to `SYS: SYS; FSPEC`, but due to issues (see FSPEC) hasn't been done just yet" |
+| `sys/fspec.lisp` ([#11](https://github.com/metebalci/muir-sys/issues/11)) | **the whole file disabled** with `#\|`, because loading `SYS2; DEFSEL QFASL` during `SI:QLD` barfed in `INTERNAL-FUNCTION-SPEC-HANDLER`. Settled for 1001: the file is deleted and the machinery stays in `qrand` and `qmisc`. |
+| `sys/qmisc.lisp` ([#11](https://github.com/metebalci/muir-sys/issues/11)) | the functions above "should be moved to `SYS: SYS; FSPEC`, but due to issues (see FSPEC) hasn't been done just yet". Settled with the row above. |
 | `eh/eh.lisp`, `eh/ehc.lisp` ([#16](https://github.com/metebalci/muir-sys/issues/16)) | "No way known to do LOCF on SG-PLIST" |
 | `sys2/macarr.lisp` ([#15](https://github.com/metebalci/muir-sys/issues/15)) | "This version of STORE from NIL is not MACLISP compatible", the code disabled |
 | `sys/qrand.lisp` ([#13](https://github.com/metebalci/muir-sys/issues/13)) | "MAKE-COLD doesn't support complex types" |

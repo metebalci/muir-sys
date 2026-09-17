@@ -1605,16 +1605,17 @@ Returns T if storage really reclaimed, NIL if not."
 
 ;;;; Function spec and source file name stuff
 
-;;;---!!! The following functions and variables (everything up to next
-;;;---!!!   page break) should be moved to SYS: SYS; FSPEC LISP, but due
-;;;---!!!   to isseus (see FSPEC LISP) hasn't been done just yet.
-;;;---!!!   
-;;;---!!!	INHIBIT-FDEFINE-WARNINGS 
-;;;---!!!	VALIDATE-FUNCTION-SPEC 
-;;;---!!!	FDEFINE 
-;;;---!!!	FDEFINEDP 
-;;;---!!!	FDEFINITION 
-;;;---!!!	FDEFINEDP-AND-FDEFINITION 
+;;; this is where the function-spec machinery lives.  MIT had begun to move
+;;; it to SYS: SYS; FSPEC LISP and stopped, leaving that file one block comment
+;;; and these definitions the live ones; this system deleted the empty file (#11), so
+;;; this is the only home.  The names that were being moved from here are:
+;;;
+;;;	INHIBIT-FDEFINE-WARNINGS
+;;;	VALIDATE-FUNCTION-SPEC 
+;;;	FDEFINE 
+;;;	FDEFINEDP 
+;;;	FDEFINITION 
+;;;	FDEFINEDP-AND-FDEFINITION 
 
 ;;; (The rest of this is in QMISC)
 
@@ -1974,23 +1975,21 @@ N to do nothing special and enter the normal error handler.
 			       ORIGINAL-SPEC DWIMIFY-INFO)
 		      NIL)))))
 
-;;;---!!! The following functions and variables (everything up to next
-;;;---!!!   page break, and the one after that) should be moved to
-;;;---!!!   SYS: SYS; FSPEC LISP, but due to isseus (see FSPEC LISP)
-;;;---!!!   hasn't been done just yet.
-;;;---!!!   
-;;;---!!!	FUNCTION-SPEC-DEFAULT-HANDLER 
-;;;---!!!	INTERNAL-FUNCTION-SPEC-HANDLER 
-;;;---!!!	FUNCTION-SPEC-HASH-TABLE 
-;;;---!!!	COLD-LOAD-FUNCTION-PROPERTY-LISTS
-;;;---!!!	FUNCTION-SPEC-PUTPROP 
-;;;---!!!	FUNCTION-SPEC-PUSH-PROPERTY 
-;;;---!!!	FUNCTION-SPEC-GET 
-;;;---!!!	FDEFINE-FILE-PATHNAME 
-;;;---!!!	PATCH-SOURCE-FILE-NAMESTRING 
-;;;---!!!	FDEFINE-FILE-DEFINITIONS NIL
-;;;---!!!	NON-FILE-REDEFINED-FUNCTIONS 
-;;;---!!!	RECORD-SOURCE-FILE-NAME 
+;;; these too were being moved to SYS: SYS; FSPEC LISP, which this system deleted
+;;; because it defined nothing (#11).  The names are:
+;;;
+;;;	FUNCTION-SPEC-DEFAULT-HANDLER
+;;;	INTERNAL-FUNCTION-SPEC-HANDLER 
+;;;	FUNCTION-SPEC-HASH-TABLE 
+;;;	COLD-LOAD-FUNCTION-PROPERTY-LISTS
+;;;	FUNCTION-SPEC-PUTPROP 
+;;;	FUNCTION-SPEC-PUSH-PROPERTY 
+;;;	FUNCTION-SPEC-GET 
+;;;	FDEFINE-FILE-PATHNAME 
+;;;	PATCH-SOURCE-FILE-NAMESTRING 
+;;;	FDEFINE-FILE-DEFINITIONS NIL
+;;;	NON-FILE-REDEFINED-FUNCTIONS 
+;;;	RECORD-SOURCE-FILE-NAME 
 
 ;;; Default handler called by function-spec-handlers to do functions they don't
 ;;; handle specially.

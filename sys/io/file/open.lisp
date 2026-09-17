@@ -1937,8 +1937,8 @@ Useful for arguments to the PROGV special form."
   (VALUES (NCONS 'SI::FILE-IN-COLD-LOAD) (NCONS FLAG)))
 
 ;;; the Patch-File attribute no longer binds this, since this system loads no
-;;; patch files, so it stays NIL.  The variable stays because SYS: SYS; QRAND
-;;; and SYS: SYS; FSPEC, which are in the cold load, still read it.
+;;; patch files, so it stays NIL.  The variable stays because SYS: SYS; QRAND,
+;;; which is in the cold load, still reads it.
 (DEFVAR THIS-IS-A-PATCH-FILE NIL
   "Non-NIL while loading a patch file.")
 

@@ -387,6 +387,17 @@ file saying why.
     this system's own local file system, out of scope for this cleanup; both are
     left. `sys/sys/clpack.lisp` defines no package for any of these five
     systems, so there was nothing to remove there.
+- **`sys/fspec.lisp`**, 689 lines of which every one was inside a single `#|`
+  block, so the file defined nothing (#11). It was a half-finished move of the
+  function-spec machinery out of `sys/qrand.lisp` and `sys/qmisc.lisp`, which
+  MIT abandoned and System 100 switched off; the note at its head records the
+  barf it caused in `INTERNAL-FUNCTION-SPEC-HANDLER` while `QLD` loaded
+  `sys2/defsel.lisp`. All 38 forms in the block have live twins in `qrand` or
+  `qmisc`, save `FUNCTION-SPEC-REMPROP`, which no caller has. The cold load
+  carried the empty file, so `sys/sysdcl.lisp` loses it from
+  `COLD-LOAD-FILE-LIST` and from SYSTEM-INTERNALS' MAIN module, and the notes
+  in `qrand`, `qmisc` and `io/file/open.lisp` that pointed at it say instead
+  where the machinery lives.
 
 ## Faults fixed
 

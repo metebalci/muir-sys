@@ -1045,21 +1045,22 @@ for finding the site files, in case the system does not know that host yet."
 
 ;;;; Stuff for function specs
 
-;;;---!!! The following functions and variables (everything up to next
-;;;---!!!   page break) should be moved to SYS: SYS; FSPEC LISP, but due
-;;;---!!!   to isseus (see FSPEC LISP) hasn't been done just yet.
-;;;---!!! 
-;;;---!!!	FUNCTION-SPEC-LESSP 
-;;;---!!!	FUNDEFINE 
-;;;---!!!	FDEFINITION-LOCATION 
-;;;---!!!	FUNCTION-PARENT 
-;;;---!!!	LOCATION-FUNCTION-SPEC-HANDLER 
-;;;---!!!	STANDARDIZE-FUNCTION-SPEC 
-;;;---!!!	NON-PATHNAME-REDEFINED-FILES NIL
-;;;---!!!	QUERY-ABOUT-REDEFINITION 
-;;;---!!!	UNDEFUN 
-;;;---!!!	GET-SOURCE-FILE-NAME 
-;;;---!!!	GET-ALL-SOURCE-FILE-NAMES 
+;;; the rest of the function-spec machinery, the part that need not be in
+;;; the cold load; SYS: SYS; QRAND has the rest.  MIT was moving both to
+;;; SYS: SYS; FSPEC LISP and stopped, leaving that file one block comment; this system
+;;; deleted it, since it defined nothing (#11).  The names are:
+;;;
+;;;	FUNCTION-SPEC-LESSP
+;;;	FUNDEFINE 
+;;;	FDEFINITION-LOCATION 
+;;;	FUNCTION-PARENT 
+;;;	LOCATION-FUNCTION-SPEC-HANDLER 
+;;;	STANDARDIZE-FUNCTION-SPEC 
+;;;	NON-PATHNAME-REDEFINED-FILES NIL
+;;;	QUERY-ABOUT-REDEFINITION 
+;;;	UNDEFUN 
+;;;	GET-SOURCE-FILE-NAME 
+;;;	GET-ALL-SOURCE-FILE-NAMES 
 
 ;;; These are here because they must be loaded after the package system is operational
 ;;; (or maybe only because they aren't needed in the cold load?)
