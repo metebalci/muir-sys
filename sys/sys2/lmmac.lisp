@@ -58,45 +58,6 @@ whose type is not known until load time"
      ,@CADR-FORMS))
 (compiler:make-obsolete if-in-lambda-else-cadr "use SI:SELECT-PROCESSOR")
 
-;;; The IF-IN-MACLISP/IF-IN-LISPM conditionals have to do with not breaking
-;;; the Maclisp environment when compiling.  The optimizers in COMPAT take
-;;; over these functions when compiling in Maclisp.
-
-(DEFMACRO IF-IN-MACLISP (&BODY FORMS)
-  "Use FORMS only if running or compiling in Maclisp.  No-op on the Lisp machine."
-  FORMS
-  NIL)
-(compiler:make-obsolete if-in-maclisp "use the #+MACLISP reader macro")
-
-(DEFMACRO IF-IN-LISPM (&BODY FORMS)
-  "Use FORMS only if running or compiling on the Lisp machine."
-  `(PROGN . ,FORMS))
-(compiler:make-obsolete if-in-maclisp "use the #+LISPM reader macro")
-
-(DEFMACRO IF-FOR-MACLISP (&BODY FORMS)
-  "Use FORMS only if evaluating on or compiling FOR Maclisp.
-Nowadays this is the same as IF-IN-MACLISP since there is no longer
-a cross-compiler in Maclisp for the Lisp machine."
-  FORMS
-  NIL)
-(compiler:make-obsolete if-for-maclisp "use the #+MACLISP reader macro")
-
-(DEFMACRO IF-FOR-LISPM (&BODY FORMS)
-  "Use FORMS only if evaluating on or compiling FOR the Lisp machine.
-Nowadays this is the same as IF-IN-LISPM since there is no longer
-a cross-compiler in Maclisp for the Lisp machine."
-  `(COMPILER-LET ((RUN-IN-MACLISP-SWITCH NIL))
-     (PROGN . ,FORMS)))
-(compiler:make-obsolete if-for-lispm "use the #+LISPM reader macro")
-
-(DEFMACRO IF-FOR-MACLISP-ELSE-LISPM (MACLISP-FORM LISPM-FORM)
-  "Use MACLISP-FORM only if in Maclisp, use LISPM-FORM if on the Lisp machine."
-  MACLISP-FORM
-  `(COMPILER-LET ((RUN-IN-MACLISP-SWITCH NIL))
-     ,LISPM-FORM))
-(compiler:make-obsolete if-for-maclisp-else-lispm "use the #+LISPM//#+MACLISP reader macro")
-
-
 ;; sigh
 (DEFMACRO SEND (OBJECT OPERATION &REST ARGUMENTS)
   "Send a message to OBJECT, with operation OPERATION and ARGUMENTS."

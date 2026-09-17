@@ -131,6 +131,11 @@ file saying why.
     Symbolics versions under `#+SYMBOLICS`.
   - `sys2/meth.lisp`: an old `DEFMETHOD` that `#+NIL` commented out, since
     FLAVOR defines the one in use.
+- **The MacLisp conditional macros** `IF-IN-MACLISP`, `IF-IN-LISPM`,
+  `IF-FOR-MACLISP`, `IF-FOR-LISPM` and `IF-FOR-MACLISP-ELSE-LISPM`
+  (`sys2/lmmac.lisp`), obsolete since the MacLisp cross-compiler went, once
+  the debugger no longer used them. `cold/global.lisp` still exports their
+  names, which is harmless and left for the cold-load cleanup.
 
 ## Faults fixed
 
