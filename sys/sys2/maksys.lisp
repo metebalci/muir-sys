@@ -1274,10 +1274,9 @@ This keyword causes MAKE-SYSTEM to print what it would do but not do it."
 	 (PRINT-FILE-WARNINGS INFILE *WARNINGS-STREAM*)
 	 (SEND *WARNINGS-STREAM* ':SEND-IF-HANDLES ':FORCE-OUTPUT))))
 
-(DEFUN LOAD-FONT-WIDTHS-1 (INFILE)
-  (SETQ *SOMETHING-LOADED* T)
-  (PKG-BIND *FORCE-PACKAGE*
-    (PRESS:LOAD-FONT-WIDTHS INFILE NIL T)))
+;;; LOAD-FONT-WIDTHS-1 is gone, and the :LOAD-FONTS-WIDTHS transformation built on it
+;;; goes too.  It called LOAD-FONT-WIDTHS in package PRESS, and only the PRESS system,
+;;; which went with Dover printing, used it.
 
 (DEFVAR MAKSYS-BREAKPOINT-FLAG NIL)
 (DEFUN FILE-NEWER-THAN-INSTALLED-P (FILE &AUX
@@ -1817,11 +1816,6 @@ KEYLIST is a MAKE-SYSTEM keyword or a list of such, or NIL for none."
   FILE-NEWER-THAN-FILE-P (':TEXT) (':LISP) ("Generate host table from"
 					    "Generating host table from"
 					    "generated into host table"))
-
-(DEFINE-SIMPLE-TRANSFORMATION :LOAD-FONTS-WIDTHS LOAD-FONT-WIDTHS-1
-  FILE-NEWER-THAN-INSTALLED-P (':WIDTHS) NIL ("Load Fonts Widths from"
-					      "Loading Fonts Widths from"
-					      "loaded for fonts widths") NIL)
 
 (DEFINE-SIMPLE-TRANSFORMATION LOAD-SITE-FILE LOAD-SITE-FILE-1
   FILE-NEWER-THAN-INSTALLED-P (':QFASL) NIL

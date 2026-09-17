@@ -37,7 +37,8 @@
 	    #/Y COM-SET-Y
 	    #/D COM-DISPLAY-FONT
 	    #/V COM-SET-SAMPLE
-	    #/ COM-ROTATE-CHARACTER-RIGHT
+	    #/
+ COM-ROTATE-CHARACTER-RIGHT
 	    #/R COM-READ-FILE
 	    #/W COM-WRITE-FILE
 	    #/X COM-EXCHANGE-PLANES
@@ -2059,7 +2060,8 @@ and STRING2 is printed while waiting for the second."
 
 (DEFUN COM-READ-FILE (&AUX FD FILENAME TYPE)
   (DECLARE (:SELF-FLAVOR FED))
-  (SETQ TYPE (FED-CHOOSE '(("KST") (:QFASL) ("AC") ("AL") ("KS") ("AST"))
+  ;; no AC choice.  IO1; FNTCNV no longer reads the Xerox printers' AC fonts.
+  (SETQ TYPE (FED-CHOOSE '(("KST") (:QFASL) ("AL") ("KS") ("AST"))
 			 "Read which format of font file"))
   (IF (NULL TYPE)
       NIL
@@ -2075,8 +2077,6 @@ and STRING2 is printed while waiting for the second."
 	 (FONT-NAME-SET-FONT-AND-DESCRIPTOR CURRENT-FONT FD))
 	((STRING-EQUAL TYPE "QFASL")
 	 (LOAD FILENAME "FONTS"))
-	((STRING-EQUAL TYPE "AC")
-	 (READ-AC-INTO-FONT FILENAME CURRENT-FONT))
 	((STRING-EQUAL TYPE "KS")
 	 (READ-KS-INTO-FONT FILENAME CURRENT-FONT))
 	((STRING-EQUAL TYPE "AL")
@@ -2086,7 +2086,8 @@ and STRING2 is printed while waiting for the second."
 
 (DEFUN COM-WRITE-FILE (&AUX FILENAME TYPE)
   (DECLARE (:SELF-FLAVOR FED))
-  (SETQ TYPE (FED-CHOOSE '(("KST") (:QFASL) ("AC") ("AST"))
+  ;; no AC choice.  IO1; FNTCNV no longer writes the Xerox printers' AC fonts.
+  (SETQ TYPE (FED-CHOOSE '(("KST") (:QFASL) ("AST"))
 			 "Write which format of font file"))
   (IF (NULL TYPE)
       NIL
@@ -2098,9 +2099,7 @@ and STRING2 is printed while waiting for the second."
 	   (WRITE-FONT-INTO-AST CURRENT-FONT FILENAME)
 	   (PUTPROP CURRENT-FONT FILENAME 'AST-FILE))
 	  ((STRING-EQUAL TYPE "QFASL")
-	   (COMPILER:FASD-SYMBOL-VALUE FILENAME CURRENT-FONT))
-	  ((STRING-EQUAL TYPE "AC")
-	   (WRITE-FONT-INTO-AC FILENAME CURRENT-FONT)))))
+	   (COMPILER:FASD-SYMBOL-VALUE FILENAME CURRENT-FONT)))))
 
 (DEFVAR PATHNAME-DEFAULTS)
 
