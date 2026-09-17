@@ -178,6 +178,29 @@ file saying why.
     `GET-NEW-SYSTEM-VERSION`, `PRINT-PATCHES` and `SET-SYSTEM-STATUS`.
     `cold/global.lisp` still exports `LOAD-PATCHES` and
     `LOAD-AND-SAVE-PATCHES`, which is left for the cold-load cleanup.
+- **LMFILE**, MIT's file computer, whose server release 1000 had already left
+  out. Its pathnames go too, so no host of that kind can be defined.
+  - `file2/pathnm.lisp`, the last file of `SYS: FILE2;`, with its place in
+    FILE-SYSTEM's `HOST-PATHNAMES` module and in
+    `REST-OF-PATHNAMES-FILE-ALIST`, the list MINI loads during `QLD`
+    (`sys/sysdcl.lisp`). The note on FILE2's systems goes with it.
+  - `zmail/lmfile.lisp`, ZMail's mail-file methods for LMFILE pathnames, and
+    its place in ZMail's `MAIN` module.
+  - `io/file/access.lisp`: the `LMFILE-HOST` flavor and its methods, the
+    `:LMFILE-SERVER-HOSTS` site variable, `ADD-LMFILE-HOST` and
+    `ADD-LMFILE-HOSTS`, and the call that added those hosts when the site
+    was initialized.
+  - `io/file/open.lisp`: `FILE-HOST-USER-ID` no longer tests for `:LMFILE`,
+    which no host reported anyway.
+  - `network/chaos/qfile.lisp`: opening a file tests only for
+    `FS:LM-PARSING-MIXIN`, and `FILE-PRINT-PATHNAME` and
+    `FILE-PRINT-DIRECTORY` no longer ask the host for `:REMOTE-HOST-NAME`,
+    which only an LMFILE host answered.
+  - `file/copy.lisp`: the two tests for `REMOTE-LMFILE-PATHNAME`, a flavor
+    defined nowhere in the tree. No system loads this file.
+
+  The manual's LMFILE sections (`man/pathnm.text`, `man/fd-hac.text`), a mail
+  log (`man/bug-mail.txt`) and three comments in code stay as history.
 
 ## Faults fixed
 

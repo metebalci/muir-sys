@@ -463,17 +463,16 @@ he said /"log in/".  UNAME-HOST should be the host that the user actually logged
 (ADD-INITIALIZATION "Clean up QFILE transactions" '(QFILE-SYSTEM-INIT) '(SYSTEM))
 
 ;;; Passing and reading information about pathnames and properties
+;;; only an LMFILE host, which was not an actual machine, handled
+;;; :REMOTE-HOST-NAME.  With LMFILE gone no host does, so these two
+;;; return the host's own string.
 (DEFUN FILE-PRINT-PATHNAME (PATHNAME)
-  "Return namestring for PATHNAME, including the host if it isn't an actual machine."
-  (LET ((HN (SEND (SEND PATHNAME :HOST) :SEND-IF-HANDLES :REMOTE-HOST-NAME))
-	(SFH (SEND PATHNAME :STRING-FOR-HOST)))
-    (IF HN (STRING-APPEND HN ": " SFH) SFH)))
+  "Return namestring for PATHNAME."
+  (SEND PATHNAME :STRING-FOR-HOST))
 
 (DEFUN FILE-PRINT-DIRECTORY (PATHNAME)
-  "Return namestring for PATHNAME's dir, including the host if it isn't an actual machine."
-  (LET ((HN (SEND (SEND PATHNAME :HOST) :SEND-IF-HANDLES :REMOTE-HOST-NAME))
-	(SFD (SEND PATHNAME :STRING-FOR-DIRECTORY)))
-    (IF HN (STRING-APPEND HN ": " SFD) SFD)))
+  "Return namestring for PATHNAME's dir."
+  (SEND PATHNAME :STRING-FOR-DIRECTORY))
 
 ;;; PATHNAME is only used as a source of a host with respect to which to parse
 (DEFUN READ-FILE-PROPERTY-LIST-STRING (STRING OPERATION PATHNAME
@@ -905,7 +904,8 @@ he said /"log in/".  UNAME-HOST should be the host that the user actually logged
 	 (PROGN
 	   (MULTIPLE-VALUE (PKT SUCCESS STRING)
 	     ;; can you believe this kludgery?
-	     (IF (TYPEP FILE '(OR FS:LMFILE-PARSING-MIXIN FS:LM-PARSING-MIXIN))
+	     ;; LMFILE pathnames are gone, so only Lisp Machine pathnames open this way.
+	     (IF (TYPEP FILE 'FS:LM-PARSING-MIXIN)
 		 (SEND HOST-UNIT :COMMAND NIL (CASE DIRECTION
 						 (:INPUT (DATA-INPUT-HANDLE DATA-CONN))
 						 (:OUTPUT (DATA-OUTPUT-HANDLE DATA-CONN)))
