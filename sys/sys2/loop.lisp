@@ -1619,4 +1619,6 @@ of the sequence."
 	    char length string string-char))
       )
 
-  (or (status feature loop) (sstatus feature loop))
+;MacLisp's STATUS and SSTATUS are gone; this is what they did here.
+(unless (memq :loop *features*)
+  (setq *features* (cons :loop *features*)))

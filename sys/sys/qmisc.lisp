@@ -921,12 +921,10 @@ Type NIL to exit (or Abort)."
 
 
 
-;;;; STATUS and SSTATUS 
-;;; Note that these have to be Maclisp compatible and therefore have to work
-;;; independent of packages.  All symbols on feature lists are in the keyword package.
-
-;;; status and sstaus are obsolete.
-;;; Instead, frob the special variable *features* directly
+;;;; Features
+;;; All symbols on feature lists are in the keyword package.
+;;; MacLisp's STATUS and SSTATUS, which read and changed this list, are
+;;; deleted.  Use the variable *FEATURES* directly.
 
 (DEFVAR *FEATURES*
 	'(:LISPM :MIT :LMI :COMMON	;":common" is what dec prolelisp says it is
@@ -941,52 +939,6 @@ Type NIL to exit (or Abort)."
 
 (ADD-INITIALIZATION "Frob *FEATURES* per processor" '(PROB-FROCESSOR) :COLD)
 
-(DEFVAR STATUS-STATUS-LIST '(:FEATURE :FEATURES :NOFEATURE :STATUS :SSTATUS :TABSIZE
-			     :USERID :SITE :OPSYS))
-
-(DEFVAR STATUS-SSTATUS-LIST '(:FEATURE :NOFEATURE))
-
-(DEFUN RETURN-STATUS (STATUS-LIST ITEM ITEM-P)
-       (COND ((NOT ITEM-P) STATUS-LIST)
-	     ((NUMBERP ITEM) (MEMBER-EQUAL ITEM STATUS-LIST))
-	     (T (NOT (NULL (MEM #'STRING-EQUAL ITEM STATUS-LIST))))))
-
-(DEFUN STATUS (&QUOTE STATUS-FUNCTION &OPTIONAL (ITEM NIL ITEM-P))
-  "Obsolete Maclisp function. You really want to use the value of, or bind, *FEATURES*.
-/(STATUS FEATURES) returns a list of symbols indicating features of the
-Lisp environment. 
-/(STATUS FEATURE SYMBOL) returns T if SYMBOL is on the (STATUS FEATURES)
-list,  otherwise NIL.
-/(STATUS NOFEATURE SYMBOL) returns T if SYMBOL in *FEATURES*, otherwise NIL.
-/(STATUS STATUS) returns a list of all status operations, ie *FEATURES*.
-/(STATUS SSTATUS) returns a list of all sstatus operations."
-  (SELECTOR STATUS-FUNCTION STRING-EQUAL
-    (('FEATURE 'FEATURES) (RETURN-STATUS *FEATURES* ITEM ITEM-P))
-    (('NOFEATURE) (UNLESS ITEM-P
-		    (FERROR NIL "Too few args to STATUS NOFEATURE."))
-		  (NOT (RETURN-STATUS *FEATURES* ITEM ITEM-P)))
-    (('STATUS) (RETURN-STATUS STATUS-STATUS-LIST ITEM ITEM-P))
-    (('SSTATUS) (RETURN-STATUS STATUS-SSTATUS-LIST ITEM ITEM-P))
-    (('TABSIZE) 8.)
-    (('USERID) USER-ID)
-    (('SITE) LOCAL-HOST-NAME)
-    (('OPSYS) :LISPM)
-    (OTHERWISE (FERROR NIL "~S is not a legal STATUS request." STATUS-FUNCTION))))
-
-(DEFUN SSTATUS (&QUOTE STATUS-FUNCTION ITEM
-		&AUX (DEFAULT-CONS-AREA WORKING-STORAGE-AREA))
-  "(SSTATUS FEATURE ITEM) adds ITEM to the list of features.
-/(SSTATUS NOFEATURE ITEM) removes ITEM from the list of features.
-New programs should use the variable *FEATURES*"
-  (IF (SYMBOLP ITEM)
-      (SETQ ITEM (INTERN (STRING ITEM) PKG-KEYWORD-PACKAGE)))	;These are all keywords
-  (SELECTOR STATUS-FUNCTION STRING-EQUAL
-    (('FEATURE) (PUSHNEW ITEM *FEATURES* :TEST #'EQUAL)
-		ITEM)
-    (('NOFEATURE) (IF (SI:MEMBER-EQUAL ITEM *FEATURES*)
-		      (SETQ *FEATURES* (DEL #'EQUAL ITEM *FEATURES*)))
-		  ITEM)
-    (OTHERWISE (FERROR NIL "~S is not a legal SSTATUS request." STATUS-FUNCTION))))
 
 ;;;; Site stuff
 
