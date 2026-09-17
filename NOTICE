@@ -10,8 +10,9 @@ The system in sys/ is the Lisp Machine system of the Massachusetts Institute
 of Technology, System 99.32, as recovered from TID/671 by MIT's Tapes of Tech
 Square project: a backup of the machine OZ.
 
-LM-3 brought that content up as System 100 (https://tumbleweed.nu/r/sys) and,
-in its release note for System 100, declared:
+LM-3 brought that content up as System 100 (https://tumbleweed.nu/r/sys).
+That work, every commit of it, is Alfred M. Szmidt's, who commits there as ams.
+The release note for System 100 declares:
 
     Everything is now licensed under the terms of the GNU Affero General
     Public License as published by the Free Software Foundation, either
@@ -25,8 +26,9 @@ Fixes from LM-3's later work
 
 Some fixes were taken from the changes LM-3 made after System 100, on its way
 to System 304: each one singly, checked against these files, and none bringing
-material from LMI's or Gigamos's System 130. They are LM-3's work, covered by
-the same declaration and distributed under the same terms.
+material from LMI's or Gigamos's System 130. They are LM-3's work, all of them
+committed by Alfred M. Szmidt (ams), covered by the same declaration and
+distributed under the same terms.
 docs/upstream-changes.md, in the repository, lists each one.
 
 Changes made here
