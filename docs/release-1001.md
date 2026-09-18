@@ -414,6 +414,24 @@ file saying why.
 
 ## Faults fixed
 
+- **Function-spec properties are read back again.** In
+  `sys/qrand.lisp`'s `FUNCTION-SPEC-DEFAULT-HANDLER`, the `GET` clause had a
+  second form after its `IF`, so the clause always returned the default and
+  discarded the lookup: no property of a function spec that is not a symbol,
+  such as which file a method came from, could be read. The default now sits
+  inside the loop, as MIT wrote it in the unfinished `SYS; FSPEC` this release
+  deletes.
+- **A cold load can be driven without a console** (#18). `cold/mini.lisp`
+  gains `MINI-RUN-SCRIPT`: before the cold load reaches its listener
+  (`sys/ltop.lisp`), it asks the file server for `SYS: COLD; SCRIPT LISP` and
+  evaluates the forms in it, so a build can type `(SI:QLD)` and the save
+  without a screen. If the server has no such file the open is refused and the
+  cold load goes to its listener exactly as before. Progress is reported by
+  asking for names such as `SYS: COLD; REPORT; form-2`, which the server logs,
+  since MINI cannot send data; `MINI-OPEN-FILE` grew a `NO-BARF` argument for
+  both. Anything that goes wrong still appears on the console, which a cold
+  load has no error handler to catch.
+
 - **The error handler's stack-group plist works again** (#16). Three places in
   `eh/eh.lisp` and `eh/ehc.lisp` were switched off by the bring-up with
   ">>ERROR; No way known to do LOCF on SG-PLIST": saving and restoring a stack

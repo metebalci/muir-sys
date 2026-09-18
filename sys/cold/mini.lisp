@@ -104,36 +104,41 @@
   (MINI-SEND-PKT 7 4))				;STS
 
 ;;; Open a file for read
-(DEFUN MINI-OPEN-FILE (FILENAME BINARY-P)
+;;; NO-BARF makes a refused open return NIL instead of breaking, so that
+;;; the cold load can ask for a file that need not be there (MINI-RUN-SCRIPT)
+;;; and can report progress by asking for a name (MINI-REPORT).
+(DEFUN MINI-OPEN-FILE (FILENAME BINARY-P &OPTIONAL NO-BARF)
   (SETQ MINI-CH-IDX #o1000 MINI-UNRCHF NIL MINI-EOF-SEEN NIL)
   (UNLESS MINI-OPEN-P (MINI-OPEN-CONNECTION MINI-DESTINATION-ADDRESS MINI-CONTACT-NAME))
-  (DO ((OP))					;Retransmission loop
-      (NIL)
-    ;; Send opcode #o200 (ascii open) or #o201 (binary open) with file name
-    (COPY-ARRAY-CONTENTS FILENAME MINI-PKT-STRING)
-    (MINI-SEND-PKT (IF BINARY-P #o201 #o200) (ARRAY-ACTIVE-LENGTH FILENAME))
-    ;; Get back opcode #o202 (win) or #o203 (lose) or OPN if old STS lost
-    (SETQ OP (MINI-NEXT-PKT NIL))
-    (COND ((NULL OP))				;no response, retransmit
-	  ((= OP 2)				;OPN
-	   (MINI-SEND-STS))			;send STS and then retransmit
-	  ((OR (= OP #o202) (= OP #o203))	;Win or Lose
-	   (SETQ MINI-IN-PKT-NUMBER (LOGAND #o177777 (1+ MINI-IN-PKT-NUMBER))
-		 MINI-OUT-PKT-NUMBER (LOGAND 177777 (1+ MINI-OUT-PKT-NUMBER)))
-	   (LET* ((LENGTH (LOGAND #o7777 (AREF MINI-PKT 1)))
-		  (CR (STRING-SEARCH-CHAR #/NEWLINE MINI-PKT-STRING 0 LENGTH)))
-	     ;; Before pathnames and time parsing is loaded, things are stored as strings.
-	     (SETQ MINI-FILE-ID (CONS (SUBSTRING MINI-PKT-STRING 0 CR)
+  (AND (DO ((OP))				;Retransmission loop
+	   (NIL)
+	 ;; Send opcode #o200 (ascii open) or #o201 (binary open) with file name
+	 (COPY-ARRAY-CONTENTS FILENAME MINI-PKT-STRING)
+	 (MINI-SEND-PKT (IF BINARY-P #o201 #o200) (ARRAY-ACTIVE-LENGTH FILENAME))
+	 ;; Get back opcode #o202 (win) or #o203 (lose) or OPN if old STS lost
+	 (SETQ OP (MINI-NEXT-PKT NIL))
+	 (COND ((NULL OP))			;no response, retransmit
+	       ((= OP 2)			;OPN
+		(MINI-SEND-STS))		;send STS and then retransmit
+	       ((OR (= OP #o202) (= OP #o203))	;Win or Lose
+		(SETQ MINI-IN-PKT-NUMBER (LOGAND #o177777 (1+ MINI-IN-PKT-NUMBER))
+		      MINI-OUT-PKT-NUMBER (LOGAND 177777 (1+ MINI-OUT-PKT-NUMBER)))
+		(LET* ((LENGTH (LOGAND #o7777 (AREF MINI-PKT 1)))
+		       (CR (STRING-SEARCH-CHAR #/NEWLINE MINI-PKT-STRING 0 LENGTH)))
+		  ;; Before pathnames and time parsing is loaded, things are stored as strings.
+		  (SETQ MINI-FILE-ID (CONS (SUBSTRING MINI-PKT-STRING 0 CR)
 						;Discard zero at front of month, so the format
 						;matches that produced by PRINT-UNIVERSAL-TIME
 						;and by QFILE before TIMPAR is loaded.
-				      (STRING-LEFT-TRIM
-					#/0 (SUBSTRING MINI-PKT-STRING (1+ CR) LENGTH)))))
-	   (MINI-SEND-STS)			;Acknowledge packet just received
-	   (IF (= OP #o202)
-	       (RETURN T)
-	     (MINI-BARF MINI-FILE-ID FILENAME)))))
-  (IF BINARY-P #'MINI-BINARY-STREAM #'MINI-ASCII-STREAM))
+					   (STRING-LEFT-TRIM
+					     #/0 (SUBSTRING MINI-PKT-STRING (1+ CR) LENGTH)))))
+		(MINI-SEND-STS)			;Acknowledge packet just received
+		(IF (= OP #o202)
+		    (RETURN T)
+		  (IF NO-BARF
+		      (RETURN NIL)
+		    (MINI-BARF MINI-FILE-ID FILENAME))))))
+       (IF BINARY-P #'MINI-BINARY-STREAM #'MINI-ASCII-STREAM)))
 
 ;;; Doesn't use symbols for packet fields since not loaded yet
 ;;; This sends a packet and doesn't return until it has cleared microcode.
@@ -358,6 +363,43 @@
 	(PUSH (SETQ TEM (NCONS FILE-NAME)) *COLD-LOADED-FILE-PROPERTY-LISTS*))
     (LET ((MINI-PLIST-RECEIVER-POINTER TEM))
       (SET-FILE-LOADED-ID 'MINI-PLIST-RECEIVER MINI-FILE-ID PACKAGE))))
+
+;;; a cold load runs unattended.  It asks the file server for
+;;; MINI-SCRIPT-FILE-NAME; if the server has no such file the open is refused
+;;; and the cold load goes to its console listener exactly as before.  If it
+;;; has one, its forms are read and evaluated here, which is how a build types
+;;; (SI:QLD) and (SI:DISK-SAVE ...) without a screen.
+;;;
+;;; Progress is reported by asking the server for a file whose name carries the
+;;; message: MINI has no way to send data, but every request is logged by the
+;;; server, with its time.  So the server's log says how far the script got,
+;;; and the console still shows anything that goes wrong, since the cold load
+;;; has no error handler to catch it.
+
+(DEFVAR MINI-SCRIPT-FILE-NAME "SYS: COLD; SCRIPT LISP")
+
+(DEFUN MINI-REPORT (MESSAGE)
+  (MINI-OPEN-FILE (STRING-APPEND "SYS: COLD; REPORT; " MESSAGE) NIL T)
+  NIL)
+
+(DEFUN MINI-RUN-SCRIPT (&AUX STREAM (N 0))
+  (WHEN (SETQ STREAM (MINI-OPEN-FILE MINI-SCRIPT-FILE-NAME NIL T))
+    (MINI-REPORT "script-begins")
+    (LET ((EOF '(()))
+	  (*STANDARD-INPUT* STREAM)
+	  (*PACKAGE* (PKG-FIND-PACKAGE "SYSTEM-INTERNALS")))
+      (DO ((FORM (CLI:READ *STANDARD-INPUT* NIL EOF)
+		 (CLI:READ *STANDARD-INPUT* NIL EOF)))
+	  ((EQ FORM EOF))
+	(SETQ N (1+ N))
+	;; FORMAT is not loaded this early, so the number is a digit.
+	(MINI-REPORT (STRING-APPEND "form-"
+				    (IF (< N 10.)
+					(STRING (INT-CHAR (+ (CHAR-INT #/0) N)))
+				      "more")))
+	(EVAL FORM)))
+    (MINI-REPORT "script-ends")
+    T))
 
 (DEFUN MINI-BOOT ()
   (SETQ MINI-OPEN-P NIL)
