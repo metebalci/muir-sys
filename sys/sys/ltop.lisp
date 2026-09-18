@@ -348,6 +348,14 @@ COLD-BOOT is T if this is for a cold boot."
     (PRINC (PACKAGE-NAME *PACKAGE*))
     (PRINC ".]"))
 
+  ;; in a cold load, run the server's script if it has one, so that a
+  ;; build needs no console.  PRINT-HERALD is the test for a full world; a
+  ;; cold load has none.  A refused open returns NIL and we fall through to
+  ;; the listener, as before.
+  (WHEN (AND (NOT (FBOUNDP 'PRINT-HERALD))
+	     (FBOUNDP 'MINI-RUN-SCRIPT))
+    (MINI-RUN-SCRIPT))
+
   (AND (BOUNDP 'TIME:*LAST-TIME-UPDATE-TIME*)
        (NULL (CAR COLD-BOOT-HISTORY))
        (SETF (CAR COLD-BOOT-HISTORY) (CATCH-ERROR (LIST SI:LOCAL-HOST

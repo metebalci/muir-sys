@@ -2001,14 +2001,20 @@ N to do nothing special and enter the normal error handler.
     (FUNCTION-PARENT NIL)		;Default is no embedding in other definitions
     (COMPILER-FDEFINEDP NIL)		;Default is no remembering of compiled definitions
     (DWIMIFY NIL)
+    ;; the clause had a second form, ARG2, after the IF, so it always
+    ;; returned the default and threw the lookup away: no property of a
+    ;; function spec that is not a symbol, such as a method's source file,
+    ;; could be read back.  The default belongs inside the loop, which is how
+    ;; MIT wrote it in the half-finished SYS; FSPEC that System 100 switched
+    ;; off and release 1001 deleted.
     (GET (IF FUNCTION-SPEC-HASH-TABLE
 	     ;; Default is to use plist hash table
 	     (WITH-STACK-LIST (KEY FUNCTION-SPEC ARG1)
 	       (GETHASH KEY FUNCTION-SPEC-HASH-TABLE ARG2))
 	   (LOOP FOR (FS IND PROP) IN COLD-LOAD-FUNCTION-PROPERTY-LISTS
 		 WHEN (AND (EQUAL FS FUNCTION-SPEC) (EQ IND ARG1))
-		 RETURN PROP))
-	 ARG2)
+		 RETURN PROP
+		 FINALLY (RETURN ARG2))))
     (PUTPROP (LET ((DEFAULT-CONS-AREA BACKGROUND-CONS-AREA)
 		   (AREA (%AREA-NUMBER FUNCTION-SPEC)))
 	       (IF (OR (AREA-TEMPORARY-P AREA)
