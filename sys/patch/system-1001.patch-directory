@@ -1,0 +1,5 @@
+;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
+;;; Version directory for the clean-built System 1001 band.
+
+(:EXPERIMENTAL
+ ((0 "System Loaded" "LISPM" NIL)))

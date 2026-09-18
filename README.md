@@ -16,6 +16,15 @@ today's sizes and kinds, and to be built, versioned and released reproducibly
 from a git repository. **Compatibility is not kept:** the CADR architecture,
 the PROM, the microcode and the system are all open to change.
 
+## System 1001
+
+System 1001 removes unused machine and host support, dead interfaces and
+obsolete compatibility code. It fixes the error handler and TELNET input,
+and adds unattended cold loading through a generated
+`SYS: SITE; COLDRUN LISP` script. The system is built by a clean recompile,
+a new cold load, `QLD` and a saved band.
+[`docs/release-1001.md`](docs/release-1001.md) records the changes.
+
 ## System 1000
 
 **System 1000** is System 100 fixed and cleaned up: the same sources and
@@ -75,6 +84,8 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
+- [`docs/release-1001.md`](docs/release-1001.md) --- every change System 1001
+  makes to System 1000.
 - [`docs/release-1000.md`](docs/release-1000.md) --- every change System 1000
   makes to System 100.
 - [`docs/upstream-changes.md`](docs/upstream-changes.md) --- the fixes LM-3 made

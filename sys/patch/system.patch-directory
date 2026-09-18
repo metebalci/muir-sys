@@ -1,5 +1,4 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
-;;; release 1000, forked from System 100.
+;;; System 1001 release version.
 
-
-("System" 1000)
+("System" 1001)

@@ -561,3 +561,11 @@ file saying why.
   177201. Release 1000 was re-released with the same change.
 
 ## Around the system
+
+- **WORMCH is rebuilt from its AST source.** The build guide gives a QFASL
+  recipe that declares `FONTS:WORM` special before assigning the converted
+  font. A saved-value assignment alone fails in a fresh cold-loaded world.
+  The generated QFASL remains outside the repository.
+- **The build guide follows the System 100-based tree.** It compiles ZWEI
+  as part of SYSTEM, compiles ALLDEFS directly, and uses the current four-band
+  development layout.
