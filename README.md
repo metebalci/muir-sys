@@ -67,7 +67,7 @@ This is the system. Three projects provide the machine:
 | | |
 |---|---|
 | `sys/` | the Lisp Machine sources, as the machine sees them: `SYS: SYS2;` is `sys/sys2/` |
-| `site/` | the site files a machine loads, for the example site `Z54` |
+| `site/` | the site files a machine loads, for the example site `MIT` |
 | `docs/` | how the system is built, and what has been found out about it |
 
 ## Documents
