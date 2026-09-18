@@ -399,6 +399,14 @@ file saying why.
   in `qrand`, `qmisc` and `io/file/open.lisp` that pointed at it say instead
   where the machinery lives.
 
+- **The demos that need hardware this system does not have** (the user, 2026-09-18):
+  `demo/ctest.lisp`, the wire-wrap board tester, with the driver it calls,
+  `io1/cdrive.lisp`, and that driver's notes, `io1/wlr.doc`; and
+  `demo/votrax.lisp` with its word list `demo/words.lisp`, which drive a
+  Votrax speech synthesizer. No system loaded any of them: the HACKS system
+  names neither, and nothing else in the tree calls them. The other demos
+  stay.
+
 ## Faults fixed
 
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
