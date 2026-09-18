@@ -2,7 +2,15 @@
 
 This is how a new world is built from the tree: compile the sources, make a cold load, boot it, load the rest of the system and save a band. It follows the tree's own code, and each claim cites a file and line.
 
-**Status:** verified end to end twice on 2026-09-16. First from a stock System 100 band on the bootstrap subnet; then, the same night, by the 1000 band rebuilding the final tree on the site's own subnet 376, from a tree with every compiled file removed. That second build compiled SYSTEM, made a cold load, loaded it with `QLD` to a partition size of 20842 blocks, and saved a band that boots as "LMI System, band 1 of LISPM-1 / Experimental System 1000 / Microcode 323" and answers `(1000 "177202" 65153 256)`.
+**System 1001 verification (2026-09-18):** clean compilation, fresh cold
+loading, unattended QLD and saved-band boot checks passed. The main SYSTEM
+compile took 2h17m36s; MAKE-COLD took 5m16s; the successful unattended QLD
+took 25m25s. LOD4 booted as System 1001 with microcode 323, passed SYS file
+access, and the regenerated WORM font matched its AST source. UCADR and PROM
+machine outputs matched their previous assemblies, as did both diagnostic
+memory images and symbol sets.
+
+**Earlier System 1000 verification:** verified end to end twice on 2026-09-16. First from a stock System 100 band on the bootstrap subnet; then, the same night, by the 1000 band rebuilding the final tree on the site's own subnet 376, from a tree with every compiled file removed. That second build compiled SYSTEM, made a cold load, loaded it with `QLD` to a partition size of 20842 blocks, and saved a band that boots as "LMI System, band 1 of LISPM-1 / Experimental System 1000 / Microcode 323" and answers `(1000 "177202" 65153 256)`.
 
 | Step | Result |
 |---|---|
@@ -49,9 +57,12 @@ hand instead, in the order SYSTEM's own ALLDEFS module lists them
 (`sys/sysdcl.lisp:10-16`):
 
 ```lisp
-(qc-file "SYS: SYS2; DEFMAC LISP")   (qc-file "SYS: SYS2; STRUCT LISP")
-(qc-file "SYS: SYS2; LMMAC LISP")    (qc-file "SYS: SYS2; SETF LISP")
-(qc-file "SYS: EH; ERRMAC LISP")     (qc-file "SYS: SYS; TYPES LISP")
+(qc-file "SYS: SYS2; DEFMAC LISP")
+(qc-file "SYS: SYS2; LMMAC LISP")
+(qc-file "SYS: EH; ERRMAC LISP")
+(qc-file "SYS: SYS2; STRUCT LISP")
+(qc-file "SYS: SYS2; SETF LISP")
+(qc-file "SYS: SYS; TYPES LISP")
 ```
 
 **Then the systems**, with the version left where it is:
@@ -83,7 +94,19 @@ So either give the server a writable home directory for the user, or ask for
 - **`MAKE-COLD`'s partition question traps over TELNET** (issue 4). Replacing `FQUERY` for the duration answers it: `(let ((old (symbol-function 'fquery))) (unwind-protect (progn (fset 'fquery (function (lambda (&rest ignore) t))) (funcall (intern "MAKE-COLD" "COLD") "LOD3")) (fset 'fquery old)))`. Check first that every file of `COLD-LOAD-FILE-LIST` has a QFASL.
 - **A cold load has no TELNET.** `(si:qld)` is typed at the console, which muir serves over RFB; a client sending key events slowly is enough.
 - **The site files must be compiled** into the directory served as `SYS: SITE;` --- `site`, `lmlocs` and the host table --- or `QLD` stops at "File not found" for `/site/site.qfasl`.
-- **Two generated files are needed and not carried:** `SYS: SYS; UCINIT QFASL` (above) and `SYS: DEMO; WORMCH QFASL`, which the HACKS system loads and whose source, `demo/wormch.ast`, has no build rule yet. Both came from the release. At an error prompt, RESUME retries once the file is there; muir maps RESUME to F5.
+- **WORMCH is generated from its AST source.** Before loading HACKS into a cold world, use the running build band's font converter and QFASL writer:
+
+  ```lisp
+  (let ((name (fed:read-ast-into-font
+                "SYS: DEMO; WORMCH AST" 'fonts:worm)))
+    ;; A fresh world needs the special declaration before the assignment.
+    (compiler:dump-forms-to-file "SYS: DEMO; WORMCH QFASL"
+      (list (list 'proclaim (list 'quote (list 'special name)))
+            (list 'setq name (list 'quote (symbol-value name))))
+      '(:package :user)))
+  ```
+
+  `SYS: SYS; UCINIT QFASL` is a tracked binary input, as are the fonts without recovered sources and `DEMO; TVBGAR`. Preserve these inputs when clearing generated QFASLs for a clean build.
 - **Answer the "additional systems to load" question with `()`.** In this base ZWEI and the rest are components of System and are already loaded.
 
 ### Moving the new band to the site's own subnet
@@ -119,14 +142,18 @@ A release pack has muir's default layout and only the microcode and the band loa
 ```
 initialize                               2 MCR, PAGE, 4 LOD of 49419 blocks
 name LISPM-1
-comment 1000
+comment 1001
 load-from MCR1 <build pack> MCR1         the microcode the band was verified with
 modify MCR1 keep UCADR 323
-load-from LOD1 <build pack> LOD5         the saved band
-modify LOD1 keep Exp 1000
+load-from LOD1 <build pack> LOD4         the verified full band
+modify LOD1 keep Exp 1001
+current LOD1
+current MCR1
 ```
 
-`load-from` copies blocks, not partition comments, hence the two `modify` steps. Take the release's checksum from a pack that has never been booted: a running machine writes its own pack.
+`load-from` copies blocks, not partition comments, hence the two `modify` steps. Take the release's checksum from a pack that has never been booted: a running machine writes its own pack. Boot-test a disposable copy against
+the sources extracted from the release archive. All unused release partitions,
+including PAGE, must contain only zeroes.
 
 ## The stages
 
@@ -142,10 +169,10 @@ A world cannot be built from nothing, so each stage runs on the one before.
 
 - **A running band** to compile with, such as a 1000 band.
 - **A file server for `SYS:`** that serves both FILE and MINI. ozd does.
-- **A site.** The tree has no `site/` directory, and the build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
+- **A site.** The repository includes an example `site/` directory. The build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
 - **The translations file must survive the traditional readtable.** A cold load reads it with `MINI-READFILE` (`cold/mini.lisp:319`), which ignores the file's attribute list, so it is read in traditional syntax whatever the file says. There a slash escapes the next character. A file whose targets are Unix paths must therefore double every slash and name no readtable, or the cold load stops with "End of file ... in the middle of the list". MIT's own site file never met this: its targets are TOPS-20 paths with no slashes. This is metebalci/muir-sys issue 9.
 - **A free partition for the cold load,** and a larger one for the saved world (step 7).
-- **The console,** for steps 5 and 6. The TELNET server is not part of a cold load.
+- **A console or generated COLDRUN script** for steps 5 and 6. The TELNET server is not part of a cold load; System 1001 can run QLD from the script described below.
 
 Every session that reads or writes files must log in first, for example with `(login "LISPM" t)`.
 
@@ -165,48 +192,44 @@ The cold-load builder loads both QFASL files specially (`cold/coldut.lisp:1244-1
 
 ## 2. Compile the systems
 
-`SYSTEM` is the whole system except ZWEI (`sys/sysdcl.lisp:6-43`). ZWEI is compiled on its own (`sys/sysdcl.lisp:229`), and QLD loads it only when asked.
+`SYSTEM` includes ZWEI and HACKS in this System 100-based tree. There is no
+`SYSTEM-MACROS` system. Compile SYSTEM's six ALLDEFS files in the order given
+above, and compile the site files before the cold load:
 
 ```lisp
-(make-system 'system :recompile :noconfirm :defaulted-batch)
-(make-system 'zwei :recompile :noconfirm :defaulted-batch)
+(make-system 'site :recompile :noload :noconfirm :nowarn)
+(make-system 'system :recompile :noload :noconfirm :nowarn)
 ```
 
-- `:RECOMPILE` compiles every file even when its QFASL is newer (`sys2/maksys.lisp:466-468`).
-- `:NOCONFIRM` asks nothing (`sys2/maksys.lisp:432`).
-- `:DEFAULTED-BATCH` writes the compiler's warnings to the system's warnings file instead of the screen, and asks nothing (`sys2/maksys.lisp:502-521`). For `SYSTEM` that is `SYS: PATCH; SYSTEM-CWARNS LISP` (`sys/sysdcl.lisp:10`). The tracked `patch/cwarns-*.lisp` files come from upstream's last full build, by ams on 2023-03-22, which made `SYSTEM-INTERNALS`, then ZWEI, then COLD.
+For a clean build, clear generated QFASLs first, preserving the tracked binary
+inputs described above. Regenerate both readtables and WORMCH from source.
+Keep the source tree unchanged throughout compilation and cold loading.
 
-**Loading while compiling.** Without `:NOLOAD`, each new file is loaded into the compiling world as it is compiled, which changes that world as it goes. With `:NOLOAD`, every file is compiled against the definitions the band already has. That is safe only when the band was built from nearly the same sources. For the fork point it is: trunk at 1af7716f24 differs from the System 304 release by 5 commits in 4 files, none of them a definition file or `sys/sysdcl.lisp`. So it compiles with:
+`:RECOMPILE` rebuilds every compilation target. `:NOLOAD` suppresses final
+loading into the build band, but still loads definitions required by compile
+steps. Use a compatible build band and compile the current `SYS; SYSDCL`
+source before loading its QFASL. `:NOWARN` enables unattended compilation
+without requiring a compiler-warning database in the login directory.
 
-```lisp
-(make-system 'system-macros :recompile :noload :noconfirm)
-(make-system 'system :recompile :noload :noconfirm :defaulted-batch)
-(make-system 'zwei :recompile :noload :noconfirm :defaulted-batch)
-```
+Compiling SYSTEM increments its major version once. The final 1001 build
+advanced the directory from 1000 to 1001 while the running checkpoint stayed
+1000. For a recovery or a rebuild of the same version, add
+`:NO-INCREMENT-PATCH`; check the directory before deciding whether to advance
+it. Do not increment again merely because an interrupted build is resumed.
 
-**`:NOLOAD` still loads definition files.** It removes only the top-level load steps (`sys2/maksys.lisp:452-456`). A load that another step depends on still happens, such as SYSTEM's `(:DO-COMPONENTS (:FASLOAD ALLDEFS))` (`sys/sysdcl.lisp:43`) or `(:COMPILE-LOAD MAIN (:FASLOAD DEFS))` in the component systems. On the first try, SYSTEM loaded `SYS: SYS2; DEFMAC QFASL` before compiling anything, and stopped with "File not found". So `SYSTEM-MACROS` (`sys/sysdcl.lisp:610-619`), which compiles exactly SYSTEM's six definition files and depends on nothing, goes first. It runs without `:DEFAULTED-BATCH` because it names no warnings file, and that keyword would then use the user's home directory. The definition files that are loaded come from the band's own sources, and `:DEFAULTED-BATCH` turns redefinition questions into warnings.
-
-**Pace.** On muir's micro engine, `SYS: IO; DISK`, 2161 lines, compiled in 77 seconds of wall time. the first SYSTEM compile took 6511 seconds, about an hour and 49 minutes, and wrote 150 compiled files.
-
-**Expected warnings.** The warnings database names 62 undefined functions. Most belong to systems that SYSTEM does not include, such as the CADR debugger, PRESS, FED, the IP code and Converse, and are harmless. Sixteen are functions that nothing in the tree defines, in Peek, the mouse code, `SYS; QMISC` and `SYS; QFCTNS`; that is issue 3.
-
-**The world runs out of address space.** A long compile consumes areas and regions, and the world holds 255 of them (`SIZE-OF-AREA-ARRAYS`, `cold/qcom.lisp:803`, a base-8 file). The first build compiled all of SYSTEM and 24 files of ZWEI before the console began warning "Address space low!", counting down from 37 regions to 1, and the compile then stopped with `TRAP 5033 (REGION-TABLE-OVERFLOW)` inside `MAKE-SYMBOL`. Nothing is lost: the compiled files are already written. Reboot the machine and continue with `:COMPILE` instead of `:RECOMPILE`, which skips the files whose compiled form is newer than their source. Expect to reboot once or twice during a full build.
-
-**Resuming needs the interrupted file compiled by hand.** `:COMPILE` decides what is out of date by reading the compiled file's property list (`SI::FILE-NEWER-THAN-INSTALLED-P` through `SI::SYSTEM-GET-FILE-PROPERTY-LIST`), and a missing compiled file signals "File not found" rather than meaning "compile it". The file the trap interrupted has no compiled form, so the resumed build stops on it at once. Compile the missing files directly first, then let `MAKE-SYSTEM` finish:
-
-```lisp
-(dolist (f '("DIRED" "BDIRED")) (qc-file (format nil "SYS: ZWEI; ~A LISP" f)))
-(make-system 'zwei :compile :noload :noconfirm :defaulted-batch)
-```
-
-Which files are missing can be read off the system's module list in `sys/sysdcl.lisp` against the compiled files present.
-
-**The version number rises.** Compiling a patchable system increments its major version, because `(:PATCHABLE ...)` includes that step (`sys2/maksys.lisp:1788-1789`). SYSTEM went from 1000 to 1001 and wrote `patch/system-1001.patch-directory`; ZWEI went from 130 to 131 and wrote `zwei/patch/zwei-131.patch-directory`. A build also rewrites the tracked warnings files and patch directories of the systems it makes. Pass `:NO-INCREMENT-PATCH` (`sys2/maksys.lisp:472-473`) to keep the number as it is.
+The final 1001 SYSTEM compile took 2 hours 17 minutes 36 seconds on muir's
+micro engine. A long compile can exhaust the build world's address space;
+reboot before assembling microcode or making the cold load. If compilation
+was interrupted, directly compile any missing or incomplete outputs before
+resuming with `:COMPILE` and `:NO-INCREMENT-PATCH`.
 
 ## 3. Build the cold-load builder
 
 ```lisp
-(make-system 'cold :compile :noconfirm)
+(load "SYS: COLD; COLDPK LISP")
+(qc-file "SYS: COLD; COLDUT LISP")
+(qc-file "SYS: COLD; COLDLD LISP")
+(make-system 'cold :noconfirm)
 ```
 
 The `COLD` system (`cold/coldpk.lisp:57-64`) compiles and loads `COLD; COLDUT` and `COLDLD`, and loads the cold-load parameters from `COLD; QCOM` and `QDEFS`. It keeps the new world's symbols in its own package, so the new world may differ incompatibly from the old one (`cold/coldpk.lisp:9-24`).
@@ -225,7 +248,11 @@ The symbol cannot be read before the package exists, so in a world where COLD ha
 
 The COLD system has the same resume trap as the others: `COLD; COLDUT` and `COLD; COLDLD` must be compiled by hand with `qc-file` before `(make-system 'cold :compile :noconfirm)` will run, since it reads their compiled files' properties.
 
-**Run it at the console, not over TELNET.** `MAKE-COLD` confirms before writing the partition, through `FQUERY` with `:TYPE :READLINE` (`io/disk.lisp:989`, `io1/fquery.lisp:407`), and a line read over TELNET takes a trap and leaves the session in the error handler; that is issue 4. At the console the question is answered from the keyboard. It is asked twice when the form is typed rather than evaluated from a script: the Return that ends the form is read as an empty answer, and the question is asked again. Answer the second one with `Yes` and Return. muir serves its console over RFB, so a viewer, or a small client sending key events, can type the form and the answer while a TELNET session stays open for anything that only prints.
+**Choose the destination explicitly.** The verified unattended build used
+the temporary `FQUERY` override shown above after checking and clearing LOD3.
+The earlier System 100 bring-up required console input because of TELNET
+line-input bugs; System 1001 includes those fixes. Never answer a partition
+overwrite question automatically without first checking its destination.
 
 **Keep typed forms short.** A cold load's console has a small wired keyboard buffer, and a long line is silently truncated: a 130-character form typed at about twelve characters a second stopped echoing after sixty characters, and the reader simply waited for the rest. Type short forms, or type slowly, and read back what the screen echoed before pressing Return.
 
@@ -346,22 +373,23 @@ Everything else in this document is procedure rather than a change to the source
 
 ## 7. Save the band
 
+After QLD completes and the new world's version and SYS file access pass:
+
 ```lisp
-(si:disk-save "LOD9")
+(si:disk-save "LOD4" t)
 ```
 
-`DISK-SAVE` (`sys/qmisc.lisp:1157`) asks for confirmation unless its second argument is true. The partition must hold at least the size QLD printed. A full 1000.0 world needs 25144 blocks, more than a standard LOD partition of 24225 blocks.
+The second argument suppresses questions. Use a destination large enough for
+the finished world; muir's current default LOD partitions hold 49419 blocks.
+The build clears LOD4 with the emulator stopped before booting the cold band,
+so no older band data remains beyond the new saved world's end. Preserve a
+backup of the existing full band first.
 
-With the machine stopped, `diskpack` merges two neighbouring free partitions: delete the second, then grow the first into its blocks. On a standard pack, LOD5 and LOD6 are adjacent and LOD9 follows them:
-
-```
-diskpack pack.img "delete LOD6"
-diskpack pack.img "modify LOD5 48450"
-```
-
-LOD5 then holds 48450 blocks and ends exactly where LOD9 begins, so no other partition moves. This was tried on a copy of the development pack: the label came out as expected, and LOD2 and LOD9 stayed byte for byte the same.
-
-After saving, the microcode boots the saved world itself. Make that partition the current band so later boots use it.
+Saving resets networking and boots the saved world, so a TELNET driver can
+lose its connection before printing a completion marker. Reconnect and verify
+the loaded band, System version and SYS file access. With the emulator
+stopped, copy verified LOD3 to LOD1 and LOD4 to LOD2 for the development
+layout, preserve their comments, and select LOD2 for subsequent boots.
 
 ## Checks
 
@@ -402,7 +430,9 @@ OZ, not MIT-OZ.
 **PROMH, the boot PROM.** `(ua:assemble "SYS: UCADR; PROMH TEXT")`, with
 standard input answering `9` for the version and `T` for "T IF FOR PROM", and
 `Y-OR-N-P` yes. It writes beside its source, in `sys/ucadr/`, and the four files
-move to `ubin/`. All four are byte for byte System 100's.
+move to `ubin/`. The machine code, table and location map match the earlier
+assembly byte for byte. Symbol-file ordering and assembler bookkeeping can
+differ; compare the symbols and machine outputs separately.
 
 **DCFU and MEMD, the disk formatter and memory test.** In a freshly booted band
 each, since a dump includes every symbol the assembler holds:
