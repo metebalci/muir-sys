@@ -365,7 +365,7 @@
       (SET-FILE-LOADED-ID 'MINI-PLIST-RECEIVER MINI-FILE-ID PACKAGE))))
 
 ;;; a cold load runs unattended.  It asks the file server for
-;;; SYS: COLD; COLDRUN LISP; if the server has no such file the open is refused
+;;; SYS: SITE; COLDRUN LISP; if the server has no such file the open is refused
 ;;; and the cold load goes to its console listener exactly as before.  If it
 ;;; has one, its forms are read and evaluated here, which is how a build types
 ;;; (SI:QLD) and (SI:DISK-SAVE ...) without a screen.
@@ -375,7 +375,21 @@
 ;;; console still shows anything that goes wrong, since the cold load has no
 ;;; error handler to catch it.
 
-(DEFVAR MINI-SCRIPT-FILE-NAME "SYS: COLD; COLDRUN LISP")
+
+;;; COLDRUN is generated site policy, not system source.  MINI has no
+;;; logical pathname translator, so resolve its site pathname while
+;;; compiling, just as its server address is resolved above, so the cold
+;;; load sends the server a physical pathname rather than SYS: SITE; ... .
+(DEFMACRO DEFINE-MINI-SCRIPT-FILE-NAME ()
+  ;; DEFVAR quotes its initializer in this system.  Expand the whole
+  ;; definition here so the cold load receives a string, not a macro call.
+  `(DEFVAR MINI-SCRIPT-FILE-NAME
+     ,(SEND (SEND (FS:PARSE-PATHNAME "SYS: SITE; COLDRUN LISP")
+                  :TRANSLATED-PATHNAME)
+            :STRING-FOR-MINI)))
+
+(DEFINE-MINI-SCRIPT-FILE-NAME)
+(DEFVAR MINI-SCRIPT-RUNNING-P NIL)
 
 (DEFCONST MINI-REPORT-OP #o204)			;a message for the server's log
 
@@ -388,6 +402,10 @@
 ;;; retransmit for ever --- which in a cold load there is no way out of --- we
 ;;; give up after three tries and report no more.
 (DEFUN MINI-REPORT (MESSAGE)
+  ;; QLD hands the board to the full NCP.  Reinitializing MINI after
+  ;; that would replace the NCP's packet lists and disrupt FILE traffic.
+  (WHEN (AND (BOUNDP 'QLD-MINI-DONE) QLD-MINI-DONE)
+    (RETURN-FROM MINI-REPORT (MINI-REPORT-THROUGH-NCP MESSAGE)))
   (WHEN MINI-REPORTING-P
     (UNLESS MINI-OPEN-P (MINI-OPEN-CONNECTION MINI-DESTINATION-ADDRESS MINI-CONTACT-NAME))
     (DO ((TRIES 3 (1- TRIES))
@@ -405,24 +423,58 @@
 	     (MINI-SEND-STS)
 	     (RETURN T))))))
 
-(DEFUN MINI-RUN-SCRIPT (&AUX STREAM (N 0))
-  (WHEN (SETQ STREAM (MINI-OPEN-FILE MINI-SCRIPT-FILE-NAME NIL T))
-    (MINI-REPORT "script-begins")
-    (LET ((EOF '(()))
-	  (*STANDARD-INPUT* STREAM)
-	  (*PACKAGE* (PKG-FIND-PACKAGE "SYSTEM-INTERNALS")))
-      (DO ((FORM (CLI:READ *STANDARD-INPUT* NIL EOF)
-		 (CLI:READ *STANDARD-INPUT* NIL EOF)))
-	  ((EQ FORM EOF))
-	(SETQ N (1+ N))
-	;; FORMAT is not loaded this early, so the number is a digit.
-	(MINI-REPORT (STRING-APPEND "form-"
-				    (IF (< N 10.)
-					(STRING (INT-CHAR (+ (CHAR-INT #/0) N)))
-				      "more")))
-	(EVAL FORM)))
-    (MINI-REPORT "script-ends")
-    T))
+
+;;; after QLD, send the same report using an ordinary NCP connection.
+;;; Bound both waits so an old server cannot hold an unattended build, and
+;;; return the reply packet and connection even when reporting fails.
+(DEFUN MINI-REPORT-THROUGH-NCP (MESSAGE &AUX CONN PKT)
+  (WHEN MINI-REPORTING-P
+    (UNWIND-PROTECT
+        (PROGN
+          (SETQ CONN (CHAOS:OPEN-CONNECTION MINI-DESTINATION-ADDRESS
+                                             MINI-CONTACT-NAME 1))
+          (CHAOS:WAIT CONN 'CHAOS:RFC-SENT-STATE (* 10. 60.))
+          (WHEN (EQ (CHAOS:STATE CONN) 'CHAOS:OPEN-STATE)
+            (SETQ PKT (CHAOS:GET-PKT))
+            (CHAOS:SET-PKT-STRING PKT MESSAGE)
+            (CHAOS:SEND-PKT CONN PKT MINI-REPORT-OP)
+            (SETQ PKT NIL)
+            (PROCESS-WAIT-WITH-TIMEOUT
+              "MINI report" (* 10. 60.)
+              #'(LAMBDA (C)
+                  (OR (CHAOS:READ-PKTS C)
+                      (NOT (EQ (CHAOS:STATE C) 'CHAOS:OPEN-STATE))))
+              CONN)
+            (SETQ PKT (CHAOS:GET-NEXT-PKT CONN T)))
+          (SETQ MINI-REPORTING-P
+                (AND PKT (= (CHAOS:PKT-OPCODE PKT) #o203))))
+      (WHEN PKT (CHAOS:RETURN-PKT PKT))
+      (WHEN CONN (CHAOS:CLOSE-CONN CONN)))))
+
+;;; MINI has one stream and one packet buffer.  Read through EOF before
+;;; reporting or evaluating: either operation may reuse that buffer, and QLD
+;;; opens other files and eventually replaces the network and input streams.
+;;; QLD also calls LISP-REINITIALIZE; the binding prevents a recursive script.
+(DEFUN MINI-RUN-SCRIPT (&AUX STREAM (N 0) FORMS)
+  (UNLESS MINI-SCRIPT-RUNNING-P
+    (LET ((MINI-SCRIPT-RUNNING-P T)
+          (*PACKAGE* (PKG-FIND-PACKAGE "SYSTEM-INTERNALS")))
+      (WHEN (SETQ STREAM (MINI-OPEN-FILE MINI-SCRIPT-FILE-NAME NIL T))
+        (LET ((EOF '(())))
+          (DO ((FORM (CLI:READ STREAM NIL EOF) (CLI:READ STREAM NIL EOF)))
+              ((EQ FORM EOF))
+            (PUSH FORM FORMS)))
+        (MINI-REPORT "script-begins")
+        (DOLIST (FORM (NREVERSE FORMS))
+          (SETQ N (1+ N))
+          ;; FORMAT is not loaded this early, so the number is a digit.
+          (MINI-REPORT (STRING-APPEND "form-"
+                           (IF (< N 10.)
+                               (STRING (INT-CHAR (+ (CHAR-INT #/0) N)))
+                             "more")))
+          (EVAL FORM))
+        (MINI-REPORT "script-ends")
+        T))))
 
 (DEFUN MINI-BOOT ()
   (SETQ MINI-OPEN-P NIL)

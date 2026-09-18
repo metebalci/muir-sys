@@ -265,7 +265,30 @@ and nothing here can write it again: its writer, `WRITE-INITIALLY-MICROCOMPILED-
 
 ## 6. Load the rest
 
-At the cold load's console:
+For an unattended load, generate `site/coldrun.lisp`, served as
+`SYS: SITE; COLDRUN LISP`, with these forms:
+
+```lisp
+(si:qld '(:noconfirm :no-reload-system-declaration) nil)
+(si:mini-report "qld-complete")
+```
+
+The cold load reads and runs this script before entering its listener.
+The script is local build input, ignored by Git and outside the SITE
+compilation list. The runner stays in `sys/cold/mini.lisp`. It resolves the
+script's logical pathname while compiling, because MINI has no pathname
+translator at cold boot. With the supplied site translations, ozd sees
+`/site/coldrun.lisp`. Changing that translation requires recompiling MINI
+and rebuilding the cold band.
+
+The second argument to QLD suppresses the additional-systems question.
+Use forms supported by the cold environment before QLD has loaded the rest
+of the system. With ozd's `--log-mini`, a successful run reports
+`qld-complete` followed by `script-ends`. Saving the finished band is a
+separate step.
+
+If the script is absent, the cold load enters its ordinary listener. To
+load interactively, use the cold load's console:
 
 ```lisp
 (si:qld)

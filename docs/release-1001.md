@@ -412,6 +412,71 @@ file saying why.
   went with those hosts, and `FUNCTION-SPEC-REMPROP`, which only ever existed
   inside the block comment that was `sys/fspec.lisp`.
 
+- **The rest of the dangling cold-load exports,** found by checking every name
+  `cold/export.lisp` and `cold/global.lisp` export against a definition
+  somewhere in `sys/`. This closes out the "left for the cold-load cleanup"
+  notes above: `STATUS`, `SSTATUS`, `LOAD-PATCHES`, `LOAD-AND-SAVE-PATCHES`,
+  `IF-IN-MACLISP`, `IF-IN-LISPM`, `IF-FOR-MACLISP`, `IF-FOR-LISPM` and
+  `IF-FOR-MACLISP-ELSE-LISPM` are gone from `cold/global.lisp`, all removed
+  earlier this release along with their callers.
+  - **34 more names left `cold/export.lisp`:** `SI:*READER-SYMBOL-SUBSTITUTIONS*`,
+    `SI:CHANGE-INSTANCE-FLAVOR`, `SI:COMPILE-HOST-FLAVOR-COMBINATION`,
+    `SI:DEFINE-SIMPLE-METHOD-COMBINATION`, `SI:FILE-WARNINGS-EDITOR-BUFFER`,
+    `SI:MAKE-24-BIT-UNSIGNED`, `SI:MAP-SYSTEM-FILES`, `SI:NOTE-PRIVATE-PATCH`,
+    `SI:OTHER-MACHINE-LOCATION-ALIST`, `SI:PROCESS-SCHEDULER` (only
+    `APPROPRIATE-PROCESS-SCHEDULER` and `PROCESS-SCHEDULER-FOR-CADR` exist),
+    `SI:PTTBL-CHARACTER-BEFORE-FONT`, `SI:PTTBL-CHARACTER-PREFIX`,
+    `SI:PTTBL-CLOSE-RANDOM`, `SI:PTTBL-OPEN-RANDOM`, `SI:RDTBL-#-MACRO-ALIST`,
+    `SI:SET-HOST-FLAVOR-KEYWORDS`, `SI:SET-SYSTEM-FILE-PROPERTIES` and
+    `SI:TERMINAL-IO-SYN-STREAM`, all of them either never implemented or only
+    ever named in a comment describing what the code around it does; the eight
+    gray levels `TV:0%-GRAY`, `TV:5.5%-GRAY`, `TV:6%-GRAY`, `TV:7%-GRAY`,
+    `TV:8%-GRAY`, `TV:9%-GRAY`, `TV:10%-GRAY` and `TV:100%-GRAY`, an odd set
+    that was never implemented alongside the five gray levels
+    `window/scrman.lisp` does define; `TV:MOUSE-CHAR-P` and
+    `COMPILER:FASL-UPATE-STREAM`, both transposed or misspelled duplicates of
+    real, already-exported names (`TV:CHAR-MOUSE-P`,
+    `COMPILER:FASL-UPDATE-STREAM`); and `TV:MAIN-SCREEN-AND-WHOLINE`,
+    `ZWEI:*KILL-RING*`, `FS:UNKNOWN-LOGICAL-DIRECTORY`, `EH:INSURE-PDL-ROOM`,
+    `TIME:GET-INTERNAL-TIME` and `CHAOS:HOST-CHAOS-MIXIN`, none of them found
+    anywhere else in the tree. Two more names deep in the same commented-out
+    block that already held the removed `SI:HOST-*-MIXIN` names,
+    `SI:FILE-RETRY-READ-PATHNAME` and `SI:NETWORK-TYPE-FLAVOR`, are already
+    inert (the block comment they are in is never read) and are left as
+    historical prose rather than touched.
+  - **26 more names left `cold/global.lisp`:** `ARRAY-PUSH-PORTION-EXTEND`,
+    `CONDITION-PSETQ`, `COPYTREE-SHARE`, `DEFINE-PROMPT-AND-READ-TYPE`,
+    `DEFVAR-RESETTABLE`, `DEFVAR-STANDARD`, `DEFWHOPPER-SUBST`,
+    `MAKE-HARDCOPY-STREAM`, `MAKE-HEAP`, `MAXPREFIX`, `MAXSUFFIX`,
+    `NULL-MACRO`, `PROCESS-ERROR-STOP-PROCESSES`, `PROCESS-PLIST`,
+    `RESET-FILL-POINTER`, `SETQ-STANDARD-VALUE`, `SGVREF`,
+    `STANDARD-VALUE-LET`, `STANDARD-VALUE-LET*`, `STANDARD-VALUE-PROGV`,
+    `STRING-NCONC-PORTION`, `UNBOUND-FUNCTION` (a plain symbol, never the
+    `:UNBOUND-FUNCTION` keyword that `WHO-CALLS` still uses) and
+    `UNWIND-ALL`. `WITH-OPEN-STRING` goes the same way: `sys/qmisc.lisp`'s
+    `:CONSTRUCTED-STRING` stream operation was written to support it, but the
+    macro itself was never in this tree, System 100 or System 304 alike.
+  - **`WITH-LIST` and `WITH-LIST*` are gone, correcting a fault of this
+    release's own** (commit `29b39b3`, "global.lisp: WITH-LIST and WITH-LIST*
+    were defined and never exported"): they were never defined anywhere in
+    this tree at all. The only trace of either name is a System 303 patch
+    note, `"WITH-LIST, WITH-LIST*: New macros."`, that the System 100 import
+    never carried the macros for; the comment that blamed a missing export
+    is deleted along with the names.
+  - **Three more names were exported and marked `MAKE-OBSOLETE` for a
+    definition that had already been deleted or commented out,** so both go
+    together: `PROCESS-CREATE` (`sys/sys/qcopt.lisp`; its `DEFF` alias in
+    `sys/sys2/proces.lisp` was already commented out, as `io1/swar.lisp:477`
+    already noted), `SI:PROCESS-RUN-TEMPORARY-FUNCTION` (`sys/sys/qcopt.lisp`,
+    never given a definition at all) and `FUNCTION-DOCUMENTATION`
+    (`sys/sys/qmisc.lisp`; its `DEFF` alias to `DOCUMENTATION` was already
+    commented out). The two dead commented-out lines for `PROCESS-CREATE` in
+    `sys/sys2/proces.lisp` go too.
+
+- **The remaining magtape disk interface is removed.** `io/disk.lisp` no longer
+  recognizes `MT` units or tests for the removed tape handler when copying a
+  band. That handler had no definition in the carried tree.
+
 ## Faults fixed
 
 - **Function-spec properties are read back again.** In
@@ -422,15 +487,23 @@ file saying why.
   inside the loop, as MIT wrote it in the unfinished `SYS; FSPEC` this release
   deletes.
 - **A cold load can be driven without a console** (#18). `cold/mini.lisp`
-  gains `MINI-RUN-SCRIPT`: before the cold load reaches its listener
-  (`sys/ltop.lisp`), it asks the file server for `SYS: COLD; COLDRUN LISP` and
-  evaluates the forms in it, so a build can type `(SI:QLD)` and the save
-  without a screen. If the server has no such file the open is refused and the
-  cold load goes to its listener exactly as before. Progress is reported by
-  asking for names such as `SYS: COLD; COLDRUN-REPORT; form-2`, which the server logs,
-  since MINI cannot send data; `MINI-OPEN-FILE` grew a `NO-BARF` argument for
-  both. Anything that goes wrong still appears on the console, which a cold
-  load has no error handler to catch.
+  gains `MINI-RUN-SCRIPT`: before the cold load reaches its listener, it asks
+  for `SYS: SITE; COLDRUN LISP`, translated to the server's physical pathname
+  at compile time. The generated script lives in `site/coldrun.lisp`, outside
+  system source and the SITE compilation list, and is ignored by Git.
+  A missing script leaves the ordinary listener available.
+  The script is read completely before any form is evaluated, because MINI
+  shares one packet buffer and QLD opens other files. A running-script guard
+  prevents QLD's reinitialization from starting the script again.
+  Progress uses MINI opcode 204, which ozd logs and acknowledges. Once QLD
+  starts the full network stack, reports use an ordinary Chaos connection
+  rather than taking the board back from that stack. Reporting waits are
+  bounded so an unsupported report cannot hold the build indefinitely.
+  QLD accepts an optional second argument listing additional systems; NIL
+  suppresses its console question, while the default still asks. Cold-boot
+  verification completed QLD unattended and reported both `qld-complete`
+  and `script-ends`; a separate test checked scripts spanning multiple
+  packets and the recursive-entry guard.
 
 - **The error handler's stack-group plist works again** (#16). Three places in
   `eh/eh.lisp` and `eh/ehc.lisp` were switched off by the bring-up with

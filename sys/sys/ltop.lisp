@@ -296,8 +296,9 @@ COLD-BOOT is T if this is for a cold boot."
   ;; no longer wrapped in SELECT-PROCESSOR; this system runs only on a CADR.
   (AND (FBOUNDP 'CADR:CLEAR-UNIBUS-MAP)	;clear valid bits on unibus map.
        (CADR:CLEAR-UNIBUS-MAP))		; and necessary if sharing Unibus with PDP11.
-						; Do this before SYSTEM-INITIALIZATION-LIST to
-						; avoid screwwing ETHERNET code.
+						; Do this before SYSTEM-INITIALIZATION-LIST.
+						; the ETHERNET code this ordering used to
+						; protect is gone; the ordering itself stays.
   ;; These are initializations that have to be done before other initializations
   (INITIALIZATIONS 'SYSTEM-INITIALIZATION-LIST T)
   ;; At this point if the window system is loaded, it is all ready to go
@@ -885,7 +886,8 @@ Pass whatever data or pointers you need in the ARGUMENTS."
 ;;; 3. Do a quasi cold boot.  This turns on the real file system.
 ;;; 4. Load MAKSYS and SYSDCL to build the initial systems.
 ;;; 5. Use MAKE-SYSTEM to load the rest of the top level system.
-(DEFUN QLD (&OPTIONAL (LOAD-KEYWORDS '(:NOCONFIRM :NO-RELOAD-SYSTEM-DECLARATION))) ; :SILENT
+(DEFUN QLD (&OPTIONAL (LOAD-KEYWORDS '(:NOCONFIRM :NO-RELOAD-SYSTEM-DECLARATION))
+                     (ADDITIONAL-SYSTEMS :ASK)) ; :SILENT
   "Load the rest of the Lisp machine system into the cold load.
 Used only if you are not generating a new Lisp machine system version."
 ; (SETQ AREA-FOR-PROPERTY-LISTS WORKING-STORAGE-AREA)	;Because will be recopied at end
@@ -917,7 +919,11 @@ Used only if you are not generating a new Lisp machine system version."
 	(SET (CAR X) (CDR X))))
   (LET (TV:MORE-PROCESSING-GLOBAL-ENABLE)
     (APPLY #'MAKE-SYSTEM "System" LOAD-KEYWORDS)
-    (DOLIST (SYSTEM (PROMPT-AND-READ :READ "List of names of additional systems to load:~%"))
+    ;; a supplied list (including NIL) lets COLDRUN choose the extra
+    ;; systems without a console.  The ordinary QLD call still asks as before.
+    (DOLIST (SYSTEM (IF (EQ ADDITIONAL-SYSTEMS :ASK)
+                       (PROMPT-AND-READ :READ "List of names of additional systems to load:~%")
+                     ADDITIONAL-SYSTEMS))
       (APPLY #'MAKE-SYSTEM SYSTEM LOAD-KEYWORDS)))
 ; ;; Compactify property lists in the hopes of speeding up compilation
 ; (SETQ AREA-FOR-PROPERTY-LISTS PROPERTY-LIST-AREA)

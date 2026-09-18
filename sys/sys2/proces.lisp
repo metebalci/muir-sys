@@ -107,8 +107,8 @@ and :SPECIAL-PDL-SIZE are passed on to MAKE-STACK-GROUP."
 			  (LOCF INIT-ARGS)
 			  T))))
 
-;(DEFF PROCESS-CREATE 'MAKE-PROCESS)
-;(compiler::make-obsolete process-create "Use MAKE-PROCESS instead.")
+;; the commented-out PROCESS-CREATE alias was removed with its stale
+;; export and obsolescence declaration; MAKE-PROCESS remains the constructor.
 
 (DEFMETHOD (PROCESS :INIT) (INIT-PLIST)
   (UNLESS (VARIABLE-BOUNDP STACK-GROUP)

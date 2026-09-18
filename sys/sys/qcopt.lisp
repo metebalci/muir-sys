@@ -1295,9 +1295,9 @@ of a list satisfies the test. Eg (EQ . MEMQ)")
 (make-obsolete explodec "use strings")
 (make-obsolete exploden "use strings")
 (make-obsolete samepnamep "use strings")
-;;; This can't go in PROCES because it gets loaded before this file
-(make-obsolete process-create "it has been renamed to MAKE-PROCESS")
-(make-obsolete si:process-run-temporary-function "PROCESS-RUN-FUNCTION is identical.")
+;;; PROCESS-CREATE and SI:PROCESS-RUN-TEMPORARY-FUNCTION are gone: neither
+;;; had a definition left anywhere in the tree (the alias to MAKE-PROCESS in
+;;; PROCES was already commented out); their exports are removed as well.
 (make-obsolete fs:file-read-property-list "the new name is FS:READ-ATTRIBUTE-LIST")
 (make-obsolete fs:file-property-list "the new name is FS:FILE-ATTRIBUTE-LIST")
 (make-obsolete fs:file-property-bindings "the new name is FS:FILE-ATTRIBUTE-BINDINGS")
