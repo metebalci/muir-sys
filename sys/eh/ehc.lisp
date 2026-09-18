@@ -1720,9 +1720,12 @@ You don't need to use this unless you're debugging the debugger."
 
     (format t "~&")
 
-;;;---!!! SYS:SYS;SGDEFS introduced RP-ATTENTION at some point (renamed from
-;;;---!!!   RP-DOWNWARD-CLOSURE-PUSHED?).
-;;;---!!!    (format t "~[~;ATTENTION ~]" (rp-attention rp ap))
+    ;; the bring-up left this off, asking whether RP-ATTENTION was a
+    ;; renaming of RP-DOWNWARD-CLOSURE-PUSHED.  In this tree there is no
+    ;; RP-ATTENTION: SYS2; SGDEFS defines RP-DOWNWARD-CLOSURE-PUSHED over
+    ;; %%LP-CLS-DOWNWARD-CLOSURE-PUSHED (sgdefs.lisp:154), which is the bit
+    ;; this line wants, so it prints under that name.
+    (format t "~[~;DOWNWARD-CLOSURE ~]" (rp-downward-closure-pushed rp ap))
     (format t "~[~;SELF-MAP ~]" (ldb %%lp-cls-self-map-provided (rp-call-word rp ap)))
     (format t "~[~;TRAP-ON-EXIT ~]" (rp-trap-on-exit rp ap))
     (format t "~[~;ADI-PRESENT ~]" (rp-adi-present rp ap))

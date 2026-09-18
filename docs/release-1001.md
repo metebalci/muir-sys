@@ -442,6 +442,13 @@ file saying why.
   nothing defines. Named `SI:SG-PLIST` it expands through `ARRAY-LEADER`,
   compiles without a warning, and the error handler runs with it.
 
+- **The error handler's backtrace prints the closure bit again.** The
+  bring-up left one line of `eh/ehc.lisp`'s long backtrace off, asking
+  whether `RP-ATTENTION` was a renaming of `RP-DOWNWARD-CLOSURE-PUSHED`.
+  There is no `RP-ATTENTION` in this tree: `sys2/sgdefs.lisp` defines
+  `RP-DOWNWARD-CLOSURE-PUSHED` over the bit the line wants, so it prints
+  under that name. With this, no `;;;---!!!` note is left anywhere in the
+  tree.
 - **The last bring-up note outside the error handler is answered** (#13).
   `sys/qrand.lisp`'s table of null elements per array type had two entries
   commented out with "MAKE-COLD doesn't support complex types". The reason is
