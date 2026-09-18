@@ -369,17 +369,19 @@ so it knows who to call back."
   (SETF (SG-FLAGS-MAR-MODE SG) 0)			;Turn off the MAR (why??)
   (ASSURE-FREE-SPACE)
   (SETQ RESULT (STACK-GROUP-RESUME SG NIL))
+  ;; the stack group's plist is saved and put back again.  The bring-up
+  ;; switched these two lines off with ">>ERROR; No way known to do LOCF on
+  ;; SG-PLIST".  The reason was the package: EH inherits the other SG-
+  ;; accessors from SYSTEM (SYS: COLD; SYSTEM lists them), but not SG-PLIST,
+  ;; so it read here as EH:SG-PLIST, which nothing defines.  Named as
+  ;; SI:SG-PLIST it expands through ARRAY-LEADER and compiles.
   (LET ((INNER-TRAP-ON-CALL (SG-FLAGS-TRAP-ON-CALL SG))
-;;;---!!! >>ERROR; No way known to do LOCF on SG-PLIST.
-;;;---!!!	(INNER-PLIST (SG-PLIST SG))
-	)
+	(INNER-PLIST (SI:SG-PLIST SG)))
     (SG-RESTORE-STATE SG)
     ;; If the guy set trap-on-call before returning, leave it on.
     (IF (NOT (ZEROP INNER-TRAP-ON-CALL))
 	(SETF (SG-FLAGS-TRAP-ON-CALL SG) 1))
-;;;---!!! >>ERROR; No way known to do LOCF on SG-PLIST.
-;;;---!!!    (SETF (SG-PLIST SG) INNER-PLIST)
-    )
+    (SETF (SI:SG-PLIST SG) INNER-PLIST))
   (WHEN (AND ERROR-HANDLER-RUNNING ERROR-HANDLER-REPRINT-ERROR)
     (UNLESS (EQ CURRENT-STACK-GROUP LAST-SECOND-LEVEL-ERROR-HANDLER-SG)
       (FORMAT T "~%Back to ")
@@ -2427,10 +2429,12 @@ This version does some invisible pointer following."
 		  ((AND (CONSP M) (EQ (CAR M) 'RESUME-FOOTHOLD))
 		   (SG-RESTORE-STATE SG 1)
 		   (SETF (SG-CURRENT-STATE SG) SG-STATE-RESUMABLE)
-;;;---!!! >>ERROR; No way known to do LOCF on SG-PLIST.
-;;;---!!!		   (COND ((GETF (SG-PLIST SG) 'SINGLE-MACRO-DISPATCH)
-;;;---!!!			  (SETF (GETF (SG-PLIST SG) 'SINGLE-MACRO-DISPATCH) NIL)
-;;;---!!!			  (SETF (SG-INST-DISP SG) 2)))
+		   ;; back into single-instruction stepping, as this always
+		   ;; meant to.  The bring-up switched it off over LOCF of
+		   ;; SG-PLIST; the accessor just needs naming in SI.
+		   (COND ((GETF (SI:SG-PLIST SG) 'SINGLE-MACRO-DISPATCH)
+			  (SETF (GETF (SI:SG-PLIST SG) 'SINGLE-MACRO-DISPATCH) NIL)
+			  (SETF (SG-INST-DISP SG) 2)))
 		   (STACK-GROUP-RESUME SG NIL))
 		  ((NULL M)
 		   ;; Microcode error.
