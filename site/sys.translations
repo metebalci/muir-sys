@@ -1,6 +1,6 @@
 ;;;-*- Mode:LISP; Package:FS; Base:10 -*-
 
-;;; SYS: at the Z54 site. OZ serves the sources at /sys and this site's own
+;;; SYS: at the MIT site. OZ serves the sources at /sys and this site's own
 ;;; files at /site. Targets are host-less: the physical host is OZ.
 ;;;
 ;;; Every slash is doubled, and this file names no readtable, on purpose.
