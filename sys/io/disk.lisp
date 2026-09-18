@@ -537,9 +537,10 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 ;;; Unit is unit number on local disk controller or a string.
 ;;; If a string, CC means hack over debug interface
 ;;;    		 TEST is a source of test data
-;;;		 MT is magtape
 ;;;	  otherwise it is assumed to be the chaosnet name of a remote machine.
-(DECLARE (*EXPR FS:MAKE-BAND-MAGTAPE-HANDLER))
+;;; MT (magtape) was a third case here; FS:MAKE-BAND-MAGTAPE-HANDLER never
+;;; had a definition in this tree (the comment at its call below already said
+;;; "Temporarily, this fctn in RG;MT"), and MAGTAPE is gone besides.
 
 (DEFUN DECODE-UNIT-ARGUMENT (UNIT USE &OPTIONAL (CC-DISK-INIT-P NIL) (WRITE-P NIL)
 			     &AUX TEM)
@@ -569,13 +570,6 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 	   (DECLARE (SPECIAL CC-DISK-UNIT))
 	   (CLOSURE '(CC-DISK-UNIT)
 		    'CC-TEST-HANDLER)))
-	((AND (STRINGP UNIT)			;Magtape interface.
-	      (STRING-EQUAL UNIT "MT" :END1 2))
-	 (SETQ TEM (STRING-SEARCH-CHAR #/SPACE UNIT))
-	 (LET ((CC-DISK-UNIT (IF (NULL TEM) 0 (READ-FROM-STRING UNIT NIL (1+ TEM)))))
-	   (COND ((NOT (ZEROP CC-DISK-UNIT))
-		  (FERROR NIL "MT can only talk to unit zero")))
-	   (FS:MAKE-BAND-MAGTAPE-HANDLER WRITE-P)))	;Temporarily, this fctn in RG;MT.
 	((STRINGP UNIT)				;Open connection to foreign disk
 	 ;; make @lm1 work as well as lm1
 	 ;; if a host is stupid enough to have a name like @Losing  then use "@@Losing"
@@ -1525,10 +1519,12 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 	  (FIND-DISK-PARTITION-FOR-WRITE TO-PART NIL TO-UNIT))
 	(SETQ PART-COMMENT (PARTITION-COMMENT FROM-PART FROM-UNIT))
 	(FORMAT T "~&Copying ~S" PART-COMMENT)
+	;; this used to skip ahead for a magtape FROM-UNIT, which needed a
+	;; NOT (AND (CLOSUREP FROM-UNIT) (EQ (CLOSURE-FUNCTION FROM-UNIT)
+	;; 'FS:BAND-MAGTAPE-HANDLER)) clause here; MAGTAPE is gone, so FROM-UNIT
+	;; can never be that closure, and the clause always passed.
 	(AND (OR (NUMBERP FROM-PART) (STRING-EQUAL FROM-PART "LOD" :END1 3))
 	     (NOT WHOLE-THING-P)
-	     (NOT (AND (CLOSUREP FROM-UNIT)
-		       (EQ (CLOSURE-FUNCTION FROM-UNIT) 'FS:BAND-MAGTAPE-HANDLER)))
 	     (LET ((RQB NIL) (BUF NIL))
 	       (UNWIND-PROTECT
 		   (PROGN (SETQ RQB (GET-DISK-RQB 1))

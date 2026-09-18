@@ -26,6 +26,9 @@
 # is newer (:GENERATE-HOST-TABLE, sys/sysdcl.lisp:158-160).
 /site/hsttbl.lisp
 
+# COLDRUN is a local build script served to a cold boot, not release source.
+/site/coldrun.lisp
+
 # The machine-control tools (tools/: lispm.py over TELNET, console.py over RFB),
 # kept here but not yet tracked.
 /tools/

@@ -1293,10 +1293,9 @@ Documentation strings are installed by SETFing a call to DOCUMENTATION."
 	     (COMBINED-METHOD-DOCUMENTATION SYMBOL)
 	   (OR (CADR (ASSQ 'DOCUMENTATION (DEBUGGING-INFO SYMBOL)))
 	       (CADR (ASSQ :DOCUMENTATION (DEBUGGING-INFO SYMBOL))))))))
-;;; Old name.
-;(DEFF FUNCTION-DOCUMENTATION 'DOCUMENTATION)
-(MAKE-OBSOLETE FUNCTION-DOCUMENTATION
-	       "use DOCUMENTATION with a second argument of 'FUNCTION.")
+;;; FUNCTION-DOCUMENTATION is gone: its DEFF alias to DOCUMENTATION was
+;;; already commented out, so the name had no definition, and cold/global.lisp
+;;; no longer exports it.
 
 (DEFUN COMBINED-METHOD-DOCUMENTATION (METHOD &OPTIONAL STREAM &KEY (FRESH-LINE T))
   "Returns a string which documents Method.  Method must be a :combined method.
