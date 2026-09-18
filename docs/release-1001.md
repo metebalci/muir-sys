@@ -407,6 +407,11 @@ file saying why.
   names neither, and nothing else in the tree calls them. The other demos
   stay.
 
+- **Six names `cold/export.lisp` exported with nothing to define them:** the
+  five host mixins for ITS, TOPS-20, Tenex, VMS and Multics, whose flavors
+  went with those hosts, and `FUNCTION-SPEC-REMPROP`, which only ever existed
+  inside the block comment that was `sys/fspec.lisp`.
+
 ## Faults fixed
 
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
