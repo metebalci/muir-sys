@@ -365,7 +365,7 @@
       (SET-FILE-LOADED-ID 'MINI-PLIST-RECEIVER MINI-FILE-ID PACKAGE))))
 
 ;;; a cold load runs unattended.  It asks the file server for
-;;; MINI-SCRIPT-FILE-NAME; if the server has no such file the open is refused
+;;; SYS: COLD; COLDRUN LISP; if the server has no such file the open is refused
 ;;; and the cold load goes to its console listener exactly as before.  If it
 ;;; has one, its forms are read and evaluated here, which is how a build types
 ;;; (SI:QLD) and (SI:DISK-SAVE ...) without a screen.
@@ -376,10 +376,10 @@
 ;;; and the console still shows anything that goes wrong, since the cold load
 ;;; has no error handler to catch it.
 
-(DEFVAR MINI-SCRIPT-FILE-NAME "SYS: COLD; SCRIPT LISP")
+(DEFVAR MINI-SCRIPT-FILE-NAME "SYS: COLD; COLDRUN LISP")
 
 (DEFUN MINI-REPORT (MESSAGE)
-  (MINI-OPEN-FILE (STRING-APPEND "SYS: COLD; REPORT; " MESSAGE) NIL T)
+  (MINI-OPEN-FILE (STRING-APPEND "SYS: COLD; COLDRUN-REPORT; " MESSAGE) NIL T)
   NIL)
 
 (DEFUN MINI-RUN-SCRIPT (&AUX STREAM (N 0))
