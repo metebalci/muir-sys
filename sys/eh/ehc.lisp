@@ -290,10 +290,12 @@ Deactivates the debugger window if one was in use."
   (leaving-error-handler)
   (without-interrupts
     (free-second-level-error-handler-sg %current-stack-group)
-;;;---!!! >>ERROR; No way known to do LOCF on SG-PLIST.
-;;;---!!!    (cond ((getf (sg-plist sg) 'single-macro-dispatch)
-;;;---!!!	   (setf (getf (sg-plist sg) 'single-macro-dispatch) nil)
-;;;---!!!	   (setf (sg-inst-disp sg) 2)))
+    ;; back into single-instruction stepping, as this always meant to.
+    ;; The bring-up switched it off over LOCF of SG-PLIST; the accessor just
+    ;; needs naming in SI, since EH does not inherit it.
+    (cond ((getf (si:sg-plist sg) 'single-macro-dispatch)
+	   (setf (getf (si:sg-plist sg) 'single-macro-dispatch) nil)
+	   (setf (sg-inst-disp sg) 2)))
     (stack-group-resume sg val)))
 
 ;;;; Backtrace commands.

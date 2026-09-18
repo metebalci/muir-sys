@@ -414,6 +414,16 @@ file saying why.
 
 ## Faults fixed
 
+- **The error handler's stack-group plist works again** (#16). Three places in
+  `eh/eh.lisp` and `eh/ehc.lisp` were switched off by the bring-up with
+  ">>ERROR; No way known to do LOCF on SG-PLIST": saving and restoring a stack
+  group's property list around a resume, and re-entering single-instruction
+  stepping when a foothold resumes. The cause was the package, not LOCF: EH
+  inherits the other `SG-` accessors from SYSTEM, which `cold/system.lisp`
+  lists, but not `SG-PLIST`, so the name read there as `EH:SG-PLIST`, which
+  nothing defines. Named `SI:SG-PLIST` it expands through `ARRAY-LEADER`,
+  compiles without a warning, and the error handler runs with it.
+
 - **The last bring-up note outside the error handler is answered** (#13).
   `sys/qrand.lisp`'s table of null elements per array type had two entries
   commented out with "MAKE-COLD doesn't support complex types". The reason is
