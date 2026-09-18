@@ -295,11 +295,12 @@ This list describes how to bind the arguments and how to initialize them."
 	       (ART-FLOAT . 0f0)
 	       (ART-FPS-FLOAT . 0f0)
 	       (ART-FAT-STRING . #/ )
-;;;---!!! MAKE-COLD doesn't support complex types.
-;;;---!!!	       (ART-COMPLEX-FLOAT . 0f0+0f0i)
 	       (ART-COMPLEX . 0)
-;;;---!!! MAKE-COLD doesn't support complex types.
-;;;---!!!	       (ART-COMPLEX-FPS-FLOAT 0f0+0f0i)
+	       ;; the two complex float types have no entry.  Their null element
+	       ;; would have to be written as a complex literal, which this file
+	       ;; cannot carry: QRAND is a cold-load file, and the cold load reads it
+	       ;; before the reader can make a complex number.  Nothing here calls
+	       ;; ARRAY-TYPE-NULL-ELEMENT, and an absent entry gives NIL.
 	       ))))
 
 (DEFUN ARRAY-ELEMENT-TYPE (ARRAY)

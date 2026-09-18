@@ -414,6 +414,15 @@ file saying why.
 
 ## Faults fixed
 
+- **The last bring-up note outside the error handler is answered** (#13).
+  `sys/qrand.lisp`'s table of null elements per array type had two entries
+  commented out with "MAKE-COLD doesn't support complex types". The reason is
+  narrower than the note: the entries' values would be complex literals, and
+  QRAND is read while a cold load is built, before the reader can make a
+  complex number. `ARRAY-TYPE-NULL-ELEMENT` has no caller in the tree and an
+  absent entry gives NIL, so the note is replaced by a comment saying that,
+  and the `ART-COMPLEX` entry, whose value is 0, stays.
+
 - **`window/wholin.lisp`:** the who line showed NIL for a running process,
   whose wait whostate is NIL; it shows the run whostate then. The fix is
   LM-3's, marked for 1001 in `docs/upstream-changes.md`.
