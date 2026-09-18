@@ -370,17 +370,40 @@
 ;;; has one, its forms are read and evaluated here, which is how a build types
 ;;; (SI:QLD) and (SI:DISK-SAVE ...) without a screen.
 ;;;
-;;; Progress is reported by asking the server for a file whose name carries the
-;;; message: MINI has no way to send data, but every request is logged by the
-;;; server, with its time.  So the server's log says how far the script got,
-;;; and the console still shows anything that goes wrong, since the cold load
-;;; has no error handler to catch it.
+;;; Progress is reported with MINI-REPORT, opcode 204, which the server writes
+;;; to its log with the time.  So the log says how far the script got, and the
+;;; console still shows anything that goes wrong, since the cold load has no
+;;; error handler to catch it.
 
 (DEFVAR MINI-SCRIPT-FILE-NAME "SYS: COLD; COLDRUN LISP")
 
+(DEFCONST MINI-REPORT-OP #o204)			;a message for the server's log
+
+(DEFVAR MINI-REPORTING-P T)
+
+;;; send one line for the server to log.  MINI has no way to send data,
+;;; so this is its own opcode, 204, beside the opens: the server answers as it
+;;; answers an open it will not serve, with a lose, so no file follows.  A
+;;; server that does not know 204 says nothing at all, and rather than
+;;; retransmit for ever --- which in a cold load there is no way out of --- we
+;;; give up after three tries and report no more.
 (DEFUN MINI-REPORT (MESSAGE)
-  (MINI-OPEN-FILE (STRING-APPEND "SYS: COLD; COLDRUN-REPORT; " MESSAGE) NIL T)
-  NIL)
+  (WHEN MINI-REPORTING-P
+    (UNLESS MINI-OPEN-P (MINI-OPEN-CONNECTION MINI-DESTINATION-ADDRESS MINI-CONTACT-NAME))
+    (DO ((TRIES 3 (1- TRIES))
+	 (OP))
+	((ZEROP TRIES) (SETQ MINI-REPORTING-P NIL) NIL)
+      (COPY-ARRAY-CONTENTS MESSAGE MINI-PKT-STRING)
+      (MINI-SEND-PKT MINI-REPORT-OP (ARRAY-ACTIVE-LENGTH MESSAGE))
+      (SETQ OP (MINI-NEXT-PKT NIL))
+      (COND ((NULL OP))				;no answer, try again
+	    ((= OP 2)				;OPN, acknowledge and try again
+	     (MINI-SEND-STS))
+	    (T					;anything else is an answer
+	     (SETQ MINI-IN-PKT-NUMBER (LOGAND #o177777 (1+ MINI-IN-PKT-NUMBER))
+		   MINI-OUT-PKT-NUMBER (LOGAND #o177777 (1+ MINI-OUT-PKT-NUMBER)))
+	     (MINI-SEND-STS)
+	     (RETURN T))))))
 
 (DEFUN MINI-RUN-SCRIPT (&AUX STREAM (N 0))
   (WHEN (SETQ STREAM (MINI-OPEN-FILE MINI-SCRIPT-FILE-NAME NIL T))
