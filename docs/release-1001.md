@@ -423,11 +423,11 @@ file saying why.
   deletes.
 - **A cold load can be driven without a console** (#18). `cold/mini.lisp`
   gains `MINI-RUN-SCRIPT`: before the cold load reaches its listener
-  (`sys/ltop.lisp`), it asks the file server for `SYS: COLD; SCRIPT LISP` and
+  (`sys/ltop.lisp`), it asks the file server for `SYS: COLD; COLDRUN LISP` and
   evaluates the forms in it, so a build can type `(SI:QLD)` and the save
   without a screen. If the server has no such file the open is refused and the
   cold load goes to its listener exactly as before. Progress is reported by
-  asking for names such as `SYS: COLD; REPORT; form-2`, which the server logs,
+  asking for names such as `SYS: COLD; COLDRUN-REPORT; form-2`, which the server logs,
   since MINI cannot send data; `MINI-OPEN-FILE` grew a `NO-BARF` argument for
   both. Anything that goes wrong still appears on the console, which a cold
   load has no error handler to catch.
