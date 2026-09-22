@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muir-sys &mdash; release notes</title>
+<meta name="description" content="What each release of the Lisp Machine system for muir and muir-fpga changed, with its assets and how to run it.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- The release notes: one section a release, newest first. A new release
+     adds its section at the top, in the same shape: title and date, a
+     summary, what changed, and its assets with their checksums. The full
+     record of every change is docs/release-N.md in the repository; this page
+     is the summary a reader needs to choose and run a release. -->
+
+<p class="desk-note"><a href="index.html"><b>muir-sys</b></a> &middot; release notes</p>
+
+<div class="page">
+
+  <section aria-label="Release notes">
+    <div class="masthead">
+      <span class="eyebrow">Release notes</span>
+      <h1 class="title t-xl">Releases</h1>
+      <p class="lede">Every release is a whole band, built from the sources by a clean compile, a new cold load, QLD and a save. There are no patches: a release is replaced by the next one.</p>
+      <div class="actions">
+        <a class="key" href="#system-1001">System 1001</a>
+        <a class="key" href="#system-1000">System 1000</a>
+        <a class="key" href="#running">Running a release</a>
+        <a class="key lm" href="https://github.com/metebalci/muir-sys/releases">GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="system-1001" aria-label="System 1001">
+    <div class="release-head">
+      <h2 class="title t-m">System 1001</h2>
+      <span class="date">2026-09-22 &middot; tag <code>release-1001</code></span>
+    </div>
+    <p class="lede">A deep cleanup of System 1000, and the faults found while making it. What will never be used is gone, not commented out, and git keeps the history.</p>
+
+    <div class="panels">
+      <div class="panel">
+        <span class="eyebrow">Removed</span>
+        <p>38 fewer source files and about 21,000 fewer lines.</p>
+        <ul class="facts">
+          <li><b>Machines other than the CADR:</b> all of the Lambda and the Explorer, their processor tests, their NuBus and SDU code, their Ethernet and its microcode, and the 28 instruction declarations the CADR&rsquo;s microcode never implemented.</li>
+          <li><b>Hosts it does not talk to:</b> ITS, TOPS-20, Tenex, Twenex, VMS and Multics pathnames and hosts, and LMFILE. What remains is UNIX, the local file system, and logical hosts.</li>
+          <li><b>Hardware nobody here has:</b> the Xerox Press and Dover printing path with EFTP, the XGP printer, the keyboard and PROM firmware tools, the wire-wrap board tester and the Votrax speech demos.</li>
+          <li><b>Patches.</b> This system makes releases, never patches, so the machinery that loaded and wrote them is gone, with the editor&rsquo;s commands for it. The version the herald prints is kept, and so is the patch directory it lives in.</li>
+          <li><b>Other dialects:</b> MacLisp and NIL conditionals, <code>STATUS</code> and <code>SSTATUS</code>, and the compatibility macros; about 400 reader conditionals resolved to what a CADR reads, with no change to the code the reader produces.</li>
+          <li><b>Dead weight:</b> files no system loaded, disabled blocks, duplicate copies, obsolete names nothing called, and notes that described a machine that is not here.</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">Fixed</span>
+        <ul class="facts">
+          <li>The last of MIT&rsquo;s own unfinished notes are answered.</li>
+          <li>The error handler saves and restores a stack group&rsquo;s property list again, and returns to single-instruction stepping from a foothold.</li>
+          <li>A property of a function spec that is not a symbol, such as which file a method came from, can be read back again.</li>
+          <li>Over TELNET: <code>~%</code> sends CR LF, a session whose first input is Return no longer breaks, a line read no longer traps, and a question answered wrongly asks again instead of failing.</li>
+          <li>The who line shows what a running process is doing, not NIL.</li>
+          <li>The microcode assembler writes the diagnostic microcode files correctly.</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">New</span>
+        <ul class="facts">
+          <li><b>A cold load can be driven without a console.</b> It asks the file server for <code>SYS: SITE; COLDRUN LISP</code> and evaluates what it finds, so a build can hand it <code>(SI:QLD)</code> and the save with no screen. It reports its progress with MINI&rsquo;s new opcode 204, which ozd 8c816e5 or later writes to its log.</li>
+          <li><b>The site is named MIT,</b> as System 100 has it, so the herald says "MIT System". Only the name is taken: its hosts are numbered from the subnet&rsquo;s first address, OZ at 177200 and LISPM-1 at 177201.</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">Upgrading from System 1000</span>
+        <p>Nothing carries over between bands: take the new pack. The 28 unimplemented instruction declarations are gone, freeing octal 732-737, 761-767 and 1100-1116, and MINI has opcode 204. The microcode is unchanged, 323.</p>
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">Assets</span>
+        <table class="assets">
+          <thead><tr><th>File</th><th>Bytes</th><th>SHA-256</th></tr></thead>
+          <tbody>
+            <tr><td><code>release-1001-pack.img.gz</code></td><td colspan="2" class="pending">given when the release is published</td></tr>
+            <tr><td><code>release-1001-sys.tar.gz</code></td><td colspan="2" class="pending">given when the release is published</td></tr>
+          </tbody>
+        </table>
+        <p>The tarball unpacks to <code>release-1001/</code>: the whole repository at the tag, with the assembled microcode in <code>sys/ubin/</code>. Every change is recorded in <a href="https://github.com/metebalci/muir-sys/blob/main/docs/release-1001.md"><code>docs/release-1001.md</code></a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="system-1000" aria-label="System 1000">
+    <div class="release-head">
+      <h2 class="title t-m">System 1000</h2>
+      <span class="date">2026-09-22 &middot; tag <code>release-1000</code></span>
+    </div>
+    <p class="lede">System 100 fixed and cleaned up: the same sources and microcode 323, the faults that stopped it rebuilding itself repaired, the material that is not MIT&rsquo;s left out. It continues where System 100 left off.</p>
+
+    <div class="panels">
+      <div class="panel">
+        <span class="eyebrow">What changed</span>
+        <ul class="facts">
+          <li><b>It rebuilds itself.</b> The fault that stopped a cold load in silence and MINI&rsquo;s two stream faults are fixed. The band is compiled by the system itself, and the microcode is assembled from its sources.</li>
+          <li><b>The network:</b> the routing table covers every subnet, and MINI finds its file server by itself.</li>
+          <li><b>About forty faults</b> are fixed across the tree.</li>
+          <li><b>Gone:</b> the tape, LMFILE and Xerox printing systems. Only System is patchable, and what is not MIT&rsquo;s, or not wanted, was never imported.</li>
+          <li><b>The site is named MIT,</b> with OZ at 177200 and LISPM-1 at 177201 on subnet 376.</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">Assets</span>
+        <table class="assets">
+          <thead><tr><th>File</th><th>Bytes</th><th>SHA-256</th></tr></thead>
+          <tbody>
+            <tr><td><code>release-1000-pack.img.gz</code></td><td colspan="2" class="pending">given when the release is published</td></tr>
+            <tr><td><code>release-1000-sys.tar.gz</code></td><td colspan="2" class="pending">given when the release is published</td></tr>
+          </tbody>
+        </table>
+        <p>The tarball unpacks to <code>release-1000/</code>: <code>sys/</code> and <code>site/</code> with <code>LICENSE</code> and <code>NOTICE</code>, and the assembled microcode in <code>sys/ubin/</code>. Every change is recorded in <a href="https://github.com/metebalci/muir-sys/blob/main/docs/release-1000.md"><code>docs/release-1000.md</code></a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="running" aria-label="Running a release">
+    <h2 class="title t-m">Running a release</h2>
+    <div class="panels">
+      <div class="panel">
+        <p>A band expects its site&rsquo;s Chaosnet: subnet 376, with its file, time and host table server <b>OZ</b> at 177200, which ozd provides, and the machine <b>LISPM-1</b> at 177201. For release N, with muir:</p>
+<pre><code>gunzip release-N-pack.img.gz
+tar -xzf release-N-sys.tar.gz
+mkdir lispm
+
+ozd --address 177200 --name OZ,system=UNIX \
+    --root sys=$PWD/release-N/sys --root site=$PWD/release-N/site \
+    --root lispm=$PWD/lispm \
+    --host 177201,LISPM-1,system=LISPM --peer 177201@127.0.0.1:42043 \
+    --tcp 127.0.0.1:2323,TELNET@177201
+
+muir --micro --disk-pack release-N-pack.img \
+    --chaos-address 177201 --chaos-udp 42043 \
+    --chaos-udp-peer 177200@127.0.0.1:42042 --chaos-udp-default-peer 127.0.0.1:42042</code></pre>
+        <p>The machine boots to "MIT System, band 1 of LISPM-1". muir serves the screen, keyboard and mouse over RFB, for any VNC viewer, and <code>telnet 127.0.0.1 2323</code> reaches its Lisp listener through ozd. Log in with <code>(login "LISPM" "OZ" t)</code> before touching files.</p>
+      </div>
+    </div>
+
+    <footer class="wholine">
+      <div class="label">muir-sys &middot; release notes</div>
+      <div class="bar"><span>09/22/26 10:00:00</span><span>USER:</span><span>Tyi</span><span>1001</span></div>
+    </footer>
+  </section>
+
+</div>
+
+</body>
+</html>
