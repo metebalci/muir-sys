@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The favicon: the mascot's diskette without its face. -->
+  <polygon points="3,2 27,2 30,5 30,30 3,30" fill="#141414"/>
+  <rect x="9" y="2" width="14" height="9" fill="#fff"/>
+  <rect x="18" y="3.5" width="3" height="6" fill="#141414"/>
+  <rect x="6" y="17" width="21" height="11" fill="#fff"/>
+  <rect x="6" y="17" width="21" height="3" fill="#ff48b0"/>
+</svg>

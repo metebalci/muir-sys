@@ -1,0 +1,282 @@
+/* SPDX-FileCopyrightText: 2026 Mete Balci */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* muir-sys --- the project page, in the hand of ozd's page.
+
+   ozd's page is drawn as Cold Boot is, a manga-style zine about the CADR:
+   riso black and one spot color, fluorescent pink, on paper white, laid on
+   a halftone desk. This page keeps that look, so that the projects around
+   the CADR read as one family. It carries only the rules this page uses:
+   paper sections, 3px ink panels, the display face with a pink drop shadow,
+   links drawn as keys, and the Lisp Machine's who-line at the foot.
+
+   No dark mode, as on ozd's page: paper and ink is what this is, and a spot
+   color printed on black is a different object. The mascot is drawn with a
+   paper halo under its linework, so that it also stands on a dark
+   background wherever else it is shown.
+
+   Text sizes are all in rem, taken from the tokens below, and nothing here
+   styles `html`. */
+
+/* The three families, served from this directory rather than from Google:
+   a visitor should not have to ask a third party for a page to be readable.
+   Dela Gothic One is the display face, Zen Maru Gothic the voice, IBM Plex
+   Mono the machine's own. All are under the SIL Open Font License 1.1, and
+   `fonts/README.md` says where each came from and what it was cut down to. */
+@font-face {
+  font-family: 'Dela Gothic One';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/dela-gothic-one.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Zen Maru Gothic';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('fonts/zen-maru-gothic-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Zen Maru Gothic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/zen-maru-gothic-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('fonts/ibm-plex-mono-500.woff2') format('woff2');
+}
+
+:root {
+  --ink: #141414;
+  --paper: #ffffff;
+  --spot: #ff48b0;        /* riso Fluorescent Pink */
+  --spot-tint: #ffd3ec;
+  --desk: #e6e0e4;
+
+  --display: "Dela Gothic One", "Arial Black", sans-serif;
+  --voice: "Zen Maru Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Every size on the page comes from one of these. */
+  --fs-body: 1.125rem;         /* running text */
+  --fs-small: 0.95rem;         /* the colophon */
+  --fs-lede: 1.24rem;          /* the line under the wordmark */
+  --fs-mono: 0.92rem;          /* inline code, the keys */
+  --fs-mono-small: 0.84rem;    /* eyebrows, the who-line */
+  --fs-t-xl: clamp(3rem, 11vw, 7rem);   /* the wordmark: muir-sys is eight letters, so it fits a phone at 11vw */
+  --fs-t-m: 1.5rem;            /* a section's title */
+
+  --measure: 70ch;
+  --line: 3px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--voice);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ink);
+  background-color: var(--desk);
+  background-image: radial-gradient(rgba(20, 20, 20, 0.13) 1px, transparent 1.4px);
+  background-size: 7px 7px;
+  padding-block: 1.5rem 3rem;
+  padding-inline: 1rem;
+  -webkit-text-size-adjust: 100%;
+}
+
+p { margin: 0; text-wrap: pretty; }
+a { color: inherit; text-decoration-color: var(--spot); text-decoration-thickness: 2px; text-underline-offset: 2px; }
+a:focus-visible { outline: 3px solid var(--spot); outline-offset: 3px; }
+b { font-weight: 700; }
+
+/* ---------------------------------------------------------------- shell */
+
+/* One explicit column, so that a section never grows past the viewport. */
+.page {
+  max-width: 64rem;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.75rem;
+}
+
+.desk-note {
+  max-width: 64rem;
+  margin: 0 auto 0.9rem;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-small);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding-inline: 0.15rem;
+}
+.desk-note b { font-weight: 500; }
+
+/* Each section is paper on the halftone desk, with its panels above and the
+   machine's own status line ruled off at the foot. */
+.page > section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: var(--paper);
+  padding: 1.25rem 1.25rem 0.8rem;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08), 0 14px 30px -18px rgba(40, 20, 35, 0.45);
+}
+
+.panels { display: grid; gap: 0.9rem; }
+/* The mascot's panel is the narrower one: the list beside it is the text. */
+.hero-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+
+/* ---------------------------------------------------------------- panels */
+
+.panel {
+  position: relative;
+  min-width: 0;
+  border: var(--line) solid var(--ink);
+  background: var(--paper);
+  overflow: hidden;
+  padding: 0.8rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.panel.bare { border: 0; padding: 0; overflow: visible; }
+.panel.center { align-items: center; justify-content: center; text-align: center; }
+
+/* focus lines (manga 集中線) behind the mascot */
+.focus::before {
+  content: "";
+  position: absolute;
+  inset: -60%;
+  background: repeating-conic-gradient(from 3deg, var(--ink) 0deg 0.7deg, transparent 0.7deg 5.3deg);
+  -webkit-mask: radial-gradient(circle, transparent 24%, #000 60%);
+  mask: radial-gradient(circle, transparent 24%, #000 60%);
+  pointer-events: none;
+}
+.focus > * { position: relative; }
+
+/* ------------------------------------------------------------- lettering */
+
+.title {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  line-height: 0.95;
+  text-wrap: balance;
+  text-shadow: 0.07em 0.05em 0 var(--spot);   /* second drum, slightly off */
+}
+.t-xl { font-size: var(--fs-t-xl); letter-spacing: -0.02em; line-height: 0.88; }
+.t-m { font-size: var(--fs-t-m); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-small);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  align-self: flex-start;
+  background: var(--spot);
+  color: var(--ink);
+  padding: 0.1rem 0.4rem;
+}
+
+.lede { font-size: var(--fs-lede); font-weight: 700; max-width: 40rem; }
+
+/* -------------------------------------------------- masthead and the keys */
+
+.masthead { display: grid; gap: 0.85rem; justify-items: start; }
+
+/* links drawn as Lisp Machine keys */
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.key {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  /* Every key is pink, like the GitHub one; no black button on this page. */
+  background: var(--spot-tint);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-bottom-width: 5px;
+  border-radius: 4px;
+  padding: 0.45rem 0.85rem 0.35rem;
+}
+.key.lm { background: var(--spot-tint); color: var(--ink); }
+.key:hover { background: var(--spot); color: var(--ink); }
+.key:active { border-bottom-width: 2px; translate: 0 3px; }
+
+/* ---------------------------------------------------------- the mascot */
+
+/* Drawn at 140 by 180 units; shown between about 200 and 270 pixels wide. */
+.mascot { display: block; width: min(100%, 17rem); height: auto; }
+
+/* ---------------------------------------------------------------- lists */
+
+/* The facts: short lines with dotted rules between them, as ozd's flags. */
+ul.facts { margin: 0; padding: 0; list-style: none; max-width: var(--measure); }
+ul.facts li { padding: 0.55rem 0; border-top: 2px dotted var(--ink); }
+ul.facts li:first-child { border-top: 0; padding-top: 0; }
+ul.facts li:last-child { padding-bottom: 0; }
+
+/* ---------------------------------------------- colophon and the who-line */
+
+.colophon { display: grid; gap: 0.4rem; font-size: var(--fs-small); max-width: var(--measure); }
+
+.wholine { font-family: var(--mono); font-size: var(--fs-mono-small); font-weight: 400; line-height: 1.2; margin-top: auto; }
+.wholine .label { padding-block: 0.1rem 0.15rem; }
+.wholine .bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.2rem 0.75rem;
+  border-top: 4px solid var(--ink);
+  padding-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.wholine .bar span:last-child { background: var(--spot); color: var(--ink); padding-inline: 0.35rem; }
+
+/* ------------------------------------------------------------------ narrow */
+
+/* The phone: the mascot's panel over the list. */
+@media screen and (max-width: 46rem) {
+  .page > section { padding: 0.9rem 0.9rem 0.7rem; }
+  .panels, .hero-split { grid-template-columns: minmax(0, 1fr); }
+  .mascot { width: min(100%, 13rem); }
+}
+
+/* -------------------------------------------------------- release notes */
+
+/* The release notes page: a section a release, newest first, each with its
+   title, its summary, what changed and its assets. */
+code { font-family: var(--mono); font-size: var(--fs-mono); font-weight: 400; }
+.release-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.9rem; }
+.release-head .date { font-family: var(--mono); font-size: var(--fs-mono-small); }
+.panel h3 { margin: 0; font-size: var(--fs-body); font-weight: 700; }
+ul.facts ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.assets { width: 100%; border-collapse: collapse; font-size: var(--fs-small); }
+.assets th, .assets td { text-align: left; vertical-align: top; padding: 0.35rem 0.5rem 0.35rem 0; border-top: 2px dotted var(--ink); }
+.assets thead th { border-top: 0; font-family: var(--mono); font-size: var(--fs-mono-small); font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; }
+.assets code { overflow-wrap: anywhere; }
+.pending { font-style: italic; }
+pre { margin: 0; overflow-x: auto; font-family: var(--mono); font-size: var(--fs-mono-small); line-height: 1.35; border-left: 4px solid var(--spot); padding: 0.4rem 0 0.4rem 0.7rem; }
+pre code { font-size: inherit; }

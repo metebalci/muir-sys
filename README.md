@@ -10,11 +10,11 @@ project, "possibly the last backup and version of the Lisp Machine for the
 CADR". This system is forked from **System 100**, [LM-3](https://tumbleweed.nu/lm-3/)'s
 release of that content, brought up and fixed, under the AGPL.
 
-The aim is not preservation. The machine is meant to run on an FPGA and in a
-simulator rather than on 1980s boards, to use memory, screens and networks of
-today's sizes and kinds, and to be built, versioned and released reproducibly
-from a git repository. **Compatibility is not kept:** the CADR architecture,
-the PROM, the microcode and the system are all open to change.
+The aim is to evolve the system, not to change it radically. It continues
+where System 100 left off and moves on in steps, each a release built from
+this repository. It runs on an FPGA and in a simulator rather than on 1980s
+boards. **Backward compatibility is not an aim, but System 1001 will always
+be supported by muir and muir-fpga.**
 
 ## System 1001
 
@@ -29,8 +29,8 @@ a new cold load, `QLD` and a saved band.
 
 **System 1000** is System 100 fixed and cleaned up: the same sources and
 microcode 323, the faults that stopped it rebuilding itself repaired, the
-material that is not MIT's left out. The number
-steps from 100 to 1000: the same lineage, a different project.
+material that is not MIT's left out. It continues where System 100 left off,
+and the number steps from 100 to 1000.
 
 In short, the fault that stopped a cold load in silence and MINI's two stream
 faults are fixed; the routing table covers every subnet, and MINI finds its
@@ -64,13 +64,6 @@ This is the system. Three projects provide the machine:
 | **muir-fpga** | the hardware simulator |
 | **ozd** | the Chaosnet services daemon: files, time, host table, TELNET |
 
-## Where it is going
-
-1. Hardware multiply and divide, in one ALU step instead of 32.
-2. No disk paging, with 16MW of physical memory.
-3. 720p, then 1080p.
-4. TCP/IP, once the sources can be loaded over it.
-
 ## Layout
 
 | | |
@@ -78,6 +71,7 @@ This is the system. Three projects provide the machine:
 | `sys/` | the Lisp Machine sources, as the machine sees them: `SYS: SYS2;` is `sys/sys2/` |
 | `site/` | the site files a machine loads, for the example site `MIT` |
 | `docs/` | how the system is built, and what has been found out about it |
+| `pages/` | the project's web page and its release notes, written by hand |
 
 ## Documents
 
