@@ -107,6 +107,7 @@
         <ul class="facts">
           <li><b>It rebuilds itself.</b> The fault that stopped a cold load in silence and MINI&rsquo;s two stream faults are fixed. The band is compiled by the system itself, and the microcode is assembled from its sources.</li>
           <li><b>The network:</b> the routing table covers every subnet, and MINI finds its file server by itself.</li>
+          <li><b>Fixes from LM-3&rsquo;s later work.</b> LM-3 went on from System 100 to releases 300 through 304. Those are not taken whole, because much of them is LMI and System 130 material; instead 36 of LM-3&rsquo;s bug fixes are taken one at a time, each read against this tree before it was applied: in the cold-load builder, the compiler, pathnames and the file client, Chaosnet, the window system and ZWEI. <a href="https://github.com/metebalci/muir-sys/blob/main/docs/upstream-changes.md"><code>docs/upstream-changes.md</code></a> records every ruling.</li>
           <li><b>About forty faults</b> are fixed across the tree.</li>
           <li><b>Gone:</b> the tape, LMFILE and Xerox printing systems. Only System is patchable, and what is not MIT&rsquo;s, or not wanted, was never imported.</li>
           <li><b>The site is named MIT,</b> with OZ at 177200 and LISPM-1 at 177201 on subnet 376.</li>
