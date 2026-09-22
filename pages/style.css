@@ -116,9 +116,10 @@ b { font-weight: 700; }
   gap: 1.75rem;
 }
 
+/* From the desk's left edge, not the page column's, as muir's and
+   muir-fpga's pages have it. */
 .desk-note {
-  max-width: 64rem;
-  margin: 0 auto 0.9rem;
+  margin: 0 0 0.9rem;
   font-family: var(--mono);
   font-size: var(--fs-mono-small);
   font-weight: 400;
