@@ -1,7 +1,7 @@
 # muir-sys
 
-**This system makes the Lisp Machine usable today:** on current hardware,
-with current displays and networks, and with today's tools and practices.
+**The Lisp Machine system for muir and muir-fpga,** continuing where System
+100 left off and evolved step by step.
 
 The starting point is the MIT CADR and its system as MIT last left it. **System
 release 99.32** is the content of a backup of OZ recovered by the
@@ -10,11 +10,9 @@ project, "possibly the last backup and version of the Lisp Machine for the
 CADR". This system is forked from **System 100**, [LM-3](https://tumbleweed.nu/lm-3/)'s
 release of that content, brought up and fixed, under the AGPL.
 
-The aim is to evolve the system, not to change it radically. It continues
-where System 100 left off and moves on in steps, each a release built from
-this repository. It runs on an FPGA and in a simulator rather than on 1980s
-boards. **Backward compatibility is not an aim, but System 1001 will always
-be supported by muir and muir-fpga.**
+The aim is to evolve the system, not to change it radically. It moves on in
+steps, each a release built from this repository. **Backward compatibility is
+not an aim, but System 1001 will always be supported by muir and muir-fpga.**
 
 ## System 1001
 
