@@ -126,6 +126,14 @@ b { font-weight: 700; }
   padding-inline: 0.15rem;
 }
 .desk-note b { font-weight: 500; }
+/* The desk note is the pages' navigation, as on muir's and muir-fpga's pages:
+   the project, then each page, the current one marked in the spot color. */
+.desk-note a, .desk-note [aria-current="page"] { white-space: nowrap; }
+.desk-note [aria-current="page"] {
+  background: var(--spot);
+  box-shadow: 0 0 0 0.15rem var(--spot);
+  color: var(--ink);
+}
 
 /* Each section is paper on the halftone desk, with its panels above and the
    machine's own status line ruled off at the foot. */
