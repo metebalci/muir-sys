@@ -71,7 +71,6 @@
         <span class="eyebrow">New</span>
         <ul class="facts">
           <li><b>A cold load can be driven without a console.</b> It asks the file server for <code>SYS: SITE; COLDRUN LISP</code> and evaluates what it finds, so a build can hand it <code>(SI:QLD)</code> and the save with no screen. It reports its progress with MINI&rsquo;s new opcode 204, which ozd 8c816e5 or later writes to its log.</li>
-          <li><b>The site is named MIT,</b> as System 100 has it, so the herald says "MIT System". Only the name is taken: its hosts are numbered from the subnet&rsquo;s first address, OZ at 177200 and LISPM-1 at 177201.</li>
         </ul>
       </div>
 
@@ -110,7 +109,7 @@
           <li><b>Fixes from LM-3&rsquo;s later work.</b> LM-3 went on from System 100 to releases 300 through 304. Those are not taken whole, because much of them is LMI and System 130 material; instead 36 of LM-3&rsquo;s bug fixes are taken one at a time, each read against this tree before it was applied: in the cold-load builder, the compiler, pathnames and the file client, Chaosnet, the window system and ZWEI. <a href="https://github.com/metebalci/muir-sys/blob/main/docs/upstream-changes.md"><code>docs/upstream-changes.md</code></a> records every ruling.</li>
           <li><b>About forty faults</b> are fixed across the tree.</li>
           <li><b>Gone:</b> the tape, LMFILE and Xerox printing systems. Only System is patchable, and what is not MIT&rsquo;s, or not wanted, was never imported.</li>
-          <li><b>The site is named MIT,</b> with OZ at 177200 and LISPM-1 at 177201 on subnet 376.</li>
+          <li><b>The site is named MIT,</b> as System 100 has it, so the herald says "MIT System". Only the name is taken: the hosts are this site&rsquo;s own, numbered from the subnet&rsquo;s first address, OZ at 177200 and LISPM-1 at 177201 on subnet 376.</li>
         </ul>
       </div>
 
