@@ -45,3 +45,7 @@
 # docs/fonts.md has the rest.
 /lm3-*/
 /lmfont/
+
+# The run directory: logs, packs, build records and the machine's working
+# files. Local to this clone and never committed.
+/run/
