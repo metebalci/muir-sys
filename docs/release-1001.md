@@ -556,10 +556,6 @@ file saying why.
   so over TELNET a question asked with FQUERY signalled as soon as it had to
   ask again. These streams ring the terminal's bell with BEL now (#5).
 
-- **The site is MIT, not Z54,** and its hosts are numbered from the subnet's
-  first address: OZ is 177200 and LISPM-*n* is 177200+*n*, so LISPM-1 is
-  177201. Release 1000 was re-released with the same change.
-
 ## Around the system
 
 - **WORMCH is rebuilt from its AST source.** The build guide gives a QFASL
