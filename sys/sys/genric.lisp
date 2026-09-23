@@ -1840,7 +1840,10 @@ The microcode sets it at boot from MACHINE-ID."
 	    "Control store words" "A memory words" "Dispatch memory words"
 	    ;; word 7, from revision 3: bit 0 multiply, bit 1 divide, one
 	    ;; instruction each.
-	    "Instruction features")
+	    "Instruction features"
+	    ;; word 10, from revision 4: 1 if the processor has its own tick,
+	    ;; the 60-cycle clock the display's vertical interrupt used to give.
+	    "Processor tick")
   "What the words of QUUX's feature page hold, from word 0 on.")
 
 (defun print-feature-page (&optional (stream *standard-output*))
