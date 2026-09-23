@@ -728,7 +728,9 @@ A-GC-SWITCHES 	     ((BYTE-VALUE Q-DATA-TYPE DTP-FIX) 0)
 A-ARRAY-INDEX-ORDER  ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 5)
 
 ;1 for CADR, 2 for LAMBDA.
-A-PROCESSOR-TYPE-CODE ((PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX) 1))
+;; quux: 4, si:quux-type-code.  this microcode needs quux's 6-bit level-1
+;; map entry, so it says which machine it is for.
+a-processor-type-code ((plus (byte-value q-data-type dtp-fix) 4))
 
 ;Last array referenced at XAR-1-CACHED-1.
 ;The results of decoding this array are found in A-AR-1-ARRAY-ADDRESS-1, etc.
@@ -933,8 +935,10 @@ A-DISK-DOING-READ-COMPARE (0)
 A-DISK-IDLE-TIME (0)		;Time since last disk op (other than background)
 A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops)
 
-(ASSIGN DISK-SWAP-OUT-CCW-BASE 700) ;build CCW lists for swap out starting here
-(ASSIGN DISK-SWAP-OUT-CCW-MAX  720) ; and not above here.
+;; quux: swap-out ccws move from 700-717 to 440-457, where the reverse
+;; first-level map was, because that map's 64 entries now take 640-737.
+(assign disk-swap-out-ccw-base 440) ;build ccw lists for swap out starting here
+(assign disk-swap-out-ccw-max  460) ; and not above here.
 (ASSIGN DISK-SWAP-IN-CCW-BASE 740)  ;build CCW lists for swap in starting here
 (ASSIGN DISK-SWAP-IN-CCW-MAX  760)  ; and not above here.
 

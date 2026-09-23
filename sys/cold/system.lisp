@@ -117,6 +117,7 @@
 
 ;;; Processor code variables
  CADR-TYPE-CODE
+ quux-type-code
  PROCESSOR-TYPE-CODE
 
 ;;; Addresses of funny parts of virtual memory.
