@@ -10,6 +10,15 @@ access, and the regenerated WORM font matched its AST source. UCADR and PROM
 machine outputs matched their previous assemblies, as did both diagnostic
 memory images and symbol sets.
 
+**Rebuild of both releases (2026-09-22 and 23):** System 1000 and 1001 were
+rebuilt from their tags, from trees extracted from the release archives, each
+on its own machine and ports. The SYSTEM compiles took 2h27m each. MAKE-COLD
+took 5m33s for 1001 and 6m45s for 1000. 1001's QLD ran unattended in 25m26s;
+1000's was typed at the console and reached a partition size of 20842 blocks.
+Reassembled microcode matched each release's `ucadr.mcr`, `.tbl` and `.locs`
+byte for byte. A copy of each release pack booted against the extracted
+sources.
+
 **Earlier System 1000 verification:** verified end to end twice on 2026-09-16. First from a stock System 100 band on the bootstrap subnet; then, the same night, by the 1000 band rebuilding the final tree on the site's own subnet 376, from a tree with every compiled file removed. That second build compiled SYSTEM, made a cold load, loaded it with `QLD` to a partition size of 20842 blocks, and saved a band that boots as "LMI System, band 1 of LISPM-1 / Experimental System 1000 / Microcode 323" and answers `(1000 "177202" 65153 256)`.
 
 | Step | Result |
@@ -135,6 +144,37 @@ subnet. The band it builds can, so the last step moves it:
 - **Nothing else may log in while a build runs.** A Lisp Machine has one user, and `LOGIN` logs out first, closing every file connection; a second TELNET session's login killed a SYSTEM compile mid-write.
 - **A long compile can exhaust the band.** Near the end of SYSTEM, in the demos, the machine halted in `TRAP`'s recursive-error check. A reboot and `(make-system 'system :compile :noload :noconfirm :nowarn :no-increment-patch)` finished the rest, compiling only what was missing. Reboot again before `MAKE-COLD`, which also needs room.
 
+### What the 2026-09-22 rebuild added
+
+- **A QFASL records the site of the band that compiled it.** `QC-FILE` puts
+  `:SITE ,SI:SITE-NAME` in the file's `:COMPILE-DATA` (`sys/qcfile.lisp:179`),
+  and `DUMP-FORMS-TO-FILE` does the same through `SHORT-SITE-NAME`
+  (`sys/qcfasd.lisp:454`); "these properties wind up on the GENERIC-PATHNAME",
+  so the built world carries them too. A build on a band of another site
+  therefore writes that site's name into every QFASL. Give the build band the
+  new site first, then compile:
+
+  ```lisp
+  (login "LISPM" "OZ" t)
+  (let ((si:inhibit-fdefine-warnings :just-warn))
+    (load "SYS: SITE; SYS TRANSLATIONS") (load "SYS: SITE; SITE QFASL")
+    (load "SYS: SITE; LMLOCS QFASL") (load "SYS: SITE; HSTTBL QFASL"))
+  si:site-name
+  (si:disk-save "LOD2" t)
+  ```
+
+  The site files loaded here may have been compiled at the old site; the
+  build compiles them again. Make the saved partition current and compile
+  from it, so a reboot during the build keeps the new site. The header also
+  records the user and the machine's location name.
+- **Clear generated QFASLs by the tracked list, not by pattern.** The tree
+  tracks some binaries (`sys/sys/ucinit.qfasl`, `sys/demo/tvbgar.qfasl` and
+  fonts), and a clean build must keep them. Compare against the release
+  archive's file list, sorted with `LC_ALL=C` before `comm`.
+- **Read the microcode file list from `ucadr/ucode.lisp` with its comments.**
+  System 1000's list has `"UC-PUP"` commented out; assembling it in adds code
+  that the released microcode does not have.
+
 ### Writing a release pack
 
 A release pack has muir's default layout and only the microcode and the band loaded (`diskpack`, muir `daefb0c` or later):
@@ -167,12 +207,12 @@ A world cannot be built from nothing, so each stage runs on the one before.
 
 ## What is needed
 
-- **A running band** to compile with, such as a 1000 band.
+- **A running band** to compile with, such as a 1000 band, **whose site is the site being built** (see "What the 2026-09-22 rebuild added" below).
 - **A file server for `SYS:`** that serves both FILE and MINI. ozd does.
 - **A site.** The repository includes an example `site/` directory. The build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
 - **The translations file must survive the traditional readtable.** A cold load reads it with `MINI-READFILE` (`cold/mini.lisp:319`), which ignores the file's attribute list, so it is read in traditional syntax whatever the file says. There a slash escapes the next character. A file whose targets are Unix paths must therefore double every slash and name no readtable, or the cold load stops with "End of file ... in the middle of the list". MIT's own site file never met this: its targets are TOPS-20 paths with no slashes. This is metebalci/muir-sys issue 9.
 - **A free partition for the cold load,** and a larger one for the saved world (step 7).
-- **A console or generated COLDRUN script** for steps 5 and 6. The TELNET server is not part of a cold load; System 1001 can run QLD from the script described below.
+- **A console or generated COLDRUN script** for steps 5 and 6. The TELNET server is not part of a cold load; System 1001 can run QLD from the script described below. System 1000 cannot: its `(si:qld)` is typed at the console, which muir serves over RFB, and QLD then asks for a list of additional systems, answered with `()`.
 
 Every session that reads or writes files must log in first, for example with `(login "LISPM" t)`.
 
