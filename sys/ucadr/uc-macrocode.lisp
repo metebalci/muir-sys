@@ -481,7 +481,8 @@ CBM0					;%OPEN-CALL-BLOCK etc. call in here
 	    (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(POPJ-AFTER-NEXT		;Push LPFEF Q
 	  (C-PDL-BUFFER-POINTER-PUSH) M-T)
-       ((A-IPMARK) (BYTE-FIELD 10. 0) M-ZR)	;A-IPMARK -> new open block
+       ((a-ipmark) pdl-buffer-address-mask m-zr)	;A-IPMARK -> new open block;
+					;the pdl buffer's own width, not 10 bits: quux's buffer can be bigger
 
 
 ;;; MISC INSTRUCTION
