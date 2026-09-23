@@ -102,12 +102,33 @@ Will be NIL by the time YOU get to look at it")
 
 ;;; Function to reset various things, do initialization that's inconvenient in cold load, etc.
 ;;; COLD-BOOT is T if this is for a cold boot.
+;; quux: the band's safeguard, as the microcode's machine-not-quux-4 halt is
+;; the microcode's: a band of system 1002 on a cadr runs mit's microcode 323,
+;; whose type code is 1, and would go on with a pdl buffer, a map, a clock and
+;; a feature page it does not have.  print why on the cold-load stream, which
+;; needs nothing set up, and halt; the halt cannot be continued past.
+(defun check-machine-is-quux ()
+  (unless (= processor-type-code quux-type-code)
+    ;; only what the cold load has: princ, as its own greeting uses, not
+    ;; format, which is loaded later.
+    (send cold-load-stream :fresh-line)
+    (princ "This band runs only on QUUX: System 1001 is the last for the CADR." cold-load-stream)
+    (terpri cold-load-stream)
+    (princ "This machine's processor type is " cold-load-stream)
+    (princ processor-type-code cold-load-stream)
+    (princ ", not QUUX's 4." cold-load-stream)
+    (terpri cold-load-stream)
+    (do () (nil) (%halt))))
+
 (DEFUN LISP-REINITIALIZE (&OPTIONAL (CALLED-BY-USER T)
 			  &AUX (COLD-BOOT COLD-BOOTING)
 			  MUST-ENABLE-TRAPPING)
   "Resets various global constants and initializes the error system.
 COLD-BOOT is T if this is for a cold boot."
   (SETQ INHIBIT-SCHEDULING-FLAG T)		;In case called by the user
+  ;; quux: from system 1002 the system runs only on quux; system 1001 is the
+  ;; last for the cadr.  stop at once, and say why, rather than misbehave.
+  (check-machine-is-quux)
 
   (SETQ ALPHABETIC-CASE-AFFECTS-STRING-COMPARISON NIL)
   ;; If these are set wrong, all sorts of things don't work.
