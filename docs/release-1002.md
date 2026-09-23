@@ -8,14 +8,28 @@ a comment in that file saying why.
   `patch/system-1002.patch-directory`), set on main as soon as System 1001
   was released, so that no band built from main calls itself 1001.
 
+## QUUX only
+
+- **System 1002 runs only on QUUX; System 1001 is the last release for the
+  CADR** (the user, 2026-09-23). The CADR stays on System 100 and 1001 with
+  MIT's microcode 323. The system assumes QUUX: `SI:MACHINE-PDL-BUFFER-LENGTH`
+  reads the feature page with no CADR case, and `SI:PRINT-FEATURE-PAGE` no
+  longer answers for a CADR.
+- **A band stops on anything else.** `LISP-REINITIALIZE` (`sys/ltop.lisp`)
+  first calls `SI:CHECK-MACHINE-IS-QUUX`: if the processor type is not
+  QUUX's, it prints why on the cold-load stream and halts, as the
+  microcode's `MACHINE-NOT-QUUX-4` does for the microcode. Loaded into System
+  1001's band, it passes on QUUX and halts on a CADR running 323.
+- **So a 1002 band is built on QUUX.** Compiling and making the cold load
+  can still run on a 1001 band on the CADR; booting the cold load, QLD and
+  the save run on QUUX with microcode 1000.
+
 ## QUUX
 
 - **Microcode 1000 is QUUX's; the CADR keeps MIT's 323.** QUUX is the CADR
   evolved, and muir and muir-fpga run it with `--machine quux`. This is the
   first change to the microcode itself, which stayed 323 while it was MIT's;
-  it takes 1000 as the system took 1000 after System 100. One band serves
-  both machines: it asks the machine at boot what it is running on.
-  Microcode 1000 needs QUUX hardware revision 4:
+  it takes 1000 as the system took 1000 after System 100.   Microcode 1000 needs QUUX hardware revision 4:
   - **A six-bit level-1 map entry** (revision 1), using a bit the CADR
     leaves spare, so the level-2 map has 64 blocks of 32 pages instead of
     32: 63 usable blocks map 504K words at once instead of 248K.

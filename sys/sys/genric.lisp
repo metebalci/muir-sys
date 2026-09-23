@@ -1846,11 +1846,11 @@ The microcode sets it at boot from MACHINE-ID."
 	    "Processor tick")
   "What the words of QUUX's feature page hold, from word 0 on.")
 
+;; from system 1002 the system runs only on quux, whose feature page this
+;; reads; lisp-reinitialize stops on anything else.
 (defun print-feature-page (&optional (stream *standard-output*))
-  "Print QUUX's feature page: the machine's ID and the sizes of its memories.
-A CADR has no feature page, and says so."
-  (if (not (= (machine-type-code) quux-type-code))
-      (format stream "~&A ~A has no feature page.~%" (machine-type))
+  "Print QUUX's feature page: the machine's ID and the sizes of its memories."
+  (progn
     (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
     (loop for name in feature-page-words
 	  for i from 0
