@@ -125,13 +125,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST SYSTEM-COMMUNICATION-AREA-QS '(
   ;; LOCATIONS RELATIVE TO 400 IN CADR
   ;; locations 400-437 are miscellaneous Qs declared below
-  ;; locations 440-477 were the reverse first level map: it is at 640-737,
-  ;; for quux's 64 entries (a cadr uses 32), and 440-457 hold the swap-out
-  ;; CCWs that were at 700-717
+  ;; locations 440-477 are the reverse first level map on a CADR (microcode
+  ;; 323); on QUUX (microcode 1000) it is at 640-737, for its 64 entries, and
+  ;; 440-457 hold the swap-out CCWs that the CADR has at 700-717
   ;; locations 500-511 are the keyboard buffer header (buffer is 200-377)
   ;; locations 600-637 are the disk-error log
-  ;; locations 740-777 are reserved for disk CCW's: swap-in CCWs at 740-757
-  ;; and 777; 700-737 hold the second half of the reverse first level map
+  ;; locations 700-777 are reserved for disk CCW's: swap-out at 700-717 on a
+  ;; CADR, swap-in at 740-757, and 777; on QUUX 700-737 hold the second half
+  ;; of its reverse first level map
   ;; In CADR, location 777 is used (for now) by the disk code for the CCW.
   ;;  --actually it seems to use locations 12-377 for the CCW most of the time.
   ;;  THE FOLLOWING ARE COMMENTS FOR THE LAMBDA
@@ -142,7 +143,7 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;;   unfortunately, for the time being, the world still has to agree implicitly
   ;;   on a slot number for the lowest memory, which holds this data!
   ;; locations 700-777 are reserved for disk CCW's
-  ;;   locations 700-720 used for swap out (now 440-460).
+  ;;   locations 700-720 used for swap out (on QUUX, 440-460).
   ;;   locations 740-760 used for swap in.
   ;;   location 777 is used during booting, etc.
   ;;   (other, higher, locations are used temporarily during band copying.)

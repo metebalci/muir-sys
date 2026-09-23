@@ -268,11 +268,13 @@
 				;NOTE THAT CRUFT PUSHED BY SGLV SHOULD BE COUNTED IN THIS
 
 ;Number of bits in PP, PI registers.
-(DEF-DATA-FIELD PDL-BUFFER-ADDRESS-MASK 10. 0)
+;; quux from revision 2: a 14-bit pointer, 16k words, not the cadr's 10 bits
+;; and 1k (muir measured 16k against 1k and 4k, and the user chose 16k).
+(def-data-field pdl-buffer-address-mask 14. 0)
 
-(DEF-DATA-FIELD PDL-BUFFER-ADDRESS-HIGH-BIT 1 9.)
+(def-data-field pdl-buffer-address-high-bit 1 13.)
 
-(ASSIGN PDL-BUFFER-SIZE-IN-WORDS 2000)
+(assign pdl-buffer-size-in-words 40000)
 
 ;Max value for M-PDL-BUFFER-ACTIVE-QS.  This allows max size active frame.
 (ASSIGN PDL-BUFFER-HIGH-LIMIT
@@ -728,9 +730,10 @@ A-GC-SWITCHES 	     ((BYTE-VALUE Q-DATA-TYPE DTP-FIX) 0)
 A-ARRAY-INDEX-ORDER  ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 5)
 
 ;1 for CADR, 2 for LAMBDA.
-;; 1 for a cadr, or a quux's own type from machine-id (4, si:quux-type-code):
-;; initial-map-a sets it at boot, so one microcode serves both machines.
-a-processor-type-code ((plus (byte-value q-data-type dtp-fix) 1))
+;; quux's own type from machine-id (4, si:quux-type-code), which initial-map-a
+;; sets at boot; this microcode runs only on quux.  the cadr's microcode 323
+;; has 1 here.
+a-processor-type-code ((plus (byte-value q-data-type dtp-fix) 4))
 
 ;Last array referenced at XAR-1-CACHED-1.
 ;The results of decoding this array are found in A-AR-1-ARRAY-ADDRESS-1, etc.
@@ -1220,8 +1223,8 @@ A-MOUSE-SAVE-2 (0)
 A-MOUSE-SAVE-E (0)
 
 ;; the invalid level-1 entry, which points at the last level-2 block, kept
-;; all map-miss: 37 on a cadr, 77 on a quux with the 6-bit level-1 entry.
-;; initial-map-a sets it from machine-id; the level-1 miss tests, the reuse
+;; all map-miss: 77 with quux's 6-bit level-1 entry (a cadr's would be 37).
+;; initial-map-a sets it at boot; the level-1 miss tests, the reuse
 ;; pointer's wrap and pgf-rl's check compare against it.  it is last, so that no
 ;; location an earlier microcode had moves.
 a-level-1-map-invalid
