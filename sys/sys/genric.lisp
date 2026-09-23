@@ -1814,9 +1814,13 @@ If KEY is non-NIL, it is a function to apply to each element
 
 (defun machine-type ()
   "Return the generic name for the hardware that we are running on, as a string.
-It is /"CADR/"."
-  ;; this system runs only on a CADR.
-  "CADR")
+It is /"CADR/" or /"QUUX/"."
+  ;; the microcode sets processor-type-code at boot from machine-id: the
+  ;; cadr or quux, the cadr evolved.  anything else cannot happen on muir or
+  ;; muir-fpga, and is named as such rather than guessed.
+  (cond ((= processor-type-code cadr-type-code) "CADR")
+	((= processor-type-code quux-type-code) "QUUX")
+	(t "UNKNOWN")))
 
 (defun machine-version ()
   "Return a string that identifies which hardware and special microcode we are using."

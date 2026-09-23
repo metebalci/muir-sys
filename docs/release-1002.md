@@ -50,7 +50,8 @@ a comment in that file saying why.
   - `A-PROCESSOR-TYPE-CODE`, which the Lisp variable `SI:PROCESSOR-TYPE-CODE`
     shows, is set at boot: 1, `SI:CADR-TYPE-CODE`, or 4, the new constant
     `SI:QUUX-TYPE-CODE` (`window/cold.lisp`, exported from
-    `cold/system.lisp`), after the Lambda's 2 and the Explorer's 3. No code
+    `cold/system.lisp`), after the Lambda's 2 and the Explorer's 3. `MACHINE-TYPE`
+    names it, and the herald prints it; no other code
     tests it.
   - `cold/qcom.lisp`: `SIZE-OF-HARDWARE-LEVEL-2-MAP` is 4000, QUUX's, and
     the system communication area's layout comment says where the reverse

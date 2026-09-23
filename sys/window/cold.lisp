@@ -9,7 +9,7 @@
 ;;; rather than TV because it is part of the cold-load.
 
 ;;; only the CADR's code is left.  SI:PROCESSOR-TYPE-CODE, which the
-;;; microcode sets, is one of these; no code tests it.
+;;; microcode sets, is one of these; MACHINE-TYPE (SYS; GENRIC) names it.
 (DEFCONST CADR-TYPE-CODE 1
   "The value which SI:PROCESSOR-TYPE-CODE has when you run on a CADR.")
 ;;; quux is the cadr evolved, with a 6-bit level-1 map entry.  the microcode
