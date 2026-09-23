@@ -335,6 +335,13 @@
 		(OR (SOURCE-P (FIELD FUNCTION-SOURCE 14))
 		    (ERROR)) CONS-LAP-SYM)
 
+;; quux's id word, read-only: signature 0x5155 in bits 31:16, the hardware
+;; revision in 15:4 and the processor type in 3:0.  a cadr does not drive
+;; this source and reads all ones, so anything without the signature is a
+;; cadr.  muir's docs/quux.md holds the contract.
+(defprop quux-id (or (source-p (field function-source 16))
+		     (error)) cons-lap-sym)
+
 (DEFPROP MICRO-STACK-POINTER (OR (SOURCE-P (PLUS (FIELD FUNCTION-SOURCE 1)
 						 (BYTE-FIELD 5 24.)))
 				 (ERROR)) CONS-LAP-SYM)

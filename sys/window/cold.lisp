@@ -12,8 +12,9 @@
 ;;; microcode sets, is one of these; no code tests it.
 (DEFCONST CADR-TYPE-CODE 1
   "The value which SI:PROCESSOR-TYPE-CODE has when you run on a CADR.")
-;;; quux is the cadr evolved, with a 6-bit level-1 map entry; its microcode
-;;; sets 4, after the lambda's 2 and the explorer's 3.
+;;; quux is the cadr evolved, with a 6-bit level-1 map entry.  the microcode
+;;; reads the machine's id at boot and sets 4 on a quux, after the lambda's 2
+;;; and the explorer's 3, or 1 on a cadr.
 (defconst quux-type-code 4
   "The value which SI:PROCESSOR-TYPE-CODE has when you run on a QUUX.")
 

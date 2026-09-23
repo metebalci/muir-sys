@@ -34,9 +34,9 @@
 (DEF-DATA-FIELD MAP-ACCESS-CODE 2 22.)		;NOTE BIT 22 IS IN TWO FIELDS
 (def-data-field map-first-level-map 6 24.)	;note not the same as where it writes
 ;; quux: the level-1 entry is 6 bits, not the cadr's 5, so the level-2 map
-;; has 64 blocks of 32 pages instead of 32.  bit 29 is the new bit; a cadr
-;; reads it as 0, which initial-map-a checks at boot.  77 is the invalid
-;; entry, pointing at the last block, which is kept all map-miss.
+;; has 64 blocks of 32 pages instead of 32.  bit 29 is the new bit, which a
+;; cadr reads as 0, so the 6-bit field serves both.  the invalid entry is
+;; a-level-1-map-invalid, 37 or 77, set at boot from quux-id.
 (DEF-DATA-FIELD MAP-SECOND-LEVEL-MAP 24. 0)
 (DEF-DATA-FIELD MAP-ACCESS-STATUS-AND-META-BITS 10. 14.)
 (DEF-DATA-FIELD MAP-HARDWARE-READ-ACCESS 1 23.)	;HARDWARE PERMITS (AT LEAST) READ ACCESS
@@ -209,7 +209,7 @@ GET-MAP-BITS
 	(CALL-XCT-NEXT PGF-SAVE-1)		;Save MD, M-A, M-B, M-T
        ((A-PGF-VMA) MD)				;Address of reference, also saves MD
 	((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;Check for level 1 map miss
-	(call-equal m-tem (a-constant 77) level-1-map-miss)	;quux: 77 is the invalid entry
+	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;37 on a cadr, 77 on quux
 	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
 	(JUMP-GREATER-OR-EQUAL-XCT-NEXT		;Check for A-memory or I/O address
 		M-A A-LOWEST-DIRECT-VIRTUAL-ADDRESS
@@ -372,22 +372,23 @@ LEVEL-1-MAP-MISS
 	((M-T) A-SECOND-LEVEL-MAP-REUSE-POINTER)	;ALLOCATE A BLOCK OF LVL 2 MAP
 	((MD M-A) SELECTIVE-DEPOSIT MD VMA-MAP-BLOCK-PART A-ZERO) ;-> 1ST ENTRY IN BLOCK
 	;; point 1st lvl at it.  quux: the block number is 6 bits, and its bit 5
-	;; is written from vma<24>, apart from the other five.  m-tem is free:
-	;; page faults clobber it, and the callers are done with it.
+	;; is written from vma<24>, apart from the other five; on a cadr it is
+	;; always 0.  m-tem is free: page faults clobber it, and the callers
+	;; are done with it.
 	((m-tem) (byte-field 1 5) m-t)				;bit 5 of the block
 	((m-pgf-tem) dpb m-t map-write-first-level-map		;bits 4:0
 		(a-constant (byte-mask map-write-enable-first-level-write)))
 	((vma-write-map) dpb m-tem map-write-first-level-map-high a-pgf-tem)
-	;; quux: the reverse map has 64 entries, too many for sys com 440-477,
-	;; so it is at 640-737, which only the lambda used.
+	;; the reverse map has 64 entries for quux, too many for sys com
+	;; 440-477, so it is at 640-737 on both machines.
 	((m-pgf-tem) add m-t (a-constant 240))		;reverse 1st lvl map in 240-337 of
 	((VMA-START-READ) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)  ;SYS COM AREA.
 	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT THE OLD MAP
 	(JUMP-LESS-THAN READ-MEMORY-DATA A-ZERO PGF-L1C) ;DON'T WRITE MAP IF NO PREVIOUS
-	((vma-write-map) dpb				;and 77-ify old 1st lvl map
-		(m-constant -1) map-write-first-level-map	;entry so will fault if used;
-		(a-constant (plus (byte-mask map-write-enable-first-level-write)	;quux: all
-				  (byte-mask map-write-first-level-map-high))))	;6 bits
+	((vma-write-map) dpb				;and invalidate old 1st lvl map
+		(m-constant -1) map-write-first-level-map	;entry so will fault if used:
+		(a-constant (plus (byte-mask map-write-enable-first-level-write)	;all ones,
+				  (byte-mask map-write-first-level-map-high))))	;37 or 77
 	((VMA) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)
 PGF-L1C	((WRITE-MEMORY-DATA-START-WRITE) M-A)		;UPDATE REVERSE FIRST LVL MAP
 	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT 1ST ENTRY IN BLOCK
@@ -404,7 +405,7 @@ PGF-L1A	((VMA-WRITE-MAP)				;FILL 2ND-LEVEL MAP WITH MAP-MISS (0)
 ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER	
 	((Q-R A-SECOND-LEVEL-MAP-REUSE-POINTER)
 		ADD M-ZERO A-SECOND-LEVEL-MAP-REUSE-POINTER ALU-CARRY-IN-ONE)
-	(popj-after-next popj-less-than q-r (a-constant 77))	;quux: wrap before the invalid block, 77
+	(popj-after-next popj-less-than q-r a-level-1-map-invalid) ;wrap before the invalid block
        ((A-SECOND-LEVEL-MAP-REUSE-POINTER)
 		A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)	;WRAP AROUND TO AFTER THE WIRED ONES
 
@@ -413,7 +414,7 @@ ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER
 PGF-MAP-MISS
 	(CALL-XCT-NEXT PGF-SAVE)	;SAVE A,B,T,VMA
        ((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;CHECK FOR 1ST-LEVEL MISS
-	(call-equal m-tem (a-constant 77) level-1-map-miss)	;quux: 77 is the invalid entry
+	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;37 on a cadr, 77 on quux
 	;; MD HAS ADDRESS, VMA SAVED AND CLOBBERED.  HANDLE 2ND-LEVEL MISS
 	((A-SECOND-LEVEL-MAP-RELOADS) ADD A-SECOND-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
 	((M-T) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA) ;ADDRESS SANS EXTRA BITS
@@ -655,7 +656,7 @@ PGF-AG	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
 ;RELOAD HARDWARE MAP FROM PAGE HASH TABLE
 PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
 	((M-T) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)
-	(call-equal m-t (a-constant 77) illop)		;about to clobber; quux: 77 is invalid
+	(call-equal m-t a-level-1-map-invalid illop)	;about to clobber
 	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;GET SECOND WORD OF PHT ENTRY
 	(ILLOP-IF-PAGE-FAULT)				;TABLE SUPPOSED TO BE WIRED
 	((M-A) A-PGF-A)					;RESTORE REGS DURING MEM CYCLE
