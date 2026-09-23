@@ -29,21 +29,36 @@ INITIAL-MAP
        ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
-	;first set all level 1 map to 77, quux's invalid entry: all 6 bits
+	;; which machine: quux-id carries the signature 50525 (0x5155) in bits
+	;; 31:16 on a quux, and reads all ones on a cadr.  a cadr is type 1 with
+	;; 5-bit level-1 entries, invalid entry 37; a quux gives its own type in
+	;; bits 3:0, and from hardware revision 1 (bits 15:4, cumulative) has the
+	;; 6-bit entry, invalid entry 77.
+	((a-processor-type-code) (a-constant (plus (byte-value q-data-type dtp-fix) 1)))
+	((a-level-1-map-invalid) (a-constant 37))
+	((m-tem) (byte-field 20 20) quux-id)
+	(jump-not-equal m-tem (a-constant 50525) inimap0)
+	((a-processor-type-code) (byte-field 4 0) quux-id
+		(a-constant (byte-value q-data-type dtp-fix)))
+	((m-tem) (byte-field 14 4) quux-id)
+	(jump-equal m-tem a-zero inimap0)
+	((a-level-1-map-invalid) (a-constant 77))
+inimap0	;first set all level 1 map to the invalid entry: all ones, 5 bits on a
+	;cadr and 6 on quux, where bit 5 is written from vma<24>
 	((vma) dpb (m-constant -1) map-write-first-level-map
 		   (a-constant (plus (byte-value map-write-enable-first-level-write 1)
 				     (byte-mask map-write-first-level-map-high))))
 	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 1 24.) A-ZERO)
 INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
 	(JUMP-NOT-EQUAL MD A-ZERO INIMAP1)
-	;; quux: this microcode needs the 6-bit level-1 entry.  a cadr reads
-	;; bit 29 as 0, so the entry just written for block 0 reads back 37, and
-	;; the first level-2 block past 37 would silently alias another.  halt
-	;; at quux-map-missing instead.  md is 0 here, addressing block 0.
+	;; the entry just written for block 0 must read back as the invalid entry
+	;; quux-id promised: if the level-1 map is narrower than it says, blocks
+	;; would silently alias, so halt at map-width-mismatch.  md is 0 here,
+	;; addressing block 0.
 	((m-tem) map-first-level-map memory-map-data)
-	(jump-not-equal m-tem (a-constant 77) quux-map-missing)
-	;THEN ZERO LAST BLOCK OF LEVEL 2 MAP (block 77 on quux, which md's
-	;level-1 entry, just set to 77, points at)
+	(jump-not-equal m-tem a-level-1-map-invalid map-width-mismatch)
+	;THEN ZERO LAST BLOCK OF LEVEL 2 MAP (the invalid block, 37 or 77, which
+	;md's level-1 entry, just set to it, points at)
 	((MD) A-ZERO)
 INIMAP2	((VMA-WRITE-MAP) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE A-ZERO)
 	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
@@ -55,8 +70,8 @@ INIMAP7	((VMA-WRITE-MAP) M-C)
 	((MD) ADD MD (A-CONSTANT 20000))
 	(JUMP-LESS-THAN-XCT-NEXT MD A-A INIMAP7)
        ((M-C) ADD M-C (A-CONSTANT (BYTE-VALUE MAP-WRITE-FIRST-LEVEL-MAP 1)))
-	;; quux: only the low 5 bits of the entry are counted here, which holds
-	;; while fewer than 40 blocks (256k words) are wired.
+	;; only the low 5 bits of the entry are counted here, which holds while
+	;; fewer than 37 blocks (248k words) are wired.
 	((A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT) 
 		MAP-WRITE-FIRST-LEVEL-MAP M-C)	;FIRST NON-WIRED
 	;THEN SET UP WIRED LEVEL 2 MAP
@@ -77,8 +92,9 @@ INIM3A	((M-1) (BYTE-FIELD 5 8) MD)		;IF NOT AT EVEN 1ST LVL MAP BOUNDARY...
 
 INIM3B						;INITIALIZE REVERSE 1ST LVL MAP
 	((A-SECOND-LEVEL-MAP-REUSE-POINTER) A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)
-					;reverse 1st lvl map locs 240-337:
-					;quux's 64 entries do not fit in 40-77
+					;reverse 1st lvl map locs 240-337 on
+					;both machines: quux's 64 entries do
+					;not fit in 40-77
 	((WRITE-MEMORY-DATA) M-ZERO)	;VALUE TO GO IN WIRED ENTRIES
 	((vma) (a-constant 637))	;a-v-system-communication-area is 400
 INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
@@ -86,13 +102,12 @@ INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	((WRITE-MEMORY-DATA) ADD WRITE-MEMORY-DATA (A-CONSTANT 20000))
 	(JUMP-LESS-THAN WRITE-MEMORY-DATA A-A INIMAP6)	;JUMP IF STILL WIRED
 	((M-A WRITE-MEMORY-DATA) (M-CONSTANT -1))	;REST OF ENTRYS ARE -1.
-INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;quux: 64 entries, to 737
+INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
 	(POPJ)
 
-;; quux: initial-map-a comes here when the level-1 map keeps only 5 bits of
-;; an entry, as a cadr's does: this microcode is for quux alone.  the halt
-;; shows this location.
-quux-map-missing
+;; initial-map-a comes here when the level-1 map is narrower than quux-id
+;; says.  the halt shows this location.
+map-width-mismatch
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
