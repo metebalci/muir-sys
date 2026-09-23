@@ -90,6 +90,10 @@ before it was taken.
 - **`site/sys.translations` and `docs/building.md` say why files the cold
   load reads over MINI use spaces only**: MINI hands the reader untranslated
   bytes, so an ASCII tab is not whitespace to it (lmz-sys `2e684c2`).
+- **`docs/booting.md`, how a machine boots**, from power-on through the
+  PROM and the microcode to the first macroinstruction, carried over (lmz-sys
+  `fecd0a5`) with every citation re-checked against this tree, and the
+  PROM's and microcode 1000's QUUX handling added.
 
 Not taken: that line's reader and naming changes for Common Lisp (`#T`, the
 comparison names in ASCII), bishop's stack-frame operations, and its
