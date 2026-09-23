@@ -329,7 +329,13 @@ The microcode version number and some other suitable information is also include
   (FORMAT S "~& Microcode")
   (DOTIMES (I (- MAX 9))
     (WRITE-CHAR #/SPACE S))
-  (FORMAT S " ~3D" %MICROCODE-VERSION-NUMBER))
+  (FORMAT S " ~3D" %MICROCODE-VERSION-NUMBER)
+  ;; the machine the microcode found at boot, the cadr or quux, under the
+  ;; microcode it runs, aligned with it.
+  (format s "~& Machine Type")
+  (dotimes (i (- max 12.))		;decimal: this file reads in base 8
+    (write-char #/space s))
+  (format s " ~A" (machine-type)))
 
 (DEFUN PRINT-SYSTEM-MODIFICATIONS (&REST SYSTEM-NAMES)
   "Print descriptions of all loaded patches of the systems in SYSTEM-NAMES, or all systems."
