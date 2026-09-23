@@ -125,10 +125,12 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST SYSTEM-COMMUNICATION-AREA-QS '(
   ;; LOCATIONS RELATIVE TO 400 IN CADR
   ;; locations 400-437 are miscellaneous Qs declared below
-  ;; locations 440-477 are the reverse first level map
+  ;; locations 440-477 were the reverse first level map: quux's 64 entries
+  ;; are at 640-737, and 440-457 hold the swap-out CCWs that were at 700-717
   ;; locations 500-511 are the keyboard buffer header (buffer is 200-377)
   ;; locations 600-637 are the disk-error log
-  ;; locations 700-777 are reserved for disk CCW's (only 777 used now)
+  ;; locations 740-777 are reserved for disk CCW's: swap-in CCWs at 740-757
+  ;; and 777; 700-737 hold the second half of quux's reverse first level map
   ;; In CADR, location 777 is used (for now) by the disk code for the CCW.
   ;;  --actually it seems to use locations 12-377 for the CCW most of the time.
   ;;  THE FOLLOWING ARE COMMENTS FOR THE LAMBDA
@@ -139,7 +141,7 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;;   unfortunately, for the time being, the world still has to agree implicitly
   ;;   on a slot number for the lowest memory, which holds this data!
   ;; locations 700-777 are reserved for disk CCW's
-  ;;   locations 700-720 used for swap out.
+  ;;   locations 700-720 used for swap out (on quux, 440-460).
   ;;   locations 740-760 used for swap in.
   ;;   location 777 is used during booting, etc.
   ;;   (other, higher, locations are used temporarily during band copying.)
@@ -964,7 +966,8 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST SIZE-OF-HARDWARE-PDL-BUFFER       2000)
 (DEFCONST SIZE-OF-HARDWARE-MICRO-STACK        40)
 (DEFCONST SIZE-OF-HARDWARE-LEVEL-1-MAP      4000)
-(DEFCONST SIZE-OF-HARDWARE-LEVEL-2-MAP      2000)
+;;; quux's level-2 map, 64 blocks of 32; a cadr's is half of it, 2000.
+(defconst size-of-hardware-level-2-map      4000)
 (DEFCONST SIZE-OF-HARDWARE-UNIBUS-MAP         20)
 
 (DEFCONST A-MEMORY-LOCATION-NAMES '(	;LIST IN ORDER OF CONTENTS OF A-MEMORY STARTING AT 40
@@ -1049,7 +1052,8 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %GC-SWITCHES
   ARRAY-INDEX-ORDER			;NIL => first array subscript varies fastes.
 					;T => last subscript varies fastest.
-  PROCESSOR-TYPE-CODE			;1 => CADR, 2 => LAMBDA, 3 => EXPLORER
+  PROCESSOR-TYPE-CODE			;1 => CADR, 2 => LAMBDA, 3 => EXPLORER,
+					;4 => QUUX
   AR-1-ARRAY-POINTER-1			;Array whose data is cached for AR-1-CACHED-1.
   AR-1-ARRAY-POINTER-2			;Array whose data is cached for AR-1-CACHED-2.
   ))

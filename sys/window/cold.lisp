@@ -9,9 +9,13 @@
 ;;; rather than TV because it is part of the cold-load.
 
 ;;; only the CADR's code is left.  SI:PROCESSOR-TYPE-CODE, which the
-;;; microcode sets, is always this on muir and muir-fpga, and no code tests it.
+;;; microcode sets, is one of these; no code tests it.
 (DEFCONST CADR-TYPE-CODE 1
   "The value which SI:PROCESSOR-TYPE-CODE has when you run on a CADR.")
+;;; quux is the cadr evolved, with a 6-bit level-1 map entry; its microcode
+;;; sets 4, after the lambda's 2 and the explorer's 3.
+(defconst quux-type-code 4
+  "The value which SI:PROCESSOR-TYPE-CODE has when you run on a QUUX.")
 
 (SETQ TV:MORE-PROCESSING-GLOBAL-ENABLE T)
 

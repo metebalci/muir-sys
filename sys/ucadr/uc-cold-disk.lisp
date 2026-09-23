@@ -29,13 +29,21 @@ INITIAL-MAP
        ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
-	;FIRST SET ALL LEVEL 1 MAP TO 37
-	((VMA) DPB (M-CONSTANT -1) MAP-WRITE-FIRST-LEVEL-MAP 
-		   (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-FIRST-LEVEL-WRITE 1)))
+	;first set all level 1 map to 77, quux's invalid entry: all 6 bits
+	((vma) dpb (m-constant -1) map-write-first-level-map
+		   (a-constant (plus (byte-value map-write-enable-first-level-write 1)
+				     (byte-mask map-write-first-level-map-high))))
 	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 1 24.) A-ZERO)
 INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
 	(JUMP-NOT-EQUAL MD A-ZERO INIMAP1)
-	;THEN ZERO LAST BLOCK OF LEVEL 2 MAP
+	;; quux: this microcode needs the 6-bit level-1 entry.  a cadr reads
+	;; bit 29 as 0, so the entry just written for block 0 reads back 37, and
+	;; the first level-2 block past 37 would silently alias another.  halt
+	;; at quux-map-missing instead.  md is 0 here, addressing block 0.
+	((m-tem) map-first-level-map memory-map-data)
+	(jump-not-equal m-tem (a-constant 77) quux-map-missing)
+	;THEN ZERO LAST BLOCK OF LEVEL 2 MAP (block 77 on quux, which md's
+	;level-1 entry, just set to 77, points at)
 	((MD) A-ZERO)
 INIMAP2	((VMA-WRITE-MAP) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE A-ZERO)
 	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
@@ -47,6 +55,8 @@ INIMAP7	((VMA-WRITE-MAP) M-C)
 	((MD) ADD MD (A-CONSTANT 20000))
 	(JUMP-LESS-THAN-XCT-NEXT MD A-A INIMAP7)
        ((M-C) ADD M-C (A-CONSTANT (BYTE-VALUE MAP-WRITE-FIRST-LEVEL-MAP 1)))
+	;; quux: only the low 5 bits of the entry are counted here, which holds
+	;; while fewer than 40 blocks (256k words) are wired.
 	((A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT) 
 		MAP-WRITE-FIRST-LEVEL-MAP M-C)	;FIRST NON-WIRED
 	;THEN SET UP WIRED LEVEL 2 MAP
@@ -67,16 +77,23 @@ INIM3A	((M-1) (BYTE-FIELD 5 8) MD)		;IF NOT AT EVEN 1ST LVL MAP BOUNDARY...
 
 INIM3B						;INITIALIZE REVERSE 1ST LVL MAP
 	((A-SECOND-LEVEL-MAP-REUSE-POINTER) A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)
-					;REVERSE 1ST LVL MAP LOCS 40-77
+					;reverse 1st lvl map locs 240-337:
+					;quux's 64 entries do not fit in 40-77
 	((WRITE-MEMORY-DATA) M-ZERO)	;VALUE TO GO IN WIRED ENTRIES
-	((VMA) (A-CONSTANT 437))	;A-V-SYSTEM-COMMUNICATION-AREA IS 400
+	((vma) (a-constant 637))	;a-v-system-communication-area is 400
 INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
 	((WRITE-MEMORY-DATA) ADD WRITE-MEMORY-DATA (A-CONSTANT 20000))
 	(JUMP-LESS-THAN WRITE-MEMORY-DATA A-A INIMAP6)	;JUMP IF STILL WIRED
 	((M-A WRITE-MEMORY-DATA) (M-CONSTANT -1))	;REST OF ENTRYS ARE -1.
-INIMAP6	(JUMP-LESS-THAN VMA (A-CONSTANT 477) INIMAP5)
+INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;quux: 64 entries, to 737
 	(POPJ)
+
+;; quux: initial-map-a comes here when the level-1 map keeps only 5 bits of
+;; an entry, as a cadr's does: this microcode is for quux alone.  the halt
+;; shows this location.
+quux-map-missing
+	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
 ;THIS WORKS BY TEMPORARILY CLOBBERING LOCATION 0 OF THE SECOND-LEVEL MAP.
