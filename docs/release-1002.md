@@ -145,13 +145,26 @@ a comment in that file saying why.
   one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, so the served
   `SYS: UBIN;` must hold that microcode's `ucadr.tbl`.
 
+## Faults fixed
+
+- **Dividing by the most negative fixnum no longer corrupts or halts.**
+  Negating -2^24, the most negative fixnum, gives 2^24, which must become a
+  bignum, and making the bignum clobbers registers. `QDIV` kept a ratio's
+  numerator in Q-R while its denominator was boxed, so `(%div 5 -16777216)`
+  gave 39565/16777216; `NORMALIZED-RATIONAL-FIX-SIGNS`, on the way from a
+  bignum dividend, kept the numerator in M-J while it negated the
+  denominator, and the next negation then got a raw integer and halted the
+  machine, as `(floor 4294967295 -16777216)` did. Both were MIT's, on
+  microcode 323 as well. The unboxed numerator now waits in a word of A
+  memory of its own, and the boxed one on the stack (`ucadr/uc-arith.lisp`).
+  Checked against exact arithmetic on the host: `TRUNCATE`, `FLOOR`,
+  `CEILING` and `%DIV` over 24 values, the edges of the fixnum range and
+  bignums among them, 2304 cases.
+
 ## Known faults found, not yet fixed
 
-- **`(floor 4294967295 -16777216)` halts the machine** (`ILLOP` from
-  `XMINUS`, the MINUS instruction's type dispatch), on MIT's microcode 323 on
-  a CADR as on microcode 1000; `(truncate 4294967295 -16777216)` answers
-  -255 and 16777215. Found by step 3's arithmetic comparison, which leaves
-  `FLOOR`, `CEILING` and `MOD` out for now.
+- **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
+  returns 0 for a zero dividend before it looks at the divisor. MIT's.
 
 ## The herald
 

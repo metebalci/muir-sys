@@ -1231,6 +1231,12 @@ A-MOUSE-SAVE-E (0)
 a-level-1-map-invalid
 	(37)
 
+;; quux: qdiv's numerator while its denominator is boxed, which can cons a
+;; bignum and clobber q-r (uc-arith, qdiv-rel-prime-1).  unboxed; last, so
+;; that no earlier location moves.
+a-qdiv-numerator
+	(0)
+
 ;Arrays at fixed locations in A memory, used for the mouse
 (ASSIGN MOUSE-CURSOR-PATTERN-AMEM-LOC 1600)	;32x32 BIT ARRAY
 (ASSIGN MOUSE-BUTTONS-BUFFER-AMEM-LOC 1640)	;8 4-WORD ART-Q ENTRIES
