@@ -13,7 +13,7 @@ release of that content, brought up and fixed, under the AGPL.
 
 The aim is to evolve the system, not to change it radically. It moves on in
 steps, each a release built from this repository. **Backward compatibility is
-not an aim, but System 1001 will always be supported by muir and muir-fpga.**
+not an aim.**
 
 **System 1001 is the last release for the CADR,** which stays on it with MIT's
 microcode 323. From System 1002 the system runs only on QUUX.
