@@ -352,9 +352,17 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 			(SETQ VAL (PARSE-PATHNAME VAL)))
 		       ((CONSP VAL)
 			;; Don't bomb out if host isn't defined.
-			(SETF (CAR VAL)
-			      (OR (GET-PATHNAME-HOST (CAR VAL) T)
-				  (SEND SYS-PATHNAME :PHYSICAL-HOST)))
+			;; :physical-host is a message to a host (io; file;
+			;; logical), and this sent it to a pathname, so the arm
+			;; meant to save an undefined host was itself an error.
+			;; nothing reached it while every host a band names was
+			;; defined; a machine that had never heard of the host
+			;; its files were compiled on reached it at once.  the
+			;; translated pathname's own host is the physical one.
+			;; (found and fixed in lmz-sys 6d1da93, System 2000.)
+			(setf (car val)
+			      (or (get-pathname-host (car val) t)
+				  (send phys-pathname :host)))
 			;; Symbols like UNSPECIFIC may be in the wrong package
 			(DO ((L (CDR VAL) (CDR L)))
 			    ((NULL L))
@@ -420,9 +428,12 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 
 (DEFUN PATHNAME-FROM-COLD-LOAD-PATHLIST (PATHLIST)
   ;; Don't bomb out if host isn't defined.
-  (SETF (CAR PATHLIST)
-	(OR (GET-PATHNAME-HOST (CAR PATHLIST) T)
-	    (SEND (SAMPLE-PATHNAME "SYS") :PHYSICAL-HOST)))
+  ;; the same fault as in canonicalize-cold-load-pathnames above, and fixed
+  ;; the same way: ask the translated pathname for its host rather than
+  ;; asking a pathname for a host's message.
+  (setf (car pathlist)
+	(or (get-pathname-host (car pathlist) t)
+	    (send (send (sample-pathname "SYS") :translated-pathname) :host)))
   ;; Symbols like UNSPECIFIC may be in the wrong package
   (DO ((L (CDR PATHLIST) (CDR L))) ((NULL L))
     (AND (SYMBOLP (CAR L))
