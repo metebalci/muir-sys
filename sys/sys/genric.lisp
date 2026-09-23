@@ -1840,7 +1840,8 @@ The microcode sets it at boot from MACHINE-ID."
 	    ;; the 60-cycle clock the display's vertical interrupt used to give.
 	    "Processor tick"
 	    ;; words 11-13, mono tv, quux's display
-	    "Display width, height" "Display bits, words/line" "Display buffer")
+	    "Display width, height" "Display bits, words a line" "Display buffer")
+	    ;; not "words/line": / escapes the next character in this readtable
   "What the words of QUUX's feature page hold, from word 0 on.")
 
 ;; from system 1002 the system runs only on quux, whose feature page this
