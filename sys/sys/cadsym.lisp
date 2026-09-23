@@ -296,6 +296,19 @@
 			 OUTPUT-SELECTOR-LEFTSHIFT-1) CONS-LAP-SYM)
 (DEFPROP DIVIDE-LAST-STEP (PLUS (FIELD ALU-OP 41) SHIFT-Q-LEFT) CONS-LAP-SYM)
 (DEFPROP DIVIDE-REMAINDER-CORRECTION-STEP (FIELD ALU-OP 45) CONS-LAP-SYM)
+
+;; quux from revision 3 multiplies and divides in one instruction.  multiply,
+;; alu function 42, leaves what 32 multiply-steps would: the m source is the
+;; initial high word, a the multiplicand, q the multiplier; the high word goes
+;; to the destination and the low word to q.  divide, 43, leaves what a
+;; divide-first-step and 31 divide-steps would: m the high dividend, a the
+;; divisor, q the low dividend; the partial remainder goes to the destination
+;; and the quotient to q, with divide-first-step's overflow bit in q<31>.
+;; divide-last-step and divide-remainder-correction-step follow as before.
+;; the output selector and q control are ignored.  muir's docs/quux.md holds
+;; the contract.
+(defprop multiply (field alu-op 42) cons-lap-sym)
+(defprop divide (field alu-op 43) cons-lap-sym)
 
 ; FUNCTION SOURCES
 (DEFPROP READ-I-ARG 

@@ -1837,7 +1837,10 @@ The microcode sets it at boot from MACHINE-ID."
 
 (defconst feature-page-words
 	  '("Machine ID" "Level-1 entry bits" "Level-2 map entries" "PDL buffer words"
-	    "Control store words" "A memory words" "Dispatch memory words")
+	    "Control store words" "A memory words" "Dispatch memory words"
+	    ;; word 7, from revision 3: bit 0 multiply, bit 1 divide, one
+	    ;; instruction each.
+	    "Instruction features")
   "What the words of QUUX's feature page hold, from word 0 on.")
 
 (defun print-feature-page (&optional (stream *standard-output*))
@@ -1853,7 +1856,10 @@ A CADR has no feature page, and says so."
 		 (format stream "~% ~22A ~16R  (signature ~16R, revision ~D, type ~D)"
 			 name word (ldb (byte 16. 16.) word) (ldb (byte 12. 4) word)
 			 (ldb (byte 4 0) word))
-	       (format stream "~% ~22A ~D" name word)))
+	       (if (= i 7)
+		   (format stream "~% ~22A ~D  (~:[no multiply~;multiply~], ~:[no divide~;divide~])"
+			   name word (ldb-test (byte 1 0) word) (ldb-test (byte 1 1) word))
+		 (format stream "~% ~22A ~D" name word))))
     (terpri stream)))
 
 (defun machine-version ()

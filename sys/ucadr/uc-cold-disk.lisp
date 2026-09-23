@@ -29,17 +29,19 @@ INITIAL-MAP
        ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
-	;; this microcode is for quux from hardware revision 2: the 6-bit level-1
-	;; entry (revision 1) and the 16k-word pdl buffer (revision 2).  the cadr
+	;; this microcode is for quux from hardware revision 3: the 6-bit level-1
+	;; entry (revision 1), the 16k-word pdl buffer (revision 2), and multiply
+	;; and divide in one instruction each (revision 3).  the cadr
 	;; keeps mit's microcode 323.  machine-id carries the signature 50525
 	;; (0x5155) in bits 31:16 on a quux, and reads all ones on a cadr; the
 	;; revision is in bits 15:4, cumulative, and the processor type in 3:0.
-	;; on anything else, halt at machine-not-quux-2 rather than run with a map
+	;; on anything else, halt at machine-not-quux-3 rather than run with a map
 	;; and a pdl buffer the hardware does not have.
 	((m-tem) (byte-field 20 20) machine-id)
-	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-2)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-3)
 	((m-tem) (byte-field 14 4) machine-id)
-	(jump-less-than m-tem (a-constant 2) machine-not-quux-2)
+	(jump-less-than m-tem (a-constant 3) machine-not-quux-3)	;revision 3: multiply
+								;and divide
 	((a-processor-type-code) (byte-field 4 0) machine-id
 		(a-constant (byte-value q-data-type dtp-fix)))
 	((a-level-1-map-invalid) (a-constant 77))
@@ -109,9 +111,9 @@ INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
 map-width-mismatch
 	(call illop)
 
-;; initial-map-a comes here when machine-id is not quux's from revision 2 on,
+;; initial-map-a comes here when machine-id is not quux's from revision 3 on,
 ;; a cadr's all ones included.  the halt shows this location.
-machine-not-quux-2
+machine-not-quux-3
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.

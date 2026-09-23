@@ -15,7 +15,7 @@ a comment in that file saying why.
   first change to the microcode itself, which stayed 323 while it was MIT's;
   it takes 1000 as the system took 1000 after System 100. One band serves
   both machines: it asks the machine at boot what it is running on.
-  Microcode 1000 needs QUUX hardware revision 2:
+  Microcode 1000 needs QUUX hardware revision 3:
   - **A six-bit level-1 map entry** (revision 1), using a bit the CADR
     leaves spare, so the level-2 map has 64 blocks of 32 pages instead of
     32: 63 usable blocks map 504K words at once instead of 248K.
@@ -30,14 +30,30 @@ a comment in that file saying why.
     muir measured 16K against 1K and 4K on its thirteen workloads: 4.3% fewer
     microcycles in all, 29% fewer in deep recursion, with stack-group
     switching unchanged.
+  - **Multiply and divide in one instruction each** (revision 3). The
+    assembler names ALU functions 42 and 43 `MULTIPLY` and `DIVIDE`
+    (`sys/cadsym.lisp`): one does what 32 `MULTIPLY-STEP`s did, the other
+    what a `DIVIDE-FIRST-STEP` and 31 `DIVIDE-STEP`s did, with the first
+    step's overflow bit in Q<31>. `MPY` (fixnum multiply, and
+    `%MULTIPLY-FRACTIONS`), `DIV` (with its two other entries, the
+    bignum-by-fixnum remainder loop and `%DIVIDE-DOUBLE`/`%REMAINDER-DOUBLE`)
+    and the bignum division's quotient estimate use them
+    (`ucadr/uc-arith.lisp`). The loops that take 31 steps for 31-bit bignum
+    digits, the float divide's 30, and `DIVIDE-ONCE`'s, which has no first
+    step, still step: they are not the 32 the instructions do. Compared
+    over fixnums, edge values and bignums (multiply, quotient and remainder,
+    GCD, `%MULTIPLY-FRACTIONS`, `%DIVIDE-DOUBLE`, `%REMAINDER-DOUBLE`, 15255
+    results), microcode 1000 on QUUX revision 3 gives exactly what the
+    stepwise microcode and MIT's 323 on a CADR give.
   - **The machine's id** is functional source 16, which the assembler now
     names `MACHINE-ID` (`sys/cadsym.lisp`): on QUUX the signature 0x5155 in
     bits 31:16, the hardware revision in 15:4 (cumulative) and the processor
     type in 3:0; a CADR does not drive the source and reads all ones. muir's
     `docs/quux.md` holds the contract. `INITIAL-MAP-A`
     (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
-    `MACHINE-NOT-QUUX-2` on anything but QUUX from revision 2, so microcode
-    1000 never runs with a map or a PDL buffer the hardware lacks. It then
+    `MACHINE-NOT-QUUX-3` on anything but QUUX from revision 3, so microcode
+    1000 never runs with a map, a PDL buffer or an instruction the hardware
+    lacks. It then
     sets every level-1 entry to 77, zeroes block 77, and halts at
     `MAP-WIDTH-MISMATCH` if block 0's entry does not read back as 77.
   - **The reverse first-level map**, one word per level-2 block, moves from
@@ -68,6 +84,14 @@ a comment in that file saying why.
 - **Serve the running microcode's table.** A band whose microcode is not the
   one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, so the served
   `SYS: UBIN;` must hold that microcode's `ucadr.tbl`.
+
+## Known faults found, not yet fixed
+
+- **`(floor 4294967295 -16777216)` halts the machine** (`ILLOP` from
+  `XMINUS`, the MINUS instruction's type dispatch), on MIT's microcode 323 on
+  a CADR as on microcode 1000; `(truncate 4294967295 -16777216)` answers
+  -255 and 16777215. Found by step 3's arithmetic comparison, which leaves
+  `FLOOR`, `CEILING` and `MOD` out for now.
 
 ## The herald
 
