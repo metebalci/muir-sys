@@ -297,8 +297,12 @@ MAKE-CONSTANTS
 	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 23.) A-DISK-ERROR)
 
 ;;; Clear some more memories
-	((PDL-BUFFER-POINTER M-A)	;2000, size of pdl buffer
-		DPB M-ONES (BYTE-FIELD 1 10.) A-ZERO)
+	;; quux: clear words 0-1777, the ones the a-memory load and fill-a-loop
+	;; use, whatever the pdl index's width.  a pointer of all ones makes the
+	;; first push land at 0 on a 10-bit cadr and on quux's 12 or 14 bits
+	;; alike; starting at 2000, as mit did, cleared 2001-4000 on quux.
+	((m-a) dpb m-ones (byte-field 1 10.) a-zero)	;2000 words, the cadr's pdl buffer
+	((pdl-buffer-pointer) seto)
 CLEAR-PDL-BUFFER
 	((C-PDL-BUFFER-POINTER-PUSH) M-ZERO)
 	((M-A) ADD M-A A-ONES)
@@ -317,9 +321,14 @@ CLEAR-LEVEL-1-MAP
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 24.) MD CLEAR-LEVEL-1-MAP)
 
 	((MD) SETZ)
+	;; quux: the level-1 entry is 6 bits, bits 4:0 written from vma<31:27>
+	;; and bit 5 from vma<24>, so the level-2 map has 64 blocks to clear.
+	;; a cadr ignores vma<24>, and its blocks 40-77 are 0-37 again.
 CLEAR-LEVEL-2-MAP
-	((M-A) (BYTE-FIELD 5 13.) MD)		;What to write in level-1 map
-	((VMA-WRITE-MAP) DPB M-A (BYTE-FIELD 5 27.) A-B) ;Make level-1 map point at level-2
+	((m-a) (byte-field 6 13.) md)		;What to write in level-1 map
+	((m-temp-1) dpb m-a (byte-field 5 27.) a-b)	;bits 4:0 of the entry
+	((m-temp-2) (byte-field 1 5) m-a)		;bit 5
+	((vma-write-map) dpb m-temp-2 (byte-field 1 24.) a-temp-1) ;Make level-1 map point at level-2
 	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 25.) A-ZERO)	;Clear level-2 map
 	((MD) ADD MD A-400)
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 24.) MD CLEAR-LEVEL-2-MAP)
@@ -591,11 +600,17 @@ FILL-M-LOOP
 	((M-GARBAGE) C-PDL-BUFFER-INDEX)
 	((PDL-BUFFER-INDEX) M+1 PDL-BUFFER-INDEX)
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 5) PDL-BUFFER-INDEX FILL-M-LOOP)
+;; quux: copy exactly 2000 words, a memory's size.  mit stopped when the
+;; index wrapped to 0, which on a 10-bit cadr is after 1777; on quux's wider
+;; index it ran on, and the a address wrapped and zeroed a memory.  stop at
+;; 2000, and still at 0 for the cadr, whose index never reaches 2000.
 FILL-A-LOOP
 	((OA-REG-LOW) DPB PDL-BUFFER-INDEX (BYTE-FIELD 10. 14.) A-ZERO)
 	((A-GARBAGE) C-PDL-BUFFER-INDEX)
 	((PDL-BUFFER-INDEX) M+1 PDL-BUFFER-INDEX)
+	(jump-if-bit-set (byte-field 1 10.) pdl-buffer-index fill-a-done)
 	(JUMP-NOT-EQUAL PDL-BUFFER-INDEX A-ZERO FILL-A-LOOP)
+fill-a-done
 ;;; Turn off the PROM and enter the real world.
 ;;; Writing 44 in Unibus location 766012, which is at virtual address 1005,
 ;;; will turn on ERROR-STOP-ENABLE and PROM-DISABLE.  The 2 programs (PROM and RAM)
