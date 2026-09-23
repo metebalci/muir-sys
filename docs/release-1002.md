@@ -15,7 +15,7 @@ a comment in that file saying why.
   first change to the microcode itself, which stayed 323 while it was MIT's;
   it takes 1000 as the system took 1000 after System 100. One band serves
   both machines: it asks the machine at boot what it is running on.
-  Microcode 1000 needs QUUX hardware revision 3:
+  Microcode 1000 needs QUUX hardware revision 4:
   - **A six-bit level-1 map entry** (revision 1), using a bit the CADR
     leaves spare, so the level-2 map has 64 blocks of 32 pages instead of
     32: 63 usable blocks map 504K words at once instead of 248K.
@@ -45,15 +45,29 @@ a comment in that file saying why.
     GCD, `%MULTIPLY-FRACTIONS`, `%DIVIDE-DOUBLE`, `%REMAINDER-DOUBLE`, 15255
     results), microcode 1000 on QUUX revision 3 gives exactly what the
     stepwise microcode and MIT's 323 on a CADR give.
+  - **The tick is the clock** (revision 4). The CADR's 60-cycle clock ---
+    the mouse, the disk's idle count, the Chaosnet's transmit-abort wakeup
+    and the sequence-break counter the scheduler runs on --- was the display
+    board's vertical interrupt; the next display has none. QUUX's processor
+    has a tick of its own, which the assembler names `TICK-CONTROL`,
+    `TICK-PERIOD` and `TICK-STATUS` (`sys/cadsym.lisp`). Boot starts it,
+    with its reset period of 16,667 microseconds, where the Unibus
+    interrupts are enabled (`ucadr/uc-cold-disk.lisp`); `INTR` runs the
+    60-cycle handler when its flag is up, and clears it
+    (`ucadr/uc-interrupt.lisp`). The display's vertical interrupt, if the
+    band enables it, is only cleared, or the clock would run twice as fast.
+    `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
+    is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
+    comes from the microsecond clock, which this does not touch.
   - **The machine's id** is functional source 16, which the assembler now
     names `MACHINE-ID` (`sys/cadsym.lisp`): on QUUX the signature 0x5155 in
     bits 31:16, the hardware revision in 15:4 (cumulative) and the processor
     type in 3:0; a CADR does not drive the source and reads all ones. muir's
     `docs/quux.md` holds the contract. `INITIAL-MAP-A`
     (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
-    `MACHINE-NOT-QUUX-3` on anything but QUUX from revision 3, so microcode
-    1000 never runs with a map, a PDL buffer or an instruction the hardware
-    lacks. It then
+    `MACHINE-NOT-QUUX-4` on anything but QUUX from revision 4, so microcode
+    1000 never runs with a map, a PDL buffer, an instruction or a clock the
+    hardware lacks. It then
     sets every level-1 entry to 77, zeroes block 77, and halts at
     `MAP-WIDTH-MISMATCH` if block 0's entry does not read back as 77.
   - **The reverse first-level map**, one word per level-2 block, moves from

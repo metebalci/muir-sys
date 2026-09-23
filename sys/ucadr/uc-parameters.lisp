@@ -776,7 +776,9 @@ A-DISK-READ-COMPARE-DIFFERENCES (0) ;NUMBER OF READ-COMPARE DIFFERENCES WITHOUT
 				; ACCOMPANYING READ ERROR
 A-CONS-WORK-DONE (0)	;K times number of Q's consed up (not a fixnum)
 A-SCAV-WORK-DONE (0)	;number of Q's cleaned by scavenger (not a fixnum)
-A-TV-CLOCK-RATE (67.)	;TV frame rate divided by this to get clock, default is 1/second
+;; quux: the tick's 60 hz, not the display's frame rate of about 60.5 hz,
+;; so 60 gives the sequence-break clock once a second (67 would be 1.12 s).
+a-tv-clock-rate (60.)	;TV frame rate divided by this to get clock, default is 1/second
 A-AGING-DEPTH (0)	;Number of laps before page aged.  Don't make bigger than 3!!
 A-DISK-ECC-COUNT (0)		;Count of corrected soft ECC errors
 A-COUNT-FINDCORE-STEPS (0)		;Number of iterations in FINDCORE

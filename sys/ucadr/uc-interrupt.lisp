@@ -62,6 +62,10 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	((A-INTR-A) M-A)			;I need a couple M registers
 	((A-INTR-B) M-B)
 	((A-INTR-T) M-T)			;Convenient to be able to clobber this
+	;; quux: the tick is the clock, from revision 4, not the display's
+	;; vertical interrupt; if its flag is up, run the 60-cycle handler.  any
+	;; other interrupt still pending comes back when this one is dismissed.
+	(jump-if-bit-set (byte-field 1 0) tick-status intr-tick)
 	((A-INTR-LOCAL-UNIBUS-MODE) (BYTE-FIELD 1 1) MD)
 	(JUMP-EQUAL A-INTR-LOCAL-UNIBUS-MODE M-ZERO INNL0)  ;jump on no local-enable, ie,
 						; PDP11 arbritrating UNIBUS. 
@@ -310,6 +314,12 @@ INTRX0	((VMA-START-READ) A-TV-REGS-BASE)	;Look for TV interrupt
 	((WRITE-MEMORY-DATA-START-WRITE)	;Yes, clear flag
 		ANDCA READ-MEMORY-DATA (A-CONSTANT 1_4))
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
+	;; quux: the tick drives the clock now, so the display's vertical
+	;; interrupt, if the band enabled it, is only cleared; running the
+	;; handler for both would run the clock twice as fast.
+	(jump intrx1)
+intr-tick
+	((tick-control) (a-constant 3))		;quux: keep the tick on, clear its flag
 	;; Here is the roughly-60-cycle clock interrupt handler
 	(JUMP-LESS-OR-EQUAL M-ZERO A-CHAOS-TRANSMIT-ABORTED 60CYC-0)
 	;; Wake up Chaosnet after transmit abort

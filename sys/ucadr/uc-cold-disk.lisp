@@ -30,18 +30,18 @@ INITIAL-MAP
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
 	;; this microcode is for quux from hardware revision 3: the 6-bit level-1
-	;; entry (revision 1), the 16k-word pdl buffer (revision 2), and multiply
-	;; and divide in one instruction each (revision 3).  the cadr
+	;; entry (revision 1), the 16k-word pdl buffer (revision 2), multiply
+	;; and divide in one instruction each (revision 3), and the tick, its own
+	;; 60-cycle clock (revision 4).  the cadr
 	;; keeps mit's microcode 323.  machine-id carries the signature 50525
 	;; (0x5155) in bits 31:16 on a quux, and reads all ones on a cadr; the
 	;; revision is in bits 15:4, cumulative, and the processor type in 3:0.
-	;; on anything else, halt at machine-not-quux-3 rather than run with a map
+	;; on anything else, halt at machine-not-quux-4 rather than run with a map
 	;; and a pdl buffer the hardware does not have.
 	((m-tem) (byte-field 20 20) machine-id)
-	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-3)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-4)
 	((m-tem) (byte-field 14 4) machine-id)
-	(jump-less-than m-tem (a-constant 3) machine-not-quux-3)	;revision 3: multiply
-								;and divide
+	(jump-less-than m-tem (a-constant 4) machine-not-quux-4)	;revision 4: the tick
 	((a-processor-type-code) (byte-field 4 0) machine-id
 		(a-constant (byte-value q-data-type dtp-fix)))
 	((a-level-1-map-invalid) (a-constant 77))
@@ -111,9 +111,9 @@ INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
 map-width-mismatch
 	(call illop)
 
-;; initial-map-a comes here when machine-id is not quux's from revision 3 on,
+;; initial-map-a comes here when machine-id is not quux's from revision 4 on,
 ;; a cadr's all ones included.  the halt shows this location.
-machine-not-quux-3
+machine-not-quux-4
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
@@ -795,6 +795,11 @@ BEG06	(CALL-NOT-EQUAL MICRO-STACK-PNTR-AND-DATA 	;CLEAR THE MICRO STACK PNTR (TO
 	((MD) (A-CONSTANT 6000))		;Enable Unibus interrupts
 	((VMA-START-WRITE) (A-CONSTANT 77773020))  ;Unibus address 766040
 	(CHECK-PAGE-WRITE)
+	;; quux: start the tick, the 60-cycle clock, with its reset period of
+	;; 16,667 microseconds, as the unibus interrupts are enabled: the clock
+	;; handler runs only once the machine is set up, as it did when the band
+	;; enabled the display's interrupt.
+	((tick-control) (a-constant 1))
 	(JUMP-XCT-NEXT QLENX)			;CALL INITIAL FUNCTION, NEVER RETURNS
        ((M-ERROR-SUBSTATUS) M-ZERO)
 

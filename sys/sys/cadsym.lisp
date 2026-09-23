@@ -437,6 +437,21 @@
 (DEFPROP OA-REG-LOW (OR (SOURCE-P (ERROR))
 			(FIELD FUNCTION-DESTINATION 16)) CONS-LAP-SYM)
 
+;; quux's tick, from revision 4: the processor's own clock, which takes the
+;; place of the display's vertical interrupt.  tick-control, destination 3:
+;; bit 0 enables, and a write with bit 1 set clears the flag.  tick-period,
+;; destination 4: the period in microseconds, bits 23:0, 0 taken as 1, 16,667
+;; (60 hz) at reset; a write starts a period from then.  tick-status, source
+;; 17: bit 0 the flag, bit 1 the enable.  while enabled and up, the flag is part
+;; of the interrupt the microcode already tests.  muir's docs/quux.md holds the
+;; contract.
+(defprop tick-control (or (source-p (error))
+			  (field function-destination 3)) cons-lap-sym)
+(defprop tick-period (or (source-p (error))
+			 (field function-destination 4)) cons-lap-sym)
+(defprop tick-status (or (source-p (field function-source 17))
+			 (error)) cons-lap-sym)
+
 (DEFPROP OA-REG-HIGH (OR (SOURCE-P (ERROR))
 			 (FIELD FUNCTION-DESTINATION 17)) CONS-LAP-SYM)
 (DEFPROP OA-REG-HI (OR (SOURCE-P (ERROR))
