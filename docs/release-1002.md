@@ -60,6 +60,16 @@ a comment in that file saying why.
   `SYS: UBIN;` must hold the running microcode's `ucadr.tbl`, which a band
   reads when its microcode is not the one it was saved with.
 
+## The herald
+
+- **The herald names the site, whatever it is.** MIT's `PRINT-HERALD`
+  (`io/disk.lisp`) printed "MIT System" for the site `:MIT` and "LMI System"
+  for every other site, so a site copied from `site/` under its own name was
+  told it ran LMI's system. It prints the site's name now, "FOO System" for a
+  site `:FOO`, and "UNKNOWN" when no site is loaded (unbound or NIL), in the
+  first line and in the line naming the machine, which trapped on an unbound
+  site name. The MIT site prints exactly what it did.
+
 ## Taken from the System 2000 line
 
 What lmz-sys, the System 2000 line for bishop, fixed after the two lines
