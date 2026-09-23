@@ -33,10 +33,13 @@ FIXGET-1
 ;M-1 TIMES Q-R, RESULT TO Q-R, LEAVES CORRECT HIGH HALF IN M-2.
 ;CALLER MUST CHECK FOR OVERFLOW, IF SHE CARES.
 
-MPY	((M-2) MULTIPLY-STEP A-1 M-ZERO)
-(REPEAT 30. ((M-2) MULTIPLY-STEP M-2 A-1))
-	(POPJ-IF-BIT-CLEAR-XCT-NEXT (BYTE-FIELD 1 0) Q-R)
-       ((M-2) MULTIPLY-STEP M-2 A-1)
+;; quux: one multiply does the 32 multiply-steps.  the finagle for a
+;; negative multiplier tested q-r bit 0 after 31 steps, which was the sign
+;; bit; test the sign before the multiply replaces q-r.
+MPY	(jump-if-bit-set-xct-next (byte-field 1 31.) q-r mpy-negative)
+       ((m-2) multiply m-zero a-1)
+	(POPJ)
+mpy-negative
 	(POPJ-AFTER-NEXT
 	 (M-2) M-2 SUB A-1)		;FINAGLE IF NEGATIVE VALUE INITIALLY IN Q-R
        (NO-OP)
@@ -48,10 +51,12 @@ MPY	((M-2) MULTIPLY-STEP A-1 M-ZERO)
 DIV	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-1 A-ZERO DIV1)
        ((A-TEM1 Q-R) M-1)	;Q GETS MAGNITUDE OF DIVIDEND, A-TEM1 SAVES ORIGINAL
 	((Q-R) SUB M-ZERO A-TEM1)
-DIV1	((M-1) DIVIDE-FIRST-STEP M-ZERO A-2)
-DIV1A	(CALL-IF-BIT-SET (BYTE-FIELD 1 0) Q-R TRAP)	;DIVIDE OVERFLOW
+;; quux: one divide does the divide-first-step and the 31 divide-steps, and
+;; leaves the first step's overflow bit in q<31>, not q<0>.  div1a is entered
+;; by callers that do the divide in their xct-next slot.
+DIV1	((M-1) divide M-ZERO A-2)
+DIV1A	(call-if-bit-set (byte-field 1 31.) q-r trap)	;DIVIDE OVERFLOW
   (ERROR-TABLE DIVIDE-BY-ZERO)
-(REPEAT 31. ((M-1) DIVIDE-STEP M-1 A-2))
 	((M-1) DIVIDE-LAST-STEP M-1 A-2)
 	(JUMP-LESS-OR-EQUAL-XCT-NEXT M-ZERO A-TEM1 DIV2) ;JUMP IF POSITIVE DIVIDEND
        ((M-1) DIVIDE-REMAINDER-CORRECTION-STEP M-1 A-2) ;M-1 GETS MAGNITUDE OF REMAINDER
@@ -311,7 +316,7 @@ REM-BIG-FIX-LOOP
 ;;; HERE M-1,,Q-R HAVE (M-1)*1_31.+MD
 REM-BIG-FIX-OVFL
 	(CALL-XCT-NEXT DIV1A)
-       ((M-1) DIVIDE-FIRST-STEP M-1 A-2)
+       ((m-1) divide m-1 a-2)		;quux: the whole divide, which div1a expects
 	(JUMP-NOT-EQUAL-XCT-NEXT M-C (A-CONSTANT 1) REM-BIG-FIX-LOOP)
        ((M-C) SUB M-C (A-CONSTANT 1))
 	(POPJ-EQUAL-XCT-NEXT M-A A-ZERO)	;POPJ IF DIVIDEND POSITIVE
@@ -499,7 +504,8 @@ XDIVD3	;DIVIDEND IS IN M-A (HIGH), M-TEM (LOW), DIVISOR IS IN M-2
 	((A-TEM1) M-1)	;ORIGINAL SIGN OF DIVIDEND IS IN SIGN(A-TEM1) FOR DIVIDE
 	((Q-R) M-TEM)					;LOW DIVIDEND TO Q-R FOR DIVIDE
 	(JUMP-XCT-NEXT DIV1A)				;JOIN NORMAL DIVIDE ROUTINE
-       ((M-1) DIVIDE-FIRST-STEP M-A A-2)		;BUT WITH DIFFERENT FIRST STEP
+       ((m-1) divide m-a a-2)		;BUT WITH DIFFERENT HIGH DIVIDEND
+					;quux: the whole divide, which div1a expects
 
 ;;; ARITHMETIC MICROCODE.
 
@@ -3273,8 +3279,7 @@ BIDIV-LOOP
 	((M-3) (BYTE-FIELD 30. 1) M-3 A-ZERO)		;high 30. bits of same
 	((M-1) A-BIDIV-V1)				;Divide by V1
 	;; Compute QHAT = Floor((U0 * B + U1) / V1) and RHAT = U0 * B + U1 - QHAT * V1
-	((M-3) DIVIDE-FIRST-STEP M-3 A-1)
-(REPEAT 31. ((M-3) DIVIDE-STEP M-3 A-1))
+	((m-3) divide m-3 a-1)		;quux: one divide for the first step and 31 more
 	((M-3) DIVIDE-LAST-STEP M-3 A-1)
 	((M-3) DIVIDE-REMAINDER-CORRECTION-STEP M-3 A-1);RHAT
 	(JUMP-XCT-NEXT BIDIV-OPTIMIZE-QHAT)
