@@ -1818,9 +1818,43 @@ It is /"CADR/" or /"QUUX/"."
   ;; the microcode sets processor-type-code at boot from machine-id: the
   ;; cadr or quux, the cadr evolved.  anything else cannot happen on muir or
   ;; muir-fpga, and is named as such rather than guessed.
-  (cond ((= processor-type-code cadr-type-code) "CADR")
-	((= processor-type-code quux-type-code) "QUUX")
+  (cond ((= (machine-type-code) cadr-type-code) "CADR")
+	((= (machine-type-code) quux-type-code) "QUUX")
 	(t "UNKNOWN")))
+
+(defun machine-type-code ()
+  "Return the machine's type code: 1, CADR-TYPE-CODE, or 4, QUUX-TYPE-CODE.
+The microcode sets it at boot from MACHINE-ID."
+  processor-type-code)
+
+;;; quux's feature page: one read-only xbus i/o page at physical 17377000,
+;;; which %xbus-read addresses by its offset in i/o space.  its words say
+;;; how big the machine's memories are (muir's docs/quux.md holds the
+;;; contract); a cadr has no such page, and reading there times out, so it
+;;; is read only on a quux.
+(defconst feature-page-xbus-address #o377000
+  "Where QUUX's feature page is, as an argument to %XBUS-READ.")
+
+(defconst feature-page-words
+	  '("Machine ID" "Level-1 entry bits" "Level-2 map entries" "PDL buffer words"
+	    "Control store words" "A memory words" "Dispatch memory words")
+  "What the words of QUUX's feature page hold, from word 0 on.")
+
+(defun print-feature-page (&optional (stream *standard-output*))
+  "Print QUUX's feature page: the machine's ID and the sizes of its memories.
+A CADR has no feature page, and says so."
+  (if (not (= (machine-type-code) quux-type-code))
+      (format stream "~&A ~A has no feature page.~%" (machine-type))
+    (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
+    (loop for name in feature-page-words
+	  for i from 0
+	  as word = (%xbus-read (+ feature-page-xbus-address i))
+	  do (if (zerop i)
+		 (format stream "~% ~22A ~16R  (signature ~16R, revision ~D, type ~D)"
+			 name word (ldb (byte 16. 16.) word) (ldb (byte 12. 4) word)
+			 (ldb (byte 4 0) word))
+	       (format stream "~% ~22A ~D" name word)))
+    (terpri stream)))
 
 (defun machine-version ()
   "Return a string that identifies which hardware and special microcode we are using."

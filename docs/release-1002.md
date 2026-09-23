@@ -71,6 +71,22 @@ a comment in that file saying why.
   first line and in the line naming the machine, which trapped on an unbound
   site name. The MIT site prints exactly what it did.
 
+- **The herald prints the machine type**, "Machine Type CADR" or "QUUX",
+  under the microcode's version (`DESCRIBE-SYSTEM-VERSIONS`,
+  `sys2/patch.lisp`). `MACHINE-TYPE` (`sys/genric.lisp`), which returned
+  "CADR" whatever the machine, names it from the type code the microcode set
+  at boot.
+
+## Asking the machine
+
+- **`SI:MACHINE-TYPE-CODE`** returns 1 on a CADR and 4 on QUUX, the type code
+  the microcode set at boot from `MACHINE-ID`; `MACHINE-TYPE` gives its name.
+- **`SI:PRINT-FEATURE-PAGE`** prints QUUX's feature page, read with
+  `%XBUS-READ` at Xbus 17377000: the machine ID with its signature, revision
+  and type, and the sizes of the level-1 entry, the level-2 map, the PDL
+  buffer, control store, A memory and dispatch memory. On a CADR, which has no
+  such page and times out if it is read, it says so instead.
+
 ## Taken from the System 2000 line
 
 What lmz-sys, the System 2000 line for bishop, fixed after the two lines
