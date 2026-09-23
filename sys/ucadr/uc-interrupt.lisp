@@ -308,16 +308,9 @@ INND0	((VMA-START-READ) ADD M-A
 
 ;;; XBUS interrupts
 
-INTRX0	((VMA-START-READ) A-TV-REGS-BASE)	;Look for TV interrupt
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 4) READ-MEMORY-DATA INTRX1)
-	((WRITE-MEMORY-DATA-START-WRITE)	;Yes, clear flag
-		ANDCA READ-MEMORY-DATA (A-CONSTANT 1_4))
-	(CHECK-PAGE-WRITE-NO-INTERRUPT)
-	;; quux: the tick drives the clock now, so the display's vertical
-	;; interrupt, if the band enabled it, is only cleared; running the
-	;; handler for both would run the clock twice as fast.
-	(jump intrx1)
+;; quux: mono tv, the display, has no interrupt, and the tick is the clock,
+;; so the cadr tv's vertical flag is no longer read or cleared here.
+INTRX0	(jump intrx1)
 intr-tick
 	((tick-control) (a-constant 3))		;quux: keep the tick on, clear its flag
 	;; Here is the roughly-60-cycle clock interrupt handler

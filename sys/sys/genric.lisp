@@ -1827,14 +1827,9 @@ It is /"CADR/" or /"QUUX/"."
 The microcode sets it at boot from MACHINE-ID."
   processor-type-code)
 
-;;; quux's feature page: one read-only xbus i/o page at physical 17377000,
-;;; which %xbus-read addresses by its offset in i/o space.  its words say
-;;; how big the machine's memories are (muir's docs/quux.md holds the
-;;; contract); a cadr has no such page, and reading there times out, so it
-;;; is read only on a quux.
-(defconst feature-page-xbus-address #o377000
-  "Where QUUX's feature page is, as an argument to %XBUS-READ.")
-
+;;; quux's feature page: one read-only xbus i/o page at physical 17377000
+;;; (feature-page-xbus-address, defined in sys; ltop, which reads the
+;;; display's geometry from it in the cold load).
 (defconst feature-page-words
 	  '("Machine ID" "Level-1 entry bits" "Level-2 map entries" "PDL buffer words"
 	    "Control store words" "A memory words" "Dispatch memory words"
@@ -1843,7 +1838,9 @@ The microcode sets it at boot from MACHINE-ID."
 	    "Instruction features"
 	    ;; word 10, from revision 4: 1 if the processor has its own tick,
 	    ;; the 60-cycle clock the display's vertical interrupt used to give.
-	    "Processor tick")
+	    "Processor tick"
+	    ;; words 11-13, mono tv, quux's display
+	    "Display width, height" "Display bits, words/line" "Display buffer")
   "What the words of QUUX's feature page hold, from word 0 on.")
 
 ;; from system 1002 the system runs only on quux, whose feature page this
@@ -1859,10 +1856,18 @@ The microcode sets it at boot from MACHINE-ID."
 		 (format stream "~% ~22A ~16R  (signature ~16R, revision ~D, type ~D)"
 			 name word (ldb (byte 16. 16.) word) (ldb (byte 12. 4) word)
 			 (ldb (byte 4 0) word))
+	       (cond ((= i #o11)
+		      (format stream "~% ~22A ~D x ~D" name (mono-tv-width) (mono-tv-height)))
+		     ((= i #o12)
+		      (format stream "~% ~22A ~D, ~D" name (feature-page-field #o12 #o2020)
+			      (mono-tv-words-per-line)))
+		     ((= i #o13)
+		      (format stream "~% ~22A ~O" name word))
+		     (t
 	       (if (= i 7)
 		   (format stream "~% ~22A ~D  (~:[no multiply~;multiply~], ~:[no divide~;divide~])"
 			   name word (ldb-test (byte 1 0) word) (ldb-test (byte 1 1) word))
-		 (format stream "~% ~22A ~D" name word))))
+		 (format stream "~% ~22A ~D" name word))))))
     (terpri stream)))
 
 (defun machine-version ()

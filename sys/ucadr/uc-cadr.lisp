@@ -26,7 +26,11 @@
 
 (ASSIGN TV-REGS-ADDRESS-BASE 77377760)		;XBUS ADDRESS 17377760
  ;IN REGISTER 0, BIT 3 IS INTERRUPT ENABLE, BIT 4 IS INTERRUPT FLAG
-(ASSIGN DISK-RUN-LIGHT-VIRTUAL-ADDRESS 77051763)	;XBUS ADDRESS
+;; quux: near the bottom right of mono tv's default 1920x1080 buffer, 60 words
+;; a line, not inside the cadr tv's 768-wide one.  it serves only until lisp
+;; sets %disk-run-light from the screen's real size (tv::initialize-run-light-
+;; locations, sys; ltop).
+(assign disk-run-light-virtual-address 77176423)	;XBUS ADDRESS
 
 (ASSIGN MICROSECOND-CLOCK-HARDWARE-VIRTUAL-ADDRESS 77772050)
 (ASSIGN MICROSECOND-CLOCK-PHYSICAL-ADDRESS 77772050)  ;Unibus (764120)
