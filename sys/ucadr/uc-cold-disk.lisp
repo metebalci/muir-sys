@@ -361,8 +361,9 @@ MEM-SIZE-LOOP
 	(CALL PHYS-MEM-READ)
 	(JUMP-EQUAL MD (A-CONSTANT 37) MEM-SIZE-LOOP)
 	;M-S now has the first non-existent location
-	((MD) (A-CONSTANT 46))			;Turn ERROR-STOP-ENABLE back on
-	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;40 is PROM-DISABLE, 2 is NORMAL speed.
+	((md) (a-constant 44))			;Turn ERROR-STOP-ENABLE back on
+	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;40 is PROM-DISABLE; quux: no speed bits,
+						;so not 46
        ((VMA) (A-CONSTANT 17773005))		;Unibus 766012
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;Clear bus error indicators
        ((VMA) (A-CONSTANT 17773022))		;Unibus 766044

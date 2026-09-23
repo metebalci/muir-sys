@@ -8,82 +8,10 @@
 ;SCREEN data structure for the color TV
 (DEFVAR COLOR-SCREEN)
 
-;sync program bits
-;1  HSYNC -- Note! This bit is inverted.
-;2  VSYNC
-;4  COMPOSITE - (not used really, encode on HSYNC)
-;10  BLANKING
-;     0  PROC CYC
-;     20  REFRESH
-;     40  INC TVMA
-;     60  STEP TVMA
-;     0    --
-;     100  CLR TVMA
-;     200  EOL
-;     300  EOP
-;Assume 60MHZ bit clock, therefore 15Mhz (66.7 ns) TTL clock, 533ns SYNC clk
-; 30. sync clks per line, 10. for horz sync, 
-;41.6 lines for 666 usec vertical
-;1037 lines per 16.66 ms frame
-
-;;; 64 Mhz main clock, 12 Mhz video data rate.
-;;; During each sync period, 4 8 bit nibbles are shifted out.
-;;; Therefore a TV cycle is done every 2 sync periods.
-
-(COMMENT
-;; This sync program is only CLOSE to NTSC video
-
-(SETQ SYNC '(
-   1 30 30 10 30 30 31 (44. 11) (5 10) (43. 11) 211 111 ;equalizing pulses, clr-tvma
-   2 30 30 10 30 30 31 (44. 11) (5 10) (43. 11) 211 11  ;equalizing pulses
-   3 32 32 12 32 32 32 (39. 12) (5 13) (45. 12) (3 13) 213 13   ;vert sync
-   3   30 30 10 30 30 30 (44. 11) (5 10) (43. 11) 211 11  ;equalizing pulses
-   13. 30 30 10 30 30 30 (4 11) (88. 11) 211 11 	;vert retrace
-   6 30 30 10 30 30 30 (10. 11) (74. 1) (8. 11) 211 11
-   227. 30 30 10 30 30 30 (9. 11) 11 (36. 41 1) 1 1 (8. 11) 211 71   ;12 mhz video, 9x64 bits
-   6 30 30 10 30 30 30 (10. 11) (74. 1) (8. 11) 211 11
-   1 30 30 10 30 30 30 (9. 11) (83. 11) 211 11
-   1 30 30 10 30 30 31 (44. 11) (5 10) (43. 11) 211 111 ;equalizing pulses, clr-tvma
-   2 30 30 10 30 30 31 (44. 11) (5 10) (43. 11) 211 11  ;equalizing pulses
-   1 30 30 10 30 30 31 (44. 11) (45. 12) (3 13) 213 73  ;extra 1/2 line, step-tvma
-   2 32 32 12 32 32 32 (39. 12) (5 13) (45. 12) (3 13) 213 13   ;vert sync
-   1 32 32 12 32 32 32 (39. 12) (5 13) (5 10) (43. 11) 211 11   ;1/2 vert sync, equalizing
-   3 30 30 10 30 30 31 (44. 11) (5 10) (43. 11) 211 11  ;equalizing pulses
-   13. 30 30 10 30 30 30 (4 11) (88. 11) 211 11 	;vert retrace
-   6 30 30 10 30 30 30 (10. 11) (74. 1) (8. 11) 211 11
-   227. 30 30 10 30 30 30 (9. 11) 11 (36. 41 1) 1 1 (8. 11) 211 71
-   6 30 30 10 30 30 30 (10. 11) (74. 1) (8. 11) 211 11
-   1 30 30 10 30 30 30 (9. 11) (83. 11) 311 11
-   (30 1))))
-
-;;; This is really NTSC standard video
-(DEFCONST SYNC '(
-   1 30 30 10 31 31 31 (45. 11) (3 10) (46. 11) 211 111 ;equalizing pulses, clr-tvma
-   2 30 30 10 31 31 31 (45. 11) (3 10) (46. 11) 211 11  ;equalizing pulses
-   3 32 32 12 32 32 32 (39. 12) (6 13) (45. 12) (4 13) 213 13   ;vert sync
-   3 30 30 10 31 31 31 (45. 11) (3 10) (46. 11) 211 11  ;equalizing pulses
-
-   13. 30 30 10 30 30 30 (6 11) (88. 11) 211 11 	;vert retrace
-   6 30 30 10 30 30 30 (12. 11) (74. 1) (8. 11) 211 11
-   227. 30 30 10 30 30 30 (11. 11) 11 (36. 41 1) 1 1 (8. 11) 211 71   ;12 mhz video, 9x64 bits
-   6 30 30 10 30 30 30 (12. 11) (74. 1) (8. 11) 211 11
-   1 30 30 10 30 30 30 (11. 11) (83. 11) 211 11
-
-   1 30 30 10 30 30 30 (45. 11) (3 10) (46. 11) 211 111 ;equalizing pulses, clr-tvma
-   2 30 30 10 31 31 31 (45. 11) (3 10) (46. 11) 211 11  ;equalizing pulses
-   1 30 30 10 31 31 31 (45. 11) (45. 10) (4 11) 211 11  ;equalizing pulses
-   1 30 30 10 30 30 30 (39. 10) (6 13) (45. 12) (4 13) 213 73  ;step-tvma
-   1 32 32 12 32 32 32 (39. 12) (6 13) (45. 12) (4 11) 213 13   ;vert sync
-   1 32 32 12 30 30 30 (39. 10) (6 11) (3 10) (46. 11) 211 11   ;equalizing
-   3 30 30 10 31 31 31 (45. 11) (3 10) (46. 11) 211 11  ;equalizing pulses
-
-   13. 30 30 10 30 30 30 (6 11) (88. 11) 211 11 	;vert retrace
-   6 30 30 10 30 30 30 (12. 11) (74. 1) (8. 11) 211 11
-   227. 30 30 10 30 30 30 (11. 11) 11 (36. 41 1) 1 1 (8. 11) 211 71
-   6 30 30 10 30 30 30 (12. 11) (74. 1) (8. 11) 211 11
-   1 30 30 10 30 30 30 (11. 11) (83. 11) 311 11
-
-   (30 1)))
+;; quux: the color tv's sync programs are gone: a quux color display, if one
+;; comes, will be like mono tv, with no sync program.  of the tv control
+;; registers only register 4, the color map, is kept for it (the user,
+;; 2026-09-23).
 
 ;Function which reads an XBUS location with parity checking disabled.
 ;This is useful if it might be NXM.  Unfortunately the CADR machine
@@ -92,10 +20,11 @@
 ; no stat-stop-enable, parity-stop-enable).
 ;The mode register is writable at location 766012
 ;XBUS-ADDR is an I/O address like %XBUS-READ.
+;; quux: 40 and 44, not 42 and 46: quux's mode register has no speed bits.
 (DEFUN XBUS-READ-NO-PARITY (XBUS-ADDR)
-  (PROG2 (%UNIBUS-WRITE 766012 42)	;Turn off error-stop-enable (normal speed)
+  (PROG2 (%UNIBUS-WRITE 766012 40)	;Turn off error-stop-enable
 	 (%XBUS-READ XBUS-ADDR)
-	 (%UNIBUS-WRITE 766012 46)	;Turn on error-stop-enable
+	 (%UNIBUS-WRITE 766012 44)	;Turn on error-stop-enable
 	 (%UNIBUS-WRITE 766044 0)))	;Clear xbus nxm and parity indicators
 
 (DEFUN XBUS-LOCATION-EXISTS-P (XBUS-ADDR BITS)
@@ -118,9 +47,11 @@
 ;       is WRITE-COLOR-MAP.  The added advantage is that the array can be saved and restored.
 
 ;Write one location in the color map
-;Sync to horizontal sync.
+;; quux: no longer synchronized to the retrace, which quux's tv registers do
+;; not report; register 4 is written directly, and the synchronize argument
+;; is gone.
 (DEFUN WRITE-COLOR-MAP (LOC R G B
-                        &OPTIONAL (SYNCHRONIZE NIL) (SCREEN COLOR-SCREEN)
+                        &OPTIONAL (SCREEN COLOR-SCREEN)
                         &AUX (TV-ADR (TV:SCREEN-CONTROL-ADDRESS SCREEN))
                              (HARDWARE-COLOR-MAP (GET (LOCF (TV:SCREEN-PROPERTY-LIST SCREEN))
                                                       ':HARDWARE-COLOR-MAP)))
@@ -128,31 +59,7 @@
 LOC is a number between 0 and 17, that can appear in a pixel;
 R, G and B (red, green and blue) are numbers from 0 to 377
 that together say how pixels containing LOC should appear on the screen.
-SYNCHRONIZE = T says wait until retrace time to make the change,
- to avoid a visible glitch.
 SCREEN is the screen to operate on."
-  (SETQ LOC (LOGAND LOC 17)
-        R (- 377 (LOGAND (FIX R) 377))
-        G (- 377 (LOGAND (FIX G) 377))
-        B (- 377 (LOGAND (FIX B) 377)))
-  (AND SYNCHRONIZE (PROG NIL A (COND ((GREATERP (LOGAND 40 (%XBUS-READ TV-ADR)) 0)
-				      (RETURN NIL)))(GO A)))
-  (%XBUS-WRITE-SYNC (+ TV-ADR 4) (DPB R 1010 LOC) 0 TV-ADR 100 100)
-  (%XBUS-WRITE-SYNC (+ TV-ADR 4) (DPB G 1010 (DPB 1 0602 LOC)) 0 TV-ADR 100 100)
-  (%XBUS-WRITE-SYNC (+ TV-ADR 4) (DPB B 1010 (DPB 2 0602 LOC)) 0 TV-ADR 100 100)
-  (ASET (- 377 R) HARDWARE-COLOR-MAP LOC 0)
-  (ASET (- 377 G) HARDWARE-COLOR-MAP LOC 1)
-  (ASET (- 377 B) HARDWARE-COLOR-MAP LOC 2))
-
-;Use this when you know you are in the vertical retrace.  Dont waste time waiting
-;for horizontal retrace.
-(DEFUN WRITE-COLOR-MAP-IMMEDIATE (LOC R G B
-                        &OPTIONAL (SCREEN COLOR-SCREEN)
-                        &AUX (TV-ADR (TV:SCREEN-CONTROL-ADDRESS SCREEN))
-                             (HARDWARE-COLOR-MAP (GET (LOCF (TV:SCREEN-PROPERTY-LIST SCREEN))
-                                                      ':HARDWARE-COLOR-MAP)))
-  "Like WRITE-COLOR-MAP but faster but only allowed under special conditions.
-The condition is that you must already be in the vertical retrace."
   (SETQ LOC (LOGAND LOC 17)
         R (- 377 (LOGAND (FIX R) 377))
         G (- 377 (LOGAND (FIX G) 377))
@@ -164,82 +71,25 @@ The condition is that you must already be in the vertical retrace."
   (ASET (- 377 G) HARDWARE-COLOR-MAP LOC 1)
   (ASET (- 377 B) HARDWARE-COLOR-MAP LOC 2))
 
+;; quux: with no retrace to wait for, this is write-color-map itself.
+(DEFF WRITE-COLOR-MAP-IMMEDIATE 'WRITE-COLOR-MAP)
+
 (DEFUN BLT-COLOR-MAP (ARRAY &OPTIONAL (SCREEN COLOR-SCREEN)
-			    &AUX (TV-ADR (TV:SCREEN-CONTROL-ADDRESS SCREEN))
-			         (TV-ADR4 (+ 4 TV-ADR))
+			    &AUX (TV-ADR4 (+ 4 (TV:SCREEN-CONTROL-ADDRESS SCREEN)))
 			         (HARDWARE-COLOR-MAP (GET
 						      (LOCF (TV:SCREEN-PROPERTY-LIST SCREEN))
-						      ':HARDWARE-COLOR-MAP))
-				 (I 0)
-				 (TEM-ARRAY (MAKE-ARRAY 60 ':TYPE 'ART-16B)))
+						      ':HARDWARE-COLOR-MAP)))
   "Write the entire color map of SCREEN from ARRAY (a 16 by 3 array).
-ARRAY could be a saved copy of HARDWARE-COLOR-MAP.
-We wait for vertical retrace to tell the hardware."
-      (DO ((I 0 (1+ I)))			;Precompute xbus-writands
-	  (( I 20))
-	(ASET (DPB (- 377 (FIX (AREF ARRAY I 0))) 1010 I) TEM-ARRAY I)
-	(ASET (DPB (- 377 (FIX (AREF ARRAY I 1))) 1010 (+ I 100)) TEM-ARRAY (+ I 20))
-	(ASET (DPB (- 377 (FIX (AREF ARRAY I 2))) 1010 (+ I 200)) TEM-ARRAY (+ I 40)))
-      (DO () ((ZEROP (LOGAND 40 (%XBUS-READ TV-ADR)))))	;til not vert retracing
-      (DO () ((BIT-TEST (%XBUS-READ TV-ADR) 40))	;til retrace starts
-	(COND ((< I 20) (ASET (AREF ARRAY I 0) HARDWARE-COLOR-MAP I 0)
-	                (ASET (AREF ARRAY I 1) HARDWARE-COLOR-MAP I 1)
-			(ASET (AREF ARRAY I 2) HARDWARE-COLOR-MAP I 2)
-			(SETQ I (1+ I)))))      ;update internal version while-u-wait
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 0))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 1))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 2))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 3))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 4))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 5))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 6))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 7))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 8))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 11))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 12))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 13))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 14))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 15))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 16))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 17))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 20))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 21))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 22))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 23))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 24))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 25))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 26))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 27))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 30))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 31))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 32))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 33))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 34))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 35))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 36))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 37))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 40))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 41))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 42))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 43))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 44))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 45))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 46))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 47))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 50))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 51))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 52))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 53))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 54))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 55))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 56))
-      (%XBUS-WRITE TV-ADR4 (AREF TEM-ARRAY 57))
-      (DO ((I I (1+ I)))			;finish updating internal map version
-	  (( I 20))
-	(ASET (AREF ARRAY I 0) HARDWARE-COLOR-MAP I 0)
-	(ASET (AREF ARRAY I 1) HARDWARE-COLOR-MAP I 1)
-	(ASET (AREF ARRAY I 2) HARDWARE-COLOR-MAP I 2))
-      (RETURN-STORAGE TEM-ARRAY))
+ARRAY could be a saved copy of HARDWARE-COLOR-MAP."
+  ;; quux: written straight away; the cadr's version waited for the vertical
+  ;; retrace, which quux's tv registers do not report.
+  (DOTIMES (I 20)
+    (%XBUS-WRITE TV-ADR4 (DPB (- 377 (FIX (AREF ARRAY I 0))) 1010 I))
+    (%XBUS-WRITE TV-ADR4 (DPB (- 377 (FIX (AREF ARRAY I 1))) 1010 (+ I 100)))
+    (%XBUS-WRITE TV-ADR4 (DPB (- 377 (FIX (AREF ARRAY I 2))) 1010 (+ I 200)))
+    (ASET (AREF ARRAY I 0) HARDWARE-COLOR-MAP I 0)
+    (ASET (AREF ARRAY I 1) HARDWARE-COLOR-MAP I 1)
+    (ASET (AREF ARRAY I 2) HARDWARE-COLOR-MAP I 2)))
 
 ;Read a map location.  Returns four values: R, G, B, LOC
 (DEFUN READ-COLOR-MAP (LOC &OPTIONAL (SCREEN COLOR-SCREEN))
@@ -260,7 +110,7 @@ and the fourth value is LOC."
   "Write color map colors START through 17 of SCREEN with R, G, B."
   (DO ((I START (1+ I)))
       ((> I 17))
-      (WRITE-COLOR-MAP I R G B T SCREEN)))
+      (WRITE-COLOR-MAP I R G B SCREEN)))
 
 ;;; Make a color screen
 (DEFFLAVOR COLOR-SCREEN () (TV:STANDARD-SCREEN))
@@ -285,9 +135,9 @@ and the fourth value is LOC."
   "Don't actually expose the color screen if there is no color monitor.  This
 function is a TOTAL KLUDGE."
   `(COND ((COLOR-EXISTS-P SELF)
-	  (OR TV:EXPOSED-P (SETUP SYNC SELF))
+	  (OR TV:EXPOSED-P (SETUP SELF))
 	  . ,BODY)
-	 (T (SETUP SYNC SELF))))
+	 (T (SETUP SELF))))
 
 (DEFUN MAKE-SCREEN (&OPTIONAL (NAME "COLOR") (XBUS-ADR -600000) (CONTROL-ADR 377750))
   (TV:DEFINE-SCREEN 'COLOR-SCREEN NAME
@@ -300,12 +150,9 @@ function is a TOTAL KLUDGE."
 	     :HARDWARE-COLOR-MAP ,(MAKE-ARRAY '(20 3) ':TYPE 'ART-8B))))
 
 ;Init a color screen
-(DEFUN SETUP (&OPTIONAL (SYNC-PROG SYNC) (SCREEN COLOR-SCREEN)
-              &AUX (TV-COLOR-ADR (TV:SCREEN-CONTROL-ADDRESS SCREEN)))
+;; quux: no sync program to load, so no sync-prog argument.
+(DEFUN SETUP (&OPTIONAL (SCREEN COLOR-SCREEN))
   (COND ((COLOR-EXISTS-P SCREEN)
-         (SI:STOP-SYNC TV-COLOR-ADR)
-         (SI:FILL-SYNC SYNC-PROG 0 TV-COLOR-ADR)
-         (SI:START-SYNC 3 0 36. TV-COLOR-ADR)
 	 (WHEN (VARIABLE-BOUNDP COLOR-SCREEN)	;May not be, if just creating it now.
 	   (R-G-B-COLOR-MAP)
 	   (SI:CLEAR-SCREEN-BUFFER (SEND COLOR-SCREEN ':BUFFER)))
@@ -457,13 +304,13 @@ Does not set the color map."
 		 CURSOR-WIDTH CURSOR-HEIGHT
 		 COLOR TV:ALU-XOR))))
 
-(DEFUN RANDOM-COLOR-MAP (&OPTIONAL (START 1) (SYNCHRONIZE NIL) (SCREEN COLOR-SCREEN))
+;; quux: no synchronize argument, as write-color-map has none.
+(DEFUN RANDOM-COLOR-MAP (&OPTIONAL (START 1) (SCREEN COLOR-SCREEN))
   "Fill the color map from START through 15. with random colors."
        (DO ((I START (1+ I)))
            ((= I 20))
            (WRITE-COLOR-MAP I (RANDOM (1+ COLOR-MAP-ON)) (RANDOM (1+ COLOR-MAP-ON))
-			    (RANDOM (1+ COLOR-MAP-ON)) SYNCHRONIZE SCREEN)
-	   (SETQ SYNCHRONIZE NIL)))		;ONLY SYNCHRONIZE THE FIRST CHANGE
+			    (RANDOM (1+ COLOR-MAP-ON)) SCREEN)))
 
 (DEFUN GRAY-COLOR-MAP (&OPTIONAL (BASE 0))
   "Fill the color map with a gray scale; color 0 = BASE,
@@ -480,7 +327,7 @@ so that color 17 is just darker than BASE."
        (DO ()
            ((FUNCALL TERMINAL-IO ':TYI-NO-HANG))
            (PROCESS-ALLOW-SCHEDULE)
-           (RANDOM-COLOR-MAP 1 (> DELAY 2))	;IF THE DELAY IS > 2, SYNCHRONIZE WRITES
+           (RANDOM-COLOR-MAP 1)	;quux: no synchronized writes to ask for
            (OR (ZEROP DELAY) (PROCESS-SLEEP DELAY))))
 
 (DEFUN GRAY-COLORIZE (&OPTIONAL (DELAY 2))

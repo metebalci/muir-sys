@@ -24,8 +24,8 @@
 (ASSIGN DISK-READ-COMPARE-COMMAND 10)
 (ASSIGN DISK-RECALIBRATE-COMMAND 10001005)
 
-(ASSIGN TV-REGS-ADDRESS-BASE 77377760)		;XBUS ADDRESS 17377760
- ;IN REGISTER 0, BIT 3 IS INTERRUPT ENABLE, BIT 4 IS INTERRUPT FLAG
+;; quux: tv-regs-address-base and a-tv-regs-base are gone: the tv's vertical
+;; interrupt was the only thing the microcode read there, and mono tv has none.
 ;; quux: near the bottom right of mono tv's default 1920x1080 buffer, 60 words
 ;; a line, not inside the cadr tv's 768-wide one.  it serves only until lisp
 ;; sets %disk-run-light from the screen's real size (tv::initialize-run-light-
@@ -79,8 +79,9 @@ PROM	(JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO PROM)    ;These 2 instructions duplicat
        ((VMA) (A-CONSTANT 17772040))		;Unibus address 764100 (KBD LOW)
 	((MD) (BYTE-FIELD 6 0) MD)		;Get keycode
 	(JUMP-EQUAL MD (A-CONSTANT 46) COLD-BOOT)	;This is cold-boot if key is RUBOUT
-	((MD) (A-CONSTANT 46))			;Standardize mode.  Mostly, set to NORMAL speed
-	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;40 is PROM-DISABLE, 2 is NORMAL speed.
+	((md) (a-constant 44))			;Standardize mode.
+	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;40 is PROM-DISABLE, 4 is ERROR-STOP-ENABLE;
+						;quux: no speed bits, so not 46
        ((VMA) (A-CONSTANT 17773005))		;Unibus 766012
 	(JUMP BEG0000)
 
@@ -141,28 +142,10 @@ XUBR (MISC-INST-ENTRY %UNIBUS-READ)
 		(A-CONSTANT LOWEST-UNIBUS-VIRTUAL-ADDRESS))
 	(JUMP XUBR0)
 
-;; %XBUS-WRITE-SYNC w-loc w-val delay s-loc s-mask s-val
-;; Waits for (LOGAND (%XBUS-READ s-loc) s-mask) to not-equal s-val, then
-;; to equal s-val.  Then it loops 'delay' number of times and writes
-;; w-val into w-loc.  This is intended for such things as color-map hacking.
-XXBWS (MISC-INST-ENTRY %XBUS-WRITE-SYNC)
-	(CALL GET-32-BITS)		;S-VAL
-	((M-2) M-1)
-	(CALL GET-32-BITS)		;S-MASK
-	((VMA) (BYTE-FIELD 18. 0) C-PDL-BUFFER-POINTER-POP	;S-LOC
-		(A-CONSTANT LOWEST-IO-SPACE-VIRTUAL-ADDRESS))
-XXBWS1	((VMA-START-READ) VMA)
-	(CHECK-PAGE-READ)
-	((M-3) AND READ-MEMORY-DATA A-1)
-	(JUMP-EQUAL M-3 A-2 XXBWS1)
-XXBWS2	((VMA-START-READ) VMA)
-	(CHECK-PAGE-READ)
-	((M-3) AND READ-MEMORY-DATA A-1)
-	(JUMP-NOT-EQUAL M-3 A-2 XXBWS2)
-	((M-1) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;DELAY
-XXBWS3	(JUMP-NOT-EQUAL-XCT-NEXT M-1 A-ZERO XXBWS3)
-       ((M-1) SUB M-1 (A-CONSTANT 1))
-	;drop into XXBW
+;; quux: %xbus-write-sync is gone.  it waited on a status bit of the cadr tv's
+;; control register before writing, for writing the color map in the retrace;
+;; quux's tv registers report no retrace, and the color map is written
+;; directly.  its misc opcode, 471, is free.
 
 ;; See comments on %XBUS-READ above.
 XXBW (MISC-INST-ENTRY %XBUS-WRITE)
