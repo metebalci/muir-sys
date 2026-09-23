@@ -16,8 +16,10 @@ repository, is something else: the site files a Lisp Machine loads.)
 - `fonts/` holds the three families, served from here rather than from
   Google. `fonts/README.md` says where they came from and under what license.
 
-It is not published yet: this repository has no Pages workflow, and Pages
-is not enabled for it.
+`.github/workflows/pages.yml` publishes this directory on every push to
+`main` that touches it, and can be run by hand. The page is served at
+<https://muir-sys.metebalci.com/>; the domain is set in the repository's Pages
+settings, which is why there is no `CNAME` file here.
 
 To look at the page before pushing, open `index.html` in a browser, or serve
 the directory:
