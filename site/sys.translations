@@ -11,6 +11,18 @@
 ;;; left unterminated, and the cold load stops with "End of file ... in the
 ;;; middle of the list". MIT's own site file never met this, its translation
 ;;; targets being TOPS-20 paths with no slashes in them.
+;;;
+;;; Spaces only, and no page marks: MINI's character stream hands the server's
+;;; bytes to the reader untranslated (SYS: COLD; MINI, MINI-ASCII-STREAM),
+;;; unlike the streams the file system uses later, which map ASCII 10, 11, 12,
+;;; 14, 15 and 177 to the machine's own Backspace, Tab, Line, Page, Newline and
+;;; Rubout (SYS: IO; STREAM, TYI-FROM-ASCII-STREAM). An ASCII tab therefore
+;;; reaches the reader as a character the traditional readtable does not class
+;;; as whitespace, and a line that begins with one is read as part of the token
+;;; above it: the form quietly acquires an argument, and the error comes later
+;;; and elsewhere. The sources QLD reads after the handover are full of tabs and
+;;; page marks, and are fine, because they arrive through the translating
+;;; streams. Only what the cold load reads over MINI is bound by this.
 
 (SET-LOGICAL-PATHNAME-HOST "SYS"
   :PHYSICAL-HOST "OZ"
