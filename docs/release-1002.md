@@ -86,6 +86,25 @@ a comment in that file saying why.
     CADR TV's sync program, says there is none. The microcode's first
     run-light address is inside MONO TV's default buffer, and `INTRX0` no
     longer reads the CADR TV's vertical flag.
+  - **The TV sync program is gone, and with it most of the TV registers.**
+    MONO TV has no sync program, and of the CADR TV's control registers
+    QUUX keeps only register 0's black-on-white bit and register 4, the
+    color map (the user). So the sync routines and tables go from
+    `window/cold.lisp` (`READ-SYNC`, `WRITE-SYNC`, `START-SYNC`,
+    `STOP-SYNC`, `FILL-SYNC`, `CHECK-SYNC`, `SETUP-CPT`, `PROM-SETUP`,
+    `CPT-SYNC2`), `SYNC-RAM-CONTENTS` from `window/shwarm.lisp`, and the
+    CADR debugger's TV sync code from `cc/dmon.lisp`. The color TV code
+    stays for a color display like MONO TV, without its sync programs or
+    its waits for the retrace, which QUUX's registers no longer report:
+    `WRITE-COLOR-MAP` writes register 4 directly, and
+    `WRITE-COLOR-MAP-IMMEDIATE` is the same function
+    (`window/color.lisp`). The microcode's `%XBUS-WRITE-SYNC`, which
+    waited on a TV status bit, is gone and its misc opcode, 471, is free,
+    as are `A-TV-REGS-BASE` and `TV-REGS-ADDRESS-BASE`.
+  - **No speed bits.** QUUX's mode register (Unibus 766012) has no speed
+    bits; every microcycle is one length. The microcode writes 44, not 46,
+    where it sets the mode (`ucadr/uc-cadr.lisp`, `ucadr/uc-cold-disk.lisp`),
+    and `COLOR:XBUS-READ-NO-PARITY` writes 40 and 44, not 42 and 46.
   - **The machine's id** is functional source 16, which the assembler now
     names `MACHINE-ID` (`sys/cadsym.lisp`): on QUUX the signature 0x5155 in
     bits 31:16, the hardware revision in 15:4 (cumulative) and the processor

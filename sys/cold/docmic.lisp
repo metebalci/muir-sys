@@ -719,10 +719,6 @@ COUNT is the number of words to copy.")
 (SETF (DOCUMENTATION '*THROW 'FUNCTION)
   "Obsolete name for THROW")
 
-;(SETF (DOCUMENTATION '%XBUS-WRITE-SYNC 'FUNCTION)
-;  "")
-;;arglist = (IO-ADDR WORD DELAY SYNC-LOC SYNC-MASK SYNC-VAL)
-
 (SETF (DOCUMENTATION '%P-LDB 'FUNCTION)
   "Return the contents of byte PPSS in the word addressed by POINTER.
 This byte can include any of the bits in the word, and can overlap

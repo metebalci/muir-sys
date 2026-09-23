@@ -196,151 +196,16 @@
 	       (RETURN ADR)))
     ))
 
-;;; Read and write the sync program
-(DEFUN CC-TV-READ-SYNC (ADR &OPTIONAL (TV-ADR 17377760))
-	(PHYS-MEM-WRITE (+ TV-ADR 2) ADR)	;Set pointer
-	(LOGAND 377 (PHYS-MEM-READ (+ TV-ADR 1))))
-
-(DEFUN CC-TV-READ-SYNC-ENB-RAM (ADR &OPTIONAL (TV-ADR 17377760))
-	(PHYS-MEM-WRITE (+ TV-ADR 3) 200)	;Enable SYNC RAM
-	(PHYS-MEM-WRITE (+ TV-ADR 2) ADR)	;Set pointer
-	(LOGAND 377 (PHYS-MEM-READ (+ TV-ADR 1))))
-
-;;; This clobbers vertical spacing in order to guarantee access to RAM not PROM.
-(DEFUN CC-TV-WRITE-SYNC (ADR DATA &OPTIONAL (TV-ADR 17377760))
-	(PHYS-MEM-WRITE (+ TV-ADR 3) 200)	;Enable SYNC RAM
-	(PHYS-MEM-WRITE (+ TV-ADR 2) ADR)	;Set pointer
-	(PHYS-MEM-WRITE (+ TV-ADR 1) DATA))
-
-;;; Start and stop the sync program
-(DEFUN CC-TV-START-SYNC (CLOCK BOW VSP &OPTIONAL (TV-ADR 17377760))
-	(PHYS-MEM-WRITE TV-ADR (+ (LSH BOW 2) CLOCK))
-	(PHYS-MEM-WRITE (+ TV-ADR 3) (+ 200 VSP)))
-
-(DEFUN CC-TV-STOP-SYNC (&OPTIONAL (TV-ADR 17377760))
-	(PHYS-MEM-WRITE (+ TV-ADR 3) 200))		;Disable output of sync
-
-;;; Write into the sync program from a list with repeat-counts
-;;; Sub-lists are repeated <car> times.
-(DEFUN CC-TV-FILL-SYNC (L &OPTIONAL (ADR 0) (TV-ADR 17377760) &AUX X)
-  (DO ((L L (CDR L))) ((NULL L) ADR)
-    (SETQ X (CAR L))
-    (COND ((ATOM X) (CC-TV-WRITE-SYNC ADR X TV-ADR) (SETQ ADR (1+ ADR)))
-	  (T (DO N (CAR X) (1- N) (ZEROP N)
-	       (SETQ ADR (CC-TV-FILL-SYNC (CDR X) ADR TV-ADR)))))))
-
-(DEFUN CC-TV-CHECK-SYNC (L &OPTIONAL (ADR 0) (TV-ADR 17377760) &AUX X)
-  (DO ((L L (CDR L))) ((NULL L) ADR)
-    (SETQ X (CAR L))
-    (COND ((ATOM X)
-	   (CC-TV-CHECK-SYNC-WD ADR X TV-ADR)
-	   (SETQ ADR (1+ ADR)))
-	  (T (DO N (CAR X) (1- N) (ZEROP N)
-	       (SETQ ADR (CC-TV-CHECK-SYNC (CDR X) ADR TV-ADR)))))))
-
-(DEFUN CC-TV-CHECK-SYNC-WD (ADR DATA TV-ADR &AUX MACH)
-  (COND ((NOT (= DATA (SETQ MACH (CC-TV-READ-SYNC ADR TV-ADR))))
-	 (FORMAT T "~%ADR:~S MACH: ~S should be ~S" ADR MACH DATA))))
-
-(DECLARE (SPECIAL SI:CPT-SYNC SI:CPT-SYNC1 SI:CPT-SYNC2 SI:COLOR-SYNC))
-
-;;; Set up sync for CPT monitor 768. x 896.
-(DEFUN CC-TV-SETUP-CPT (&OPTIONAL (SYNC-PROG SI:CPT-SYNC2) (TV-ADR 17377760))
-  (CC-TV-STOP-SYNC TV-ADR)
-  (CC-TV-FILL-SYNC SYNC-PROG 0 TV-ADR)
-  (CC-TV-START-SYNC 0 1 0 TV-ADR))
-
-(DEFUN CC-SET-TV-SPEED (FREQUENCY)
-  ;;"Set the TV refresh rate.  The default is 64.69.  Returns the number of display lines."
-  ;; Try not to burn up the monitor
-  (CHECK-ARG FREQUENCY (AND (> FREQUENCY 54.) (< FREQUENCY 76.))
-	     "a number between 55. and 75.")
-  ;; Here each horizontal line is 32. sync clocks, or 16.0 microseconds with a 64 MHz clock.
-  ;; The number of lines per frame is 70. overhead lines plus enough display lines
-  ;; to give the desired rate.
-  (LET ((TV-ADR 17377760)
-	(N-LINES (- (FIX (// 1e6 (* 16. FREQUENCY))) 70.)))
-    (CC-TV-SETUP-CPT
-      (APPEND '(1.  (1 33) (5 13) 12 12 (11. 12 12) 212 113)	;VERT SYNC, CLEAR TVMA
-	      '(53. (1 33) (5 13) 12 12 (11. 12 12) 212 13)	;VERT RETRACE
-	      '(8.  (1 31)  (5 11) 11 10 (11. 0 0) 200 21)	;8 LINES OF MARGIN
-	      (DO ((L NIL (APPEND L `(,DN (1 31) (5 11) 11 50 (11. 0 40) 200 21)))
-		   (N N-LINES (- N DN))
-		   (DN))
-		  ((ZEROP N) L)
-		(SETQ DN (MIN 255. N)))
-	      '(7. (1 31) (5 11) 11 10 (11. 0 0) 200 21)
-	      '(1. (1 31) (5 11) 11 10 (11. 0 0) 300 23))
-      TV-ADR)
-    T))
-
-(defun cc-tv-setup-loop ()
-  (do () (()) (cc-tv-setup-cpt)))
-
-(DEFUN CC-TV-CPT-CHECK-SYNC (&OPTIONAL (SYNC-PROG SI:CPT-SYNC2) (TV-ADR 17377760))
-  (CC-TV-STOP-SYNC TV-ADR)
-  (CC-TV-CHECK-SYNC SYNC-PROG 0 TV-ADR)
-  (CC-TV-START-SYNC 0 1 0 TV-ADR))
-
-(SETQ TV-SYNC-ZEROS '( (4096. 0)) )
-(SETQ TV-SYNC-ONES  '( (4096. 377)) )
-
-;FAST ADDRESS TEST WRITES ZEROS AND ONES INTO 2 LOCATIONS 
-;WHOSE ADDRESSES DIFFER IN 1 BIT, CHECKS FOR INTERFERENCE.
-;THIS DETECTS ADDRESS BITS STUCK AT ZERO OR ONE FOR SOME DATA
-;BITS, BUT DOES NOT DETECT ADJACENT ADDRESS BITS SHORTED TOGETHER.
-(DEFUN CC-FAST-ADDRESS-TEST-SYNC ()
-  (CC-TV-STOP-SYNC)
-  (DO ((N 2 (1- N))
-       (PHASE T NIL)
-       (ONES (SUB1 (DPB 1 (+ (LSH 8 6) 1) 0)))
-       (ZEROS 0))
-      ((= N 0))
-    (DO ((BITNO 0 (1+ BITNO))
-	 (GOOD1 (COND (PHASE ZEROS) (T ONES)))
-	 (GOOD2 (COND (PHASE ONES) (T ZEROS)))
-	 (BAD1)
-	 (BAD2)
-	 (BAD3)
-	 (K)
-         (CC-SUSPECT-BIT-LIST))
-	((= BITNO 12.))
-      (SETQ K (LSH 1 BITNO))
-      (CC-TV-WRITE-SYNC K GOOD2)
-      (COND ((NOT (EQUAL (SETQ BAD2 (CC-TV-READ-SYNC K)) GOOD2))
-	     (PRINC " loc ") (PRIN1 K)
-	     (CC-PRINT-BIT-LIST " fails in data bits "
-				(CC-WRONG-BITS-LIST GOOD2 BAD2 8))))
-      (CC-TV-WRITE-SYNC 0 GOOD1)		;Deposit in loc 0 second for A & M's sake
-      (COND ((NOT (EQUAL (SETQ BAD1 (CC-TV-READ-SYNC 0)) GOOD1))
-	     (PRINC " loc 0")
-	     (CC-PRINT-BIT-LIST " fails in data bits "
-				(CC-WRONG-BITS-LIST GOOD1 BAD1 8))))
-      (COND ((NOT (EQUAL (SETQ BAD3 (CC-TV-READ-SYNC K)) GOOD2))
-	     (FORMAT T " address bit ~D" BITNO)
-	     (CC-PRINT-BIT-LIST (COND (PHASE " fails storing 1's then 0 in data bits ")
-				      (T " fails storing 0 then 1's in data bits "))
-				(CC-WRONG-BITS-LIST GOOD2 BAD3 8)))))))
-
-(DEFUN CC-TV-SYNC-WRITE-LOOP (&OPTIONAL (ADR 0) (DATA -1))
-  (DO () ((KBD-TYI-NO-HANG))
-    (CC-TV-WRITE-SYNC ADR DATA)))
-
-(DEFUN CC-TV-SYNC-READ-LOOP (&OPTIONAL (ADR 0))
-  (DO () ((KBD-TYI-NO-HANG))
-    (CC-TV-READ-SYNC ADR)))
-
-(DEFUN CC-TV-SYNC-READ-LOOP-ENB-RAM (&OPTIONAL (ADR 0))
-  (DO () ((KBD-TYI-NO-HANG))
-    (CC-TV-READ-SYNC-ENB-RAM ADR)))
-
+;;; quux: the tv sync program's routines are gone (reading, writing, filling,
+;;; checking and testing the sync ram, setting up the cpt sync, the tv speed):
+;;; quux's tv has no sync program (the user, 2026-09-23).
 
 (DEFUN CC-TEST-TV-MEMORY (&OPTIONAL ALREADY-LOADED)
-  (CC-TV-SETUP-CPT)
+  ;; quux: no sync program to set up first.
   (CC-RUN-MTEST ALREADY-LOADED '(0 100000) (ASH 17000000 -8)))
 
 (defun cc-test-color-tv-memory (&optional already-loaded)
-  (cc-tv-setup-cpt color:sync 17377750)
+  ;; quux: no sync program to set up first.
   (cc-run-mtest already-loaded '(0 100000) (ash 17200000 -8)))
 
 (defun cc-tv-read (adr &optional (base-adr 17000000))

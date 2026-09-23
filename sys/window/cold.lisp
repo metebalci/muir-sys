@@ -1042,175 +1042,13 @@ not converted to upper case."
   (%beep 1350 400000))
 
 
-;;; Hardware primitives
-;;; Support for "Simple TV" (32-bit TV system)
-;;;Some special variables used by the hardware routines
-(DECLARE (SPECIAL CPT-SYNC2 COLOR-SYNC CPT-SYNC-60HZ))
+;;; quux: the cadr tv's sync program is gone --- its routines (read-sync,
+;;; write-sync, start-sync, stop-sync, fill-sync, check-sync, setup-cpt,
+;;; prom-setup) and its tables (cpt-sync2 and the commented-out older ones).
+;;; mono tv, quux's display, has no sync program, and of the tv control
+;;; registers keeps only register 0's black-on-white bit and register 4, the
+;;; color map (the user, 2026-09-23).
 
-;;; Read and write the sync program
-(DEFUN READ-SYNC (ADR &OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-  (%XBUS-WRITE (+ TV-ADR 2) ADR)		;Set pointer
-  (LOGAND 377 (%XBUS-READ (+ TV-ADR 1))))
-
-(DEFUN WRITE-SYNC (ADR DATA &OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-  (%XBUS-WRITE (+ TV-ADR 2) ADR)		;Set pointer
-  (%XBUS-WRITE (+ TV-ADR 1) DATA))
-
-;;; Start and stop the sync program
-(DEFUN START-SYNC (CLOCK BOW VSP
-		   &OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-  (%XBUS-WRITE TV-ADR (+ (LSH BOW 2) CLOCK))
-  (%XBUS-WRITE (+ TV-ADR 3) (+ 200 VSP)))
-
-(DEFUN STOP-SYNC (&OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-  (%XBUS-WRITE (+ TV-ADR 3) 200))		;Disable output of sync
-
-;;; Write into the sync program from a list with repeat-counts
-;;; Sub-lists are repeated <car> times.
-(DEFUN FILL-SYNC (L &OPTIONAL (ADR 0) (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN))
-		    &AUX X)
-  (DO ((L L (CDR L))) ((NULL L) ADR)
-    (SETQ X (CAR L))
-    (COND ((ATOM X) (WRITE-SYNC ADR X TV-ADR) (SETQ ADR (1+ ADR)))
-	  (T (DO N (CAR X) (1- N) (ZEROP N)
-		 (SETQ ADR (FILL-SYNC (CDR X) ADR TV-ADR)))))))
-
-(DEFUN CHECK-SYNC (L &OPTIONAL (ADR 0)  (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN))
-		   &AUX X)
-  (DO ((L L (CDR L))) ((NULL L) ADR)
-    (SETQ X (CAR L))
-    (COND ((ATOM X)
-	   (CHECK-SYNC-WD ADR X TV-ADR)
-	   (SETQ ADR (1+ ADR)))
-	  (T (DO N (CAR X) (1- N) (ZEROP N)
-	       (SETQ ADR (CHECK-SYNC (CDR X) ADR TV-ADR)))))))
-
-(DEFUN CHECK-SYNC-WD (ADR DATA TV-ADR &AUX MACH)
-  (COND ((NOT (= DATA (SETQ MACH (READ-SYNC ADR TV-ADR))))
-	 (FORMAT T "~%ADR:~S MACH: ~S should be ~S" ADR MACH DATA))))
-
-
-;Initialize the TV.  Name of this function is obsolete.
-;If FORCE-P is T, then SYNC-PROG is always loaded.
-;Otherwise, it is a default to be loaded only if there is no prom.
-(DEFUN SETUP-CPT (&OPTIONAL (SYNC-PROG CPT-SYNC2)
-			    (TV-ADR NIL)
-			    (FORCE-P NIL))
-  ;; no longer wrapped in a choice on the processor; this system runs only on a CADR.
-     FORCE-P
-     (IF (NULL TV-ADR) (SETQ TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-     ;; Always turn on vertical sync interrupts if this is the first TV controller.
-     ;; The microcode relies on these as a periodic clock for various purposes.
-     ;; If not the first controller, leave the interrupt enable the way it is.
-     (WITHOUT-INTERRUPTS
-      (LET ((INTERRUPT-ENABLE (IF (= TV-ADR 377760) 10	;This is the number UCADR knows
-				  (LOGAND (%XBUS-READ TV-ADR) 10)))
-	    (STATUS (%XBUS-READ TV-ADR)))
-	STATUS
-	(COND (NIL
-	       ;never using the prom, so as to assure software and hardware agree as to
-	       ; what the screen geometry is.
-	       (COMMENT
-		(AND (NOT FORCE-P)			;Unless forced, try to use the PROM
-		     (OR (ZEROP (LOGAND STATUS 200))	;Good, PROM already on
-			 (PROGN (PROM-SETUP TV-ADR)	;Try turning it on
-				(ZEROP (LOGAND (%XBUS-READ TV-ADR) 200)))))  ;On now?
-		;; The hardware at least claims the PROM is turned on.  Actually
-		;; checking for working sync does not work for some reason, so just
-		;; assume that any board which can have a PROM does have one, and
-		;; always use the PROM if it is there, since it is more likely to
-		;; be right than the default sync program.
-		;; Now turn on black-on-white mode, and interrupt enable if desired.
-		(%XBUS-WRITE TV-ADR (+ 4 INTERRUPT-ENABLE))))
-	      (T ;; Must be an ancient TV board at MIT, or else forced
-	       ;; Use default (or forced) sync program
-	       (STOP-SYNC TV-ADR)
-	       (FILL-SYNC SYNC-PROG 0 TV-ADR)
-	       (START-SYNC INTERRUPT-ENABLE 1 0 TV-ADR))))))  ;Clock 0, BOW 1, VSP 0
-
-(DEFUN PROM-SETUP (&OPTIONAL (TV-ADR TV:(SCREEN-CONTROL-ADDRESS DEFAULT-SCREEN)))
-  (%XBUS-WRITE (+ TV-ADR 3) 0))
-
-
-;sync program bits
-;1  HSYNC
-;2  VSYNC
-;4  COMPOSITE - (not used really, encode on HSYNC)
-;10  BLANKING
-;     0  PROC CYC
-;     20  REFRESH
-;     40  INC TVMA
-;     60  STEP TVMA
-;     0    --
-;     100  CLR TVMA
-;     200  EOL
-;     300  EOP
-;Assume 60MHZ bit clock, therefore 15Mhz (66.7 ns) TTL clock, 533ns SYNC clk
-; 30. sync clks per line, 10. for horz sync, 
-;41.6 lines for 666 usec vertical
-;1037 lines per 16.66 ms frame
-
-
-; 640. X 896.
-;(SETQ CPT-SYNC '(
-;   1.  (2 33) (8 13) (18. 12) 212 112
-;   45.  (2 33) (8 13) (18. 12) 212 12
-;   8.  (2 33)  (6 13) 13 12 (18. 2) 202 2
-;   255. (2 31) (6 11) 11 50 (9. 0 40) 200 0
-;   255. (2 31) (6 11) 11 50 (9. 0 40) 200 0
-;   255. (2 31) (6 11) 11 50 (9. 0 40) 200 0
-;   131. (2 31) (6 11) 11 50 (9. 0 40) 200 0
-;   8. (2 31) (6 11) 11 10 (8. 0 0) 0 0 300 0
-;))
-
-;704. x 896.
-;(SETQ CPT-SYNC1 '(
-;   1.  (1 33) (5 13) 12 12 (10. 12 12) 212 113			;VERT SYNC, CLEAR TVMA
-;   53.  (1 33) (5 13) 12 12 (10. 12 12) 212 13			;VERT RETRACE
-;   8.  (1 31)  (5 11) 11 10 (10. 0 0) 200 21		;8 LINES OF MARGIN
-;   255. (1 31) (5 11) 11 50 (10. 0 40) 200 21
-;   255. (1 31) (5 11) 11 50 (10. 0 40) 200 21
-;   255. (1 31) (5 11) 11 50 (10. 0 40) 200 21
-;   131. (1 31) (5 11) 11 50 (10. 0 40) 200 21
-;   7. (1 31) (5 11) 11 10 (10. 0 0) 200 21
-;   1. (1 31) (5 11) 11 10 (10. 0 0) 300 23
-;))
-
-;Sync for 64 Mhz crystal,  768. x 963.  (was 896 for CPT)
-; This is the default thing.  The vertical repetition rate is 60Hz, 
-;and the extra screen space is provided to the user 
-;(as compared to the original CPT sync load).
-
-(DEFCONST CPT-SYNC2 '(
-   1.  (1 33) (5 13) 12 12 (11. 12 12) 212 113			;VERT SYNC, CLEAR TVMA
-   53.  (1 33) (5 13) 12 12 (11. 12 12) 212 13			;VERT RETRACE
-   8.  (1 31)  (5 11) 11 10 (11. 0 0) 200 21		;8 LINES OF MARGIN
-   255. (1 31) (5 11) 11 50 (11. 0 40) 200 21
-   255. (1 31) (5 11) 11 50 (11. 0 40) 200 21
-   255. (1 31) (5 11) 11 50 (11. 0 40) 200 21
-   198. (1 31) (5 11) 11 50 (11. 0 40) 200 21
-   7. (1 31) (5 11) 11 10 (11. 0 0) 200 21
-   1. (1 31) (5 11) 11 10 (11. 0 0) 300 23
-))
-
-;;; This is the CPT-SYNC2 program (locations are in octal, repeats in decimal)
-;Loc	Rpt	Hsync	Vsync	Comp	Blank	Other1		Other2
-;0	1
-;1		X	X		X	Refresh
-;2-6		X	X		X
-;7-36			X		X
-;37			X		X			Eol
-;40		X	X		X			Clr MA
-;41	53.
-;42		X	X		X	Refresh
-;43-47		X	X		X
-;50-77			X		X
-;100			X		X			Eol
-;101		X	X		X			Clr MA
-;102	8.
-;103		X			X	Refresh
-;104
-
 ;This is used for making an instance in the cold-load environment,
 ;so that we can display on the TV in the cold-load stream.
 ;The instance variable slots get initialized to NIL.  Note that
@@ -1252,14 +1090,5 @@ not converted to upper case."
 ;Avoid lossage when processes are in use but window system is not loaded yet.
 (OR (FBOUNDP 'TV:BACKGROUND-STREAM)
     (FSET 'TV:BACKGROUND-STREAM COLD-LOAD-STREAM))
-
-;:NORMAL to not do when the ADD-INITIALIZATION is executed, only when it is
-;time to do the system-initializations
-; SETUP-CPT is now called directly from LISP-REINITIALIZE.  Problem was, on a cold boot,
-;references to the video buffer could happen before the sync program was set up.
-;This caused main memory parity errors even though the TV sends back ignore parity!
-;One path that caused trouble was PROCESS-INITIALIZE, (PROCESS-CLASS :RESET),
-;TV:WHO-LINE-PROCESS-CHANGE, etc.
-;(ADD-INITIALIZATION "CPT-SYNC" '(SETUP-CPT CPT-SYNC2) '(:SYSTEM :NORMAL))
 
 

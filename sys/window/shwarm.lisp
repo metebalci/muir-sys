@@ -1957,9 +1957,6 @@ SHEET's cursor is not used or moved."
   (PUSHNEW 'TV:BLINKER-CLOCK SI:CLOCK-FUNCTION-LIST :TEST #'EQ))
 
 
-(DEFVAR SYNC-RAM-CONTENTS :UNBOUND
-  "Data to load into the TV board's sync memory.")
-
 ;; quux: mono tv has no sync program and no refresh rate to set, and its
 ;; size comes from the feature page; the cadr tv's version of this, which
 ;; loaded a sync program and changed the screen's height, is gone.
