@@ -10,56 +10,64 @@ a comment in that file saying why.
 
 ## QUUX
 
-- **One microcode for the CADR and QUUX, version 1000.** QUUX is the CADR
-  evolved, and muir and muir-fpga run it with `--machine quux`. Its level-1
-  map entry is six bits instead of five, using a bit the CADR leaves spare,
-  so the level-2 map has 64 blocks of 32 pages instead of 32: 63 usable
-  blocks map 504K words at once instead of 248K. This is the first change
-  to the microcode itself, which stayed 323 while it was MIT's; it takes
-  1000 as the system took 1000 after System 100. It reads which machine it
-  is on at boot and serves both.
+- **Microcode 1000 is QUUX's; the CADR keeps MIT's 323.** QUUX is the CADR
+  evolved, and muir and muir-fpga run it with `--machine quux`. This is the
+  first change to the microcode itself, which stayed 323 while it was MIT's;
+  it takes 1000 as the system took 1000 after System 100. One band serves
+  both machines: it asks the machine at boot what it is running on.
+  Microcode 1000 needs QUUX hardware revision 2:
+  - **A six-bit level-1 map entry** (revision 1), using a bit the CADR
+    leaves spare, so the level-2 map has 64 blocks of 32 pages instead of
+    32: 63 usable blocks map 504K words at once instead of 248K.
+    `ucadr/uc-page-fault.lisp` reads the entry as MAP<29:24> and writes bits
+    4:0 from VMA<31:27>, as on the CADR, and bit 5 from VMA<24>. The invalid
+    entry is 77, in `A-LEVEL-1-MAP-INVALID`, which the three tests for it and
+    the level-2 reuse pointer's wrap compare against.
+  - **A 16K-word PDL buffer** (revision 2), a 14-bit pointer instead of the
+    CADR's 10 bits and 1K words: `PDL-BUFFER-ADDRESS-MASK`, `-HIGH-BIT` and
+    `PDL-BUFFER-SIZE-IN-WORDS` (`ucadr/uc-parameters.lisp`), which every
+    PDL-buffer site now uses by name (five had the width as a literal).
+    muir measured 16K against 1K and 4K on its thirteen workloads: 4.3% fewer
+    microcycles in all, 29% fewer in deep recursion, with stack-group
+    switching unchanged.
   - **The machine's id** is functional source 16, which the assembler now
-    names `MACHINE-ID` (`sys/cadsym.lisp`). On QUUX it reads the signature
-    0x5155 in bits 31:16, the hardware revision in 15:4 (1 is the six-bit
-    level-1 entry; revisions are cumulative) and the processor type in 3:0;
-    a CADR does not drive the source and reads all ones. muir's
-    `docs/quux.md` holds the contract.
-  - `ucadr/uc-cold-disk.lisp`: `INITIAL-MAP-A` reads `MACHINE-ID`. Without the
-    signature the machine is a CADR, processor type 1, with the invalid
-    level-1 entry 37; with it, the type is QUUX's own (4), and from revision
-    1 the invalid entry is 77. Boot then sets every level-1 entry to all
-    ones, zeroes the invalid block, and reads back block 0's entry: if it is
-    not the invalid entry the id promised, the level-1 map is narrower than
-    the id says, and the microcode halts at `MAP-WIDTH-MISMATCH` instead of
-    letting blocks alias.
-  - `ucadr/uc-page-fault.lisp`: the level-1 entry is read as six bits,
-    MAP<29:24>, which a CADR reads with bit 29 always 0. It is written as two
-    fields, bits 4:0 from VMA<31:27> as on the CADR and bit 5 from VMA<24>,
-    which a CADR ignores. The three tests for the invalid entry, and the
-    level-2 reuse pointer's wrap, compare against `A-LEVEL-1-MAP-INVALID`
-    (`ucadr/uc-parameters.lisp`, after every other A-memory variable, so no
-    location moves), 37 or 77, instead of the constant 37.
-  - The reverse first-level map, one word per level-2 block, moves from
-    system communication locations 440-477 to 640-737 on both machines: 64
-    entries do not fit before the keyboard buffer header at 500. 640-677
-    held only the Lambda's disk and memory tables. 700-717 held the
-    swap-out CCW lists (`DISK-SWAP-OUT-CCW-BASE` in
-    `ucadr/uc-parameters.lisp`), which move to 440-457, where the reverse
-    map was, with the same 16 entries. The swap-in CCWs stay at 740-757,
-    and the single-page CCW at 777.
+    names `MACHINE-ID` (`sys/cadsym.lisp`): on QUUX the signature 0x5155 in
+    bits 31:16, the hardware revision in 15:4 (cumulative) and the processor
+    type in 3:0; a CADR does not drive the source and reads all ones. muir's
+    `docs/quux.md` holds the contract. `INITIAL-MAP-A`
+    (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
+    `MACHINE-NOT-QUUX-2` on anything but QUUX from revision 2, so microcode
+    1000 never runs with a map or a PDL buffer the hardware lacks. It then
+    sets every level-1 entry to 77, zeroes block 77, and halts at
+    `MAP-WIDTH-MISMATCH` if block 0's entry does not read back as 77.
+  - **The reverse first-level map**, one word per level-2 block, moves from
+    system communication locations 440-477 to 640-737: 64 entries do not fit
+    before the keyboard buffer header at 500. 640-677 held only the Lambda's
+    disk and memory tables. 700-717 held the swap-out CCW lists
+    (`DISK-SWAP-OUT-CCW-BASE`), which move to 440-457 with the same 16
+    entries. The swap-in CCWs stay at 740-757, and the single-page CCW at
+    777.
   - `A-PROCESSOR-TYPE-CODE`, which the Lisp variable `SI:PROCESSOR-TYPE-CODE`
-    shows, is set at boot: 1, `SI:CADR-TYPE-CODE`, or 4, the new constant
-    `SI:QUUX-TYPE-CODE` (`window/cold.lisp`, exported from
-    `cold/system.lisp`), after the Lambda's 2 and the Explorer's 3. `MACHINE-TYPE`
-    names it, and the herald prints it; no other code
-    tests it.
+    shows, is 4 under microcode 1000, the new constant `SI:QUUX-TYPE-CODE`
+    (`window/cold.lisp`, exported from `cold/system.lisp`), after the Lambda's
+    2 and the Explorer's 3; 323 gives the CADR's 1, `SI:CADR-TYPE-CODE`.
   - `cold/qcom.lisp`: `SIZE-OF-HARDWARE-LEVEL-2-MAP` is 4000, QUUX's, and
-    the system communication area's layout comment says where the reverse
-    map and the swap-out CCWs now are.
-- **The band is unchanged by this.** System 1001's band runs on microcode
-  1000 as it is; the Lisp changes above are for the next band. The served
-  `SYS: UBIN;` must hold the running microcode's `ucadr.tbl`, which a band
-  reads when its microcode is not the one it was saved with.
+    the system communication area's layout comment gives both machines'.
+- **The boot PROM, version 1000,** serves both machines. MIT's PROM (version
+  9) copied A memory out of the PDL buffer until the index wrapped to 0,
+  which a wider index never does in time: A memory was overwritten and the
+  loaded microcode never started. It copies exactly 2000 words now, clears
+  PDL words 0-1777 at any width, and clears all 64 level-2 blocks
+  (`ucadr/promh.text`).
+- **The band takes the PDL buffer's length from the machine.** A stack
+  group's saved PDL phase is masked with `SI:PDL-BUFFER-LENGTH`
+  (`sys2/proces.lisp`, and `eh/eh.lisp` rebuilding a frame), which was the
+  CADR's 2000. It is set at every boot by `SI:MACHINE-PDL-BUFFER-LENGTH`:
+  QUUX's feature page, word 3 (16384), or 2000 on a CADR, since a band can
+  be booted on either machine.
+- **Serve the running microcode's table.** A band whose microcode is not the
+  one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, so the served
+  `SYS: UBIN;` must hold that microcode's `ucadr.tbl`.
 
 ## The herald
 

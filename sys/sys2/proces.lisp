@@ -260,6 +260,21 @@ unwinding it."
 (DEFVAR PDL-BUFFER-LENGTH CADR-PDL-BUFFER-LENGTH
   "Length of pdl buffer.")
 
+;; quux: the pdl buffer is 1k words on a cadr and 16k on quux from hardware
+;; revision 2, and the microcode picks its width at boot from machine-id.  a
+;; stack group's saved pdl phase is masked with this length, so it must be
+;; the machine's, read at every boot: a band can be booted on either machine.
+;; quux's feature page gives it (word 3); a cadr has no feature page.
+(defun machine-pdl-buffer-length ()
+  "Return the length of this machine's pdl buffer, in words."
+  (if (= (machine-type-code) quux-type-code)
+      (%xbus-read (+ feature-page-xbus-address 3))
+    cadr-pdl-buffer-length))
+
+(add-initialization "PDL buffer length"
+		    '(setq pdl-buffer-length (machine-pdl-buffer-length))
+		    '(:system))
+
 (DEFMETHOD (PROCESS :INTERRUPT) (FUNCTION &REST ARGS)
   (IF (EQ SELF CURRENT-PROCESS)
 	(PROGN (APPLY FUNCTION ARGS) T)		;Note destination must be D-IGNORE
