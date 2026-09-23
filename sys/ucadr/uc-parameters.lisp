@@ -728,7 +728,7 @@ A-GC-SWITCHES 	     ((BYTE-VALUE Q-DATA-TYPE DTP-FIX) 0)
 A-ARRAY-INDEX-ORDER  ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 5)
 
 ;1 for CADR, 2 for LAMBDA.
-;; 1 for a cadr, or a quux's own type from quux-id (4, si:quux-type-code):
+;; 1 for a cadr, or a quux's own type from machine-id (4, si:quux-type-code):
 ;; initial-map-a sets it at boot, so one microcode serves both machines.
 a-processor-type-code ((plus (byte-value q-data-type dtp-fix) 1))
 
@@ -1221,7 +1221,7 @@ A-MOUSE-SAVE-E (0)
 
 ;; the invalid level-1 entry, which points at the last level-2 block, kept
 ;; all map-miss: 37 on a cadr, 77 on a quux with the 6-bit level-1 entry.
-;; initial-map-a sets it from quux-id; the level-1 miss tests, the reuse
+;; initial-map-a sets it from machine-id; the level-1 miss tests, the reuse
 ;; pointer's wrap and pgf-rl's check compare against it.  it is last, so that no
 ;; location an earlier microcode had moves.
 a-level-1-map-invalid

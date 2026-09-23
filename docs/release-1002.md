@@ -19,12 +19,12 @@ a comment in that file saying why.
   1000 as the system took 1000 after System 100. It reads which machine it
   is on at boot and serves both.
   - **The machine's id** is functional source 16, which the assembler now
-    names `QUUX-ID` (`sys/cadsym.lisp`). On QUUX it reads the signature
+    names `MACHINE-ID` (`sys/cadsym.lisp`). On QUUX it reads the signature
     0x5155 in bits 31:16, the hardware revision in 15:4 (1 is the six-bit
     level-1 entry; revisions are cumulative) and the processor type in 3:0;
     a CADR does not drive the source and reads all ones. muir's
     `docs/quux.md` holds the contract.
-  - `ucadr/uc-cold-disk.lisp`: `INITIAL-MAP-A` reads `QUUX-ID`. Without the
+  - `ucadr/uc-cold-disk.lisp`: `INITIAL-MAP-A` reads `MACHINE-ID`. Without the
     signature the machine is a CADR, processor type 1, with the invalid
     level-1 entry 37; with it, the type is QUUX's own (4), and from revision
     1 the invalid entry is 77. Boot then sets every level-1 entry to all
