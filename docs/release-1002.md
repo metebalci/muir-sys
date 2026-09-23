@@ -73,6 +73,19 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **MONO TV is the display.** QUUX's display is a 1-bit frame buffer at
+    physical 17000000, 1920 by 1080 at 60 words a line by default, with no
+    sync program and no interrupt; muir can make it other sizes. The
+    feature page gives its size, words 11-13, and the cold load reads them
+    (`SI:MONO-TV-WIDTH`, `-HEIGHT`, `-WORDS-PER-LINE`, `-BUFFER-ADDRESS`
+    and `-BUFFER-LENGTH` in `sys/ltop.lisp`, each field taken out of its
+    word with `%P-LDB`, since the cold load cannot take a bignum apart).
+    The main screen is made from them when the window system loads
+    (`window/shwarm.lisp`), the cold boot clears the whole buffer, the run
+    lights follow the screen's size, and `SET-TV-SPEED`, which loaded the
+    CADR TV's sync program, says there is none. The microcode's first
+    run-light address is inside MONO TV's default buffer, and `INTRX0` no
+    longer reads the CADR TV's vertical flag.
   - **The machine's id** is functional source 16, which the assembler now
     names `MACHINE-ID` (`sys/cadsym.lisp`): on QUUX the signature 0x5155 in
     bits 31:16, the hardware revision in 15:4 (cumulative) and the processor

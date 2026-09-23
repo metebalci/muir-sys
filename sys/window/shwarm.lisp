@@ -1886,16 +1886,18 @@ SHEET's cursor is not used or moved."
 
 ;;; This height may get hacked by the who-line making code if the wholine ends up
 ;;; at the bottom of the main screen (which it usually does!)
-;;; the CADR's screen; the Lambda's sizes are gone.
-(DEFVAR MAIN-SCREEN-WIDTH 768.)
+;;; quux: mono tv's size, from the feature page, not the cadr tv's 768 by
+;;; 963 at 24 words a line: 1920 by 1080 at 60 by default, and muir can make
+;;; it other sizes.  the window system is built from these when it loads.
+(DEFVAR MAIN-SCREEN-WIDTH (si:mono-tv-width))
 
-(DEFVAR MAIN-SCREEN-HEIGHT 963.)			;was 896. for CPT
+(DEFVAR MAIN-SCREEN-HEIGHT (si:mono-tv-height))
 
-(DEFVAR MAIN-SCREEN-LOCATIONS-PER-LINE 24.)
+(DEFVAR MAIN-SCREEN-LOCATIONS-PER-LINE (si:mono-tv-words-per-line))
 
-(DEFCONST MAIN-SCREEN-BUFFER-ADDRESS IO-SPACE-VIRTUAL-ADDRESS)
+(DEFCONST MAIN-SCREEN-BUFFER-ADDRESS (si:mono-tv-buffer-address))
 (DEFCONST MAIN-SCREEN-CONTROL-ADDRESS #o377760)
-(DEFCONST MAIN-SCREEN-BUFFER-LENGTH #o100000)
+(DEFCONST MAIN-SCREEN-BUFFER-LENGTH (si:mono-tv-buffer-length))
 
 ;;;Set things up
 (DEFUN INITIALIZE ()
@@ -1958,90 +1960,13 @@ SHEET's cursor is not used or moved."
 (DEFVAR SYNC-RAM-CONTENTS :UNBOUND
   "Data to load into the TV board's sync memory.")
 
-(DEFUN SET-TV-SPEED (&OPTIONAL ARG (WASTED-LINES 0) &AUX VALUE N-LINES)
-  "Set the TV refresh rate.  ARG is the number of scan lines to display.
-On the CADR, it can also be the refresh frequency (default is 60.5).
-WASTED-LINES is a number of lines at the bottom of the screen that should not be used
-for output, and should be left zero, though they will be displayed on the monitor.
-This is useful if your monitor is adjusted so that some of it cannot be seen."
-  ;; the CADR's limits and default; the Lambda's are gone.
-  (IF ARG
-      ;; Try not to burn up the monitor
-      (CHECK-TYPE ARG (OR (INTEGER 54. 76.) (INTEGER 7644. 1086.)))
-    (SETQ ARG 60.5))
-  ;; If arg is frequency, compute number of lines from it.
-  (IF (< 100. ARG)
-      (SETQ N-LINES ARG)
-    (SETQ N-LINES (- (FIX (// 1E6 (* 16. ARG))) 70.)))
-  ;; Here each horizontal line is 32. sync clocks, or 16.0 microseconds with a 64 MHz clock.
-  ;; The number of lines per frame is 70. overhead lines plus enough display lines
-  ;; to give the desired rate.
-  (DELAYING-SCREEN-MANAGEMENT
-    (WITH-MOUSE-USURPED
-      (LOCK-SHEET (MAIN-SCREEN)
-	(LOCK-SHEET (WHO-LINE-SCREEN)
-	  (WITHOUT-INTERRUPTS
-	    (LET ((MS MOUSE-SHEET) (SW SELECTED-WINDOW))
-	      (AND (SHEET-ME-OR-MY-KID-P MS MAIN-SCREEN)
-		   (SETQ MOUSE-SHEET NIL))
-	      (SEND WHO-LINE-SCREEN :DEEXPOSE)
-	      (SEND MAIN-SCREEN :DEEXPOSE)
-	      ;; no longer wrapped in IF-IN-CADR; this system runs only on a CADR.
-	      (SI:SETUP-CPT
-		  (SETQ SYNC-RAM-CONTENTS	;save for possible use at LISP-REINITIALIZE.
-			(APPEND '(1.  (1 33) (5 13) 12 12 (11. 12 12) 212 113)	;VERT SYNC, CLEAR TVMA
-				'(53. (1 33) (5 13) 12 12 (11. 12 12) 212 13)	;VERT RETRACE
-				'(8.  (1 31)  (5 11) 11 10 (11. 0 0) 200 21)	;8 LINES OF MARGIN
-				(DO ((L NIL (APPEND L `(,DN (1 31) (5 11) 11 50 (11. 0 40) 200 21)))
-				     (N N-LINES (- N DN))
-				     (DN))
-				    ((ZEROP N) L)
-				  (SETQ DN (MIN 255. N)))
-				'(7. (1 31) (5 11) #o11 #o10 (11. 0 0) #o200 #o21)
-				'(1. (1 31) (5 11) #o11 #o10 (11. 0 0) #o300 #o23)))
-		  (SCREEN-CONTROL-ADDRESS MAIN-SCREEN)
-		  T)
-	      ;; Move the who-line, and change the dimensions of main screen
-	      (SETQ MAIN-SCREEN-HEIGHT (- N-LINES WASTED-LINES))
-	      (SEND WHO-LINE-SCREEN
-		    :CHANGE-OF-SIZE-OR-MARGINS
-		    :TOP (- MAIN-SCREEN-HEIGHT (SHEET-HEIGHT WHO-LINE-SCREEN)))
-	      (SEND MAIN-SCREEN
-		    :CHANGE-OF-SIZE-OR-MARGINS
-		    :HEIGHT (- MAIN-SCREEN-HEIGHT (SHEET-HEIGHT WHO-LINE-SCREEN)))
-	      (SETQ %DISK-RUN-LIGHT
-		    (+ (- (* MAIN-SCREEN-HEIGHT (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN)) 15)
-		       MAIN-SCREEN-BUFFER-ADDRESS))
-	      (SETQ WHO-LINE-RUN-LIGHT-LOC (+ 2 (LOGAND %DISK-RUN-LIGHT #o777777)))
-	      (SEND WHO-LINE-SCREEN :EXPOSE)
-	      (SEND MAIN-SCREEN :EXPOSE)
-	      (AND SW (SEND SW :SELECT))
-	      (SETQ MOUSE-SHEET MS)
-	      ;; Zero out the words at screen bottom that we are not using.
-	      (LET ((WASTED-WORDS (* WASTED-LINES (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN)))
-		    (PTR1 (%POINTER-PLUS (SCREEN-BUFFER MAIN-SCREEN)
-					 (* (- N-LINES WASTED-LINES)
-					    (SHEET-LOCATIONS-PER-LINE MAIN-SCREEN)))))
-		(DOTIMES (I WASTED-WORDS)
-		  (%P-DPB 0 %%Q-LOW-HALF (%MAKE-POINTER-OFFSET DTP-FIX PTR1 I))
-		  (%P-DPB 0 %%Q-HIGH-HALF (%MAKE-POINTER-OFFSET DTP-FIX PTR1 I))))
-	      (SETQ VALUE (- N-LINES WASTED-LINES))))))))
-  (DOLIST (RESOURCE-NAME WINDOW-RESOURCE-NAMES)
-    (SI:MAP-RESOURCE 
-      #'(LAMBDA (WINDOW &REST IGNORE)
-	  (UNLESS (TYPEP WINDOW 'INSTANCE) (FERROR NIL "LOSSAGE"))
-	  (IF (TYPEP WINDOW 'TV:BASIC-MENU)
-	      (LET ((GEO (SEND WINDOW :GEOMETRY)))
-		(DO ((L GEO (CDR L))) ((NULL L))
-		  (SETF (CAR L) NIL)))
-	    (LET* ((SUPERIOR (SEND WINDOW :SUPERIOR))
-		   (BOTTOM (SEND WINDOW :HEIGHT))
-		   (SUPHEIGHT (OR (SEND SUPERIOR :SEND-IF-HANDLES :INSIDE-HEIGHT)
-				  (SEND SUPERIOR :HEIGHT))))
-	      (IF (> BOTTOM SUPHEIGHT)
-		  (SEND WINDOW :SET-SIZE (SEND WINDOW :WIDTH) SUPHEIGHT)))))
-      RESOURCE-NAME))
-  VALUE)
+;; quux: mono tv has no sync program and no refresh rate to set, and its
+;; size comes from the feature page; the cadr tv's version of this, which
+;; loaded a sync program and changed the screen's height, is gone.
+(defun set-tv-speed (&optional arg (wasted-lines 0))
+  "On the CADR this set the TV's refresh rate.  QUUX's MONO TV has none to set."
+  (declare (ignore arg wasted-lines))
+  (ferror nil "MONO TV has no refresh rate or sync program to set."))
 
 ;(DEFF SET-TV-HEIGHT 'SET-TV-SPEED)
 

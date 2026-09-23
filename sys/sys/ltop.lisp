@@ -83,11 +83,7 @@ Will be NIL by the time YOU get to look at it")
 ;;; (WINDOW; SHWARM) calls it on a CADR.
 (DEFUN TV::INITIALIZE-RUN-LIGHT-LOCATIONS ()
   (WHEN (BOUNDP 'TV:DEFAULT-SCREEN)
-    (IF (BOUNDP 'TV::SYNC-RAM-CONTENTS)
-	   ;; if TV:SET-TV-SPEED has been done in this image,
-	   ;; use the results from that.
-	   (SETUP-CPT TV::SYNC-RAM-CONTENTS NIL T)
-	   (SETUP-CPT))
+    ;; quux: mono tv has no sync program, so there is none to set up.
     (IF (VARIABLE-BOUNDP TV:MAIN-SCREEN)
 	   (SETQ %DISK-RUN-LIGHT
 		 (+ (- (* TV:MAIN-SCREEN-HEIGHT
@@ -102,6 +98,32 @@ Will be NIL by the time YOU get to look at it")
 
 ;;; Function to reset various things, do initialization that's inconvenient in cold load, etc.
 ;;; COLD-BOOT is T if this is for a cold boot.
+;; quux: the feature page, one read-only xbus i/o page at physical 17377000,
+;; which gives the machine's sizes (muir's docs/quux.md holds the contract).
+;; the display's are here, in the cold load, because the cold boot clears
+;; the screen before anything else is loaded.  a field is read straight out
+;; of its word with %p-ldb: the words are 32 bits, and %xbus-read would box a
+;; big one as a bignum, which the cold load cannot take apart.
+(defconst feature-page-xbus-address #o377000
+  "Where QUUX's feature page is, as an argument to %XBUS-READ.")
+
+(defun feature-page-field (word ppss)
+  "Return the PPSS byte of word WORD (octal, as the page is numbered) of the feature page."
+  (%p-ldb ppss (+ io-space-virtual-address feature-page-xbus-address word)))
+
+;; mono tv, quux's display: a 1-bit frame buffer.  word 11 is its width in
+;; bits 31:16 and its height in 15:0, word 12 its bits per pixel and words
+;; per line, word 13 its buffer's physical address.
+(defun mono-tv-width () (feature-page-field #o11 #o2020))
+(defun mono-tv-height () (feature-page-field #o11 #o0020))
+(defun mono-tv-words-per-line () (feature-page-field #o12 #o0020))
+(defun mono-tv-buffer-length () (* (mono-tv-height) (mono-tv-words-per-line)))
+(defun mono-tv-buffer-address ()
+  "The virtual address of MONO TV's frame buffer."
+  (+ io-space-virtual-address
+     (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
+	#o17000000)))
+
 ;; quux: the band's safeguard, as the microcode's machine-not-quux-4 halt is
 ;; the microcode's: a band of system 1002 on a cadr runs mit's microcode 323,
 ;; whose type code is 1, and would go on with a pdl buffer, a map, a clock and
@@ -162,7 +184,7 @@ COLD-BOOT is T if this is for a cold boot."
      ;; main-memory parity error halt.  Who-line updating can do this.
      (TV::INITIALIZE-RUN-LIGHT-LOCATIONS)
      ;; Clear all the bits of the main screen after a cold boot.
-     (AND COLD-BOOT (CLEAR-SCREEN-BUFFER IO-SPACE-VIRTUAL-ADDRESS)))
+     (AND COLD-BOOT (CLEAR-SCREEN-BUFFER (mono-tv-buffer-address))))	;quux: mono tv's
 
   ;; Do something at least if errors occur during loading
   (OR (FBOUNDP 'FERROR) (FSET 'FERROR #'FERROR-COLD-LOAD))
@@ -427,11 +449,13 @@ This does not need to be done on A-memory variables."
       (IF (= (%P-DATA-TYPE LOC) DTP-EXTERNAL-VALUE-CELL-POINTER)
 	  (%BLT-TYPED (FOLLOW-CELL-FORWARDING LOC T) LOC 1 1)))))
 
-(DEFUN CLEAR-SCREEN-BUFFER (BUFFER-ADDRESS)
+;; quux: the whole of mono tv's buffer, from the feature page, not the cadr
+;; tv's #o100000 words: 1920x1080 is 64,800.
+(DEFUN CLEAR-SCREEN-BUFFER (BUFFER-ADDRESS &optional (length (mono-tv-buffer-length)))
   (%P-DPB 0 %%Q-LOW-HALF BUFFER-ADDRESS)
   (%P-DPB 0 %%Q-HIGH-HALF BUFFER-ADDRESS)
   (%BLT BUFFER-ADDRESS (1+ BUFFER-ADDRESS)
-	#o77777 1))
+	(1- length) 1))
 
 ;;; This is a temporary function, which turns on the "extra-pdl" feature
 (DEFUN NUMBER-GC-ON (&OPTIONAL (ON-P T))
