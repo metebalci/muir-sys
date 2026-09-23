@@ -1,7 +1,8 @@
 # muir-sys
 
-**The Lisp Machine system for muir and muir-fpga,** continuing where System
-100 left off and evolved step by step.
+**The Lisp Machine system for QUUX,** the machine that muir and muir-fpga
+evolve from the MIT CADR, continuing where System 100 left off and evolved
+step by step.
 
 The starting point is the MIT CADR and its system as MIT last left it. **System
 release 99.32** is the content of a backup of OZ recovered by the
@@ -13,6 +14,43 @@ release of that content, brought up and fixed, under the AGPL.
 The aim is to evolve the system, not to change it radically. It moves on in
 steps, each a release built from this repository. **Backward compatibility is
 not an aim, but System 1001 will always be supported by muir and muir-fpga.**
+
+**System 1001 is the last release for the CADR,** which stays on it with MIT's
+microcode 323. From System 1002 the system runs only on QUUX.
+
+## QUUX
+
+QUUX is the CADR evolved, the machine muir runs with `--machine quux` and
+muir-fpga builds. It keeps the CADR's architecture and improves on it in two
+directions: performance and capacity, and modern computing, such as the
+display's resolution, block storage and the network. Each improvement is a
+hardware revision, and the machine says which it has: `MACHINE-ID`, a
+functional source, gives the revision, and its **feature page**, one read-only
+page of I/O space, gives its sizes. The system reads both at boot rather than
+assuming them.
+
+What System 1002 uses so far:
+
+| | QUUX | the CADR |
+|---|---|---|
+| level-1 map entry (revision 1) | 6 bits: 63 level-2 blocks, 504K words mapped at once | 5 bits: 31 blocks, 248K words |
+| PDL buffer (revision 2) | 16K words | 1K words |
+| multiply and divide (revision 3) | one instruction each | 32 steps |
+| the 60-cycle clock (revision 4) | the processor's own tick | the display's vertical interrupt |
+| display | MONO TV, a 1-bit frame buffer, 1920 by 1080 by default, sized from the feature page | 768 by 963, with a sync program |
+
+The microcode is **microcode 1000**, the first change to the microcode itself,
+which stayed 323 while it was MIT's, and the machine boots it with **boot
+PROM 1000**. Both are for QUUX alone and stop on anything else, as a System
+1002 band does. [`docs/release-1002.md`](docs/release-1002.md) records each
+change as it is made; [`docs/booting.md`](docs/booting.md) follows a machine
+from power-on to Lisp.
+
+## System 1002
+
+System 1002 is in progress on `main` and not yet released: the first system for
+QUUX, as above, with the herald naming the site and the machine, and fixes
+taken from the System 2000 line.
 
 ## System 1001
 
@@ -59,7 +97,7 @@ This is the system. Three projects provide the machine:
 
 | | |
 |---|---|
-| **muir** | the software simulator |
+| **muir** | the software simulator, of the CADR and of QUUX |
 | **muir-fpga** | the hardware simulator |
 | **ozd** | the Chaosnet services daemon: files, time, host table, TELNET |
 
@@ -77,6 +115,10 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
+- [`docs/release-1002.md`](docs/release-1002.md) --- every change System 1002
+  makes to System 1001, recorded as it is made.
+- [`docs/booting.md`](docs/booting.md) --- how a machine boots, from power-on
+  through the boot PROM and the microcode to the first macroinstruction.
 - [`docs/release-1001.md`](docs/release-1001.md) --- every change System 1001
   makes to System 1000.
 - [`docs/release-1000.md`](docs/release-1000.md) --- every change System 1000
