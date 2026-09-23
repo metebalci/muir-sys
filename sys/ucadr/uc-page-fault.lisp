@@ -249,7 +249,8 @@ PGF-PDL	(JUMP-IF-BIT-SET M-PGF-WRITE PGF-W-PDL)
 PGF-R-PDL	
 	((M-PGF-TEM) SUB PDL-BUFFER-POINTER A-PDL-BUFFER-HEAD)
 	((M-PGF-TEM) ADD M-PGF-TEM (A-CONSTANT 1))	;*** THIS CODE COULD USE BUMMING ***
-	((M-PGF-TEM) (BYTE-FIELD 10. 0) M-PGF-TEM)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
+	((m-pgf-tem) pdl-buffer-address-mask m-pgf-tem)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
+					;the pdl buffer's own width, not 10 bits: quux's buffer can be bigger
 	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
 	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-R-NOT-REALLY-IN-PDL-BUFFER)
@@ -289,7 +290,8 @@ PGF-R-NOT-REALLY-IN-PDL-BUFFER
 PGF-W-PDL	
 	((M-PGF-TEM) SUB PDL-BUFFER-POINTER A-PDL-BUFFER-HEAD)
 	((M-PGF-TEM) ADD M-PGF-TEM (A-CONSTANT 1))	;*** THIS CODE COULD USE BUMMING ***
-	((M-PGF-TEM) (BYTE-FIELD 10. 0) M-PGF-TEM)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
+	((m-pgf-tem) pdl-buffer-address-mask m-pgf-tem)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
+					;the pdl buffer's own width, not 10 bits: quux's buffer can be bigger
 	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS) ;HIGHEST VIRT LOC IN P.B,
 	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
 	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-W-NOT-REALLY-IN-PDL-BUFFER)
@@ -1502,7 +1504,8 @@ P-B-MR1	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-INDEX)	;Write next Q into 
 P-B-X1	((VMA) A-V-NIL)				;Don't leave VMA nil.
 	((M-2) A-QLPDLH)			;Recompute A-PDL-BUFFER-HIGH-WARNING
 	((M-2) SUB M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS)
-	((M-2) SUB M-2 (A-CONSTANT 2000))	;Result negative if within pdl-buffer size
+	((m-2) sub m-2 (a-constant pdl-buffer-size-in-words))	;Result negative if within pdl-buffer size
+					;(named, not 2000: quux's buffer can be bigger)
 						; of the end of the regular-pdl in virt mem
 	(JUMP-LESS-THAN M-2 A-ZERO P-B-SL-1)
 	(POPJ-AFTER-NEXT			;Enough room, allow P.B. to fill
