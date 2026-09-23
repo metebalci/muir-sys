@@ -29,18 +29,18 @@ INITIAL-MAP
        ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
-	;; which machine: quux-id carries the signature 50525 (0x5155) in bits
+	;; which machine: machine-id carries the signature 50525 (0x5155) in bits
 	;; 31:16 on a quux, and reads all ones on a cadr.  a cadr is type 1 with
 	;; 5-bit level-1 entries, invalid entry 37; a quux gives its own type in
 	;; bits 3:0, and from hardware revision 1 (bits 15:4, cumulative) has the
 	;; 6-bit entry, invalid entry 77.
 	((a-processor-type-code) (a-constant (plus (byte-value q-data-type dtp-fix) 1)))
 	((a-level-1-map-invalid) (a-constant 37))
-	((m-tem) (byte-field 20 20) quux-id)
+	((m-tem) (byte-field 20 20) machine-id)
 	(jump-not-equal m-tem (a-constant 50525) inimap0)
-	((a-processor-type-code) (byte-field 4 0) quux-id
+	((a-processor-type-code) (byte-field 4 0) machine-id
 		(a-constant (byte-value q-data-type dtp-fix)))
-	((m-tem) (byte-field 14 4) quux-id)
+	((m-tem) (byte-field 14 4) machine-id)
 	(jump-equal m-tem a-zero inimap0)
 	((a-level-1-map-invalid) (a-constant 77))
 inimap0	;first set all level 1 map to the invalid entry: all ones, 5 bits on a
@@ -52,7 +52,7 @@ inimap0	;first set all level 1 map to the invalid entry: all ones, 5 bits on a
 INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
 	(JUMP-NOT-EQUAL MD A-ZERO INIMAP1)
 	;; the entry just written for block 0 must read back as the invalid entry
-	;; quux-id promised: if the level-1 map is narrower than it says, blocks
+	;; machine-id promised: if the level-1 map is narrower than it says, blocks
 	;; would silently alias, so halt at map-width-mismatch.  md is 0 here,
 	;; addressing block 0.
 	((m-tem) map-first-level-map memory-map-data)
@@ -105,7 +105,7 @@ INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
 	(POPJ)
 
-;; initial-map-a comes here when the level-1 map is narrower than quux-id
+;; initial-map-a comes here when the level-1 map is narrower than machine-id
 ;; says.  the halt shows this location.
 map-width-mismatch
 	(call illop)

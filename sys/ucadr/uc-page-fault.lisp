@@ -36,7 +36,7 @@
 ;; quux: the level-1 entry is 6 bits, not the cadr's 5, so the level-2 map
 ;; has 64 blocks of 32 pages instead of 32.  bit 29 is the new bit, which a
 ;; cadr reads as 0, so the 6-bit field serves both.  the invalid entry is
-;; a-level-1-map-invalid, 37 or 77, set at boot from quux-id.
+;; a-level-1-map-invalid, 37 or 77, set at boot from machine-id.
 (DEF-DATA-FIELD MAP-SECOND-LEVEL-MAP 24. 0)
 (DEF-DATA-FIELD MAP-ACCESS-STATUS-AND-META-BITS 10. 14.)
 (DEF-DATA-FIELD MAP-HARDWARE-READ-ACCESS 1 23.)	;HARDWARE PERMITS (AT LEAST) READ ACCESS
