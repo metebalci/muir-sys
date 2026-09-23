@@ -1269,9 +1269,15 @@ QDIV-SIGNS-RIGHT
 	(CALL DIV)
 	((M-1) M-E)
 ;Now make a rational from numerator in Q-R and denominator in M-1.
+;; quux: boxing a denominator of 2^24 (a divisor of -2^24, the most negative
+;; fixnum) overflows to a bignum, and making the bignum clobbers q-r, so the
+;; numerator was lost: (%div 5 -16777216) gave 39565/16777216.  the numerator
+;; is still unboxed here, so it waits in a-qdiv-numerator, which nothing else
+;; uses and the garbage collector need not see.
 QDIV-REL-PRIME-1
+	((a-qdiv-numerator) q-r)
 	(CALL FIXPACK-P)
-	((M-1) Q-R)
+	((m-1) a-qdiv-numerator)
 	(CALL FIXPACK-P)
 	(CALL MAKE-RATIONAL)
 	(POPJ-AFTER-NEXT
@@ -3694,11 +3700,21 @@ NORMALIZED-RATIONAL-FIX-SIGNS
 	((PDL-PUSH) PDL-TOP)
 	(CALL XMINUSP)
 	(JUMP-EQUAL M-T A-V-NIL NORMALIZED-RATIONAL-RIGHT-SIGNS)
-	(CALL XMINUS)
-	((PDL-PUSH) M-T)
-	((PDL-PUSH) M-J)
-	(CALL XMINUS)
-	((M-J) M-T)
+	;; quux: the numerator stays on the stack while the other is negated.
+	;; negating a denominator of -2^24, the most negative fixnum, overflows
+	;; to a bignum, and making the bignum clobbers m-j, where the numerator
+	;; was kept: the next xminus got a raw integer and halted the machine,
+	;; as (floor 4294967295 -16777216) did.  the stack is seen by the
+	;; garbage collector, as a boxed numerator must be.
+	((pdl-push) m-j)		;stack: denominator, numerator
+	(call xminus)			;stack: denominator; m-t: - numerator
+	((m-a) pdl-pop)			;the denominator
+	((pdl-push) m-t)
+	((pdl-push) m-a)		;stack: - numerator, denominator
+	(call xminus)			;stack: - numerator; m-t: - denominator
+	((m-a) pdl-pop)			;- numerator
+	((pdl-push) m-t)		;stack: - denominator
+	((m-j) m-a)
 NORMALIZED-RATIONAL-RIGHT-SIGNS
 	((PDL-PUSH) M-J)
 	(JUMP-XCT-NEXT MAKE-RATIONAL)
