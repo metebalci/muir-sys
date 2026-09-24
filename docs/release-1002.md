@@ -18,7 +18,7 @@ a comment in that file saying why.
 - **A band stops on anything else.** `LISP-REINITIALIZE` (`sys/ltop.lisp`)
   first calls `SI:CHECK-MACHINE-IS-QUUX`: if the processor type is not
   QUUX's, it prints why on the cold-load stream and halts, as the
-  microcode's `MACHINE-NOT-QUUX-5` does for the microcode. Loaded into System
+  microcode's `MACHINE-NOT-QUUX-6` does for the microcode. Loaded into System
   1001's band, it passes on QUUX and halts on a CADR running 323.
 - **So a 1002 band is built on QUUX.** Compiling and making the cold load
   can still run on a 1001 band on the CADR; booting the cold load, QLD and
@@ -73,6 +73,24 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **The register page, and the boot PROM at 36000** (revision 6, muir's
+    contract Q2). The feature page, 17377000, is QUUX's register page: word
+    100 says who interrupted (<0> the tick, <1> the interval timer, <2>
+    block-disk), a write to word 101, the error status, clears it, and bit
+    0 of word 102, the mode, is error stop. They replace the Unibus's
+    interrupt status (766040), error status (766044) and mode register
+    (766012). `INTR` (`ucadr/uc-interrupt.lisp`) reads word 100 first and
+    takes the tick and the disk from it; the keyboard and the Chaosnet
+    still interrupt through the Unibus until contracts Q3 and Q4 move them.
+    Boot writes the mode and clears the error status on the register page
+    (`ucadr/uc-cadr.lisp`, `uc-cold-disk.lisp`), and
+    `COLOR:XBUS-READ-NO-PARITY` (`window/color.lisp`) turns error stop off
+    and on there. The boot PROM is 1K words of the control store at
+    36000-37777, where reset starts: it clears only 0-35777, halts at
+    `ERROR-MICROCODE-TOO-BIG` if the microcode would reach 36000, sets error
+    stop through word 102 (its page 2 maps the register page, not the
+    Unibus), and ends with a jump to the microcode's location 6, with no
+    PROM-disable write (`ucadr/promh.text`).
   - **The clocks are in the processor** (revision 5, muir's contract Q1).
     The tick is fixed at 60 Hz; destination 4, the tick's period until
     now, is the interval timer's period (`INTERVAL-PERIOD`), with its
@@ -144,7 +162,7 @@ a comment in that file saying why.
     type in 3:0; a CADR does not drive the source and reads all ones. muir's
     `docs/quux.md` holds the contract. `INITIAL-MAP-A`
     (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
-    `MACHINE-NOT-QUUX-5` on anything but QUUX from revision 5, so microcode
+    `MACHINE-NOT-QUUX-6` on anything but QUUX from revision 6, so microcode
     1000 never runs with a map, a PDL buffer, an instruction or a clock the
     hardware lacks. It then
     sets every level-1 entry to 77, zeroes block 77, and halts at

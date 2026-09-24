@@ -57,6 +57,7 @@ A-11		(0)
 A-40		(0)
 A-400		(0)
 A-20000		(0)
+A-36000		(0)	;quux: the prom's first address; the microcode ends below it
 A-DISK-ERROR	(0)
 
 ;;; quux: block-disk takes a block number, so the label's geometry (the
@@ -69,17 +70,18 @@ A-MICR-N-BLOCKS	(0)	;Remaining blocks of microcode partition
 
 (LOCALITY I-MEM)
 
-(IF PROM (LOC 0))
+;; quux (contract q2): the prom is 1k words of the control store at 36000-37777,
+;; read-only, where reset sets the pc; the microcode it loads lives in
+;; 0-35777, and the prom ends by jumping to its location 6.  mit's prom sat at
+;; 0 in a prom address space, waited at its own location 6 for the write to
+;; unibus 766012 that disabled it, and halted at failed-to-jump-into-ram if
+;; that never came; there is no such write on quux.
+(LOC 6)
+I-MEM-LOC-6			;Define this symbol in either case: the microcode's 6.
+
+(IF PROM (LOC 36000))
 (IF PROM BEG)
 (IF PROM (JUMP GO))
-
-(LOC 6)
-I-MEM-LOC-6			;Define this symbol in either case.
-(IF PROM   (JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO I-MEM-LOC-6)) ;This code also appears in the RAM
-(IF PROM  ((Q-R) ADD Q-R A-ONES))
-(IF PROM I-MEM-LOC-10)
-(IF PROM   (JUMP HALT-CONS I-MEM-LOC-10))	;Foo, should be in RAM by now
-(IF PROM (ERROR-TABLE FAILED-TO-JUMP-INTO-RAM))
 
 (IF (NOT PROM) (LOC 27000))
 (IF (NOT PROM) BEG)
@@ -160,6 +162,12 @@ ERROR-DIVIDE-BY-ZERO
 ERROR-PDL-BUFFER
 	(JUMP HALT-CONS ERROR-PDL-BUFFER)
     (ERROR-TABLE ERROR-PDL-BUFFER)
+
+	;; quux: a microcode that would reach 36000, the prom's own addresses.
+	(NO-OP)
+ERROR-MICROCODE-TOO-BIG
+	(JUMP HALT-CONS ERROR-MICROCODE-TOO-BIG)
+    (ERROR-TABLE ERROR-MICROCODE-TOO-BIG)
 
 ;;; Program starts here.  Create M-ZERO and M-ONES, and check the hardware a little.
 GO	((M-ZERO Q-R) SETZ)		;Make all zeros.  Result to Q-R, not to depend on M mem
@@ -283,6 +291,7 @@ MAKE-CONSTANTS
 	((A-40)  DPB M-ONES (BYTE-FIELD 1 5) A-ZERO)
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
+	((A-36000) DPB M-ONES (BYTE-FIELD 4 10.) A-ZERO)
 	;;; A-DISK-ERROR/ 4421000
 	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
 	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
@@ -338,8 +347,10 @@ CLEAR-I-MEMORY
 	((OA-REG-LOW) DPB MD (BYTE-FIELD 14. 12.) A-ZERO)
 	(WRITE-I-MEM M-A A-A)
 	((MD) ADD MD A-1)
+;; quux: the prom clears 0-35777, the microcode's part of the control store,
+;; not its own 36000-37777.
 (IF PROM
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 14.) MD CLEAR-I-MEMORY) ;PROM, clear 16K
+	(JUMP-LESS-THAN MD A-36000 CLEAR-I-MEMORY)		 ;PROM, clear to itself
 	(JUMP-LESS-THAN MD A-B CLEAR-I-MEMORY) )                 ;RAM, clear to limit
 
 	((M-A MD) DPB M-ONES (BYTE-FIELD 1 17.) A-ZERO)	;0 with good parity
@@ -375,6 +386,8 @@ SET-UP-THE-MAP
 ;;;  Page 0: Mapped to the first page of main memory.
 ;;;  Page 1: Mapped to the disk control registers.
 ;;;  Page 2: Mapped to the debug (spy) interface registers at 766000 .
+;;;  quux: page 2 is the register page, 17377000 (contract q2), for its word
+;;;  102, the mode, in place of unibus 766012.
 ;;;  Page 3: Mapped to the second page of main memory. (system communication area)
 ;;; M-A holds the bits to write the level 1 map with r/w access, MD has zero initially.
 SET-UP-FOUR-PAGES
@@ -386,8 +399,8 @@ SET-UP-FOUR-PAGES
 	((A-DISK-REGS) DPB M-ONES (BYTE-FIELD 7 2) A-ZERO)	;Virt Addr 774
 
 	((MD) ADD MD A-400)
-	((M-B) DPB M-ONES (BYTE-FIELD 2 1) A-A)			;6
-	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 12 4) A-B)	;M-A + 37766
+	((M-B) DPB M-ONES (BYTE-FIELD 10 1) A-A)		;776
+	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36776
 
 	((MD) ADD MD A-400)
 	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 0) A-A)	;M-A + 1
@@ -403,13 +416,12 @@ PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
 	(JUMP-LESS-THAN VMA A-400 PAGE-0-PARITY-FIX) ;This does one extra location, too bad.
 
 ;;; Now turn on parity checking
-;;; Writing 4 in Unibus location 766012, which is at virtual address 1005,
-;;; turns on ERROR-STOP-ENABLE.  If we aren't really in a PROM, we write 44
-;;; which also turns on (leaves on) PROM-DISABLE.
-(IF PROM
-	((MD) A-4)					;PROM
-	((MD) DPB M-ONES (BYTE-FIELD 1 5) A-4) )	;RAM
-	((VMA-START-WRITE) DPB M-ONES (BYTE-FIELD 1 9) A-5)
+;; quux: error stop is bit 0 of the register page's word 102, the mode, at
+;; virtual 1102; mit wrote 4 (or 44 in ram, prom-disable too) to unibus
+;; 766012, virtual 1005.
+	((MD) A-1)
+	((M-TEMP-1) DPB M-ONES (BYTE-FIELD 1 6) A-2)		;102
+	((VMA-START-WRITE) DPB M-ONES (BYTE-FIELD 1 9) A-TEMP-1)	;1102
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
 ;;; Initialize the disk.
@@ -512,6 +524,8 @@ PROCESS-I-MEM-SECTION
 	(JUMP-EQUAL M-D A-ZERO PROCESS-SECTION)
 	((M-A) (BYTE-FIELD 18. 14.) M-C)
 	(JUMP-NOT-EQUAL M-A A-ZERO ERROR-BAD-ADDRESS)
+	;; quux: the microcode must end below 36000, where the prom is.
+	(JUMP-GREATER-OR-EQUAL M-C A-36000 ERROR-MICROCODE-TOO-BIG)
 	(CALL-XCT-NEXT GET-NEXT-WORD)
        ((M-D) SUB M-D A-1)
 	(CALL-XCT-NEXT GET-NEXT-WORD)
@@ -567,8 +581,7 @@ DONE-LOADING
 	(CALL-XCT-NEXT DISK-READ)
        ((M-A) SETZ)
 	((Q-R) A-400)			;Set up constant needed below.
-	((MD) DPB M-ONES (BYTE-FIELD 1 5) A-4)	;44
-	((VMA) DPB M-ONES (BYTE-FIELD 1 9) A-5) ;1005
+	;; quux: no md and vma for the prom-disable write; see jump-to-6.
 
 ;;; Copy the PDL buffer into A/M memory.
 	((PDL-BUFFER-INDEX) SETZ)
@@ -588,15 +601,14 @@ FILL-A-LOOP
 	(jump-if-bit-set (byte-field 1 10.) pdl-buffer-index fill-a-done)
 	(JUMP-NOT-EQUAL PDL-BUFFER-INDEX A-ZERO FILL-A-LOOP)
 fill-a-done
-;;; Turn off the PROM and enter the real world.
-;;; Writing 44 in Unibus location 766012, which is at virtual address 1005,
-;;; will turn on ERROR-STOP-ENABLE and PROM-DISABLE.  The 2 programs (PROM and RAM)
-;;; share a common loop at location 6 to wait for this Unibus cycle to happen.
-;;; Note that Q-R, MD, and VMA are already set up.
+;;; Enter the real world.
+;; quux: the prom stays where it is, so it simply jumps to the microcode's
+;; location 6, whose loop counts q-r down as mit's prom and ram both did while
+;; they waited for the write of 44 to unibus 766012 that disabled the prom.
+;;; Note that Q-R is already set up.
 
 JUMP-TO-6
-	(JUMP-XCT-NEXT I-MEM-LOC-6)
-       ((VMA-START-WRITE) VMA)		;Well, we can't check for page fault here
+	(JUMP I-MEM-LOC-6)
 
 GET-NEXT-WORD
 ;;; Get the next word of the MICR partition into M-A.  A-MICR-ADDRESS
