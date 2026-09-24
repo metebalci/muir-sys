@@ -26,17 +26,29 @@
 
 ;; quux: tv-regs-address-base and a-tv-regs-base are gone: the tv's vertical
 ;; interrupt was the only thing the microcode read there, and mono tv has none.
-;; quux: near the bottom right of mono tv's default 1920x1080 buffer, 60 words
-;; a line, not inside the cadr tv's 768-wide one.  it serves only until lisp
-;; sets %disk-run-light from the screen's real size (tv::initialize-run-light-
-;; locations, sys; ltop).
-(assign disk-run-light-virtual-address 77176423)	;XBUS ADDRESS
+;; quux: on mono tv's first line, words 34-40, which every mono tv size has (the
+;; narrowest, 1024 wide, is 32 words); it serves only until lisp sets
+;; %disk-run-light from the screen's real size (tv::initialize-run-light-
+;; locations, sys; ltop).  it was the bottom right of a 1920x1080 buffer,
+;; which on a smaller one is past the end: every disk operation before lisp
+;; ran was an xbus nxm (muir traced them at 17176423 on a 1280x1024 screen).
+(assign disk-run-light-virtual-address 77000036)	;XBUS ADDRESS
 
 ;; quux: the microsecond clock is the processor's source 15 (revision 5), not
 ;; the i/o board's at unibus 764120.
 
-(ASSIGN MOUSE-HARDWARE-VIRTUAL-ADDRESS 77772042)   ;Unibus 764104 Y, 764106 X
+;; quux (contract q3): the mouse is the register page's word 122, x in <11:0>,
+;; y in <27:16> and the buttons in <14:12>; mit's were unibus 764104 (y and
+;; buttons) and 764106 (x).
+(ASSIGN MOUSE-HARDWARE-VIRTUAL-ADDRESS 77377122)
+;; quux (contract q3): the keyboard is the register page's words 120, its
+;; status (<0> a key word waiting), and 121, whose read takes the oldest key
+;; word, the 32-bit word unibus 764100 and 764102 gave together.
+(ASSIGN QUUX-KBD-DATA-VIRTUAL-ADDRESS 77377121)
+(ASSIGN QUUX-KBD-STATUS-PHYSICAL-ADDRESS 17377120)
+(ASSIGN QUUX-KBD-DATA-PHYSICAL-ADDRESS 17377121)
 
+;; quux (contract q3): no beeper; %beep no longer writes unibus 764110.
 (ASSIGN BEEP-HARDWARE-VIRTUAL-ADDRESS 77772044)	   ;Unibus 764110
 
 ;; quux's register page (contract q2), the feature page's 17377000: word 100
@@ -79,11 +91,11 @@ PROM	(JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO PROM)    ;These 2 instructions duplicat
 ;;; whether this is a cold boot or a warm boot.  If the keyboard has input
 ;;; available, and the character was RETURN (rather than RUBOUT), it's a warm boot.
 	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT 17772045))		;Unibus address 764112 (KBD CSR)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 5) MD	;If keyboard is not ready,
+       ((VMA) (A-CONSTANT QUUX-KBD-STATUS-PHYSICAL-ADDRESS)) ;quux: word 120, not 764112
+	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD	;If keyboard is not ready,
 		COLD-BOOT)			; assume we are supposed to cold-boot
 	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT 17772040))		;Unibus address 764100 (KBD LOW)
+       ((VMA) (A-CONSTANT QUUX-KBD-DATA-PHYSICAL-ADDRESS)) ;quux: word 121, not 764100
 	((MD) (BYTE-FIELD 6 0) MD)		;Get keycode
 	(JUMP-EQUAL MD (A-CONSTANT 46) COLD-BOOT)	;This is cold-boot if key is RUBOUT
 	;; quux: standardize the mode: error stop, bit 0 of the register page's

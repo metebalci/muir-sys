@@ -539,6 +539,9 @@ not converted to upper case."
 	   (SETQ ASC (- ASC 40)))		;Control characters always uppercase
       (+ ASC BUCKY))))
 
+;; quux (contract q3): the channel's csr and data addresses below are the
+;; cadr's unibus keyboard's and no longer used: the microcode fills this
+;; buffer from the register page's word 121.
 ;; Sys com locations 500-511 are reserved for the wired keyboard buffer:
 ;; Locations 501 through 511 contain the buffer header; the actual buffer
 ;; is in locations 200-377 (128. chars, 64. on new-keyboards)
@@ -568,10 +571,14 @@ not converted to upper case."
   (SET-MOUSE-MODE 'DIRECT))
 
 ;;; SET-MOUSE-MODE and VIRTUAL-UNIBUS-ADDRESS keep the CADR's branch only.
+;; quux (contract q3): the keyboard's interrupt enable is bit 8 of the
+;; register page's word 120, and its key words come through word 121 into
+;; the wired buffer above (the microcode's intr-kbd), not through unibus
+;; 764112 and 764100.  the mouse is always the machine's own, so both modes
+;; do the same.
 (DEFUN SET-MOUSE-MODE (MODE)
   (SELECTQ MODE
-    (DIRECT (%UNIBUS-WRITE 764112 4))	;Keyboard interrupt enable, local mouse
-    (VIA-KBD (%UNIBUS-WRITE 764112 5))
+    ((DIRECT VIA-KBD) (%xbus-write #o377120 #o400))	;Keyboard interrupt enable
     (OTHERWISE (FERROR NIL "UNKNOWN MOUSE MODE"))))
 
 ;; Translate from a Unibus address to a Lisp machine virtual address, returning a fixnum.

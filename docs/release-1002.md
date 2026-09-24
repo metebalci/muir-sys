@@ -73,6 +73,32 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **The keyboard and the mouse are on the register page** (muir's
+    contract Q3). Word 121's read takes the oldest key word, the 32-bit
+    word Unibus 764100 and 764102 gave together; word 120 is the
+    keyboard's status and bit 8 its interrupt enable; word 122 holds the
+    mouse's X and Y counts and its buttons. `INTR` takes a keyboard
+    interrupt from word 100 <3> and puts the key word into the wired
+    keyboard buffer, the channel at sys-com 500, through the same code the
+    Unibus keyboard used (`ucadr/uc-interrupt.lisp`); `TRACK-MOUSE` reads
+    word 122 and takes it apart into the two registers it read before
+    (`ucadr/uc-track-mouse.lisp`); the warm-boot test reads words 120 and
+    121 (`ucadr/uc-cadr.lisp`). Lisp enables the keyboard's interrupt
+    through word 120 (`SET-MOUSE-MODE`, `window/cold.lisp`) and reads the
+    buttons from word 122 (`window/mouse.lisp`). There is no beeper:
+    `%BEEP` no longer clicks, but still waits its time, which the screen's
+    flash relies on (`ucadr/uc-hacks.lisp`).
+  - **No stray Xbus accesses at boot.** muir traced every Xbus access that
+    nothing answered on a 1280x1024 screen, and three were ours: the boot
+    PROM's `PAGE-0-PARITY-FIX` read and wrote one word past page 0 (MIT's
+    "one extra location, too bad"), now it stops at 377
+    (`ucadr/promh.text`); the microcode's run light before Lisp sets it was
+    at the bottom of a 1920x1080 buffer, now it is on the first line
+    (`ucadr/uc-cadr.lisp`); and `%DRAW-RECTANGLE` started the read of the
+    row below each rectangle before it tested whether the rectangle was
+    done, so an erase under the who line read one row past the buffer; it
+    now tests first (`XTVERS1`, `ucadr/uc-tv.lisp`). The CADR's TV memory
+    ran on past its last line, which hid the last two.
   - **The register page, and the boot PROM at 36000** (revision 6, muir's
     contract Q2). The feature page, 17377000, is QUUX's register page: word
     100 says who interrupted (<0> the tick, <1> the interval timer, <2>
