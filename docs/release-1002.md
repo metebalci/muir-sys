@@ -73,6 +73,14 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **No Unibus** (muir's contract Q5): on QUUX every Unibus address is an
+    NXM. After Q1-Q4 moved the clocks, the interrupt status, the keyboard,
+    the mouse and the Chaosnet off it, the microcode's last two Unibus
+    accesses go: boot no longer enables Unibus interrupts at 766040
+    (`ucadr/uc-cold-disk.lisp`), and `INTR` dismisses an interrupt the
+    register page's word 100 does not explain rather than look it up at
+    766040 (`ucadr/uc-interrupt.lisp`). muir counted every Unibus access
+    over a boot to the listener and on: none.
   - **The Chaosnet interface is on the register page** (muir's contract
     Q4), words 140-147, word 140+k for Unibus 764140+2k: the same
     registers in the same order. The microcode's accesses are all made from

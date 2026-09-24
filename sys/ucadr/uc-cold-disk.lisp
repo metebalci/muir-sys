@@ -797,9 +797,9 @@ BEG03	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 BEG06	(CALL-NOT-EQUAL MICRO-STACK-PNTR-AND-DATA 	;CLEAR THE MICRO STACK PNTR (TO -1)
 			(A-CONSTANT (PLUS 37_24. 1 (I-MEM-LOC BEG06))) BEG06)
 	((MICRO-STACK-DATA-PUSH) A-MAIN-DISPATCH)	;PUSH MAGIC RETURN
-	((MD) (A-CONSTANT 6000))		;Enable Unibus interrupts
-	((VMA-START-WRITE) (A-CONSTANT 77773020))  ;Unibus address 766040
-	(CHECK-PAGE-WRITE)
+	;; quux (contract q5): no unibus; each device's interrupt is enabled on the
+	;; register page (the keyboard's 120 <8>, the chaosnet's csr), and mit's
+	;; write of 6000 to unibus 766040, which enabled unibus interrupts, is gone.
 	;; quux: start the tick, the 60-cycle clock, with its reset period of
 	;; 16,667 microseconds, as the unibus interrupts are enabled: the clock
 	;; handler runs only once the machine is set up, as it did when the band
