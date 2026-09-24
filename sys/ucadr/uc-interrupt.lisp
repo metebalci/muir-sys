@@ -72,6 +72,11 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
 	(jump-if-bit-set (byte-field 1 3) md intr-kbd)	;keyboard (contract q3)
 	(jump-if-bit-set (byte-field 1 5) md chaos-intr-quux)	;chaosnet (contract q4)
+	;; quux (contract q5): word 100 covers every source quux has, and any unibus
+	;; address is an nxm, so an interrupt it does not explain is dismissed
+	;; (after the disk's own check) rather than looked up in unibus 766040.
+	;; the unibus code below is no longer reached.
+	(jump intrx1)
 	((VMA-START-READ) (A-CONSTANT 77773020)) ;Unibus address 766040 (interrupt status)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-INTR-LOCAL-UNIBUS-MODE) (BYTE-FIELD 1 1) MD)
