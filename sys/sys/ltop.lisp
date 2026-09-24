@@ -125,7 +125,7 @@ Will be NIL by the time YOU get to look at it")
      (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
 	#o17000000)))
 
-;; quux: the band's safeguard, as the microcode's machine-not-quux-4 halt is
+;; quux: the band's safeguard, as the microcode's machine-not-quux-5 halt is
 ;; the microcode's: a band of system 1002 on a cadr runs mit's microcode 323,
 ;; whose type code is 1, and would go on with a pdl buffer, a map, a clock and
 ;; a feature page it does not have.  print why on the cold-load stream, which

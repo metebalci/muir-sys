@@ -29,19 +29,20 @@ INITIAL-MAP
        ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
-	;; this microcode is for quux from hardware revision 3: the 6-bit level-1
+	;; this microcode is for quux from hardware revision 5: the 6-bit level-1
 	;; entry (revision 1), the 16k-word pdl buffer (revision 2), multiply
-	;; and divide in one instruction each (revision 3), and the tick, its own
-	;; 60-cycle clock (revision 4).  the cadr
+	;; and divide in one instruction each (revision 3), the tick, its own
+	;; 60-cycle clock (revision 4), and the microsecond clock and interval
+	;; timer in the processor (revision 5, contract q1).  the cadr
 	;; keeps mit's microcode 323.  machine-id carries the signature 50525
 	;; (0x5155) in bits 31:16 on a quux, and reads all ones on a cadr; the
 	;; revision is in bits 15:4, cumulative, and the processor type in 3:0.
-	;; on anything else, halt at machine-not-quux-4 rather than run with a map
+	;; on anything else, halt at machine-not-quux-5 rather than run with a map
 	;; and a pdl buffer the hardware does not have.
 	((m-tem) (byte-field 20 20) machine-id)
-	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-4)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-5)
 	((m-tem) (byte-field 14 4) machine-id)
-	(jump-less-than m-tem (a-constant 4) machine-not-quux-4)	;revision 4: the tick
+	(jump-less-than m-tem (a-constant 5) machine-not-quux-5)	;revision 5: the clocks
 	((a-processor-type-code) (byte-field 4 0) machine-id
 		(a-constant (byte-value q-data-type dtp-fix)))
 	((a-level-1-map-invalid) (a-constant 77))
@@ -111,9 +112,9 @@ INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
 map-width-mismatch
 	(call illop)
 
-;; initial-map-a comes here when machine-id is not quux's from revision 4 on,
+;; initial-map-a comes here when machine-id is not quux's from revision 5 on,
 ;; a cadr's all ones included.  the halt shows this location.
-machine-not-quux-4
+machine-not-quux-5
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.

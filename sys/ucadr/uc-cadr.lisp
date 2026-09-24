@@ -32,8 +32,8 @@
 ;; locations, sys; ltop).
 (assign disk-run-light-virtual-address 77176423)	;XBUS ADDRESS
 
-(ASSIGN MICROSECOND-CLOCK-HARDWARE-VIRTUAL-ADDRESS 77772050)
-(ASSIGN MICROSECOND-CLOCK-PHYSICAL-ADDRESS 77772050)  ;Unibus (764120)
+;; quux: the microsecond clock is the processor's source 15 (revision 5), not
+;; the i/o board's at unibus 764120.
 
 (ASSIGN MOUSE-HARDWARE-VIRTUAL-ADDRESS 77772042)   ;Unibus 764104 Y, 764106 X
 
@@ -199,43 +199,33 @@ XSTACQ (MISC-INST-ENTRY %STORE-CONDITIONAL) ;args are pointer, old-val, new-val
 
 
 ;;; Read microsecond clock into M-2  (preserve A-TEM1)
+;; quux: one read of source 15 gives the whole word; the unibus clock took two,
+;; the low half first to latch the high.
 READ-MICROSECOND-CLOCK
-	((VMA-START-READ) (A-CONSTANT MICROSECOND-CLOCK-HARDWARE-VIRTUAL-ADDRESS))
-					;Unibus 764120
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	((M-2) READ-MEMORY-DATA)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;Unibus 764122
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	(POPJ-AFTER-NEXT
-		(M-2) DPB READ-MEMORY-DATA (BYTE-FIELD 20 20) A-2)
+	(POPJ-AFTER-NEXT (M-2) MICROSECOND-CLOCK)
        (NO-OP)
 
 ;the following two routines should be combined into the above one.  But be careful,
 ; registers are very touchy.
 
 read-microsecond-clock-into-md
-	((VMA-START-READ) (A-CONSTANT MICROSECOND-CLOCK-HARDWARE-VIRTUAL-ADDRESS))
-				;Microsecond clock (764120)
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	((A-TEM1) READ-MEMORY-DATA)		;Stash low word
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)			;Map should be set up, don't bash A-TEM1
-	((WRITE-MEMORY-DATA) DPB READ-MEMORY-DATA (BYTE-FIELD 20 20) A-TEM1)
-	(popj)
+	;; quux: source 15, one read (see read-microsecond-clock).
+	(popj-after-next (write-memory-data) microsecond-clock)
+       (no-op)
 
-(ASSIGN MICROSECOND-CLOCK-UNIBUS-ADDRESS 764120)
 ;Read the time in microseconds, and put it in A-LAST-USEC-TIME.
+;; quux: from source 15; MD is no longer touched, as it was by the unibus reads.
 READ-USEC-TIME
-	((A-TEM2) MD)
-	((VMA-START-READ) (A-CONSTANT (PLUS LOWEST-UNIBUS-VIRTUAL-ADDRESS
-					    MICROSECOND-CLOCK-UNIBUS-ADDRESS)))
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	((A-LAST-USEC-TIME) MD)
-	((VMA-START-READ) M+1 VMA)
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	(POPJ-AFTER-NEXT
-	 (A-LAST-USEC-TIME) DPB MD (BYTE-FIELD 20 20) A-LAST-USEC-TIME)
-       ((MD) A-TEM2)
+	(POPJ-AFTER-NEXT (A-LAST-USEC-TIME) MICROSECOND-CLOCK)
+       (NO-OP)
+
+;;; quux: (%microsecond-clock-ldb ppss) returns the ppss field of one read of
+;;; the microsecond clock, source 15, as a fixnum, the way %p-ldb returns a
+;;; field of a word in memory.  lisp read the clock at unibus 764120 and
+;;; 764122; one read of a field lets TIME take its bits without consing.
+XUSLDB (MISC-INST-ENTRY %MICROSECOND-CLOCK-LDB)
+	(JUMP-XCT-NEXT XLLDB1)
+       ((M-1) MICROSECOND-CLOCK)
 
 XHALT (MISC-INST-ENTRY %HALT)
 	(JUMP HALT-CONS XFALSE)		;CONTINUING RETURNS NIL

@@ -382,9 +382,12 @@
 (DEFMIC RETURN-SPREAD-KEEP-CONTROL 757 (VALUE-LIST) NIL T) 
 (DEFMIC COMMON-LISP-LISTP 760 (OBJECT) T)
 
-;;; 761-767 are free.  They were the Lambda's NuBus, microsecond clock
-;;; and I/O space instructions, which the CADR's microcode never implemented;
-;;; the CADR reads its clock over the Unibus and its I/O space over the Xbus.
+;;; 761-767 were the Lambda's NuBus, microsecond clock and I/O space
+;;; instructions, which the CADR's microcode never implemented; the CADR read
+;;; its clock over the Unibus and its I/O space over the Xbus.
+;; quux: 761 reads a field of the microsecond clock, the processor's source 15
+;; (revision 5), in one read; 762-767 are free.
+(defmic %microsecond-clock-ldb 761 (ppss) t)
 
 (DEFMIC VECTORP 770 (OBJECT) T)
 (DEFMIC SIMPLE-VECTOR-P 771 (OBJECT) T)

@@ -437,20 +437,27 @@
 (DEFPROP OA-REG-LOW (OR (SOURCE-P (ERROR))
 			(FIELD FUNCTION-DESTINATION 16)) CONS-LAP-SYM)
 
-;; quux's tick, from revision 4: the processor's own clock, which takes the
-;; place of the display's vertical interrupt.  tick-control, destination 3:
-;; bit 0 enables, and a write with bit 1 set clears the flag.  tick-period,
-;; destination 4: the period in microseconds, bits 23:0, 0 taken as 1, 16,667
-;; (60 hz) at reset; a write starts a period from then.  tick-status, source
-;; 17: bit 0 the flag, bit 1 the enable.  while enabled and up, the flag is part
-;; of the interrupt the microcode already tests.  muir's docs/quux.md holds the
-;; contract.
+;; quux's clocks, in the processor.  the tick (revision 4) takes the place
+;; of the display's vertical interrupt, and from revision 5 (contract q1) it
+;; is fixed at 60 hz, 16,667 microseconds.  tick-control, destination 3: bit
+;; 0 enables the tick, a write with bit 1 set clears its flag, bit 2 enables
+;; the interval timer and bit 3 clears its flag.  interval-period, destination
+;; 4 (the tick's period until revision 5): the interval timer's period in
+;; microseconds, bits 23:0, 0 stopped.  tick-status, source 17: bit 0 the
+;; tick's flag, bit 1 its enable, bit 2 the interval timer's flag, bit 3 its
+;; enable; each flag, under its enable, is part of the interrupt the
+;; microcode already tests.  microsecond-clock, source 15 (revision 5): the
+;; microseconds since power-on, 32 bits, free-running, one read for the whole
+;; word, in place of the i/o board's unibus clock at 764120 and 764122.
+;; muir's docs/quux.md holds the contract.
 (defprop tick-control (or (source-p (error))
 			  (field function-destination 3)) cons-lap-sym)
-(defprop tick-period (or (source-p (error))
-			 (field function-destination 4)) cons-lap-sym)
+(defprop interval-period (or (source-p (error))
+			     (field function-destination 4)) cons-lap-sym)
 (defprop tick-status (or (source-p (field function-source 17))
 			 (error)) cons-lap-sym)
+(defprop microsecond-clock (or (source-p (field function-source 15))
+			       (error)) cons-lap-sym)
 
 (DEFPROP OA-REG-HIGH (OR (SOURCE-P (ERROR))
 			 (FIELD FUNCTION-DESTINATION 17)) CONS-LAP-SYM)
