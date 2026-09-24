@@ -16,7 +16,10 @@
 (ASSIGN INTERNAL-LOWEST-IO-SPACE-VIRTUAL-ADDRESS 77000000) ;BEGINING OF X-BUS IO SPACE
 (ASSIGN INTERNAL-LOWEST-UNIBUS-VIRTUAL-ADDRESS 77400000)   ;END OF X-BUS, BEGINNING OF UNIBUS
 
-(ASSIGN CHAOS-CSR-ADDRESS 77772060)		;UNIBUS 764140
+;; quux (contract q4): the chaosnet interface is the register page's words
+;; 140-147, word 140+k for unibus 764140+2k, the same registers in the same
+;; order, so every access made relative to a-chaos-csr-address moves with it.
+(ASSIGN CHAOS-CSR-ADDRESS 77377140)		;register page word 140, not UNIBUS 764140
 (ASSIGN DISK-REGS-ADDRESS-BASE 77377774)	;XBUS ADDRESS 17377774
 
 (ASSIGN DISK-READ-COMMAND 0)

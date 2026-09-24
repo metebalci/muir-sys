@@ -3,8 +3,16 @@
 
 (ASSIGN CHAOS-NUMBER-TRANSMIT-RETRIES 3)	;Send once and retry twice if aborted
 
+;; quux (contract q4): the register page's word 100 <5> says the chaosnet
+;; interface interrupted.  it is handled as the unibus interrupt was, but
+;; returns through xb-intr-ret: there is no unibus interrupt to clear.
+chaos-intr-quux
+	((micro-stack-data-push) (a-constant (i-mem-loc xb-intr-ret)))
+	(jump chaos-intr-1)
+
 CHAOS-INTR
 	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC UB-INTR-RET)))
+chaos-intr-1
 	((VMA-START-READ M-B) A-CHAOS-CSR-ADDRESS) ;M-B has base address of hardware
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-RECEIVE-DONE) READ-MEMORY-DATA
