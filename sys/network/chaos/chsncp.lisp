@@ -714,13 +714,17 @@ The status slot is used by the NCP to remember a small amount of info about the 
 ;;; Once-only initialization stuff
 (DEFUN INITIALIZE-NCP-ONCE ()
   ;; hardware register address definitions
-  (SETQ BASE-ADDRESS #o764140
+  ;; quux (contract q4): the interface is the register page's words 140-147,
+  ;; xbus word addresses, one a register, where the cadr's unibus ones were
+  ;; byte addresses two apart from 764140; they are read and written with
+  ;; %xbus-read and %xbus-write.
+  (SETQ BASE-ADDRESS #o377140
 	CONTROL-STATUS-REGISTER BASE-ADDRESS
-	MY-NUMBER-REGISTER (+ BASE-ADDRESS (LSH %CHAOS-MY-NUMBER-OFFSET 1))
-	WRITE-BUFFER-REGISTER (+ BASE-ADDRESS (LSH %CHAOS-WRITE-BUFFER-OFFSET 1))
-	READ-BUFFER-REGISTER (+ BASE-ADDRESS (LSH %CHAOS-READ-BUFFER-OFFSET 1))
-	BIT-COUNT-REGISTER (+ BASE-ADDRESS (LSH %CHAOS-BIT-COUNT-OFFSET 1))
-	INITIATE-TRANSFER-REGISTER (+ BASE-ADDRESS (LSH %CHAOS-START-TRANSMIT-OFFSET 1))
+	MY-NUMBER-REGISTER (+ BASE-ADDRESS %CHAOS-MY-NUMBER-OFFSET)
+	WRITE-BUFFER-REGISTER (+ BASE-ADDRESS %CHAOS-WRITE-BUFFER-OFFSET)
+	READ-BUFFER-REGISTER (+ BASE-ADDRESS %CHAOS-READ-BUFFER-OFFSET)
+	BIT-COUNT-REGISTER (+ BASE-ADDRESS %CHAOS-BIT-COUNT-OFFSET)
+	INITIATE-TRANSFER-REGISTER (+ BASE-ADDRESS %CHAOS-START-TRANSMIT-OFFSET)
 	*RECEIVE-BROADCAST-PACKETS-P* NIL)
   (SETQ
     ;; Connection list
@@ -750,7 +754,7 @@ The status slot is used by the NCP to remember a small amount of info about the 
 
 (DEFUN SETUP-MY-ADDRESS ()
   ;; the address comes from the Chaos board; the Lambda took it from the disk label.
-  (SETQ MY-ADDRESS (%UNIBUS-READ MY-NUMBER-REGISTER)) ;Full address of this host.
+  (SETQ MY-ADDRESS (%xbus-read MY-NUMBER-REGISTER)) ;Full address of this host.
   (SETQ MY-SUBNET (LDB #o1010 MY-ADDRESS))	;Subnet of this host.
   (LET ((EXISTING-HOST (SI:GET-HOST-FROM-ADDRESS MY-ADDRESS :CHAOS)))
     (SETQ SI:LOCAL-HOST
@@ -1812,20 +1816,21 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 ;;;; Hardware Interface
 
 ;;; these three drive the Chaos board; the Lambda, which had none, did nothing.
+;; quux (contract q4): through the register page, %xbus-read and %xbus-write.
 (DEFUN INTERFACE-RESET-AND-ENABLE ()
-  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+  (%xbus-write CONTROL-STATUS-REGISTER
 		 (DPB -1 %%CHAOS-CSR-RESET 0))
-  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+  (%xbus-write CONTROL-STATUS-REGISTER
 		 (DPB -1 %%CHAOS-CSR-INTERRUPT-ENABLES 0)))
 
 (DEFUN INTERFACE-RESET ()
-  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+  (%xbus-write CONTROL-STATUS-REGISTER
 		 (DPB -1 %%CHAOS-CSR-RESET 0)))
 
 (DEFUN RECEIVER-RESET ()
-  (%UNIBUS-WRITE CONTROL-STATUS-REGISTER
+  (%xbus-write CONTROL-STATUS-REGISTER
 		 (DPB 1 %%CHAOS-CSR-RECEIVER-CLEAR
-		      (%UNIBUS-READ CONTROL-STATUS-REGISTER))))
+		      (%xbus-read CONTROL-STATUS-REGISTER))))
 
 ;;; Top level function for receiver to be called directly from scheduler. (Instead of the
 ;;; old thing where something like this was the top level of the RECEIVER process.)
@@ -1977,7 +1982,7 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 
 (DEFUN STATUS ( &AUX CSR LC)
   "Print out contents of hardware registers (CADR Only)"
-  (SETQ CSR (%UNIBUS-READ CONTROL-STATUS-REGISTER))
+  (SETQ CSR (%xbus-read CONTROL-STATUS-REGISTER))
   (TERPRI) (TERPRI)
   (AND (LDB-TEST %%CHAOS-CSR-TIMER-INTERRUPT-ENABLE CSR)
        (FORMAT T "Timer interrupt enable or maybe transmit busy.~%"))
@@ -2001,7 +2006,7 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
        (FORMAT T "-- CRC ERROR!!! --~%"))
   (AND (LDB-TEST %%CHAOS-CSR-RECEIVE-DONE CSR)
        (FORMAT T "Receive done.~%"))
-  (FORMAT T "Bit count: ~O~%" (%UNIBUS-READ BIT-COUNT-REGISTER))
+  (FORMAT T "Bit count: ~O~%" (%xbus-read BIT-COUNT-REGISTER))
   NIL)
 
 ;;;; KLUDGES and assorted random functions

@@ -73,6 +73,18 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **The Chaosnet interface is on the register page** (muir's contract
+    Q4), words 140-147, word 140+k for Unibus 764140+2k: the same
+    registers in the same order. The microcode's accesses are all made from
+    `A-CHAOS-CSR-ADDRESS`, now word 140 (`ucadr/uc-cadr.lisp`); `INTR`
+    takes word 100 <5> into `CHAOS-INTR` through `CHAOS-INTR-QUUX`, which
+    returns without touching the Unibus (`ucadr/uc-chaos.lisp`,
+    `uc-interrupt.lisp`). Lisp addresses the registers as Xbus words and
+    uses `%XBUS-READ` and `%XBUS-WRITE` (`network/chaos/chsncp.lisp`). The
+    scheduler's own clock reader,
+    `SI:FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-CADR`, reads the
+    processor's clock (source 15) too; it still read Unibus 764120 after
+    Q1 (`sys2/prodef.lisp`).
   - **The keyboard and the mouse are on the register page** (muir's
     contract Q3). Word 121's read takes the oldest key word, the 32-bit
     word Unibus 764100 and 764102 gave together; word 120 is the

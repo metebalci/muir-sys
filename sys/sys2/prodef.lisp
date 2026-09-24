@@ -167,9 +167,9 @@ It runs in the scheduler stack group and keeps no stack state between runs."))
 ;;; A version of TIME:FIXNUM-MICROSECOND-TIME which is open-coded and loaded earlier
 ;;; so that the scheduler can call it
 (DEFSUBST FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-CADR ()
-  (LET ((LOW (%UNIBUS-READ #o764120))
-	(HIGH (%UNIBUS-READ #o764122)))
-    (DPB HIGH #o2007 LOW)))
+  ;; quux (contract q1): the low 23 bits of the processor's microsecond clock,
+  ;; source 15, in one read; the cadr read them from unibus 764120 and 764122.
+  (%microsecond-clock-ldb #o0027))
 
 ;;; An open-coded, positive-fixnum-returning version of READ-METER
 (DEFMACRO FIXNUM-READ-METER-FOR-SCHEDULER (NAME)
