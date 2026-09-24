@@ -1077,11 +1077,32 @@ not converted to upper case."
   (SEND INSTANCE ':INIT (LOCF INIT-OPTIONS))
   INSTANCE)
 
+;; quux: one band must run at any mono tv size, so lisp-reinitialize sends
+;; this at every boot, to take the size the feature page gives now, not the
+;; one the stream was made at.  it is defined here, before
+;; make-instance-immediate below, which builds the stream's operations from
+;; the methods defined before it: defined after, it is not handled.  the
+;; array is as wide as a raster line, as :init makes it; the microcode draws
+;; by locations-per-line.
+(defmethod-immediate (cold-load-stream :set-mono-tv) ()
+  (let ((new-wpl (mono-tv-words-per-line))
+	(new-height (mono-tv-height))
+	(new-buffer (mono-tv-buffer-address)))
+    (unless (and (= locations-per-line new-wpl) (= height new-height) (= buffer new-buffer))
+      (setq locations-per-line new-wpl
+	    width (* 32. new-wpl)
+	    height new-height
+	    buffer new-buffer
+	    array (make-array (list width height) ':type 'art-1b ':displaced-to buffer)
+	    cursor-x 0
+	    cursor-y 0))))
+
 (DEFUN COLD-LOAD-STREAM-INIT-PLIST-GENERATOR NIL
-  ;; the CADR's size; the Lambda's is gone.
-  `(:WIDTH 1400
-    :HEIGHT 1600
-    :BUFFER ,IO-SPACE-VIRTUAL-ADDRESS
+  ;; quux: mono tv's size and buffer, from the feature page; the cadr's
+  ;; 768 by 896 at io-space-virtual-address drew garbage on it.
+  `(:width ,(* 32. (mono-tv-words-per-line))
+    :height ,(mono-tv-height)
+    :buffer ,(mono-tv-buffer-address)
     :CONTROL-ADDRESS 377760))
 
 (MAKE-INSTANCE-IMMEDIATE COLD-LOAD-STREAM COLD-LOAD-STREAM-INIT-PLIST-GENERATOR)

@@ -83,13 +83,14 @@ Will be NIL by the time YOU get to look at it")
 ;;; (WINDOW; SHWARM) calls it on a CADR.
 (DEFUN TV::INITIALIZE-RUN-LIGHT-LOCATIONS ()
   (WHEN (BOUNDP 'TV:DEFAULT-SCREEN)
-    ;; quux: mono tv has no sync program, so there is none to set up.
-    (IF (VARIABLE-BOUNDP TV:MAIN-SCREEN)
-	   (SETQ %DISK-RUN-LIGHT
-		 (+ (- (* TV:MAIN-SCREEN-HEIGHT
-			  (TV:SHEET-LOCATIONS-PER-LINE TV:MAIN-SCREEN))
-		       #o15)
-		    (TV:SCREEN-BUFFER TV:MAIN-SCREEN))))
+    ;; quux: mono tv has no sync program, so there is none to set up.  the
+    ;; run lights are on mono tv's last line, from the feature page and not
+    ;; from the main screen, which at boot still has the size the band was
+    ;; saved at, until tv:set-screens-to-mono-tv moves it; a band saved at a
+    ;; bigger size would put them past the end of the buffer.
+    (setq %disk-run-light
+	  (+ (- (mono-tv-buffer-length) #o15)
+	     (mono-tv-buffer-address)))
     (SETQ TV::WHO-LINE-RUN-LIGHT-LOC (+ 2 (LOGAND %DISK-RUN-LIGHT #o777777)))))
 
 (ADD-INITIALIZATION "Put run lights at the bottom of the screen"
@@ -182,6 +183,11 @@ COLD-BOOT is T if this is for a cold boot."
      ;; Set up the TV sync program as soon as possible; until it is set up
      ;; read references to the TV buffer can get NXM errors which cause a
      ;; main-memory parity error halt.  Who-line updating can do this.
+     ;; quux: the cold-load stream takes mono tv's size, which may differ
+     ;; from the size the band was saved at, before anything prints on it.
+     ;; on the cold load's first boot the stream is not made yet; it is
+     ;; made at mono tv's size then.
+     (if (boundp 'cold-load-stream) (send cold-load-stream :set-mono-tv))
      (TV::INITIALIZE-RUN-LIGHT-LOCATIONS)
      ;; Clear all the bits of the main screen after a cold boot.
      (AND COLD-BOOT (CLEAR-SCREEN-BUFFER (mono-tv-buffer-address))))	;quux: mono tv's

@@ -1903,6 +1903,8 @@ SHEET's cursor is not used or moved."
 (DEFUN INITIALIZE ()
   (SHEET-CLEAR-LOCKS)
   (WHO-LINE-SETUP)
+  ;; quux: a band saved at one mono tv size may boot at another.
+  (set-screens-to-mono-tv)
   ;; Set up screen and sheet for the main monitor (CPT typically)
   (OR MAIN-SCREEN
       (SETQ MAIN-SCREEN
@@ -1918,6 +1920,155 @@ SHEET's cursor is not used or moved."
 	INHIBIT-SCREEN-MANAGEMENT NIL
 	SCREEN-MANAGER-TOP-LEVEL T
 	SCREEN-MANAGER-QUEUE NIL))
+
+;; quux: one band runs at any mono tv size.  the screens are made at the
+;; size the feature page gave when the window system loaded, at qld, so at
+;; every boot, after the locks are cleared and before anything is exposed,
+;; they are moved to the size it gives now.  this follows mit's set-tv-speed,
+;; which changed the height, and the lambda's set-screen-width, which changed
+;; the words per line; system 1002 deleted both.  it goes in three steps, so
+;; that no window ever draws past the array it draws in (a window erases its
+;; margins as its size changes): the screens shrink to the smaller of the two
+;; sizes at the old pitch, every array moves to the new pitch and buffer,
+;; screens first, and the screens grow to the new size.  a change of the main
+;; screen's size scales its inferiors.
+(defun set-screens-to-mono-tv ()
+  "Size the main screen and the who line to MONO TV's size, from the feature page."
+  (let ((new-width (si:mono-tv-width))
+	(new-height (si:mono-tv-height))
+	(new-wpl (si:mono-tv-words-per-line))
+	(new-buffer (si:mono-tv-buffer-address)))
+    (unless (or (null main-screen) (null who-line-screen)
+		(and (= new-width main-screen-width)
+		     (= new-height main-screen-height)
+		     (= new-wpl main-screen-locations-per-line)
+		     (= new-buffer main-screen-buffer-address)))
+      ;; a window's change of size can wait, which lets the scheduler run,
+      ;; and at boot this comes before the chaosnet's own reset (chaos-ncp,
+      ;; later on the same list): the scheduler then retransmitted on
+      ;; connections from before the save, found no buffer and stopped with
+      ;; "error in the scheduler".  the reset here is the one that is
+      ;; about to run anyway.
+      (if (fboundp 'chaos:reset) (chaos:reset))
+      (delaying-screen-management
+	(without-interrupts
+	  (let ((who-height (sheet-height who-line-screen)))
+	    (setq mouse-sheet nil)
+	    ;; the who line's mouse documentation line is as wide as the
+	    ;; screen and is not scaled, so it is sized with the screens.
+	    (and who-line-documentation-window
+		 (send who-line-documentation-window :deexpose))
+	    (send who-line-screen :deexpose)
+	    (send main-screen :deexpose)
+	    (set-screen-sizes (min new-width main-screen-width)
+			      (min new-height main-screen-height) who-height)
+	    (setq main-screen-width new-width
+		  main-screen-height new-height
+		  main-screen-locations-per-line new-wpl
+		  main-screen-buffer-address new-buffer
+		  main-screen-buffer-length (* new-height new-wpl))
+	    (send main-screen :eval-inside-yourself
+		  `(screen-set-mono-tv ,new-buffer ,new-wpl 0 ,(- new-height who-height)))
+	    (send who-line-screen :eval-inside-yourself
+		  `(screen-set-mono-tv ,new-buffer ,new-wpl ,(- new-height who-height) ,who-height))
+	    (dolist (screen (list main-screen who-line-screen))
+	      (map-over-all-windows-of-sheet
+		#'(lambda (window)
+		    (unless (eq window screen)
+		      (send window :eval-inside-yourself `(sheet-set-mono-tv-pitch ,new-wpl))))
+		screen))
+	    (set-screen-sizes new-width new-height who-height)
+	    (and main-screen-and-who-line (main-screen-and-who-line))
+	    (initialize-run-light-locations)
+	    (send who-line-screen :expose)
+	    (and who-line-documentation-window
+		 (send who-line-documentation-window :expose))
+	    (send main-screen :expose)
+	    (setq mouse-sheet main-screen)))))))
+
+;; the main screen above the who line, the who line at the bottom, and the
+;; who line's documentation line across it, for a screen width by height.
+;; nothing is done if the size is the one the screens have: a change of the
+;; main screen's size deexposes its exposed inferiors and exposes again only
+;; those whose edges change.
+(defun set-screen-sizes (width height who-height)
+  (unless (and (= width (sheet-width main-screen))
+	       (= (- height who-height) (sheet-height main-screen)))
+    (set-screen-sizes-1 width height who-height)))
+
+(defun set-screen-sizes-1 (width height who-height)
+  (send who-line-screen :change-of-size-or-margins
+	:left 0 :right width :top (- height who-height) :bottom height)
+  (send main-screen :change-of-size-or-margins
+	:left 0 :right width :top 0 :bottom (- height who-height))
+  (and who-line-documentation-window
+       (send who-line-documentation-window :change-of-size-or-margins
+	     :left 0 :right width)))
+
+;; point a screen's own array at mono tv's buffer, with the new pitch, from
+;; line y for height lines, as (screen :before :expose) does from the
+;; screen's own size, which is not changed yet.
+(defun screen-set-mono-tv (new-buffer wpl y h)
+  (declare (:self-flavor screen))
+  (let ((array (or screen-array old-screen-array))
+	(pitch (truncate (* wpl 32.) bits-per-pixel)))
+    (setq buffer new-buffer
+	  locations-per-line wpl)
+    (si:change-indirect-array array (array-type array)
+			      (if array-index-order (list h pitch) (list pitch h))
+			      (+ buffer (* y wpl))
+			      nil)))
+
+;; a window's locations per line, which the microcode draws by, and its
+;; arrays at the new pitch, as (sheet :change-of-size-or-margins) points them.
+(defun sheet-set-mono-tv-pitch (wpl)
+  (declare (:self-flavor sheet))
+  (let ((pitch (truncate (* wpl 32.) (screen-bits-per-pixel (sheet-get-screen self))))
+	(array (or screen-array old-screen-array)))
+    (setq locations-per-line wpl)
+    (when bit-array
+      (setq bit-array (grow-bit-array bit-array pitch height width)))
+    ;; an indirect array keeps or lacks its index offset (change-indirect-
+    ;; array will not add or remove one), as the lambda's fix-array knew.
+    (when array
+      (let ((offset (if (= (%p-ldb-offset si:%%array-index-length-if-short array 0) 2)
+			nil
+		      (if (and bit-array (not exposed-p))
+			  0
+			(+ x-offset (* pitch y-offset))))))
+	(redirect-array array (array-type array) pitch height
+			(if (and bit-array (not exposed-p))
+			    bit-array
+			  (sheet-superior-screen-array))
+			offset)))))
+
+;; mit's, from the lambda's set-screen-width: every window of sheet,
+;; including deactivated ones in window resources and zmacs's typeout and
+;; mini buffer windows, which are not among their superiors' inferiors.
+(defvar *mapped-windows*)
+
+(defun map-over-all-windows-of-sheet (func sheet)
+  (setq *mapped-windows* nil)
+  (map-over-all-windows-of-sheet-1 func sheet)
+  (dolist (resource-name window-resource-names)
+    (si:map-resource #'(lambda (window ignore ignore)
+			 (cond ((and (eq (send window :status) ':deactivated)
+				     (eq sheet (sheet-get-screen window)))
+				(map-over-all-windows-of-sheet-1 func window))))
+		     resource-name)))
+
+(defun map-over-all-windows-of-sheet-1 (func sheet)
+  (cond ((null (memq sheet *mapped-windows*))
+	 (push sheet *mapped-windows*)
+	 (funcall func sheet)
+	 (cond ((and (not (typep sheet 'zwei:zwei-mini-buffer))
+		     (send sheet :send-if-handles :typeout-window))
+		(map-over-all-windows-of-sheet-1 func (send sheet :typeout-window))))
+	 (cond ((and (typep sheet 'zwei:mode-line-window)
+		     (send sheet :mini-buffer-window))
+		(map-over-all-windows-of-sheet-1 func (send sheet :mini-buffer-window))))
+	 (dolist (x (send sheet :inferiors))
+	   (map-over-all-windows-of-sheet-1 func x)))))
 
 (DEFUN DEFINE-SCREEN (FLAVOR NAME &REST ARGS)
   (LET ((SCREEN (APPLY #'MAKE-INSTANCE FLAVOR :NAME NAME ARGS)))
