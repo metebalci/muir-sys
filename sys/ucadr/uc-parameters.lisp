@@ -639,6 +639,8 @@ A-DISK-RUN-LIGHT ((BYTE-VALUE Q-DATA-TYPE DTP-FIX) DISK-RUN-LIGHT-VIRTUAL-ADDRES
 A-LOADED-BAND ((BYTE-VALUE Q-DATA-TYPE DTP-FIX))
 				;HIGH 24 BITS OF NAME OF BAND LOADED (FOR GREETING MSG)
 ;THESE TWO GET SET FROM THE LABEL
+;; quux: no longer: block-disk takes block numbers, and nothing reads these
+;; two.  they stay so that the a-memory locations after them do not move.
 A-DISK-BLOCKS-PER-TRACK ((PLUS 17. (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 A-DISK-BLOCKS-PER-CYLINDER ((PLUS 85. (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 
@@ -936,7 +938,7 @@ A-DISK-MA	(0)		;MA read back (last memory location referenced)
 A-DISK-FINAL-ADDRESS (0)	;Disk address read back
 A-DISK-ECC	(0)		;Error correction data read back
 A-DISK-RETRY-STATE (0)		;Count of retries
-A-DISK-DOING-READ-COMPARE (0)
+A-DISK-DOING-READ-COMPARE (0)	;quux: unused (block-disk has no read-compare); kept in place
 A-DISK-IDLE-TIME (0)		;Time since last disk op (other than background)
 A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops)
 
@@ -976,6 +978,7 @@ A-DISK-SAVE-FLAGS (0)
 
 A-DISK-CYL-BEG (0)	;Typeless virtual address that lies at start of a cylinder
 A-DISK-CYL-END (0)	;Typeless virtual address that lies at start of next cylinder
+			;quux: these two are unused (block-disk has no cylinders); kept in place
 
 ;PARAMETERS OF THE CURRENTLY SELECTED SCREEN (SEE TV-SELECT-SCREEN)
 ;NOT PRESERVED THROUGH SEQUENCE BREAKS

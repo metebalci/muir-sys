@@ -225,11 +225,10 @@ as SUBSET-START, to resume where it left off."
 		     (NDIFFS 0))
 		    ((= I N)
 		     (OR (ZEROP NDIFFS)
-			 (LET ((SPT (AREF DISK-SECTORS-PER-TRACK-ARRAY 0))
-			       (HPC (AREF DISK-HEADS-PER-CYLINDER-ARRAY 0)))
-			   (FORMAT T "~&Block ~S (cyl ~O surf ~O sec ~O here, rel ~S) differs in ~D halfwords~%"
-				   B (TRUNCATE B (* HPC SPT)) (TRUNCATE (\ B (* HPC SPT)) SPT)
-				   (\ B SPT) (- B ORIG-PART-BASE) NDIFFS))))
+			 ;; quux: block-disk addresses blocks, so the cylinder,
+			 ;; surface and sector are no longer printed.
+			 (format t "~&Block ~S (rel ~S) differs in ~D halfwords~%"
+				 b (- b orig-part-base) ndiffs)))
 		  (OR (= (AREF BUF I) (AREF BUF1 I)) (SETQ NDIFFS (1+ NDIFFS))))))))
      (CHAOS:CLOSE-CONN CONN "Done"))
    (AND RQB (SYS:RETURN-DISK-RQB RQB))

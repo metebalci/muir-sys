@@ -28,19 +28,8 @@ DISK-SWAP-HANDLER
 	(CHECK-PAGE-WRITE)
 	(JUMP DISK-PGF-RESTORE)
 
-;Given a typeless virtual memory address in M-A, set A-DISK-CYL-BEG and A-DISK-CYL-END
-;to the typeless virtual memory addresses which enclose the cylinder containing that block
-;Smashes M-1, M-2, A-TEM1
-GET-DISK-CYLINDER-BOUNDARY
-	((M-1) VMA-PAGE-ADDR-PART M-A)
-	((M-1) ADD M-1 A-DISK-OFFSET)
-	(CALL-XCT-NEXT DIV)			;M-1 gets n blocks into cylinder
-       ((M-2) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-CYLINDER)
-	((M-1) DPB M-1 VMA-PAGE-ADDR-PART A-ZERO)	;Convert pages to words
-	((M-2) DPB M-2 VMA-PAGE-ADDR-PART A-ZERO)
-	(POPJ-AFTER-NEXT (A-DISK-CYL-BEG) SUB M-A A-1)
-       ((A-DISK-CYL-END) ADD M-2 A-DISK-CYL-BEG)
-
+;; quux: GET-DISK-CYLINDER-BOUNDARY, which nothing called, is gone with the
+;; disk's cylinders: block-disk has none.
 
 ;;; Here to start a disk operation, first waiting for the disk to become idle.
 ;;; M-1 has the disk address, M-T has the command.
@@ -52,13 +41,9 @@ START-DISK-SWAP
 	((A-DISK-READ-WRITE) M-T)		;Then store parameters into A-memory
 	((A-DISK-CLP) M-C)
 	((A-DISK-RETRY-STATE) M-ZERO)
-	(CALL-XCT-NEXT DIV)			;Convert disk address to physical
-       ((M-2) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-CYLINDER)
-	((A-DISK-ADDRESS) DPB Q-R (BYTE-FIELD 12. 16.) A-ZERO)	;Save cylinder
-	(CALL-XCT-NEXT DIV)
-       ((M-2) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-TRACK)
-	((A-DISK-ADDRESS) DPB Q-R (BYTE-FIELD 8 8) A-DISK-ADDRESS)	;Save head
-	((A-DISK-ADDRESS) DPB M-1 (BYTE-FIELD 8 0) A-DISK-ADDRESS)	;Save block
+	;; quux: block-disk's disk address is the block number; mit's divided it
+	;; into cylinder, head and block by the label's geometry.
+	((A-DISK-ADDRESS) M-1)
 	(JUMP-XCT-NEXT START-DISK-OP)
        ((A-DISK-RESERVED-FOR-USER) (A-CONSTANT 0))	;Not any more, it isn't!
 
@@ -79,13 +64,9 @@ START-DISK-N-PAGES
 	((A-DISK-CLP) M-C)
 	((A-DISK-RETRY-STATE) M-ZERO)
 	((M-T) M-2)
-	(CALL-XCT-NEXT DIV)			;Convert disk address to physical
-       ((M-2) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-CYLINDER)
-	((A-DISK-ADDRESS) DPB Q-R (BYTE-FIELD 12. 16.) A-ZERO)	;Save cylinder
-	(CALL-XCT-NEXT DIV)
-       ((M-2) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-TRACK)
-	((A-DISK-ADDRESS) DPB Q-R (BYTE-FIELD 8 8) A-DISK-ADDRESS)	;Save head
-	((A-DISK-ADDRESS) DPB M-1 (BYTE-FIELD 8 0) A-DISK-ADDRESS)	;Save block
+	;; quux: block-disk's disk address is the block number; mit's divided it
+	;; into cylinder, head and block by the label's geometry.
+	((A-DISK-ADDRESS) M-1)
 	;; Now build the CCW list
 	((VMA) ADD (M-CONSTANT -1) A-DISK-CLP)
 	((MD) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
@@ -105,7 +86,6 @@ BUILD-CCW-LIST-2
 ;;; Returns with address of disk-run-light in VMA
 START-DISK-OP
 	((A-DISK-COMMAND) A-DISK-READ-WRITE)
-	((A-DISK-DOING-READ-COMPARE) M-ZERO)
 ;;; Here to start some command other than the one we are really supposed to be doing
 START-DISK-OP-1
 	((MD) DPB (M-CONSTANT -1)	;Turn on interrupt enable
@@ -143,16 +123,9 @@ AWAIT-DISK
 
 DISK-COMPLETION
 	(CALL DISK-COMPLETION-GET-STATUS)
-	(JUMP-NOT-EQUAL M-ZERO A-DISK-DOING-READ-COMPARE DISK-COMPLETION-READ-COMPARE-OVER)
+	;; quux: block-disk has no read-compare (command 10 stops by error), so
+	;; A-DISK-SWITCHES' read-compare bits, 0 and 1, do nothing now.
 	(JUMP-NOT-EQUAL M-A A-ZERO DISK-COMPLETION-ERROR)
-	;; Operation completed without error, but may still need to do a read-compare.
-	((OA-REG-LOW) DPB M-ZERO (BYTE-FIELD 31. 1) A-DISK-READ-WRITE)
-	((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 1 0))	;1 if read, 2 if write
-	((M-TEM) AND M-TEM A-DISK-SWITCHES)
-	((M-B) (A-CONSTANT DISK-READ-COMPARE-COMMAND))
-	((A-DISK-DOING-READ-COMPARE) SETO)
-	(JUMP-NOT-EQUAL-XCT-NEXT M-TEM A-ZERO START-DISK-OP-1) ;Must check this transfer
-       ((A-DISK-COMMAND) DPB M-B (BYTE-FIELD 4 0) A-DISK-COMMAND) ;using same recovery features
 DISK-COMPLETION-OK	;; Here when a disk operation has successfully completed
 	((MD) M-ZERO)	;Turn off disk run light
 	((VMA-START-WRITE) A-DISK-RUN-LIGHT)
@@ -164,109 +137,38 @@ DISK-COMPLETION-OK	;; Here when a disk operation has successfully completed
 DISK-COMPLETION-GET-STATUS
 	(CALL-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD ILLOP)	;Control busy?
 	((A-DISK-STATUS) MD)	;Store away results of operation
+	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
+	;; <17> past the end of the pack, <20> nxm.
 	((M-A) AND MD		;Get just error status bits
-		(A-CONSTANT (PLUS 1_4 1_5 1_6 1_8 1_9 1_10. 1_11. 1_12. 1_13.
-				  1_14. 1_15. 1_16. 1_17. 1_18. 1_19. 1_20. 1_23.)))
+		(A-CONSTANT (PLUS 1_9 1_13. 1_17. 1_20.)))
 	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-DISK-MA) MD)
 	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-DISK-FINAL-ADDRESS) MD)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(CHECK-PAGE-READ-NO-INTERRUPT)
+	;; quux: block-disk has no ecc register; the cadr's was read from the
+	;; start register's address.
 	(POPJ-AFTER-NEXT NO-OP)
-       ((A-DISK-ECC) MD)
+       ((A-DISK-ECC) M-ZERO)
 
-DISK-COMPLETION-READ-COMPARE-OVER
-	((A-DISK-DOING-READ-COMPARE) M-ZERO)
-	(JUMP-NOT-EQUAL M-A A-ZERO DISK-COMPLETION-READ-COMPARE-ERROR)
-	((M-TEM) A-DISK-STATUS)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 22.) M-TEM DISK-COMPLETION-OK)	;No rd/comp error
-	((A-DISK-READ-COMPARE-DIFFERENCES) M+A+1 M-ZERO A-DISK-READ-COMPARE-DIFFERENCES)
-DISK-COMPLETION-READ-COMPARE-ERROR
-	(JUMP-EQUAL A-DISK-READ-WRITE M-ZERO DISK-COMPLETION-READ-COMPARE-READ-ERROR)
-	(CALL LOG-DISK-ERROR)
-	(JUMP-XCT-NEXT START-DISK-OP)		;Do write over
-       ((A-DISK-READ-COMPARE-REWRITES) M+A+1 M-ZERO A-DISK-READ-COMPARE-REWRITES)
-
-DISK-COMPLETION-READ-COMPARE-READ-ERROR
-	((A-DISK-READ-COMPARE-REREADS) M+A+1 M-ZERO A-DISK-READ-COMPARE-REREADS)
+;; quux: every error of block-disk's is final: no pack, a transfer stopped
+;; by error, past the end of the pack, or nxm.  so there is nothing to retry,
+;; recover with the data strobe, or recalibrate for, and the read-compare,
+;; retry, recovery and recalibrate code is gone.
 DISK-COMPLETION-ERROR
 	((A-DISK-ERROR-COUNT) M+A+1 M-ZERO A-DISK-ERROR-COUNT)
 	(CALL LOG-DISK-ERROR)
-	((M-TEM) AND M-A (A-CONSTANT (PLUS 1_4   ;Multiple select
-					   1_5   ;No select
-					   1_6   ;Fault
-					   1_9   ;Off line
-					   1_19. ;Mem parity error
-					   1_20. ;NXM
-					   )))
-	(JUMP-NOT-EQUAL M-TEM A-ZERO FATAL-DISK-ERROR)	;Fatal error, die
-	((M-TEM) AND M-A (A-CONSTANT (PLUS 1_8   ;Off cylinder
-					   1_10. ;Seek error
-					   1_11. ;Timeout error
-					   1_12. ;Start-block error
-					   1_13. ;Any termination
-					   1_14. ;Overrun
-					   1_23. ;Internal parity error
-					   )))
-	(JUMP-NOT-EQUAL M-TEM A-ZERO DISK-COMPLETION-RETRY)
-	;(JUMP-IF-BIT-SET (BYTE-FIELD 1 15.) M-A DISK-COMPLETION-ECC)
-	;; ECC Hard, ECC Soft, Header ECC, or Header Compare
-	;; Operation may succeed if error-recovery features invoked (command <7:4>)
-	;; However, we use only the data strobe features, not the servo offset
-	;; features.  See the bugs mentioned in LMDOC;DISK
-DISK-COMPLETION-RECOVER
-	(JUMP-EQUAL M-B (A-CONSTANT DISK-WRITE-COMMAND) DISK-COMPLETION-RETRY)
-	((M-TEM) A-DISK-MA)		;Get controller type
-	(DISPATCH (BYTE-FIELD 2 22.) M-TEM D-DISK-COMPLETION-RECOVER)
-(LOCALITY D-MEM)
-(START-DISPATCH 2 0)
-D-DISK-COMPLETION-RECOVER
-	(P-BIT R-BIT)			;Trident, drop through
-	(INHIBIT-XCT-NEXT-BIT DISK-COMPLETION-RETRY)	;Marksman, no recovery features
-	(INHIBIT-XCT-NEXT-BIT ILLOP)	;Type 2 not defined
-	(P-BIT R-BIT)			;Type 3 treat as Trident in case old disk control
-(END-DISPATCH)
-(LOCALITY I-MEM)
-	((M-TEM) A-DISK-COMMAND)
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 6) M-TEM DISK-COMPLETION-RETRY) ;Features exhausted
-	(JUMP-IF-BIT-CLEAR-XCT-NEXT (BYTE-FIELD 1 7) M-TEM START-DISK-OP-1)
-       ((A-DISK-COMMAND) DPB (M-CONSTANT -1) (BYTE-FIELD 1 7) A-DISK-COMMAND)
-	(JUMP-XCT-NEXT START-DISK-OP-1)
-       ((A-DISK-COMMAND) SUB M-TEM (A-CONSTANT 1_6))	;Bit 7 off, bit 6 on
+	(JUMP FATAL-DISK-ERROR)
 
-DISK-COMPLETION-RETRY	;Operation may succeed if tried again
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 14.) M-A DISK-COMPLETION-RETRY-1)
-	((VMA-START-READ) A-CHAOS-CSR-ADDRESS)	;Overrun: try turning off Chaosnet
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	((M-TEM) MD)
-	((MD-START-WRITE) SELECTIVE-DEPOSIT M-ZERO
-		(LISP-BYTE %%CHAOS-CSR-INTERRUPT-ENABLES) A-TEM)
-	(CHECK-PAGE-WRITE-NO-INTERRUPT)
-DISK-COMPLETION-RETRY-1
-	((A-DISK-RETRY-STATE Q-R) M+A+1 M-ZERO A-DISK-RETRY-STATE)
-	(JUMP-GREATER-THAN Q-R (A-CONSTANT 5) FATAL-DISK-ERROR)	;Give up after 5 tries
-	(CALL-IF-BIT-CLEAR (BYTE-FIELD 1 0) Q-R DISK-RECALIBRATE)	;Recal 2nd, 4th time
-	(JUMP START-DISK-OP)
-
-;;; This is called with the disk not busy, and possibly at interrupt level.
-DISK-RECALIBRATE	;Recalibrate the disk.  Callable as a subroutine.
-	((MD) (A-CONSTANT DISK-RECALIBRATE-COMMAND))
-	((VMA-START-WRITE) A-DISK-REGS-BASE)
-	(CHECK-PAGE-WRITE-NO-INTERRUPT)
-	((A-DISK-RECALIBRATE-COUNT) M+A+1 M-ZERO A-DISK-RECALIBRATE-COUNT)
-	((VMA-START-WRITE) ADD VMA (A-CONSTANT 3))
-	(CHECK-PAGE-WRITE-NO-INTERRUPT)
-DISK-RECALIBRATE-WAIT	;Now wait for on-cylinder.  Must NOT check for interrupts
-			;since may be called from interrupt level.  Hopefully this
-			;doesn't happen often enough to lose many keyboard characters.
-			;This is also called from COLD-RUN-DISK
+;;; Wait for the controller to be not active.  Must NOT check for interrupts,
+;;; since it may be called from interrupt level.  Called from COLD-RUN-DISK.
+;;; quux: mit's disk-recalibrate-wait also waited for the drive to be on
+;;; cylinder; block-disk has no cylinders.
+DISK-AWAIT-READY
 	((VMA-START-READ) A-DISK-REGS-BASE)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD DISK-RECALIBRATE-WAIT) ;Wait for startup
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 8) MD DISK-RECALIBRATE-WAIT) ;Wait for not off cyl
+	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD DISK-AWAIT-READY) ;Wait for not active
 	(POPJ)
 
 ;;; Here if a fatal disk error has occurred.  Pass back to user if this is from user.
@@ -294,60 +196,9 @@ LOG-DISK-ERROR
 	(POPJ-AFTER-NEXT (A-DISK-ERROR-LOG-POINTER) (A-CONSTANT 600))
        (NO-OP)
 
-;I don't want to try out this error-correction stuff right now
-;Also this knows the disk geometry (e.g. number of heads per disk)
-;Something will have to change for multiple units
-;
-;DISK-COMPLETION-ECC	;ECC Soft - fix bad bits in memory and continue
-;			;The disk address has not been incremented past the sector in error
-;			;The MA has the address of the last word in the bad page
-;			;The right half of the ECC register is the bit number in error
-;			;The left half of the ECC register is a mask of which bits are wrong
-;	((A-DISK-ECC-COUNT) M+A+1 M-ZERO A-DISK-ECC-COUNT)
-;	((M-A) A-DISK-ECC)
-;	(CALL-XCT-NEXT PHYS-MEM-READ)
-;       ((VMA) (BYTE-FIELD 8 5) M-A A-DISK-MA)	;VMA<21:0> gets physical addr of 1st bad word
-;	((M-B) (BYTE-FIELD 5 0) M-A)	;Get bit number of first erroneous bit
-;	((M-A) (BYTE-FIELD 20 20) M-A)	;Get erroneous bits mask
-;	((M-TEM) M-A-1 (M-CONSTANT 32.) A-B)	;Byte length-1 for bits in first word
-;	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-B)
-;	((A-TEM1) DPB M-A (BYTE-FIELD 0 0) A-ZERO)	;Erroneous bits in first word
-;	(CALL-XCT-NEXT PHYS-MEM-WRITE)	;Correct first word
-;       ((MD) XOR MD A-TEM1)
-;	(JUMP-LESS-OR-EQUAL M-B (A-CONSTANT 16.) DISK-COMPLETION-ECC-2) ;If all bits in 1st wd
-;	((OA-REG-LOW) SUB (M-CONSTANT 32.) A-B)	;Rotate remainder of bit mask to low bits
-;	((M-A) (BYTE-FIELD 16. 0) M-A)
-;	(JUMP-EQUAL M-A A-ZERO DISK-COMPLETION-ECC-2)	;Jump if no bits in second word
-;	(CALL-XCT-NEXT PHYS-MEM-READ)
-;       ((VMA) ADD VMA (A-CONSTANT 1))
-;	(CALL-XCT-NEXT PHYS-MEM-WRITE)
-;       ((MD) XOR MD A-A)
-;DISK-COMPLETION-ECC-2
-;	(CALL-XCT-NEXT PHYS-MEM-READ)	;Fetch a CCW
-;       ((VMA) A-DISK-CLP)
-;	((M-TEM) XOR MD A-DISK-MA)
-;	((M-TEM) (BYTE-FIELD 14. 8) M-TEM)
-;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD DISK-COMPLETION-ECC-4)	;End CCW list
-;	(JUMP-NOT-EQUAL-XCT-NEXT M-TEM A-ZERO DISK-COMPLETION-ECC-2)
-;       ((A-DISK-CLP) ADD VMA (A-CONSTANT 1))
-;	;Advance the disk address manually
-;	((M-A) M+A+1 M-ZERO A-DISK-FINAL-ADDRESS)
-;	((M-TEM) (BYTE-FIELD 8 0) M-A)	;Block number
-;	(JUMP-LESS-THAN M-TEM A-DISK-CURRENT-BLOCKS-PER-TRACK DISK-COMPLETION-ECC-3)
-;	((M-A) DPB M-ZERO (BYTE-FIELD 8 0) A-A)	;Recycle to block 0
-;	((M-A) ADD M-A (A-CONSTANT 400))	; on next head
-;	((M-TEM) (BYTE-FIELD 8 8) M-A)	;Head number
-;	(JUMP-LESS-THAN M-TEM A-DISK-CURRENT-NUMBER-OF-HEADS DISK-COMPLETION-ECC-3)
-;	((M-A) DPB M-ZERO (BYTE-FIELD 8 8) A-A)	;Recycle to head 0
-;	((M-A) ADD M-A (A-CONSTANT 200000))	; on next cylinder
-;DISK-COMPLETION-ECC-3
-;	((A-DISK-ADDRESS) M-A)
-;	(JUMP START-DISK-OP-1)
-;
-;DISK-COMPLETION-ECC-4		;Here for ECC error corrected on last page of transfer
-;	(CALL-NOT-EQUAL M-TEM A-ZERO ILLOP)	;CCW not found in CCW list?
-;	(JUMP DISK-COMPLETION-OK)
-
+;; quux: mit's soft-ecc correction, commented out, is gone: block-disk has no
+;; ecc, and it knew the cadr disk's geometry.
+
 ;;; Support for "user" disk I/O
 ;;; Note that the interrupt-enable bit in the command word controls
 ;;; whether or not system error recovery features are invoked.
@@ -369,7 +220,6 @@ XDSKOP (MISC-INST-ENTRY %DISK-OP)
 	(CHECK-PAGE-READ)
 	((A-DISK-ADDRESS) MD)
 	((A-DISK-RETRY-STATE) M-ZERO)
-	((A-DISK-DOING-READ-COMPARE) M-ZERO)
 	(CALL-XCT-NEXT START-DISK-OP-2)		;Fire it up
        ((MD M-1) A-DISK-COMMAND)
 XDSKOP2	((VMA-START-READ) A-DISK-REGS-BASE)	;Await controller ready

@@ -271,7 +271,8 @@ Each item looks like: (name value start-x start-y width)")
   (DPB (%P-LDB #o2020 ADR) #o2020 (%P-LDB #o0020 ADR)))
 
 ;;; This will get hairier later, e.g. check for wrap around
-;;; Also this only understands the Trident controller I guess
+;; quux: it understands block-disk: the disk address is a block number, and
+;; there are no data strobe or servo offset bits in the command.
 (DEFUN PRINT-DISK-ERROR-LOG ()
   "Print a description of remembered disk errors."
   (FORMAT T "~&Disk error count ~D.~%" (READ-METER 'SYS:%COUNT-DISK-ERRORS))
@@ -284,20 +285,10 @@ Each item looks like: (name value start-x start-y width)")
 	     (FORMAT T "~%Command ~O ~@[(~A) ~]"
 		       (LDB #o0020 CLP-CMD)
 		       (CDR (ASSQ (LDB #o0004 CLP-CMD) '((0 . "Read")
-							 (8 . "Read-Compare")
 							 (9 . "Write")))))
-	     (AND (BIT-TEST %DISK-COMMAND-DATA-STROBE-EARLY CLP-CMD)
-		  (PRINC "Data-Strobe-Early "))
-	     (AND (BIT-TEST %DISK-COMMAND-DATA-STROBE-LATE CLP-CMD)
-		  (PRINC "Data-Strobe-Late "))
-	     (AND (BIT-TEST %DISK-COMMAND-SERVO-OFFSET CLP-CMD)
-		  (PRINC "Servo-offset "))
-	     (AND (BIT-TEST %DISK-COMMAND-SERVO-OFFSET-FORWARD CLP-CMD)
-		  (PRINC "S-O-Forward "))
 	     (TERPRI)
 	     (FORMAT T "CCW-list pointer ~O (low 16 bits)~%" (LDB #o2020 CLP-CMD))
-	     (FORMAT T "Disk address: unit ~O, cylinder ~O, head ~O, block ~O (~4:*~D ~D ~D ~D decimal)~%"
-		       (LDB #o3404 DA) (LDB #o2014 DA) (LDB #o1010 DA) (LDB #o0010 DA))
+	     (format t "Disk address: block ~O (~:*~D decimal)~%" (ldb #o0034 da))
 	     (FORMAT T "Memory address: ~O (type bits ~O)~%"
 		       (LDB #o0026 MA) (LDB #o2602 MA))
 	     (FORMAT T "Status: ~O  ~A~%"

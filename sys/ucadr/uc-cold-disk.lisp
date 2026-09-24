@@ -347,7 +347,8 @@ DISK-RESTORE-1
        ((MD) A-DISK-REGS-BASE)			; page fault handler from AWAIT-DISK,etc
 	(CALL-XCT-NEXT COLD-FAKE-L2-MAP)	; before things set up.  Another RESET-MACHINE
        ((MD) A-DISK-RUN-LIGHT)			; will be done at beg0000 eventually anyway.
-	(CALL DISK-RECALIBRATE)			;For marksman
+	;; quux: block-disk has no drive to recalibrate (mit's did, for the
+	;; marksman, after the i/o reset).
 
 ;;; Determine size of main memory
 	((MD) (A-CONSTANT 40))			;Turn off ERROR-STOP-ENABLE
@@ -728,8 +729,8 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	(CALL GET-AREA-ORIGINS)
 	((M-K) SUB M-ZERO (A-CONSTANT 200))	;FIRST 200 MICRO ENTRIES ARE NOT IN TABLE
 	((A-V-MISC-BASE) ADD M-K A-V-MICRO-CODE-SYMBOL-AREA)
-	;; If using Marksman disk, must recalibrate after I/O reset
-	(CALL DISK-RECALIBRATE)
+	;; quux: block-disk needs no recalibrate after the i/o reset (mit's
+	;; did, for the marksman).
 	;; Find out where to page off of if we don't know already 
 	(CALL-EQUAL A-DISK-OFFSET M-ZERO WARM-READ-LABEL)
 	;; Clear the unused pages of the PHT and PPD out of the map
@@ -849,17 +850,9 @@ COLD-READ-LABEL
 	;Location 7 contains the name of the main load partition.
 	;Location 200 contains the partition table.
 	;We must also find the PAGE partition and set up A-DISK-OFFSET and A-DISK-MAXIMUM
-	(CALL-XCT-NEXT PHYS-MEM-READ)		; Read the number of blocks per track
-       ((VMA) (A-CONSTANT 4))
-	((A-DISK-BLOCKS-PER-TRACK) Q-POINTER READ-MEMORY-DATA
-			(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(CALL-XCT-NEXT PHYS-MEM-READ)		; Read the number of heads
-       ((VMA) (A-CONSTANT 3))
-	((Q-R) READ-MEMORY-DATA)		; Get number of blocks per cylinder
-	(CALL-XCT-NEXT MPY)			; Blocks/track * tracks/cylinder
-       ((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-BLOCKS-PER-TRACK)
-	((A-DISK-BLOCKS-PER-CYLINDER) Q-POINTER Q-R
-			(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	;; quux: block-disk takes block numbers, so the label's geometry (words
+	;; 3 and 4, heads and blocks a track) is no longer read into
+	;; A-DISK-BLOCKS-PER-TRACK and A-DISK-BLOCKS-PER-CYLINDER.
 	(CALL-XCT-NEXT COLD-FIND-PARTITION)
        ((M-3) (A-CONSTANT 10521640520))		; PAGE = 105 107 101 120 = 10521640520
 	((A-DISK-OFFSET) M-I)
@@ -1009,7 +1002,7 @@ COLD-RUN-DISK
 	((A-DISK-SAVE-PGF-A) M-A)
 	((A-DISK-SAVE-PGF-B) M-B)
 COLD-AWAIT-DISK
-	(CALL DISK-RECALIBRATE-WAIT)		;Wait for hardware completion
+	(CALL DISK-AWAIT-READY)			;Wait for hardware completion
 	(CALL DISK-COMPLETION)
 	(JUMP-NOT-EQUAL A-DISK-BUSY M-ZERO COLD-AWAIT-DISK)  ;Not done, must have been error
 	(POPJ-AFTER-NEXT (M-B) A-DISK-SAVE-PGF-B)

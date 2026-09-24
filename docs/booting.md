@@ -5,7 +5,10 @@ loads microcode, the microcode loads a world, and the microcode enters one Lisp
 function. It follows the tree's own code, and each claim cites a file and line.
 
 It was carried over from the System 2000 line (lmz-sys `fecd0a5`) and every
-citation re-checked against this tree. Nothing here is about compiling or
+citation re-checked against this tree. Line numbers in `promh.text`,
+`uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `0ec714d`, before
+QUUX's disk became block-disk; the labels named with them are still there,
+except those block-disk removed, as noted below. Nothing here is about compiling or
 building; `docs/building.md` covers that.
 
 ## The three stages
@@ -55,15 +58,18 @@ main memory --- and on a warm boot that page belongs to a live Lisp world.
 
 Before touching it, the PROM therefore writes physical page 0 out to disk block
 1, which the label format reserves for this purpose (`SAVE-A-PAGE`, `:427-441`).
-It verifies the write with a read-compare and retries on failure, since a page
-saved wrongly is worse than not saving it. At `DONE-LOADING` it reads the block
+MIT's PROM verified the write with a read-compare and retried on failure. On
+QUUX's disk, block-disk, there is no read-compare, so the PROM writes the
+block once and halts at `ERROR-DISK-ERROR` if the write fails. At `DONE-LOADING` it reads the block
 back into page 0 (`:587-591`). The page is borrowed and returned.
 
 ### Finding the microcode
 
 The label is block 0. Word 0 must be the four characters `LABL` and word 1 must
 be 1, or the PROM halts at `ERROR-BAD-LABEL` (`DECODE-LABEL`, `:460-466`).
-Words 2 to 5 give the disk geometry, and **word 6 names the current microcode
+Words 2 to 5 give the disk geometry, which QUUX's PROM skips: block-disk is
+addressed by block number, where MIT's PROM divided each block number into a
+cylinder, head and sector. **Word 6 names the current microcode
 partition** (`:467-481`). Word 200 is the number of partitions, word 201 the
 size of a partition descriptor, and word 202 begins the table (`:482-489`); the
 PROM walks it for a descriptor whose first word is that name (`SEARCH-LABEL`,

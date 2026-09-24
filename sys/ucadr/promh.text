@@ -57,20 +57,15 @@ A-11		(0)
 A-40		(0)
 A-400		(0)
 A-20000		(0)
-A-3560		(0)
 A-DISK-ERROR	(0)
-A-DISK-RECAL	(0)
 
-;;; Disk Characteristics (from label)
-A-NCYLS		(0)	;Total number of cylinders
-A-NHEADS	(0)	;Number of data heads (i.e. tracks per cylinder)
-A-NBLKS		(0)	;Number of blocks ("sectors") per track
-A-HEADS-TIMES-BLOCKS	(0)	;Number of blocks per cylinder
+;;; quux: block-disk takes a block number, so the label's geometry (the
+;;; number of cylinders, heads and blocks a track), the recalibrate command,
+;;; the drive-ready mask and the division's temporary are gone.
 A-DISK-REGS	(0)	;Virtual address of disk control registers
 A-MICR-ORIGIN	(0)	;Base disk address of microcode partition
 A-MICR-ADDRESS	(0)	;Address of next block of microcode partition
 A-MICR-N-BLOCKS	(0)	;Remaining blocks of microcode partition
-A-TEM1		(0)	;Temporary used in division
 
 (LOCALITY I-MEM)
 
@@ -154,6 +149,8 @@ ERROR-DISK-ERROR
 	(JUMP HALT-CONS ERROR-DISK-ERROR)
     (ERROR-TABLE ERROR-DISK-ERROR)
 
+	;; quux: no longer reached (the prom no longer divides); kept so that
+	;; the halts after it keep their addresses.
 	(NO-OP)
 ERROR-DIVIDE-BY-ZERO
 	(JUMP HALT-CONS ERROR-DIVIDE-BY-ZERO)
@@ -286,15 +283,14 @@ MAKE-CONSTANTS
 	((A-40)  DPB M-ONES (BYTE-FIELD 1 5) A-ZERO)
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
-	((A-3560) DPB M-ONES (BYTE-FIELD 3 4) A-ZERO)
-	((A-3560) DPB M-ONES (BYTE-FIELD 3 8) A-3560)
-	;;; A-DISK-RECAL / 10001005
-	((A-DISK-RECAL) DPB M-ONES (BYTE-FIELD 1 9) A-5)
-	((A-DISK-RECAL) DPB M-ONES (BYTE-FIELD 1 21.) A-DISK-RECAL)
-	;;; A-DISK-ERROR/ 47777360
-	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 04. 04.) A-ZERO)
-	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 12. 09.) A-DISK-ERROR)
-	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 23.) A-DISK-ERROR)
+	;;; A-DISK-ERROR/ 4421000
+	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
+	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
+	;; the drive's, the ecc's and the transfer's.
+	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 09.) A-ZERO)
+	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 13.) A-DISK-ERROR)
+	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 17.) A-DISK-ERROR)
+	((A-DISK-ERROR) DPB M-ONES (BYTE-FIELD 01. 20.) A-DISK-ERROR)
 
 ;;; Clear some more memories
 	;; quux: clear words 0-1777, the ones the a-memory load and fill-a-loop
@@ -353,13 +349,8 @@ CLEAR-D-MEMORY
 	((MD) ADD MD A-1)
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 11.) MD CLEAR-D-MEMORY)
 
-;;; The size of the disk is not known until the label is read in and parsed.
-;;; In order to make the disk operations win, we have to initialize the
-;;; size parameters to something reasonable; it doesn't matter what they
-;;; are exactly since only blocks 0 and 1 will be dealt with.
-FUDGE-INITIAL-DISK-PARAMETERS
-	((A-NBLKS) A-3)
-	((A-HEADS-TIMES-BLOCKS) A-3)
+;;; quux: block-disk takes a block number, so the disk needs no geometry
+;;; before the label is read (mit's fudge-initial-disk-parameters is gone).
 
 ;;; Generate RESET on the I/O busses
 	((INTERRUPT-CONTROL) DPB M-ONES		;RESET THE BUS INTERFACE AND I/O DEVS
@@ -422,10 +413,12 @@ PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
 ;;; Initialize the disk.
-	(CALL DISK-RECALIBRATE)
+	(CALL DISK-AWAIT-PACK)
 
 ;;; In order to not clobber core, save a page (page 0) of physical
 ;;; memory on disk.  Block 1 is allocated to us for this purpose.
+;;; quux: block-disk has no read-compare (command 10 stops by error), so
+;;; the write is not read back; an error in it halts at error-disk-error.
 SAVE-A-PAGE
 	((M-A) DPB M-ONES (BYTE-FIELD 1 18.) A-ZERO)	;Delay for 0.1 second in case
 SAPDLY	(JUMP-NOT-EQUAL-XCT-NEXT M-A A-ZERO SAPDLY)	; something random is happening
@@ -433,12 +426,6 @@ SAPDLY	(JUMP-NOT-EQUAL-XCT-NEXT M-A A-ZERO SAPDLY)	; something random is happeni
 	((M-TEMP-1) A-1)
 	(CALL-XCT-NEXT DISK-WRITE)
        ((M-A) SETZ)
-	((M-TEMP-1) A-1)				;Now do a read-compare
-	(CALL-XCT-NEXT DISK-OP-LOW)
-       ((M-TEMP-2) DPB M-ONES (BYTE-FIELD 1 3) A-ZERO)	;OP 10 = read-compare
-	((M-TEMP-1) AND READ-MEMORY-DATA A-DISK-ERROR)
-	(JUMP-NOT-EQUAL M-TEMP-1 A-ZERO SAVE-A-PAGE)	;Got an error on readback, retry
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 22.) READ-MEMORY-DATA SAVE-A-PAGE)	;R/C failed
 
 ;;; Read the label (block 0) into physical memory page 0, get disk
 ;;; parameters, and find out where the MICR partition is.
@@ -464,18 +451,8 @@ DECODE-LABEL
 	((VMA-START-READ M-C) ADD M-C A-1)	;1
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)	;Second location of label must be version 1.
 	(JUMP-NOT-EQUAL READ-MEMORY-DATA A-1 ERROR-BAD-LABEL)
-	((VMA-START-READ M-C) ADD M-C A-1)	;2
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-NCYLS) READ-MEMORY-DATA)
-	((VMA-START-READ M-C) ADD M-C A-1)	;3
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-NHEADS) READ-MEMORY-DATA)
-	((VMA-START-READ M-C) ADD M-C A-1)	;4
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-NBLKS) READ-MEMORY-DATA)
-	((VMA-START-READ M-C) ADD M-C A-1)	;5
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-HEADS-TIMES-BLOCKS) READ-MEMORY-DATA)
+	;; quux: words 2-5, the pack's geometry, are not needed by block-disk.
+	((M-C) ADD M-C A-4)			;5
 	((VMA-START-READ M-C) ADD M-C A-1)	;6
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 	((M-B) READ-MEMORY-DATA)
@@ -626,7 +603,7 @@ GET-NEXT-WORD
 ;;; contains the number of the next page to be read in from it.
 ;;; A-MICR-N-BLOCKS has the number of remaining pages in it.
 ;;; M-MICR-OFFSET has the physical address of the next word.
-;;; Clobbers M-TEMP-1, M-TEMP-2, Q-R.
+;;; Clobbers M-TEMP-1, M-TEMP-2 (quux: not Q-R, as nothing divides).
 	(JUMP-GREATER-OR-EQUAL M-MICR-OFFSET A-400 GET-NEXT-PAGE)
 	((VMA-START-READ) M-MICR-OFFSET)
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
@@ -645,42 +622,23 @@ GET-NEXT-PAGE
 
 ;;; Disk commands.
 
-;;; Initialize the disk drive.  First, wait for it to be on-line.
-;;; Then do a fault clear and a recalibrate.  Then wait for the
-;;; drive to become ready.
-;;; Clobbers M-A, M-TEMP-1, M-TEMP-2.
-DISK-RECALIBRATE
+;;; quux: block-disk has no drive to recalibrate, no seek and no fault to
+;;; clear: wait for the controller to be not active, then for a pack
+;;; (status <9> is no pack).  mit's disk-recalibrate selected unit 0, cleared
+;;; the drive's fault, recalibrated and waited for the drive to be ready.
+;;; Clobbers nothing but the VMA and MD.
+DISK-AWAIT-PACK
 	((VMA-START-READ) A-DISK-REGS)		;Wait for control ready
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) READ-MEMORY-DATA DISK-RECALIBRATE)
-	((WRITE-MEMORY-DATA) A-ZERO)		;Select unit 0
-	((VMA) A-DISK-REGS)
-	((VMA-START-WRITE) ADD VMA A-2)		;Disk Address reg
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((VMA-START-READ) A-DISK-REGS)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 9.) READ-MEMORY-DATA DISK-RECALIBRATE)	;Off-line
-    (ERROR-TABLE AWAIT-DISK-ON-LINE)		;Hangs near here until drive is on-line
-	((M-A) SETZ)
-	((M-TEMP-1) SETZ)
-	((M-TEMP-2) A-5)
-	(CALL-XCT-NEXT DISK-OP)
-       ((M-TEMP-2) DPB M-ONES (BYTE-FIELD 1 8) A-TEMP-2)	;405 Fault Clear
-	((M-TEMP-1) SETZ)
-	(CALL-XCT-NEXT DISK-OP)
-       ((M-TEMP-2) A-DISK-RECAL)
-AWAIT-DRIVE-READY 
-	((VMA-START-READ) A-DISK-REGS)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((M-TEMP-2) AND READ-MEMORY-DATA A-3560)	;Bits 4,5,6,8,9,10
-	(JUMP-NOT-EQUAL M-TEMP-2 A-ZERO AWAIT-DRIVE-READY)
-    (ERROR-TABLE AWAIT-DRIVE-READY)		;Hangs near here until drive is OK
+	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) READ-MEMORY-DATA DISK-AWAIT-PACK)
+	(JUMP-IF-BIT-SET (BYTE-FIELD 1 9.) READ-MEMORY-DATA DISK-AWAIT-PACK)	;No pack
+    (ERROR-TABLE AWAIT-DISK-ON-LINE)		;Hangs near here until there is a pack
 	(POPJ)
 
 ;;; Read one block.
 ;;; Takes disk block number in M-TEMP-1, phys. mem. address in M-A
 ;;; Does not clobber M-A.
-;;; Clobbers M-TEMP-1, M-TEMP-2, Q-R.
+;;; Clobbers M-TEMP-1, M-TEMP-2 (quux: not Q-R, as nothing divides).
 DISK-READ
 	(JUMP-XCT-NEXT DISK-OP)
        ((M-TEMP-2) SETZ)
@@ -688,7 +646,7 @@ DISK-READ
 ;;; Write one block.
 ;;; Takes disk block number in M-TEMP-1, phys. mem. address in M-A
 ;;; Does not clobber M-A.
-;;; Clobbers M-TEMP-1, M-TEMP-2, Q-R.
+;;; Clobbers M-TEMP-1, M-TEMP-2 (quux: not Q-R, as nothing divides).
 DISK-WRITE
 	((M-TEMP-2) A-11)
 	; drops in.
@@ -722,15 +680,11 @@ DISK-OP-LOW
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
 DISK-OP-CONTINUED
-	;; Convert block number in M-TEMP-1 to DISK ADDRESS word.
 	;; Write the DISK ADDRESS register.
-	(CALL-XCT-NEXT DIV)
-       ((M-TEMP-2) A-HEADS-TIMES-BLOCKS)
-        ((MD) DPB Q-R (BYTE-FIELD 12. 16.) A-ZERO)
-	(CALL-XCT-NEXT DIV)
-       ((M-TEMP-2) A-NBLKS)
-	((M-TEMP-1) DPB Q-R (BYTE-FIELD 8 8) A-TEMP-1)
-	((MD) IOR MD A-TEMP-1)
+	;; quux: block-disk's disk address is the block number in M-TEMP-1;
+	;; mit's divided it into cylinder, head and sector by the label's
+	;; geometry.
+	((MD) M-TEMP-1)
 	((VMA-START-WRITE) ADD VMA A-1)
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
@@ -746,24 +700,6 @@ DISK-WAIT
     (ERROR-TABLE AWAIT-DISK-DONE)		;Hangs near here while waiting for disk
 	(POPJ)
 
-;;; Divide two numbers.  This routine taken from UCADR 108.
-;;; Dividend in M-TEMP-1, divisor in M-TEMP-2
-;;; Quotient In Q-R, remainder in M-TEMP-1
-;;; Clobbers A-TEM1.
+;;; quux: DIV, taken from UCADR 108, is gone with the geometry it divided by.
 
-DIV	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-TEMP-1 A-ZERO DIV1)
-       ((A-TEM1 Q-R) M-TEMP-1)
-	((Q-R) SUB M-ZERO A-TEM1)
-DIV1	((M-TEMP-1) DIVIDE-FIRST-STEP M-ZERO A-TEMP-2)
-DIV1A	(JUMP-IF-BIT-SET (BYTE-FIELD 1 0) Q-R ERROR-DIVIDE-BY-ZERO)
-(REPEAT 31. ((M-TEMP-1) DIVIDE-STEP M-TEMP-1 A-TEMP-2))
-	((M-TEMP-1) DIVIDE-LAST-STEP M-TEMP-1 A-TEMP-2)
-	(JUMP-LESS-OR-EQUAL-XCT-NEXT M-ZERO A-TEM1 DIV2)
-       ((M-TEMP-1) DIVIDE-REMAINDER-CORRECTION-STEP M-TEMP-1 A-TEMP-2)
-	((M-TEMP-1) SUB M-ZERO A-TEMP-1)
-DIV2	((A-TEM1) XOR M-TEMP-2 A-TEM1)
-	(POPJ-LESS-OR-EQUAL M-ZERO A-TEM1)
-	(POPJ-AFTER-NEXT
-	 (A-TEM1) Q-R)
-       ((Q-R) SUB M-ZERO A-TEM1)
 )))
