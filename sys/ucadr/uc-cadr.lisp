@@ -39,6 +39,13 @@
 
 (ASSIGN BEEP-HARDWARE-VIRTUAL-ADDRESS 77772044)	   ;Unibus 764110
 
+;; quux's register page (contract q2), the feature page's 17377000: word 100
+;; says who interrupted (<0> tick, <1> interval timer, <2> block-disk), a
+;; write to word 101, the error status, clears it, and bit 0 of word 102, the
+;; mode, is error stop.  they replace unibus 766040, 766044 and 766012.
+(ASSIGN QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS 77377100)
+(ASSIGN QUUX-ERROR-STATUS-PHYSICAL-ADDRESS 17377101)
+(ASSIGN QUUX-MODE-PHYSICAL-ADDRESS 17377102)
 (ASSIGN INTERRUPT-STATUS-HARDWARE-VIRTUAL-ADDRESS 77773020)
 		;Unibus address 766040 (interrupt status)
 (ASSIGN CLEAR-INTERRUPT-HARDWARE-VIRTUAL-ADDRESS  77773021) ;Unibus address 766042
@@ -79,10 +86,12 @@ PROM	(JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO PROM)    ;These 2 instructions duplicat
        ((VMA) (A-CONSTANT 17772040))		;Unibus address 764100 (KBD LOW)
 	((MD) (BYTE-FIELD 6 0) MD)		;Get keycode
 	(JUMP-EQUAL MD (A-CONSTANT 46) COLD-BOOT)	;This is cold-boot if key is RUBOUT
-	((md) (a-constant 44))			;Standardize mode.
-	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;40 is PROM-DISABLE, 4 is ERROR-STOP-ENABLE;
-						;quux: no speed bits, so not 46
-       ((VMA) (A-CONSTANT 17773005))		;Unibus 766012
+	;; quux: standardize the mode: error stop, bit 0 of the register page's
+	;; word 102.  mit wrote 44, error stop and prom-disable, to unibus
+	;; 766012; quux's prom is never disabled.
+	((md) (a-constant 1))
+	(CALL-XCT-NEXT PHYS-MEM-WRITE)
+       ((VMA) (A-CONSTANT QUUX-MODE-PHYSICAL-ADDRESS))
 	(JUMP BEG0000)
 
 

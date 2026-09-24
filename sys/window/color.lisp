@@ -20,12 +20,14 @@
 ; no stat-stop-enable, parity-stop-enable).
 ;The mode register is writable at location 766012
 ;XBUS-ADDR is an I/O address like %XBUS-READ.
-;; quux: 40 and 44, not 42 and 46: quux's mode register has no speed bits.
+;; quux (contract q2): the mode is the register page's word 102, whose bit 0
+;; is error stop, and a write to word 101, the error status, clears it; they
+;; replace unibus 766012 and 766044.  the prom is never disabled on quux.
 (DEFUN XBUS-READ-NO-PARITY (XBUS-ADDR)
-  (PROG2 (%UNIBUS-WRITE 766012 40)	;Turn off error-stop-enable
+  (PROG2 (%xbus-write #o377102 0)	;Turn off error-stop-enable
 	 (%XBUS-READ XBUS-ADDR)
-	 (%UNIBUS-WRITE 766012 44)	;Turn on error-stop-enable
-	 (%UNIBUS-WRITE 766044 0)))	;Clear xbus nxm and parity indicators
+	 (%xbus-write #o377102 1)	;Turn on error-stop-enable
+	 (%xbus-write #o377101 0)))	;Clear xbus nxm and parity indicators
 
 (DEFUN XBUS-LOCATION-EXISTS-P (XBUS-ADDR BITS)
   "T if it is possible to turn on bits BITS in address XBUS-ADDR."

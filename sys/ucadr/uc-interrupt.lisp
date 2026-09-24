@@ -57,15 +57,21 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	((A-INTR-VMA) VMA)			;Mustn't bash the VMA
 	((A-INTR-MD) MD)			; nor the MD
 	((M-INTERRUPT-FLAG) DPB (M-CONSTANT -1) A-FLAGS) ;No page faults allowed here
-	((VMA-START-READ) (A-CONSTANT 77773020)) ;Unibus address 766040 (interrupt status)
+	;; quux (contract q2): the register page's word 100 says who interrupted,
+	;; each bit under its source's enable: <0> the tick, the 60-cycle clock;
+	;; <2> block-disk, done.  the keyboard and the chaosnet interrupt on the
+	;; unibus until q3 and q4 move them, so otherwise its status is read as
+	;; before.  any other interrupt still pending comes back when this one is
+	;; dismissed.
+	((VMA-START-READ) (A-CONSTANT QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-INTR-A) M-A)			;I need a couple M registers
 	((A-INTR-B) M-B)
 	((A-INTR-T) M-T)			;Convenient to be able to clobber this
-	;; quux: the tick is the clock, from revision 4, not the display's
-	;; vertical interrupt; if its flag is up, run the 60-cycle handler.  any
-	;; other interrupt still pending comes back when this one is dismissed.
-	(jump-if-bit-set (byte-field 1 0) tick-status intr-tick)
+	(jump-if-bit-set (byte-field 1 0) md intr-tick)
+	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
+	((VMA-START-READ) (A-CONSTANT 77773020)) ;Unibus address 766040 (interrupt status)
+	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-INTR-LOCAL-UNIBUS-MODE) (BYTE-FIELD 1 1) MD)
 	(JUMP-EQUAL A-INTR-LOCAL-UNIBUS-MODE M-ZERO INNL0)  ;jump on no local-enable, ie,
 						; PDP11 arbritrating UNIBUS. 
