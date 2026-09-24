@@ -117,6 +117,9 @@
  %UNIBUS-WRITE
  %XBUS-READ
  %XBUS-WRITE
+ ;; quux: q1's microsecond clock, misc 761; global like the i/o instructions
+ ;; above, so that every package's code names the one symbol.
+ %MICROSECOND-CLOCK-LDB
 
 ;;;; Lambda-list keywords:
 

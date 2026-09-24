@@ -1307,10 +1307,10 @@ Blame Common Lisp for wanting this unrelated alternate meaning."
 	(VALUES-LIST VALUES))
     ;; the CADR's clock only; the Lambda's clause is gone.
     (WITHOUT-INTERRUPTS
-      (LET ((LOW (%UNIBUS-READ #o764120))	;Hardware synchronizes if you read this first
-	    (HIGH (%UNIBUS-READ #o764122))
-	    (SOFT (LDB 2205 TIME-LAST-VALUE)))
-	(LET ((LOWTIME (DPB HIGH #o0220 (LDB #o1602 LOW))))	;Low 18 bits
+      ;; quux: bits 31:14 of the processor's clock, source 15, in one read,
+      ;; which the cadr put together from its two unibus halves.
+      (LET ((SOFT (LDB 2205 TIME-LAST-VALUE)))
+	(LET ((LOWTIME (%microsecond-clock-ldb #o1622)))	;Low 18 bits
 	  (SETQ TIME-LAST-VALUE
 		(DPB (IF (< LOWTIME (LDB #o0022 TIME-LAST-VALUE))
 			 (1+ SOFT)

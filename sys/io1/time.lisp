@@ -26,18 +26,26 @@ will return T if daylight savings time is in effect in the local timezonew at th
   "Return the current value of the microsecond clock (a bignum).
 Only differences in clock values are meaningful.
 There are 32. bits of data, so the value wraps around every few hours."
-  ;; the CADR's Unibus clock; the Lambda's branch is gone.
-  (LET ((LOW (%UNIBUS-READ #o764120))  ;Hardware synchronizes if you read this one first
-	(HIGH (%UNIBUS-READ #o764122)))
-    (DPB HIGH #o2020 LOW)))
+  ;; quux: the processor's clock, source 15, read by fields; a field is one
+  ;; read.  %microsecond-clock-ldb is in global (cold/global.lisp).
+  ;; read, so the high half is read on both sides of the low and the pair is
+  ;; taken when they agree.  the cadr's unibus clock latched the high half
+  ;; when the low was read.
+  (do () (nil)
+    (let* ((high (%microsecond-clock-ldb #o2020))
+	   (low (%microsecond-clock-ldb #o0020)))
+      (when (= high (%microsecond-clock-ldb #o2020))
+	(return (dpb high #o2020 low))))))
 
 (DEFUN FIXNUM-MICROSECOND-TIME (&AUX (INHIBIT-SCHEDULING-FLAG T))
   "Return the current value of the microsecond clock as two fixnums."
   (DECLARE (VALUES LOW-23-BITS TOP-9-BITS))
-  ;; the CADR's Unibus clock; the Lambda's branch is gone.
-  (LET ((LOW (%UNIBUS-READ #o764120))
-	(HIGH (%UNIBUS-READ #o764122)))
-    (VALUES (DPB HIGH #o2007 LOW) (LDB #o0711 HIGH))))
+  ;; quux: the processor's clock, source 15, as in microsecond-time.
+  (do () (nil)
+    (let* ((high (%microsecond-clock-ldb #o2711))
+	   (low (%microsecond-clock-ldb #o0027)))
+      (when (= high (%microsecond-clock-ldb #o2711))
+	(return (values low high))))))
 
 (DEFCONST INTERNAL-TIME-UNITS-PER-SECOND 60.
   "60 60ths of a second in a second.")

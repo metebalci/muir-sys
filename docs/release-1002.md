@@ -18,7 +18,7 @@ a comment in that file saying why.
 - **A band stops on anything else.** `LISP-REINITIALIZE` (`sys/ltop.lisp`)
   first calls `SI:CHECK-MACHINE-IS-QUUX`: if the processor type is not
   QUUX's, it prints why on the cold-load stream and halts, as the
-  microcode's `MACHINE-NOT-QUUX-4` does for the microcode. Loaded into System
+  microcode's `MACHINE-NOT-QUUX-5` does for the microcode. Loaded into System
   1001's band, it passes on QUUX and halts on a CADR running 323.
 - **So a 1002 band is built on QUUX.** Compiling and making the cold load
   can still run on a 1001 band on the CADR; booting the cold load, QLD and
@@ -73,6 +73,23 @@ a comment in that file saying why.
     `A-TV-CLOCK-RATE` is 60, the tick's rate, so the sequence-break clock
     is once a second (67 suited the display's 60.5 Hz). Lisp's time of day
     comes from the microsecond clock, which this does not touch.
+  - **The clocks are in the processor** (revision 5, muir's contract Q1).
+    The tick is fixed at 60 Hz; destination 4, the tick's period until
+    now, is the interval timer's period (`INTERVAL-PERIOD`), with its
+    enable and clear in `TICK-CONTROL` <2> and <3>; and source 15,
+    `MICROSECOND-CLOCK`, is a free-running 32-bit count of microseconds
+    since power-on, read whole in one instruction (`sys/cadsym.lisp`). It
+    replaces the I/O board's clock at Unibus 764120 and 764122: the
+    microcode's `READ-MICROSECOND-CLOCK`, `READ-MICROSECOND-CLOCK-INTO-MD`
+    and `READ-USEC-TIME` read the source (`ucadr/uc-cadr.lisp`), and Lisp
+    reads it through a new misc instruction, `%MICROSECOND-CLOCK-LDB`
+    (761, in GLOBAL: `cold/global.lisp`), which returns a field of one read
+    as a fixnum, so that `TIME`
+    (`sys/qrand.lisp`) takes its bits without consing;
+    `TIME:MICROSECOND-TIME` and `TIME:FIXNUM-MICROSECOND-TIME`
+    (`io1/time.lisp`) read the high field on both sides of the low. Feature
+    page word 14 is 1 when these clocks are present, and
+    `SI:PRINT-FEATURE-PAGE` names it.
   - **MONO TV is the display.** QUUX's display is a 1-bit frame buffer at
     physical 17000000, 1920 by 1080 at 60 words a line by default, with no
     sync program and no interrupt; muir can make it other sizes. The
@@ -127,7 +144,7 @@ a comment in that file saying why.
     type in 3:0; a CADR does not drive the source and reads all ones. muir's
     `docs/quux.md` holds the contract. `INITIAL-MAP-A`
     (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
-    `MACHINE-NOT-QUUX-4` on anything but QUUX from revision 4, so microcode
+    `MACHINE-NOT-QUUX-5` on anything but QUUX from revision 5, so microcode
     1000 never runs with a map, a PDL buffer, an instruction or a clock the
     hardware lacks. It then
     sets every level-1 entry to 77, zeroes block 77, and halts at
