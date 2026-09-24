@@ -31,9 +31,8 @@
 ;;; DISK-READ
 ;;; DISK-WRITE
 
-(DEFVAR *UNIT-CYLINDER-OFFSETS* NIL
-  "Alist for dealing with disks with offset origins.
-use care! Unit 0 not offset!")
+;; quux: *unit-cylinder-offsets*, which moved a unit's origin by cylinders,
+;; is gone: block-disk has one pack, unit 0, and no cylinders.
 
 ;;; Area containing wirable buffers and RQBs
 (DEFVAR DISK-BUFFER-AREA (MAKE-AREA :NAME 'DISK-BUFFER-AREA :GC :STATIC)
@@ -57,6 +56,8 @@ use care! Unit 0 not offset!")
 				      ;read compares on transfers longer than 1 block.
 				      ;This didn't find any problems while it was on anyway.
 				      ;(Fixed by DC ECO#1)
+;; quux: block-disk's errors are final (no pack, stopped by error, past the end,
+;; nxm), so disk-run retries none; this count is no longer used.
 (DEFVAR DISK-ERROR-RETRY-COUNT 5 "Retry this many times before CERRORing, on disk errors.")
 (DEFVAR LET-MICROCODE-HANDLE-DISK-ERRORS T "Use the disk error retry code in the microcode.")
 
@@ -124,36 +125,43 @@ The function receives arguments :READ-COMPARE, the RQB, and the ADDRESS."
 		     (AREF RQB %DISK-RQ-STATUS-HIGH))))
 	((SEND UNIT :READ-COMPARE RQB ADDRESS))))
 
-;;; Get STATUS of a unit by doing OFFSET-CLEAR (nebbish command) to it
-;;; Leaves the status in the rqb
-(DEFUN GET-DISK-STATUS (RQB UNIT)
-  (DISK-RUN RQB UNIT 0 1 1 %DISK-COMMAND-OFFSET-CLEAR "Offset Clear" T))
-
-;(DEFUN LOCAL-DISK-APPARENTLY-EXISTS-P (UNIT)
-;  "Returns T if there is reason to believe that UNIT exists as a running disk drive."	
-;  UNIT)					   
+;;; Get STATUS of a unit.  Leaves the status in the rqb.
+;; quux: block-disk has no command that only returns its status (mit's used
+;; offset clear), so its status register is read directly.
+(defun get-disk-status (rqb unit)
+  (block-disk-check-unit unit)
+  (let ((status (%xbus-read #o377774)))
+    (setf (aref rqb %disk-rq-status-low) (ldb #o0020 status)
+	  (aref rqb %disk-rq-status-high) (ldb #o2020 status))
+    rqb))
 
 ;;; Power up a drive, return T if successful, NIL if timed out
+;; quux: block-disk has no drive to spin up; this waits for a pack, status
+;; <9> clear, where mit's waited for the drive to be on cylinder.
 (DEFUN POWER-UP-DISK (UNIT &OPTIONAL (TIME-TO-WAIT (* 30. 60.)) &AUX RQB)
-  "Attempt to turn on disk unit UNIT, returning T if successful.  Timeout after TIME-TO-WAIT."
+  "Wait for disk unit UNIT to have a pack, returning T if it does.  Timeout after TIME-TO-WAIT."
   (UNWIND-PROTECT
      (PROGN (SETQ RQB (GET-DISK-RQB))
 	    (DO ((START-TIME (TIME)))
 		((OR (> (TIME-DIFFERENCE (TIME) START-TIME) TIME-TO-WAIT))	
-		     (NOT (LDB-TEST %%DISK-STATUS-LOW-OFF-CYLINDER
+		     (NOT (LDB-TEST %%disk-status-low-no-pack
 				    (PROGN (GET-DISK-STATUS RQB UNIT)
 					   (AREF RQB %DISK-RQ-STATUS-LOW)))))
-		 (NOT (LDB-TEST %%DISK-STATUS-LOW-OFF-CYLINDER
+		 (NOT (LDB-TEST %%disk-status-low-no-pack
 				(AREF RQB %DISK-RQ-STATUS-LOW))))
-	      (PROCESS-SLEEP 60. "Wait for disk (power up)"))
+	      (PROCESS-SLEEP 60. "Wait for disk pack"))
      (RETURN-DISK-RQB RQB)))
 
-(DEFUN CLEAR-DISK-FAULT (UNIT &AUX RQB)
-  "Clear any error indicators on disk drive UNIT."
-  (UNWIND-PROTECT
-     (PROGN (SETQ RQB (GET-DISK-RQB))
-	    (DISK-RUN RQB UNIT 0 1 1 %DISK-COMMAND-FAULT-CLEAR "Fault Clear" T))
-     (RETURN-DISK-RQB RQB)))
+;; quux: block-disk has no fault to clear (mit's issued fault clear).
+(DEFUN CLEAR-DISK-FAULT (UNIT)
+  "Clear any error indicators on disk drive UNIT.  Block-disk has none."
+  (block-disk-check-unit unit)
+  nil)
+
+;; quux: block-disk has one pack, unit 0.
+(defun block-disk-check-unit (unit)
+  (unless (eql unit 0)
+    (ferror nil "Block-disk has one pack, unit 0, not unit ~S." unit)))
 
 ;;; A debugging function
 (DEFUN PRINT-RQB (RQB)
@@ -317,6 +325,9 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 ;;; are reading the label, and automatically adjusts the geometry
 ;;; for that unit from the label.  You can also store explicitly
 ;;; in the arrays if you like.
+;; quux: block-disk takes block numbers, so nothing here divides by these any
+;; more; read-disk-label still keeps the label's geometry in them, for the
+;; label editor and the tools that print it.
 
 (DEFVAR DISK-SECTORS-PER-TRACK-ARRAY)
 (DEFVAR DISK-HEADS-PER-CYLINDER-ARRAY)
@@ -327,170 +338,96 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 
 ;;; These must be called with the buffer already wired, which specifies the
 ;;; number of pages implicitly (usually 1 of course)
-;;; For now, error-handling is rudimentary, fix later
 ;;; Note!! If you call this directly, you better make sure the modified bits for the
 ;;; pages transferred get set!!!
-(DEFUN DISK-READ-WIRED (RQB UNIT ADDRESS
-			&OPTIONAL (MICROCODE-ERROR-RECOVERY LET-MICROCODE-HANDLE-DISK-ERRORS)
-				  DO-NOT-OFFSET
-			&AUX (SECTORS-PER-TRACK (AREF DISK-SECTORS-PER-TRACK-ARRAY UNIT))
-			     (HEADS-PER-CYLINDER (AREF DISK-HEADS-PER-CYLINDER-ARRAY UNIT)))
-  
-  (DISK-RUN RQB UNIT ADDRESS SECTORS-PER-TRACK HEADS-PER-CYLINDER
-	    (LOGIOR %DISK-COMMAND-READ
-		    (IF MICROCODE-ERROR-RECOVERY %DISK-COMMAND-DONE-INTERRUPT-ENABLE 0))
-	    "read"
-	    nil
-	    (if do-not-offset -100. 0)))
+;; quux: do-not-offset, which read a cadr unit 100 cylinders back, means
+;; nothing on block-disk and is ignored.
+(defun disk-read-wired (rqb unit address
+			&optional (microcode-error-recovery let-microcode-handle-disk-errors)
+				  do-not-offset)
+  (declare (ignore do-not-offset))
+  (disk-run rqb unit address
+	    (logior %disk-command-read
+		    (if microcode-error-recovery %disk-command-done-interrupt-enable 0))
+	    "read"))
 
-(DEFUN DISK-WRITE-WIRED (RQB UNIT ADDRESS
-		   &OPTIONAL (MICROCODE-ERROR-RECOVERY LET-MICROCODE-HANDLE-DISK-ERRORS)
-		   &AUX (SECTORS-PER-TRACK (AREF DISK-SECTORS-PER-TRACK-ARRAY UNIT))
-			(HEADS-PER-CYLINDER (AREF DISK-HEADS-PER-CYLINDER-ARRAY UNIT)))
-  (DISK-RUN RQB UNIT ADDRESS SECTORS-PER-TRACK HEADS-PER-CYLINDER
-	    (LOGIOR %DISK-COMMAND-WRITE
-		    (IF MICROCODE-ERROR-RECOVERY %DISK-COMMAND-DONE-INTERRUPT-ENABLE 0))
+(defun disk-write-wired (rqb unit address
+			 &optional (microcode-error-recovery let-microcode-handle-disk-errors))
+  (disk-run rqb unit address
+	    (logior %disk-command-write
+		    (if microcode-error-recovery %disk-command-done-interrupt-enable 0))
 	    "write"))
 
-
-; A hardware bug causes this to lose if xfer > 1 page  (Fixed by DC ECO#1)
 ;;; Returns T if read-compare difference detected
-(DEFUN DISK-READ-COMPARE-WIRED (RQB UNIT ADDRESS
-		   &OPTIONAL (MICROCODE-ERROR-RECOVERY LET-MICROCODE-HANDLE-DISK-ERRORS)
-		   &AUX (SECTORS-PER-TRACK (AREF DISK-SECTORS-PER-TRACK-ARRAY UNIT))
-			(HEADS-PER-CYLINDER (AREF DISK-HEADS-PER-CYLINDER-ARRAY UNIT)))
-  (DISK-RUN RQB UNIT ADDRESS SECTORS-PER-TRACK HEADS-PER-CYLINDER
-	    (LOGIOR %DISK-COMMAND-READ-COMPARE
-		    (IF MICROCODE-ERROR-RECOVERY %DISK-COMMAND-DONE-INTERRUPT-ENABLE 0))
-	    "read-compare")
-  (LDB-TEST %%DISK-STATUS-HIGH-READ-COMPARE-DIFFERENCE
-	    (AREF RQB %DISK-RQ-STATUS-HIGH)))
+;; quux: block-disk has no read-compare (command 10 stops by error), so the
+;; blocks are read into a second rqb and compared here.  the difference bit
+;; is set in rqb's status as the cadr controller set it.
+(defun disk-read-compare-wired (rqb unit address
+				&optional (microcode-error-recovery let-microcode-handle-disk-errors))
+  (let* ((n-pages (disk-transfer-size rqb))
+	 (rqb2 (get-disk-rqb n-pages))
+	 difference)
+    (unwind-protect
+	(let ((buffer (rqb-buffer rqb))
+	      (buffer2 (rqb-buffer rqb2)))
+	  (disk-read rqb2 unit address microcode-error-recovery)
+	  (setq difference
+		(dotimes (i (* n-pages page-size 2))
+		  (unless (= (aref buffer i) (aref buffer2 i))
+		    (return t))))
+	  (setf (aref rqb %disk-rq-status-low) (aref rqb2 %disk-rq-status-low)
+		(aref rqb %disk-rq-status-high)
+		(dpb (if difference 1 0) %%disk-status-high-read-compare-difference
+		     (aref rqb2 %disk-rq-status-high))))
+      (return-disk-rqb rqb2))
+    difference))
 
-(DEFUN DISK-RUN (RQB UNIT ADDRESS SECTORS-PER-TRACK HEADS-PER-CYLINDER CMD CMD-NAME
-		 &OPTIONAL NO-ERROR-CHECKING (offset-of-another-kind 0)
-		 &AUX ADR CYLINDER SURFACE SECTOR ERROR-COUNT ER-H ER-L TEM)
-  (PROG (FINAL-ADDRESS FINAL-CYLINDER FINAL-SURFACE FINAL-SECTOR MICROCODE-ERROR-RECOVERY)
-	(SETQ FINAL-ADDRESS (+ ADDRESS (1- (DISK-TRANSFER-SIZE RQB)))   ;count length of CCW.
-	      FINAL-SECTOR (\ FINAL-ADDRESS SECTORS-PER-TRACK)
-	      ADR (FLOOR FINAL-ADDRESS SECTORS-PER-TRACK)
-	      FINAL-SURFACE (\ ADR HEADS-PER-CYLINDER)
-	      FINAL-CYLINDER (FLOOR ADR  HEADS-PER-CYLINDER)
-	      MICROCODE-ERROR-RECOVERY (BIT-TEST %DISK-COMMAND-DONE-INTERRUPT-ENABLE CMD))
-     FULL-RETRY
-	(SETQ ERROR-COUNT DISK-ERROR-RETRY-COUNT)
-     PARTIAL-RETRY
-	(SETQ SECTOR (\ ADDRESS SECTORS-PER-TRACK)
-	      ADR (FLOOR ADDRESS SECTORS-PER-TRACK)
-	      SURFACE (\ ADR HEADS-PER-CYLINDER)
-	      CYLINDER (+ (FLOOR ADR HEADS-PER-CYLINDER)
-			  (COND ((ZEROP UNIT) 0)	;dont lose completely!!
-				((SETQ TEM (ASSQ UNIT *UNIT-CYLINDER-OFFSETS*))
-				 (CDR TEM))
-				(T 0))))
-	(SETF (AREF RQB %DISK-RQ-COMMAND) CMD
-	      (AREF RQB %DISK-RQ-SURFACE-SECTOR) (+ (LSH SURFACE 8) SECTOR)
-	      (AREF RQB %DISK-RQ-UNIT-CYLINDER) (+ (LSH UNIT 12.)
-						   (LDB #o0014
-							(+ CYLINDER OFFSET-OF-ANOTHER-KIND)))
-	      (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER) 0
-	      (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR) 0)
-	(DISK-RUN-1 RQB UNIT)
-	(WHEN NO-ERROR-CHECKING
-	  (RETURN NIL))
-	(SETQ ER-H (AREF RQB %DISK-RQ-STATUS-HIGH)
-	      ER-L (AREF RQB %DISK-RQ-STATUS-LOW))
-	(AND (= CMD %DISK-COMMAND-READ-COMPARE)
-	     (LDB-TEST %%DISK-STATUS-HIGH-READ-COMPARE-DIFFERENCE ER-H)
-	     (SETQ ER-H (DPB 0 %%DISK-STATUS-HIGH-INTERNAL-PARITY ER-H)))
-	(COND ((OR (BIT-TEST %DISK-STATUS-HIGH-ERROR ER-H)
-		   (BIT-TEST %DISK-STATUS-LOW-ERROR ER-L))
-	       (OR (ZEROP (SETQ ERROR-COUNT (1- ERROR-COUNT)))
-		   MICROCODE-ERROR-RECOVERY
-		   (GO PARTIAL-RETRY))
-	       (CERROR :RETRY-DISK-OPERATION NIL 'SYS:DISK-ERROR
-		       "Disk ~A error unit ~D, cyl ~D., surf ~D., sec ~D.,~%  status ~A
+;; quux: block-disk's disk address is the block number, <27:0>: its low 16
+;; bits go in the rqb's surface-sector halfword and the rest in its
+;; unit-cylinder halfword, where mit's put the cylinder, head and sector it
+;; divided out of the block number by the label's geometry.  after the
+;; transfer the final address is the last block moved, or the one that
+;; failed.  block-disk's errors are final, so none is retried; the error
+;; offers a retry to the user, as mit's did.
+(defun disk-run (rqb unit address cmd cmd-name &optional no-error-checking
+		 &aux (final-address (+ address (1- (disk-transfer-size rqb)))))
+  (block-disk-check-unit unit)
+  (do-forever
+    (setf (aref rqb %disk-rq-command) cmd
+	  (aref rqb %disk-rq-surface-sector) (ldb #o0020 address)
+	  (aref rqb %disk-rq-unit-cylinder) (ldb #o2014 address)
+	  (aref rqb %disk-rq-final-unit-cylinder) 0
+	  (aref rqb %disk-rq-final-surface-sector) 0)
+    (disk-run-1 rqb unit)
+    (when no-error-checking
+      (return nil))
+    (let ((done (dpb (aref rqb %disk-rq-final-unit-cylinder) #o2014
+		     (aref rqb %disk-rq-final-surface-sector))))
+      (cond ((or (bit-test %disk-status-high-error (aref rqb %disk-rq-status-high))
+		 (bit-test %disk-status-low-error (aref rqb %disk-rq-status-low)))
+	     (cerror :retry-disk-operation nil 'sys:disk-error
+		     "Disk ~A error at block ~D., status ~A
  Type ~:C to retry."
-		       CMD-NAME UNIT
-		       (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER))
-		       (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-		       (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-		       (DECODE-DISK-STATUS (AREF RQB %DISK-RQ-STATUS-LOW)
-					   (AREF RQB %DISK-RQ-STATUS-HIGH))
-		       #/RESUME)
-	       (GO FULL-RETRY))
-	      ;; the test that this is not a Lambda is gone; on a CADR it was always true.
-	      ((OR ( FINAL-CYLINDER
-		     (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER)))
-		   ( FINAL-SURFACE
-		     (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR)))
-		   ( FINAL-SECTOR
-		     (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))))
-	       (CERROR :RETRY-DISK-OPERATION NIL 'SYS:DISK-ERROR
-		       "Disk ~A error unit ~D, cyl ~D., surf ~D., sec ~D.,~%  status ~A
- Failed to complete operation, final disk address should be ~D, ~D, ~D.
+		     cmd-name done
+		     (decode-disk-status (aref rqb %disk-rq-status-low)
+					 (aref rqb %disk-rq-status-high))
+		     #/resume))
+	    ((not (= done final-address))
+	     (cerror :retry-disk-operation nil 'sys:disk-error
+		     "Disk ~A stopped at block ~D., not ~D., status ~A
  Type ~:C to retry."
-		       CMD-NAME UNIT
-		       (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER))
-		       (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-		       (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-		       (DECODE-DISK-STATUS (AREF RQB %DISK-RQ-STATUS-LOW)
-					   (AREF RQB %DISK-RQ-STATUS-HIGH))
-		       FINAL-CYLINDER FINAL-SURFACE FINAL-SECTOR
-		       #/RESUME)
-	       (GO FULL-RETRY))
-	      ((AND DISK-SHOULD-READ-COMPARE
-		    (OR (= CMD %DISK-COMMAND-READ) (= CMD %DISK-COMMAND-WRITE)))
-	       (SETF (AREF RQB %DISK-RQ-COMMAND) %DISK-COMMAND-READ-COMPARE)
-	       (DISK-RUN-1 RQB UNIT)
-	       (COND ((OR (BIT-TEST %DISK-STATUS-HIGH-ERROR (AREF RQB %DISK-RQ-STATUS-HIGH))
-			  (BIT-TEST %DISK-STATUS-LOW-ERROR (AREF RQB %DISK-RQ-STATUS-LOW)))
-		      (OR (ZEROP (SETQ ERROR-COUNT (1- ERROR-COUNT)))
-			  (GO PARTIAL-RETRY))
-		      (CERROR :RETRY-DISK-OPERATION NIL 'SYS:DISK-ERROR
-			      "Disk error during read//compare after ~A unit ~D, cyl ~D., surf ~D., sec ~D.,~%  status ~A
- Type ~:C to retry."
-			      CMD-NAME UNIT
-			      (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER))
-			      (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-			      (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-			      (DECODE-DISK-STATUS (AREF RQB %DISK-RQ-STATUS-LOW)
-						  (AREF RQB %DISK-RQ-STATUS-HIGH))
-			      #/RESUME)
-		      (GO FULL-RETRY))
-		     ((LDB-TEST %%DISK-STATUS-HIGH-READ-COMPARE-DIFFERENCE
-				(AREF RQB %DISK-RQ-STATUS-HIGH))
-		      ;; A true read/compare difference really shouldn't happen, complain
-		      (CERROR :RETRY-DISK-OPERATION NIL 'SYS:DISK-ERROR
-			      "Disk read//compare error unit ~D, cyl ~D., surf ~D., sec ~D.
- Type ~:C to retry."
-			      UNIT
-			      (LDB #o0014 (AREF RQB %DISK-RQ-FINAL-UNIT-CYLINDER))
-			      (LDB #o1010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-			      (LDB #o0010 (AREF RQB %DISK-RQ-FINAL-SURFACE-SECTOR))
-			      #/RESUME)
-		      (GO FULL-RETRY)))))))
+		     cmd-name done final-address
+		     (decode-disk-status (aref rqb %disk-rq-status-low)
+					 (aref rqb %disk-rq-status-high))
+		     #/resume))
+	    (t (return nil))))))
 
-;;; This knows about a second disk controller, containing units 10-17,
-;;; which is at an XBUS address 4 less than the address of the first controller.
-(DEFUN DISK-RUN-1 (RQB UNIT)
-  (COND ((< UNIT 8)
-	 (%DISK-OP RQB)
-	 (DO () ((NOT (ZEROP (AREF RQB %DISK-RQ-DONE-FLAG))))))	;Loop until disk op complete
-	(T ;; Await disk control ready
-	   (DO () ((BIT-TEST 1 (%XBUS-READ #o377770))))
-	   ;; Write 4 words into disk control
-	   (%BLT (%MAKE-POINTER-OFFSET DTP-FIX RQB
-				       (+ (LSH %DISK-RQ-COMMAND -1) (ARRAY-DATA-OFFSET RQB)))
-		 (+ IO-SPACE-VIRTUAL-ADDRESS #o377770)
-		 4 1)
-	   ;; Await disk control done
-	   (DO () ((BIT-TEST 1 (%XBUS-READ #o377770))))
-	   ;; Read 4 words from disk control
-	   (%BLT (+ IO-SPACE-VIRTUAL-ADDRESS #o377770)
-		 (%MAKE-POINTER-OFFSET DTP-FIX RQB
-				       (+ (LSH %DISK-RQ-STATUS-LOW -1)
-					  (ARRAY-DATA-OFFSET RQB)))
-		 4 1))))
+;; quux: block-disk has one pack, unit 0; mit's second controller, units
+;; 10-17 at an xbus address 4 less, is gone.
+(defun disk-run-1 (rqb unit)
+  (block-disk-check-unit unit)
+  (%disk-op rqb)
+  (do () ((not (zerop (aref rqb %disk-rq-done-flag))))))	;Loop until disk op complete
 
 (DEFUN DISK-TRANSFER-SIZE (RQB)
   (DO ((CCWP %DISK-RQ-CCW-LIST (+ CCWP 2))
@@ -502,38 +439,20 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 ;;; Except for Idle, Interrupt, Read Compare Difference (and block-counter) which
 ;;; are not interesting as errors.
 ;;; Also if the transfer is aborted, leave out Internal Parity which is always on.
-(DEFUN DECODE-DISK-STATUS (LOW HIGH)
-  (WITH-OUTPUT-TO-STRING (S)
-    (LOOP FOR (NAME PPSS HALF) IN '(("Nonexistent-Memory" %%DISK-STATUS-HIGH-NXM T)
-				    ("Memory-Parity" %%DISK-STATUS-HIGH-MEM-PARITY T)
-				    ("Multiple-Select" %%DISK-STATUS-LOW-MULTIPLE-SELECT)
-				    ("No-Select" %%DISK-STATUS-LOW-NO-SELECT)
-				    ("Fault" %%DISK-STATUS-LOW-FAULT)
-				    ("Off-line"  %%DISK-STATUS-LOW-OFF-LINE)
-				    ("Off-Cylinder" %%DISK-STATUS-LOW-OFF-CYLINDER)
-				    ("Seek-Error" %%DISK-STATUS-LOW-SEEK-ERROR)
-				    ("Start-Block-Error" %%DISK-STATUS-LOW-START-BLOCK-ERROR)
-				    ("Overrun" %%DISK-STATUS-LOW-OVERRUN)
-				    ("Header-Compare" %%DISK-STATUS-HIGH-HEADER-COMPARE T)
-				    ("Header-ECC" %%DISK-STATUS-HIGH-HEADER-ECC T)
-				    ("ECC-Hard" %%DISK-STATUS-HIGH-ECC-HARD T)
-				    ("ECC-Soft" %%DISK-STATUS-LOW-ECC-SOFT)
-				    ("Timeout" %%DISK-STATUS-LOW-TIMEOUT)
-				    ("Internal-Parity" %%DISK-STATUS-HIGH-INTERNAL-PARITY T)
-				    ("Transfer-Aborted" %%DISK-STATUS-LOW-TRANSFER-ABORTED)
-				    ("CCW-Cycle" %%DISK-STATUS-HIGH-CCW-CYCLE T)
-				    ("Read-Only" %%DISK-STATUS-LOW-READ-ONLY)
-				    ("Sel-Unit-Attention"
-				        %%DISK-STATUS-LOW-SEL-UNIT-ATTENTION)
-				    ("Any-Unit-Attention" %%DISK-STATUS-LOW-ATTENTION))
-	  WITH FLAG = NIL
-	  WHEN (AND (LDB-TEST (SYMEVAL PPSS) (IF (NULL HALF) LOW HIGH))
-		    (OR (NEQ PPSS '%%DISK-STATUS-HIGH-INTERNAL-PARITY)
-			(NOT (LDB-TEST %%DISK-STATUS-LOW-TRANSFER-ABORTED LOW))))
-	    DO (IF FLAG (SEND S :STRING-OUT "  "))
-	       (SEND S :STRING-OUT NAME)
-	       (SETQ FLAG T))))
-
+;; quux: block-disk's status bits: nxm, past the end, no pack and stopped by
+;; error.  the cadr controller's drive, ecc and transfer bits are gone.
+(defun decode-disk-status (low high)
+  (with-output-to-string (s)
+    (loop for (name ppss half) in '(("Nonexistent-Memory" %%disk-status-high-nxm t)
+				    ("Past-End-Of-Pack" %%disk-status-high-past-end t)
+				    ("No-Pack" %%disk-status-low-no-pack)
+				    ("Stopped-By-Error" %%disk-status-low-stopped-by-error))
+	  with flag = nil
+	  when (ldb-test (symeval ppss) (if (null half) low high))
+	    do (if flag (send s :string-out "  "))
+	       (send s :string-out name)
+	       (setq flag t))))
+
 ;;; Unit is unit number on local disk controller or a string.
 ;;; If a string, CC means hack over debug interface
 ;;;    		 TEST is a source of test data

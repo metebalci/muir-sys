@@ -1171,8 +1171,12 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %%DISK-STATUS-HIGH-HEADER-COMPARE 0201
   %%DISK-STATUS-HIGH-HEADER-ECC 0101
   %%DISK-STATUS-HIGH-ECC-HARD 0001
+  ;; quux: block-disk's own bits, where the cadr controller had others:
+  ;; <17>, past the end of the pack, and <20>, nxm, in the high half.
+  %%disk-status-high-past-end 0101
   ;; Mask for bits which are errors normally
-  %DISK-STATUS-HIGH-ERROR 237
+  ;; quux: block-disk's, past the end and nxm; the cadr's was 237.
+  %DISK-STATUS-HIGH-ERROR 22
   %%DISK-STATUS-LOW-ECC-SOFT 1701
   %%DISK-STATUS-LOW-OVERRUN 1601
   %%DISK-STATUS-LOW-TRANSFER-ABORTED 1501
@@ -1189,8 +1193,12 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %%DISK-STATUS-LOW-SEL-UNIT-ATTENTION 0201
   %%DISK-STATUS-LOW-ATTENTION 0101
   %%DISK-STATUS-LOW-READY 0001
+  ;; quux: block-disk's own bits: <9>, no pack, and <13>, stopped by error.
+  %%disk-status-low-no-pack 1101
+  %%disk-status-low-stopped-by-error 1501
   ;; Mask for bits which are errors normally
-  %DISK-STATUS-LOW-ERROR 177560
+  ;; quux: block-disk's, no pack and stopped by error; the cadr's was 177560.
+  %DISK-STATUS-LOW-ERROR 21000
   %DISK-COMMAND-DONE-INTERRUPT-ENABLE 1_11.
   %DISK-COMMAND-ATTENTION-INTERRUPT-ENABLE 1_10.	;Trident only
   %DISK-COMMAND-RECALIBRATE 10001005

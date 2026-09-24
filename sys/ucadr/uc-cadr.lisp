@@ -21,8 +21,8 @@
 
 (ASSIGN DISK-READ-COMMAND 0)
 (ASSIGN DISK-WRITE-COMMAND 11)
-(ASSIGN DISK-READ-COMPARE-COMMAND 10)
-(ASSIGN DISK-RECALIBRATE-COMMAND 10001005)
+;; quux: block-disk does read, 0, and write, 11, only; mit's read-compare, 10,
+;; and recalibrate, 10001005, are gone.
 
 ;; quux: tv-regs-address-base and a-tv-regs-base are gone: the tv's vertical
 ;; interrupt was the only thing the microcode read there, and mono tv has none.

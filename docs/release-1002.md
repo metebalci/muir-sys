@@ -150,7 +150,33 @@ a comment in that file saying why.
   which a wider index never does in time: A memory was overwritten and the
   loaded microcode never started. It copies exactly 2000 words now, clears
   PDL words 0-1777 at any width, and clears all 64 level-2 blocks
-  (`ucadr/promh.text`).
+  (`ucadr/promh.text`). With block-disk (below) it serves QUUX only.
+- **QUUX's disk is block-disk** (muir's `--disk-controller block-disk`),
+  the CADR controller's registers and command list with the drive's
+  geometry taken out: the disk address is a block number, `<27:0>`, of one
+  pack, unit 0; the commands are read and write only; and the status has
+  four error bits, `<9>` no pack, `<13>` stopped by error, `<17>` past the
+  end of the pack and `<20>` NXM. QUUX has no other disk (the user). So:
+  - the boot PROM writes the block number as the disk address, waits for a
+    pack rather than recalibrating, saves page 0 without a read-compare, and
+    no longer reads the label's geometry or divides (`ucadr/promh.text`);
+  - the microcode addresses blocks directly and treats every error as
+    final, so its retry, recovery, recalibrate, read-compare and ECC code
+    is gone, as are the recalibrates at boot and the reading of the
+    geometry from the label (`ucadr/uc-disk.lisp`, `uc-cold-disk.lisp`);
+    its geometry and read-compare variables stay, unused, so that A memory
+    does not move;
+  - Lisp's `DISK-RUN` (`io/disk.lisp`) puts the block number in the
+    request, checks the final block and retries nothing; read-compare is
+    done by reading into a second request and comparing; the status is
+    read from the controller's register; `DECODE-DISK-STATUS`, the error
+    log (`io/dledit.lisp`) and the band receiver (`sys2/band.lisp`) speak
+    of blocks; `cold/qcom.lisp` names block-disk's status bits and masks.
+  The label keeps its geometry words, for the tools that print them.
+  Tested on muir 71953a2 with block-disk: the PROM loads the microcode, a
+  cold load boots and QLDs, the saved band boots; Lisp reads the label and
+  a band's first blocks, writes and reads back a block, read-compares, and
+  a read past the end reports it; the host's reading of the pack agrees.
 - **The band takes the PDL buffer's length from the machine.** A stack
   group's saved PDL phase is masked with `SI:PDL-BUFFER-LENGTH`
   (`sys2/proces.lisp`, and `eh/eh.lisp` rebuilding a frame), which was the
