@@ -58,6 +58,7 @@ A-40		(0)
 A-400		(0)
 A-20000		(0)
 A-36000		(0)	;quux: the prom's first address; the microcode ends below it
+A-377		(0)	;quux: the last word of page 0
 A-DISK-ERROR	(0)
 
 ;;; quux: block-disk takes a block number, so the label's geometry (the
@@ -292,6 +293,7 @@ MAKE-CONSTANTS
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
 	((A-36000) DPB M-ONES (BYTE-FIELD 4 10.) A-ZERO)
+	((A-377) DPB M-ONES (BYTE-FIELD 8. 0) A-ZERO)
 	;;; A-DISK-ERROR/ 4421000
 	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
 	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
@@ -413,7 +415,11 @@ PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
 			;Next instruction mustn't be ((VMA-START-WRITE) VMA).
 	((WRITE-MEMORY-DATA-START-WRITE) READ-MEMORY-DATA)
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	(JUMP-LESS-THAN VMA A-400 PAGE-0-PARITY-FIX) ;This does one extra location, too bad.
+	;; quux: stop at 377, the last word of page 0.  mit's test, against 400,
+	;; did "one extra location, too bad": virtual 400, page 1, the disk's
+	;; page, whose word 0 nothing answers on quux, an xbus nxm (muir traced
+	;; it at 17377400).
+	(JUMP-LESS-THAN VMA A-377 PAGE-0-PARITY-FIX)
 
 ;;; Now turn on parity checking
 ;; quux: error stop is bit 0 of the register page's word 102, the mode, at

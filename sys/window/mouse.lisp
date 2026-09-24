@@ -40,6 +40,10 @@
 
 (DEFCONST MOUSE-REG1 #o764104)		;Unibus address of buttons and Y position
 (DEFCONST MOUSE-REG2 #o764106)		;Unibus address of raw quadrature and X position
+;; quux (contract q3): the mouse is the register page's word 122, an xbus
+;; address: x in <11:0>, y in <27:16>, the buttons in <14:12> as 764104 had
+;; them.  the two unibus registers above are the cadr's.
+(defconst mouse-reg #o377122)
 
 
 ;;;; Low-level routines
@@ -130,9 +134,10 @@ PEEK means to look at the state without pulling anything out of the buffer
 	   (VALUES (PROG1 MOUSE-BUTTONS-IN-PROGRESS (SETQ MOUSE-BUTTONS-IN-PROGRESS NIL))
 		   MOUSE-LAST-BUTTONS-TIME MOUSE-LAST-BUTTONS-X MOUSE-LAST-BUTTONS-Y))
 	  ((= TEM MOUSE-BUTTONS-BUFFER-IN-INDEX)
-	   ;; the buttons are read from the Unibus; the Lambda's branch is gone.
+	   ;; quux: the buttons are read from the register page's word 122, with
+	   ;; %p-ldb so that the 32-bit word is never made a bignum.
 	   (VALUES (LOGIOR (IF USE-KBD-BUTTONS KBD-BUTTONS 0)
-			   (LDB #O1403 (%UNIBUS-READ MOUSE-REG1)))
+			   (%p-ldb #o1403 (+ sys:io-space-virtual-address mouse-reg)))
 		   (TIME:FIXNUM-MICROSECOND-TIME) MOUSE-X MOUSE-Y))
 	  (T (OR PEEK (SETQ MOUSE-BUTTONS-BUFFER-OUT-INDEX (\ (+ TEM 4) 32.)))
 	     (VALUES (LOGIOR (IF USE-KBD-BUTTONS KBD-BUTTONS 0)

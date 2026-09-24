@@ -325,13 +325,20 @@ XTVERS0((M-B) M-D)					;COPY OF HEIGHT
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)			;This is special.
 	((VMA-START-READ) M-E)				;FETCH TOP LEFT-HAND WORD
 XTVERS1	(CHECK-PAGE-READ-NO-INTERRUPT)			;DO FIRST COLUMN
-	(JUMP-LESS-OR-EQUAL M-B A-ZERO XTVERS2)		;JUMP IF COLUMN ALL DONE
+	;; quux: the column's count is tested after each row, before the next
+	;; row's read starts, not at the top: mit tested it here, after the read
+	;; of the row below the rectangle had already started, so every erase read
+	;; one row below its bottom.  below the who line that is past mono tv's
+	;; buffer, an xbus nxm (muir traced them at row 1024 of a 1280x1024
+	;; screen); the cadr's tv memory ran on past its last line.  m-b is the
+	;; height, never 0 here (xtvers5 returns for 0).
 	(CALL-GREATER-OR-EQUAL VMA A-TV-SCREEN-BUFFER-END-ADDRESS TRAP)
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)			;This is special.
 	((OA-REG-LOW) M-J)
 	((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-K)
 	(CHECK-PAGE-WRITE)
 	((M-B) SUB M-B (A-CONSTANT 1))
+	(JUMP-LESS-OR-EQUAL M-B A-ZERO XTVERS2)		;JUMP IF COLUMN ALL DONE
 	(JUMP-XCT-NEXT XTVERS1)
        ((VMA-START-READ) ADD VMA A-TV-SCREEN-LOCATIONS-PER-LINE)
 

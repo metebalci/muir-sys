@@ -142,13 +142,17 @@ TRACK-MOUSE
 	((A-MOUSE-SAVE-1) M-1)
 	((A-MOUSE-SAVE-2) M-2)
 	((A-MOUSE-SAVE-E) M-E)
-	((M-A) READ-MEMORY-DATA)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(CHECK-PAGE-READ-NO-INTERRUPT)
+	;; quux (contract q3): one word, 122, holds x, y and the buttons; take it
+	;; apart into what mit read from its two unibus registers: m-a as 764104,
+	;; the y count in <11:0> and the buttons in <14:12>, and m-b as 764106,
+	;; the x count in <11:0>.
+	((M-B) (BYTE-FIELD 12. 0) READ-MEMORY-DATA)
+	((M-A) (BYTE-FIELD 12. 16.) READ-MEMORY-DATA)
+	((M-TEM) (BYTE-FIELD 3 12.) READ-MEMORY-DATA)
+	((M-A) DPB M-TEM (BYTE-FIELD 3 12.) A-A)
 	((M-TEM) XOR M-A A-MOUSE-LAST-H1)	;Have buttons changed state?
 	((M-TEM) (BYTE-FIELD 3 12.) M-TEM)
-	(JUMP-EQUAL-XCT-NEXT M-TEM A-ZERO TRACK-MOUSE-1)
-       ((M-B) READ-MEMORY-DATA)
+	(JUMP-EQUAL M-TEM A-ZERO TRACK-MOUSE-1)
 	;Store new state of buttons into buttons buffer
 	((A-MOUSE-WAKEUP) A-V-TRUE)
 	((M-T) DPB M-ZERO (BYTE-FIELD 27. 5) A-MOUSE-BUTTONS-BUFFER-IN-INDEX)

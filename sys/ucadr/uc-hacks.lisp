@@ -23,8 +23,8 @@ BEEP-WAIT
 	(JUMP-GREATER-OR-EQUAL M-TEM A-ZERO XFALSE)
 	((M-TEM) SUB M-2 A-4)
 	(JUMP-LESS-OR-EQUAL M-TEM A-ZERO BEEP-WAIT)
-	((VMA-START-WRITE) (A-CONSTANT BEEP-HARDWARE-VIRTUAL-ADDRESS))
-	(CHECK-PAGE-WRITE)
+	;; quux (contract q3): no beeper, so no click (mit wrote unibus 764110);
+	;; %beep still waits its duration, which the screen's flash relies on.
 	(JUMP BEEP-NEXT-CLICK)
 
 ;;; %DRAW-TRIANGLE X1 Y1 X2 Y2 X3 Y3 ALU SHEET

@@ -70,6 +70,7 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	((A-INTR-T) M-T)			;Convenient to be able to clobber this
 	(jump-if-bit-set (byte-field 1 0) md intr-tick)
 	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
+	(jump-if-bit-set (byte-field 1 3) md intr-kbd)	;keyboard (contract q3)
 	((VMA-START-READ) (A-CONSTANT 77773020)) ;Unibus address 766040 (interrupt status)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-INTR-LOCAL-UNIBUS-MODE) (BYTE-FIELD 1 1) MD)
@@ -185,6 +186,10 @@ UB-INTR-RET
 	((WRITE-MEMORY-DATA) IOR READ-MEMORY-DATA A-TEM)	;**
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)		;**
 UB-INTR-RET-0					;**
+	;; quux (contract q3): the keyboard's channel is filled from the register
+	;; page (intr-kbd), not the unibus, so there is no unibus interrupt to
+	;; clear or enable again; clearing it could lose a chaosnet interrupt.
+	(JUMP-EQUAL M-A (A-CONSTANT (EVAL (+ 500 %UNIBUS-CHANNEL-VECTOR-ADDRESS))) XB-INTR-RET)
 	((MD) A-ZERO)				;Clear Unibus interrupt flag
 	((VMA-START-WRITE) (A-CONSTANT 77773021)) ;Unibus address 766042
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
@@ -312,6 +317,22 @@ INND0	((VMA-START-READ) ADD M-A
 	(JUMP-NOT-EQUAL M-TEM A-ZERO INNUBI)	;Device's ready bit on, handle.
 	(JUMP INND0)
 
+;; quux (contract q3): a key word is waiting (word 100 <3>).  word 121's read
+;; takes the oldest; it goes into the wired keyboard buffer, the unibus channel
+;; at sys-com 500, as the unibus keyboard's did, through intr-2.  one word an
+;; interrupt: the keyboard interrupts again while more are waiting.
+intr-kbd
+	((vma-start-read) (a-constant quux-kbd-data-virtual-address))
+	(check-page-read-no-interrupt)
+	((a-intr-tem1) read-memory-data)
+	((m-a) (a-constant (eval (+ 500 %unibus-channel-vector-address))))
+	((vma-start-read) add m-a (a-constant (eval (- %unibus-channel-buffer-in-ptr
+						       %unibus-channel-vector-address))))
+	(check-page-read-no-interrupt)
+	((m-b) read-memory-data)
+	(jump-xct-next intr-2)
+       ((md) a-intr-tem1)
+
 ;;; XBUS interrupts
 
 ;; quux: mono tv, the display, has no interrupt, and the tick is the clock,
