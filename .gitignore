@@ -49,3 +49,5 @@
 # The run directory: logs, packs, build records and the machine's working
 # files. Local to this clone and never committed.
 /run/
+# what sibling projects hand over (see ~/projects/CLAUDE.md)
+ref/

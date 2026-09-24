@@ -86,6 +86,22 @@ a comment in that file saying why.
     CADR TV's sync program, says there is none. The microcode's first
     run-light address is inside MONO TV's default buffer, and `INTRX0` no
     longer reads the CADR TV's vertical flag.
+  - **One band runs at any MONO TV size.** The window system is made at
+    the size the feature page gave when the band was built, so at every
+    boot `TV:SET-SCREENS-TO-MONO-TV` (`window/shwarm.lisp`) moves the
+    main screen, the who line and every window to the size it gives now:
+    it shrinks the screens to the smaller of the two sizes, points every
+    array at the new words per line and buffer, and grows them to the new
+    size, the main screen scaling its windows. It follows MIT's
+    `SET-TV-SPEED` and the Lambda's `SET-SCREEN-WIDTH`, and resets the
+    Chaosnet first, as a window's change of size can let the scheduler
+    run before the Chaosnet's own reset. The cold-load stream, which was
+    the CADR's 768 by 896, takes MONO TV's size when it is made and at
+    every boot (`:SET-MONO-TV`, `window/cold.lisp`), and the run lights
+    are placed from the feature page (`sys/ltop.lisp`), not from a main
+    screen that may still have the old size. Tested with a band built at
+    1280 by 1024 and booted at 1024 by 768, 1280 by 1024, 1920 by 1080
+    and 2560 by 1440.
   - **The TV sync program is gone, and with it most of the TV registers.**
     MONO TV has no sync program, and of the CADR TV's control registers
     QUUX keeps only register 0's black-on-white bit and register 4, the
@@ -174,6 +190,11 @@ a comment in that file saying why.
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
   returns 0 for a zero dividend before it looks at the divisor. MIT's.
+- **On a screen of more than 2^21 pixels, what boot draws stops at pixel
+  2^21.** At 2560 by 1440 the Lisp listener's border and label, drawn
+  while the screens change size at boot, end at row 819; drawing there
+  works after boot, and the listener's next refresh draws them whole. The
+  cause is not found.
 
 ## The herald
 
