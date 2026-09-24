@@ -161,6 +161,15 @@ a comment in that file saying why.
   `CEILING` and `%DIV` over 24 values, the edges of the fixnum range and
   bignums among them, 2304 cases.
 
+- **The error table is loaded at every boot.** A band caches its
+  microcode's error table under the microcode's version number, and every
+  unreleased build keeps its number (1000), so a band saved under one build
+  kept that build's table under a later one: an ordinary trap, such as one
+  while compiling, was looked up at the wrong addresses and reported as
+  "no error-table entry". `EH:INITIALIZE` (`eh/eh.lisp`) now forgets the
+  cached table at boot, so it is read from `SYS: UBIN;` each time, as it was
+  already whenever the version number changed.
+
 ## Known faults found, not yet fixed
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
