@@ -100,8 +100,8 @@ a comment in that file saying why.
     every boot (`:SET-MONO-TV`, `window/cold.lisp`), and the run lights
     are placed from the feature page (`sys/ltop.lisp`), not from a main
     screen that may still have the old size. Tested with a band built at
-    1280 by 1024 and booted at 1024 by 768, 1280 by 1024, 1920 by 1080
-    and 2560 by 1440.
+    1280 by 1024 and booted at 1024 by 768, 1280 by 1024 and 1920 by
+    1080, the largest size supported.
   - **The TV sync program is gone, and with it most of the TV registers.**
     MONO TV has no sync program, and of the CADR TV's control registers
     QUUX keeps only register 0's black-on-white bit and register 4, the
@@ -216,11 +216,9 @@ a comment in that file saying why.
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
   returns 0 for a zero dividend before it looks at the divisor. MIT's.
-- **On a screen of more than 2^21 pixels, what boot draws stops at pixel
-  2^21.** At 2560 by 1440 the Lisp listener's border and label, drawn
-  while the screens change size at boot, end at row 819; drawing there
-  works after boot, and the listener's next refresh draws them whole. The
-  cause is not found.
+- **MONO TV sizes above 1920 by 1080 are not supported** (the user,
+  2026-09-24). At 2560 by 1440, what boot draws in the Lisp listener stops
+  at pixel 2^21, row 819, until its next refresh; the cause is not sought.
 
 ## The herald
 
