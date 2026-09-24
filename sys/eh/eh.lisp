@@ -2386,6 +2386,12 @@ This version does some invisible pointer following."
     (SETQ TV:COLD-LOAD-STREAM-OWNS-KEYBOARD NIL))
   (SETQ ERROR-HANDLER-RUNNING NIL)
   (SETQ ERRSET-STATUS NIL)		;Set to T if an errset exists and should be obeyed
+  ;; muir-sys: load the running microcode's table at every boot, not only when
+  ;; its version number differs from the one this band last loaded.  every
+  ;; unreleased build of a microcode keeps its number (1000), so a band saved
+  ;; under one build kept that build's table under a later one, and the error
+  ;; handler looked a trap up at the wrong addresses ("no error-table entry").
+  (setq microcode-error-table-version-number 0 error-table-number 0)
   (ASSURE-TABLE-LOADED)			;Gets the right UCONS/UCADR TABLE file loaded.
   (ASSURE-TABLE-PROCESSED)		;Processes the contents of UCONS/UCADR TABLE.
   )
