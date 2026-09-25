@@ -224,11 +224,38 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
 (DEFVAR *NETWORK-TIME-FUNCTION* NIL)
 (DEFVAR *UT-AT-BOOT-TIME* NIL "Used for UPTIME protocol, do not random SETQ.")
 
+;; quux: the real-time clock, word 103 of the register page from revision 9
+;; (muir's docs/quux.md, "The real-time clock"): unix seconds, unsigned 32
+;; bits, read-only, the host's time.  feature word 15 <0> says it is there,
+;; and the word reads 0 below revision 9.  it lets a boot know the time
+;; without asking the network.  the time zone stays the site's, applied when
+;; a time is decoded, so the clock needs only the epoch constant.
+(defconst unix-epoch-universal-time 2208988800.
+  "The universal time of 1970-01-01 00:00 GMT, where the RTC's count starts.")
+
+(defvar *read-rtc* t
+  "NIL keeps INITIALIZE-TIMEBASE from reading the RTC, as SET-LOCAL-TIME does.")
+
+(defun rtc-universal-time ()
+  "QUUX's real-time clock as a universal time, or NIL if the machine has none."
+  (unless (zerop (si:feature-page-field #o15 #o0001))
+    (let ((seconds (%xbus-read (+ si:feature-page-xbus-address #o103))))
+      ;; %xbus-read boxes the word as a signed 32-bit number, so from
+      ;; 2038-01-19 on the unsigned count comes back negative.
+      (when (minusp seconds)
+	(incf seconds (expt 2 32.)))
+      ;; 0 is an empty register address, not a time.
+      (and (plusp seconds)
+	   (+ seconds unix-epoch-universal-time)))))
+
 (DEFUN INITIALIZE-TIMEBASE (&OPTIONAL UT)
   "Set the clock.
-Possible sources of the time include the network,
+Possible sources of the time include the real-time clock, the network,
 and, failing that, the luser who happens to be around."
   ;; the Lambda's battery clock is no longer a source, nor set here.
+  ;; quux: its real-time clock is, ahead of the network, which stays the
+  ;; source on a machine without one.
+  (and (null ut) *read-rtc* (setq ut (rtc-universal-time)))
   (AND (NULL UT) (NOT (SI:GET-SITE-OPTION :STANDALONE)) *NETWORK-TIME-FUNCTION* 
        (SETQ UT (FUNCALL *NETWORK-TIME-FUNCTION*)))
   (TAGBODY
@@ -267,7 +294,10 @@ and, failing that, the luser who happens to be around."
 (DEFUN SET-LOCAL-TIME (&OPTIONAL NEW-TIME)
   (AND (STRINGP NEW-TIME)
        (SETQ NEW-TIME (TIME:PARSE-UNIVERSAL-TIME NEW-TIME)))
-  (LET ((*NETWORK-TIME-FUNCTION* NIL))
+  ;; quux: it reads neither the network nor the real-time clock, so with no
+  ;; NEW-TIME it still asks for the time.  nothing here writes the clock,
+  ;; which is read-only.
+  (let ((*network-time-function* nil) (*read-rtc* nil))
     (INITIALIZE-TIMEBASE NEW-TIME)))
 
 ;; This is so freshly booted machines don't give out an incorrect time or uptime until

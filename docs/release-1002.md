@@ -387,6 +387,19 @@ a comment in that file saying why.
 - **Serve the running microcode's table.** A band whose microcode is not the
   one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, so the served
   `SYS: UBIN;` must hold that microcode's `ucadr.tbl`.
+- **A boot takes the time from QUUX's real-time clock** (muir's contract Q9,
+  revision 9), so it asks the network for the time no more.
+  `TIME:RTC-UNIVERSAL-TIME` reads word 103 of the register page, Unix
+  seconds, when feature word 15 `<0>` says the clock is there, and adds
+  2,208,988,800; `%XBUS-READ` returns the word signed, so a negative value,
+  from 2038-01-19 on, has 2^32 added back. `INITIALIZE-TIMEBASE` reads it
+  ahead of the network, which stays the source below revision 9, and
+  `SET-LOCAL-TIME` reads neither: with no argument it still asks for the
+  time. The clock is read-only; the time zone stays the site's
+  (`io1/time.lisp`). Tested on muir 52614fd with `--rtc` at 1790000000,
+  2^31 and 2^32-1 and on the host's clock: the universal time is the clock
+  plus the constant, and a boot sends no TIME request; on a revision 8
+  muir the band asks for the time as before.
 
 ## Faults fixed
 
