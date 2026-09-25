@@ -30,6 +30,120 @@ sources.
 | Size of the finished world | 20614 blocks |
 | Saved band | LOD5, "Exp 1000.0", boots and answers |
 
+## Building a System 1002 band on QUUX
+
+System 1002 is built on QUUX alone: a 1002 band compiles the next one, on
+one machine, with no CADR (the user, 2026-09-25, as the CADR will never get
+a file device). The route through the CADR, below, stays documented as the
+fallback until it is retired. The stages are the ones described under "The
+stages"; what differs is where each one runs and how the disk is handled.
+
+**The disk** is a GPT (docs/booting.md), made on the host with `sgdisk`:
+MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
+
+1. **The builder goes in LOD2.** Copy the previous 1002 band (its current
+   LOD partition) into LOD2 and its microcode's `ucadr.mcr` into MCR1, and
+   set attribute bit 48 on MCR1 and LOD2. Nothing writes LOD2 after this:
+   the cold load goes to LOD3 and the finished world to LOD4, so a failed
+   build leaves the builder as it was.
+2. **Serve the builder's microcode in `SYS: UBIN;`**, all four files. The
+   band reads `UCADR TBL` at every boot (`EH:INITIALIZE`, `eh/eh.lisp`).
+3. **Boot the builder and compile.** Log in, load `SYS: SYS; SYSDCL QFASL`,
+   run any priming forms (below), then
+   `(make-system 'system :compile :noload :noconfirm :nowarn :no-increment-patch)`.
+   Then build the cold load exactly as in steps 3 and 4 below, into LOD3.
+   `MAKE-COLD` finds LOD3 by its GPT name (`io/disk.lisp:940`) and writes it
+   with `DISK-WRITE`; where it would set the partition's comment it prints
+   the `sgdisk -c` command instead (`io/disk.lisp:1492`).
+4. **Boot the cold load.**
+   - *Same microcode:* from the running builder,
+     `(si:disk-restore "LOD3")`, with `FQUERY` answering yes. The world is
+     replaced at once, so a TELNET driver sees its connection close; no
+     restart and no GPT edit. `DISK-RESTORE` keeps the running microcode
+     (`sys/qmisc.lisp:1676`), so this path is only for a target that runs
+     on the builder's microcode.
+   - *New microcode:* stop the machine, write the new `ucadr.mcr` into MCR1
+     with `dd` (the file is in partition order), move bit 48 from LOD2 to
+     LOD3 with `sgdisk -A 5:clear:48 -A 6:set:48`, serve the new microcode's
+     four files in `SYS: UBIN;`, and start the machine: a cold boot.
+5. **QLD and save.** COLDRUN runs QLD as in steps 5 and 6; then
+   `(si:disk-save "LOD4" t)`. The save closes the TELNET connection, at
+   once or when ozd gives up on the host, up to three minutes later.
+6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
+   only, LOD4 named (`sgdisk -c 7:"LOD4 System 1002 ..."`), and LOD2, LOD3
+   and PAGE zeroed before the disk is handed over.
+
+**Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
+`8942300` with the same five sources recompiled as in the CADR-route build
+of that tree. Build A had dev11 (CADR-built) as its builder and took path
+4a; build B had A's band as its builder and took path 4b:
+
+| Stage | A | B |
+|---|---|---|
+| Disk and builder | 3 s | 4 s |
+| Boot, incremental compile (5 files) | 4 min 31 s | 4 min 29 s |
+| Cold load | 5 min 27 s | 5 min 11 s |
+| Restore or cold boot, to the cold load's first MINI read | 9 s | 10 s |
+| QLD, to COLDRUN's end | 17 min 35 s | 18 min 11 s |
+| Save and stop, with a fixed 60 s wait | 4 min 7 s | 1 min 10 s |
+| Whole build | 31 min 57 s | 29 min 21 s |
+
+On the CADR with MIT's 323 the same compile took 8 min 5 s and the cold
+load 5 min 48 s. The cold loads of A, B and the CADR route are byte for
+byte the same. B's five compiled files differ from the CADR route's in 4
+bytes each: the header's time and system version (1001 on the CADR's 1001
+builder, 1002 here). A's differ further in the order of the header's
+attribute list and in the numbers of generated symbols (`#:PKT2` against
+`#:PKT3`, in `CHSNCP`), which two compiles in one band also show. UNFASL
+listings with table indexes and generated-symbol numbers normalised differ
+only in the time and the version. LOD2 was unchanged at the end of both
+builds, and no GPT byte changed while the machine ran. B's band then booted
+cold and ran the checks and the end-to-end test (a warm boot, a save into
+LOD3, a cold boot, `(si:disk-restore 3)`) on muir's micro and RTL engines.
+
+### Priming the builder
+
+The builder compiles with its own compiler, macros and constants, which are
+those of the previous band. A change that other files depend on at compile
+time takes effect in the files compiled in the same build only if it is put
+into the builder first, after `SYSDCL` and before `MAKE-SYSTEM`:
+
+- **A new misc instruction.** The compiler compiles a call to it as a misc
+  instruction only if it knows the opcode; otherwise it compiles a
+  function call. Name it and give its opcode, as `cold/defmic.lisp` does;
+  for 761, which 1002 bands already know:
+
+  ```lisp
+  (globalize "%MICROSECOND-CLOCK-LDB")
+  (compiler:defmic %microsecond-clock-ldb #o761 (ppss) t)
+  ```
+
+  The name must also be in `cold/global.lisp` for the cold load. The
+  running microcode need not have the instruction: the build compiles with
+  `:noload` and never runs the new code in the builder.
+- **A changed macro, `DEFSUBST`, structure or constant that the compiler
+  folds.** Compile and load the file that defines it first, for example
+  `(qc-file-load "SYS: SYS2; LMMAC LISP")`, or build twice: the second
+  build's builder has the change. Loading a new definition of something the
+  builder itself runs (the disk code's constants, for example) changes the
+  running builder as well, so prefer the second build then.
+- A constant referred to as a special variable is not folded: disk.lisp's
+  `%DISK-STATUS-HIGH-ERROR` is compiled as a reference to the symbol, and
+  the built world uses its own value.
+
+The cold load itself is independent of the builder: `MAKE-COLD` reads
+`QCOM`, `QDEFS` and `DEFMIC` afresh into a package of its own
+(`cold/coldut.lisp:278-283`).
+
+### The CADR route (fallback)
+
+Until it is retired: the compile and the cold load run on System 1001's
+builder band on the CADR, with MIT's microcode 323 (QUUX's microcode halts
+a CADR) and a LABL pack; a new misc instruction must always be primed there
+as above. The cold load is then copied into a GPT disk with `dd`, and the
+QUUX half boots it with bit 48 on LOD3, runs QLD and saves, as in step 4's
+new-microcode case and steps 5 and 6.
+
 ## Bootstrapping on the System 100 base
 
 This tree is System 100's, and a world of the same lineage is the right thing
@@ -314,6 +428,8 @@ overwrite question automatically without first checking its destination.
 `MAKE-COLD` (`cold/coldut.lisp:1194-1218`) marks the partition "cold-incomplete", builds the areas, NIL and T, loads the files of `COLD-LOAD-FILE-LIST` (`sys/sysdcl.lisp:499-523`) and the readtables, and records the physical file names MINI will ask for (`cold/coldut.lisp:1249-1256`). It then sets the partition's comment to "cold" and the date. The partition must not be the one the running world was booted from.
 
 ## 5. Boot the cold load
+
+On QUUX's GPT disk, see "Building a System 1002 band on QUUX", step 4. On a LABL pack:
 
 Make the cold load's partition the current band, then boot. With the machine stopped, muir's `diskpack` does it. The same stop is the moment to make room for the finished world, since both are label edits:
 
