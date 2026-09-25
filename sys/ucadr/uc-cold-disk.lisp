@@ -176,7 +176,12 @@ DISK-SAVE-1
 	((VMA-START-WRITE) (A-CONSTANT (EVAL (+ 400 %SYS-COM-BAND-FORMAT))))  ;before swapout
 	(ILLOP-IF-PAGE-FAULT)			; so it gets to saved image on disk
 	(CALL SWAP-OUT-ALL-PAGES)		;Make sure disk has valid data for all pages.
-	(CALL COLD-READ-LABEL-PRESERVING-MEMORY) ;Find the specified partition, and PAGE.
+	;; quux (contract q8): read the gpt into the copy buffer, which the copy
+	;; overwrites anyway, so no page of memory is saved around it (mit saved
+	;; pages 0-2 on blocks 1, 3 and 5, which now hold gpt entries).
+	((a-gpt-buffer-page) (a-constant copy-buffer-page-origin))
+	((a-gpt-ccw) (a-constant copy-buffer-ccw-origin))
+	(call cold-read-gpt)			;Find the specified partition, and PAGE.
 ;Set up args for DISK-SAVE-REGIONWISE in case we go straight there.,
 	((M-K) A-ZERO)
 	((M-AP) M-ZERO)			;region to hack.
@@ -345,8 +350,26 @@ DISK-RESTORE-1
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)
        ((VMA) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-WIRED-SIZE))))
 	(CALL RESET-MACHINE)
+	;; quux: the run light back at its boot address, as a cold boot has it,
+	;; before the two fake level-2 entries below, which must fall in different
+	;; slots (vma<12:8>) of the invalid block.  lisp moves the run light to
+	;; mono tv's last line (tv::initialize-run-light-locations, sys; ltop),
+	;; and when the buffer is a multiple of 8k words long, 1280x1024 and
+	;; 1024x768 among them, that is slot 37, the disk registers' own: the
+	;; second entry overwrote the first, %disk-restore's disk commands went to
+	;; the frame buffer, and disk-await-ready waited for ever.  lisp sets it
+	;; again after the restore.
+	((a-disk-run-light) (a-constant (plus (byte-value q-data-type dtp-fix)
+					      disk-run-light-virtual-address)))
 	(CALL-XCT-NEXT COLD-FAKE-L2-MAP)	;set up L2 map to avoid getting to
        ((MD) A-DISK-REGS-BASE)			; page fault handler from AWAIT-DISK,etc
+	;; quux: and halt at run-light-shares-disk-slot, rather than hang, if the
+	;; run light's entry would overwrite the disk registers'.
+	((m-1) a-disk-run-light)
+	((m-1) (byte-field 5 8) m-1)
+	((m-2) a-disk-regs-base)
+	((m-2) (byte-field 5 8) m-2)
+	(jump-equal m-1 a-2 run-light-shares-disk-slot)
 	(CALL-XCT-NEXT COLD-FAKE-L2-MAP)	; before things set up.  Another RESET-MACHINE
        ((MD) A-DISK-RUN-LIGHT)			; will be done at beg0000 eventually anyway.
 	;; quux: block-disk has no drive to recalibrate (mit's did, for the
@@ -371,7 +394,7 @@ MEM-SIZE-LOOP
        ((VMA) (A-CONSTANT QUUX-MODE-PHYSICAL-ADDRESS))
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;Clear bus error indicators
        ((VMA) (A-CONSTANT QUUX-ERROR-STATUS-PHYSICAL-ADDRESS)) ;quux: word 101, not 766044
-	(CALL COLD-READ-LABEL)			;Find PAGE partition and specified partition.
+	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
 	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
 	((M-B) (A-CONSTANT 0))			;..
@@ -546,7 +569,7 @@ DISK-RESTORE-INCREMENTAL
 	((PDL-PUSH) M-I)
 	((PDL-PUSH) M-J)
 ;Restore the base partition of this partition.
-	(CALL COLD-READ-LABEL)			;Find PAGE partition and specified partition.
+	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
 	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
 	((M-B) (A-CONSTANT 0))			;..
@@ -735,7 +758,7 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	;; quux: block-disk needs no recalibrate after the i/o reset (mit's
 	;; did, for the marksman).
 	;; Find out where to page off of if we don't know already 
-	(CALL-EQUAL A-DISK-OFFSET M-ZERO WARM-READ-LABEL)
+	(CALL-EQUAL A-DISK-OFFSET M-ZERO WARM-READ-GPT)
 	;; Clear the unused pages of the PHT and PPD out of the map
 	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-V-PHYSICAL-PAGE-DATA-END)
 	((MD) ADD MD (A-CONSTANT 1))		;First page above PPD
@@ -823,6 +846,12 @@ SET-PHT-INDEX-MASK-1
 ; since the 5 bits within block are unique between the disk-regs and the run light, which is
 ; all we use this for and since another RESET-MACHINE will be done at BEG0000.
 
+;; disk-restore-1 comes here when the run light's fake level-2 entry would
+;; overwrite the disk registers' (the same vma<12:8>).  the halt shows this
+;; location.
+run-light-shares-disk-slot
+	(call illop)
+
 COLD-FAKE-L2-MAP
 	((M-T) VMA-PHYS-PAGE-ADDR-PART MD
 		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
@@ -831,80 +860,176 @@ COLD-FAKE-L2-MAP
 	(POPJ)
 
 
-;;; Decoding the label to find a partition.
+;;; Decoding the GPT to find a partition.
 
-;;; Read the disk label and find the main load partition to be used,
-;;; and the PAGE partition.  The main load to be used is either the
-;;; one whose name is in M-4, or the current one if M-4 is zero.
-;;; Also set A-LOADED-BAND for later macrocode use.
-COLD-READ-LABEL 
-	((M-B) A-ZERO)				;Core page 0
-	((M-1) A-ZERO)				;Disk page 0
-	(CALL COLD-DISK-READ-1)
-	((M-B) (A-CONSTANT 2))			;Core page 2
-	((M-1) ADD M-B A-B)			;Disk page 4
-	(CALL COLD-DISK-READ-1)
-;Cannot use COLD-DISK-READ-1 next since that puts the CCW in 777
-	((M-B) (A-CONSTANT 1))			;Core page 1
-	((M-1) ADD M-B A-B)			;Disk page 2
-	((M-2) (A-CONSTANT 1))
-	((M-C) (A-CONSTANT 170))	;Words 170-177 in disk label not used!
-	(CALL COLD-DISK-READ-1)
-	;Location 7 contains the name of the main load partition.
-	;Location 200 contains the partition table.
-	;We must also find the PAGE partition and set up A-DISK-OFFSET and A-DISK-MAXIMUM
-	;; quux: block-disk takes block numbers, so the label's geometry (words
-	;; 3 and 4, heads and blocks a track) is no longer read into
-	;; A-DISK-BLOCKS-PER-TRACK and A-DISK-BLOCKS-PER-CYLINDER.
-	(CALL-XCT-NEXT COLD-FIND-PARTITION)
-       ((M-3) (A-CONSTANT 10521640520))		; PAGE = 105 107 101 120 = 10521640520
-	((A-DISK-OFFSET) M-I)
-	((A-DISK-MAXIMUM) M-J)
-	((M-Q) M-I)				;M-Q, M-R point to PAGE partition
-	((M-R) M-J)
-	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT 7))
-	((M-3) READ-MEMORY-DATA)		;Current Band
-	(JUMP-EQUAL M-4 A-ZERO COLD-READ-LABEL-1)
-	((M-3) M-4)
-COLD-READ-LABEL-1
-	((A-LOADED-BAND) (BYTE-FIELD 30 10) M-3 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(CALL COLD-FIND-PARTITION)		;Set up M-I, M-J for partition to load.
-	(POPJ)
+;;; quux (contract q8): quux's disk carries a gpt, and the machine only reads
+;;; it; mit's label (LABL at block 0, its partition table from word 200) is
+;;; gone, with its writes to blocks 1, 3 and 5, which now hold gpt entries.
+;;; A block is two lbas, so an lba is halved to a block number.  The type
+;;; guids' words, as the disk holds them (the guid's mixed-endian bytes as
+;;; little-endian words), are muir's docs/quux.md's, checked with sgdisk:
+;;;   band (LODn)  24354602160 10160342724 14564524207 27023041220
+;;;   PAGE         10624537245 11366203257 10115335662 31024200467
+;;; Every entry is scanned.  The first PAGE entry gives A-DISK-OFFSET and
+;;; A-DISK-MAXIMUM, and M-Q and M-R as well.  The band is the first band
+;;; entry whose name's first four characters are M-4's (packed as the lisp
+;;; packs them, first character lowest), or with M-4 zero the first one
+;;; with attribute bit 48, the current band; M-4 = -1 finds PAGE only.
+;;; The band's start and size go to M-I and M-J, its packed name to M-3,
+;;; and A-LOADED-BAND is set as before.  The gpt is read one block at a
+;;; time into the page in A-GPT-BUFFER-PAGE, with the ccw at A-GPT-CCW.
+;;; A disk is at most 8 GiB, so an lba's high word is not read.
+;;; Clobbers M-1, M-2, M-3, M-B, M-C, M-T, M-TEM, M-I, M-J, M-Q, M-R.
+cold-read-gpt-page-0			;the cold boot and %disk-restore: page 0,
+	((a-gpt-buffer-page) a-zero)	; which the band's first pages overwrite
+	((a-gpt-ccw) (a-constant 777))
+cold-read-gpt
+	(call-xct-next cold-read-gpt-block)
+       ((m-1) a-zero)			;block 0: the protective mbr, and lba 1
+	(call-xct-next phys-mem-read)	; the gpt header, from word 200
+       ((vma) dpb m-b vma-phys-page-addr-part (a-constant 200))
+	(jump-not-equal md (a-constant 4022243105) gpt-missing)	;"EFI "
+	(call-xct-next phys-mem-read)
+       ((vma) add vma (a-constant 1))
+	(jump-not-equal md (a-constant 12424440520) gpt-missing)	;"PART"
+	(call-xct-next phys-mem-read)
+       ((vma) add vma (a-constant 21))	;word 222: the entries' first lba
+	(jump-if-bit-set (byte-field 1 0) md gpt-missing)	;not on a block
+	((a-gpt-block) (byte-field 37 1) md)
+	(call-xct-next phys-mem-read)
+       ((vma) add vma (a-constant 2))	;word 224: the number of entries
+	((a-gpt-count) md)
+	(call-xct-next phys-mem-read)
+       ((vma) add vma (a-constant 1))	;word 225: the size of an entry
+	(jump-not-equal md (a-constant 200) gpt-missing)	;must be 128 bytes
+	((m-q) setz)			;no PAGE yet
+	((m-i) setz)			;no band yet (none starts at block 0)
+gpt-next-block				;read the next block of 8 entries
+	(jump-equal m-zero a-gpt-count gpt-done)
+	(call-xct-next cold-read-gpt-block)
+       ((m-1) a-gpt-block)
+	((a-gpt-block) m+a+1 m-zero a-gpt-block)
+	((m-c) dpb m-b vma-phys-page-addr-part a-zero)	;m-c: the entry
+gpt-next-entry				;dispatch on the type's first word
+	(call-xct-next phys-mem-read)
+       ((vma) m-c)
+	(jump-equal md (a-constant 10624537245) gpt-page-entry)
+	(jump-equal md (a-constant 24354602160) gpt-band-entry)
+gpt-entry-done
+	((a-gpt-count) add (m-constant -1) a-gpt-count)
+	(jump-equal m-zero a-gpt-count gpt-done)
+	((m-c) add m-c (a-constant 40))	;32 words an entry
+	((m-tem) (byte-field 8. 0) m-c)
+	(jump-not-equal m-tem a-zero gpt-next-entry)
+	(jump gpt-next-block)
 
-;Does not preserve memory location 777, which is used for CCWs.
-COLD-READ-LABEL-PRESERVING-MEMORY
-	((M-B) A-ZERO)				;Core address
-	((M-1) M+A+1 M-B A-B)			;Disk address
-	((M-2) (A-CONSTANT 1))			;1 block
-	((M-C) (A-CONSTANT 777))
-	(CALL COLD-DISK-WRITE)			;Save page 0
-	((M-B) (A-CONSTANT 1))			;Core address
-	((M-1) M+A+1 M-B A-B)			;Disk address
-	((M-2) (A-CONSTANT 1))			;1 block
-	((M-C) (A-CONSTANT 777))
-	(CALL COLD-DISK-WRITE)			;Save page 1
-	((M-B) (A-CONSTANT 2))			;Core address
-	((M-1) M+A+1 M-B A-B)			;Disk address
-	((M-2) (A-CONSTANT 1))			;1 block
-	((M-C) (A-CONSTANT 777))
-	(CALL COLD-DISK-WRITE)			;Save page 2
-	(CALL COLD-READ-LABEL)
-	((M-B) A-ZERO)		;Restore page 0 from disk block 1
-	((M-1) M+A+1 M-B A-B)
-	(CALL COLD-DISK-READ-1)
-	((M-B) (A-CONSTANT 1))	;Restore page 1 from disk block 3
-	((M-1) M+A+1 M-B A-B)
-	(CALL COLD-DISK-READ-1)
-	((M-B) (A-CONSTANT 2))	;Restore page 2 from disk block 5
-	((M-1) M+A+1 M-B A-B)
-	(JUMP COLD-DISK-READ-1)
+gpt-page-entry				;the type's other three words
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 1))
+	(jump-not-equal md (a-constant 11366203257) gpt-entry-done)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 2))
+	(jump-not-equal md (a-constant 10115335662) gpt-entry-done)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 3))
+	(jump-not-equal md (a-constant 31024200467) gpt-entry-done)
+	(jump-not-equal m-q a-zero gpt-entry-done)	;the first PAGE wins
+	(call gpt-entry-extent)
+	((m-q) m-1)
+	(jump-xct-next gpt-entry-done)
+       ((m-r) m-2)
 
-;;; Here on a warm boot, we have to read the label in order to find where the
+gpt-band-entry				;the type's other three words
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 1))
+	(jump-not-equal md (a-constant 10160342724) gpt-entry-done)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 2))
+	(jump-not-equal md (a-constant 14564524207) gpt-entry-done)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 3))
+	(jump-not-equal md (a-constant 27023041220) gpt-entry-done)
+	(jump-equal m-4 a-minus-one gpt-entry-done)	;PAGE only
+	(jump-not-equal m-i a-zero gpt-entry-done)	;the first match wins
+	(jump-not-equal m-4 a-zero gpt-band-named)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 15))	;word 13: attributes 63-32
+	(jump-if-bit-clear (byte-field 1 16.) md gpt-entry-done)	;bit 48: current
+	(call gpt-entry-name)
+	(jump gpt-band-found)
+gpt-band-named
+	(call gpt-entry-name)
+	(jump-not-equal m-3 a-4 gpt-entry-done)
+gpt-band-found
+	(call gpt-entry-extent)
+	((m-i) m-1)
+	(jump-xct-next gpt-entry-done)
+       ((m-j) m-2)
+
+gpt-done
+	(jump-equal m-q a-zero gpt-no-page)
+	((a-disk-offset) m-q)
+	((a-disk-maximum) m-r)
+	(popj-equal m-4 a-minus-one)
+	(jump-equal m-i a-zero gpt-no-band)
+	((a-loaded-band) (byte-field 30 10) m-3 (a-constant (byte-value q-data-type dtp-fix)))
+	(popj)
+
+;; read block m-1 of the gpt into the page in a-gpt-buffer-page, left in m-b.
+cold-read-gpt-block
+	((m-b) a-gpt-buffer-page)
+	((m-2) (a-constant 1))
+	(jump-xct-next cold-disk-read)
+       ((m-c) a-gpt-ccw)
+
+;; the entry at m-c: its first block in m-1, its size in blocks in m-2.  a
+;; partition is whole blocks, so its first lba must be even (its last odd).
+gpt-entry-extent
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 10))	;word 8: the first lba
+	(jump-if-bit-set (byte-field 1 0) md gpt-odd-start)
+	((m-1) (byte-field 37 1) md)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 12))	;word 10: the last lba
+	((m-2) (byte-field 37 1) md)	;the last block
+	((m-2) sub m-2 a-1)
+	((m-2) m+1 m-2)
+	(popj)
+
+;; the entry at m-c: the first four characters of its name, utf-16 in words
+;; 14 and 15, packed into m-3 as the lisp packs a partition's name.
+gpt-entry-name
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 16))	;word 14: characters 0 and 1
+	((m-3) (byte-field 8. 0) md)
+	((m-tem) (byte-field 8. 16.) md)
+	((m-3) dpb m-tem (byte-field 8. 8.) a-3)
+	(call-xct-next phys-mem-read)
+       ((vma) add m-c (a-constant 17))	;word 15: characters 2 and 3
+	((m-tem) (byte-field 8. 0) md)
+	((m-3) dpb m-tem (byte-field 8. 16.) a-3)
+	((m-tem) (byte-field 8. 16.) md)
+	((m-3) dpb m-tem (byte-field 8. 24.) a-3)
+	(popj)
+
+;; the gpt's halts; each shows its own location.
+gpt-missing				;no "EFI PART" in lba 1, or entries not
+	(call illop)			; 128 bytes or not on a block
+gpt-no-page				;no PAGE partition
+	(call illop)
+gpt-no-band				;no current band (no entry with bit 48),
+	(call illop)			; or none of the name asked for
+gpt-odd-start				;the partition starts on an odd lba
+	(call illop)
+
+;;; Here on a warm boot, we have to read the gpt in order to find where the
 ;;; PAGE partition is.  But we mustn't bash core page 0.
 ;;; Also have to set up A-V-PHYSICAL-PAGE-DATA-END based on main memory size
 ;;; and set up PHT size parameters
-WARM-READ-LABEL
+;;; quux (contract q8): page 0 is parked in the pdl buffer, which is free
+;;; before BEG0000 sets it up, while the gpt is read into it; mit saved
+;;; pages 0-2 on blocks 1, 3 and 5, which now hold gpt entries.
+WARM-READ-GPT
 	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-MEMORY-SIZE))))
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) VMA-PAGE-ADDR-PART READ-MEMORY-DATA)
@@ -914,37 +1039,36 @@ WARM-READ-LABEL
 	((M-1) Q-POINTER READ-MEMORY-DATA)
 	((A-PHT-INDEX-LIMIT) M-1)
 	(CALL SET-PHT-INDEX-MASK)
-	(CALL-XCT-NEXT COLD-READ-LABEL-PRESERVING-MEMORY)	;Go get the label
-       ((M-4) SETZ)				;not worrying about load partition
+	(call gpt-park-page-0)
+	(call-xct-next cold-read-gpt-page-0)	;Go get the gpt
+       ((m-4) (m-constant -1))		;PAGE only, not the load partition
+	(call gpt-unpark-page-0)
 	((A-LOADED-BAND)			;We don't know which band this is
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(POPJ)
 
-;;; With the label in location 0, this routine finds a partition whose name is in M-3
-;;; and returns its start and size (in blocks) in M-I and M-J.
-COLD-FIND-PARTITION
-	(CALL-XCT-NEXT PHYS-MEM-READ)		;Get number of partitions
-       ((VMA) (A-CONSTANT 200))
-	((M-I) READ-MEMORY-DATA)
-	(CALL-XCT-NEXT PHYS-MEM-READ)		;Get words per partition
-       ((VMA) ADD VMA (A-CONSTANT 1))
-	((M-J) READ-MEMORY-DATA)
-	((VMA) ADD VMA (A-CONSTANT 1))
-COLD-FIND-PART-LOOP
-	(CALL-EQUAL M-I A-ZERO ILLOP)		;Out of partitions, not found, die
-	(CALL PHYS-MEM-READ)			;Get name of a partition
-	((M-I) SUB M-I (A-CONSTANT 1))
-	(JUMP-NOT-EQUAL-XCT-NEXT READ-MEMORY-DATA A-3 COLD-FIND-PART-LOOP)
-       ((VMA) ADD VMA A-J)
-	((VMA) SUB VMA A-J)
-	(CALL-XCT-NEXT PHYS-MEM-READ)		;Found it, get start and size
-       ((VMA) ADD VMA (A-CONSTANT 1))
-	((M-I) READ-MEMORY-DATA)
-	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) ADD VMA (A-CONSTANT 1))
-	(POPJ-AFTER-NEXT (M-J) READ-MEMORY-DATA)
-       (NO-OP)
-
+;; physical page 0 to pdl buffer locations 0-377 and back, around the warm
+;; boot's reading of the gpt into page 0.
+gpt-park-page-0
+	((pdl-buffer-index) setz)
+gpt-park-page-0-1
+	(call-xct-next phys-mem-read)
+       ((vma) pdl-buffer-index)
+	((c-pdl-buffer-index) md)
+	((pdl-buffer-index) m+1 pdl-buffer-index)
+	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-park-page-0-1)
+	(popj)
+
+gpt-unpark-page-0
+	((pdl-buffer-index) setz)
+gpt-unpark-page-0-1
+	((md) c-pdl-buffer-index)
+	(call-xct-next phys-mem-write)
+       ((vma) pdl-buffer-index)
+	((pdl-buffer-index) m+1 pdl-buffer-index)
+	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-unpark-page-0-1)
+	(popj)
+
 ;;; Lowest level disk routines.
 ;;; Read or write sequence of blocks from core,
 ;;; copy contiguous range of blocks from disk to disk.

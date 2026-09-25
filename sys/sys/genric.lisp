@@ -1880,7 +1880,8 @@ The microcode sets it at boot from MACHINE-ID."
 
 (defun machine-instance ()
   "Return a string that identifies which particular machine this implementation is."
-  disk-pack-name)				;this is pretty much it
+  ;; quux (contract q8): the gpt has no pack name; the host table's name.
+  (local-machine-name))
 
 (defun software-type ()
   "Return the generic name of the host software, as a string."

@@ -69,6 +69,12 @@ a-main-mem-n-blocks	(0)	;its number of blocks; 0 until one is met
 a-main-mem-block	(0)	;its first block on the disk
 a-main-mem-address	(0)	;the physical address of its first word
 
+;;; quux: the gpt's partition entries, read one block of eight at a time
+;;; into the buffer (contract q8).
+a-10		(0)	;entries in a block
+a-gpt-block	(0)	;the next block of entries to read
+a-gpt-count	(0)	;entries not yet looked at
+
 ;;; quux: block-disk takes a block number, so the label's geometry (the
 ;;; number of cylinders, heads and blocks a track), the recalibrate command,
 ;;; the drive-ready mask and the division's temporary are gone.
@@ -130,6 +136,10 @@ ERROR-PAGE-FAULT
 	(JUMP HALT-CONS ERROR-PAGE-FAULT)
     (ERROR-TABLE ERROR-PAGE-FAULT)
 
+	;; quux: error-bad-label and error-no-micr are no longer reached: the
+	;; disk has a gpt, not a label, and its halts are error-no-gpt and
+	;; error-no-current-micr at the end.  kept so that the halts after them
+	;; keep their addresses.
 	(NO-OP)
 ERROR-BAD-LABEL
 	(JUMP HALT-CONS ERROR-BAD-LABEL)
@@ -315,6 +325,7 @@ MAKE-CONSTANTS
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
 	((a-1400) dpb m-ones (byte-field 2 8) a-zero)
 	((a-2000) dpb m-ones (byte-field 1 10.) a-zero)
+	((a-10) dpb m-ones (byte-field 1 3) a-zero)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
 	((A-36000) DPB M-ONES (BYTE-FIELD 4 10.) A-ZERO)
 	;;; A-DISK-ERROR/ 4421000
@@ -466,65 +477,122 @@ SET-UP-FOUR-PAGES
 
 ;;; Read the label (block 0) into physical memory page 0, get disk
 ;;; parameters, and find out where the MICR partition is.
+;;; quux: the disk has a gpt, not mit's label (contract q8).  block 0 is
+;;; sectors 0 and 1, the protective mbr and the gpt header, so the header
+;;; is words 200-377 of the block.  its words 200-201 must be the signature
+;;; "EFI PART", 222 (the first sector of the entry array) even and 223
+;;; zero, and 225 (an entry's size) 200 bytes, or the prom halts at
+;;; error-no-gpt; word 224 is the number of entries.  the entries are read
+;;; one block, eight entries, at a time into the buffer, and the first
+;;; entry whose type is the microcode's and which has attribute bit 48, the
+;;; current bit, is the microcode partition: halt at error-no-current-micr
+;;; if there is none, and at error-odd-micr-start if it starts on an odd
+;;; sector, which is no block.  the type is told by its first word alone,
+;;; which differs between all of q8's types.  mit read the label's word 6,
+;;; the current microload's name, and looked for it in the label's
+;;; partition table.
 ;;; quux: into the buffer, physical page 3, virtual page 0.
 READ-LABEL
 	((M-TEMP-1) SETZ)
 	(CALL-XCT-NEXT DISK-READ)
        ((m-a) a-1400)
 
-	;; M-B/ LABL = 114 102 101 114 = 11420440514
-	((M-B) DPB M-ONES (BYTE-FIELD 2 02.) A-ZERO)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 06.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 08.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 14.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 17.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 22.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 2 26.) A-B)
-	((M-B) DPB M-ONES (BYTE-FIELD 1 30.) A-B)
+	;; m-b/ "EFI " = 4022243105
+	((m-b) dpb m-ones (byte-field 1 0) a-zero)
+	((m-b) dpb m-ones (byte-field 1 2) a-b)
+	((m-b) dpb m-ones (byte-field 1 6) a-b)
+	((m-b) dpb m-ones (byte-field 2 9.) a-b)
+	((m-b) dpb m-ones (byte-field 1 14.) a-b)
+	((m-b) dpb m-ones (byte-field 1 16.) a-b)
+	((m-b) dpb m-ones (byte-field 1 19.) a-b)
+	((m-b) dpb m-ones (byte-field 1 22.) a-b)
+	((m-b) dpb m-ones (byte-field 1 29.) a-b)
+	((vma-start-read) dpb m-ones (byte-field 1 7) a-zero)	;200
+	(jump-if-page-fault error-page-fault)
+	(jump-not-equal read-memory-data a-b error-no-gpt)
+	;; m-b/ "PART" = 12424440520
+	((m-b) dpb m-ones (byte-field 1 4) a-zero)
+	((m-b) dpb m-ones (byte-field 1 6) a-b)
+	((m-b) dpb m-ones (byte-field 1 8.) a-b)
+	((m-b) dpb m-ones (byte-field 1 14.) a-b)
+	((m-b) dpb m-ones (byte-field 1 17.) a-b)
+	((m-b) dpb m-ones (byte-field 1 20.) a-b)
+	((m-b) dpb m-ones (byte-field 1 22.) a-b)
+	((m-b) dpb m-ones (byte-field 1 26.) a-b)
+	((m-b) dpb m-ones (byte-field 1 28.) a-b)
+	((m-b) dpb m-ones (byte-field 1 30.) a-b)
+	((vma-start-read) add vma a-1)			;201
+	(jump-if-page-fault error-page-fault)
+	(jump-not-equal read-memory-data a-b error-no-gpt)
+	((m-c) dpb m-ones (byte-field 1 1) a-zero)
+	((m-c) dpb m-ones (byte-field 1 4) a-c)
+	((vma-start-read) dpb m-ones (byte-field 1 7) a-c)	;222, the entry array's first sector
+	(jump-if-page-fault error-page-fault)
+	(jump-if-bit-set (byte-field 1 0) read-memory-data error-no-gpt)
+	((a-gpt-block) (byte-field 31. 1) read-memory-data)	;its block
+	((vma-start-read) add vma a-1)			;223, that sector's high word
+	(jump-if-page-fault error-page-fault)
+	(jump-not-equal read-memory-data a-zero error-no-gpt)
+	((vma-start-read) add vma a-1)			;224, the number of entries
+	(jump-if-page-fault error-page-fault)
+	((a-gpt-count) read-memory-data)
+	((vma-start-read) add vma a-1)			;225, an entry's size
+	(jump-if-page-fault error-page-fault)
+	((m-temp-1) dpb m-ones (byte-field 1 7) a-zero)	;200 bytes
+	(jump-not-equal read-memory-data a-temp-1 error-no-gpt)
 
-DECODE-LABEL
-	((VMA-START-READ M-C) A-ZERO)		;0
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)	;First location of label must be ascii LABL
-	(JUMP-NOT-EQUAL READ-MEMORY-DATA A-B ERROR-BAD-LABEL)
-	((VMA-START-READ M-C) ADD M-C A-1)	;1
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)	;Second location of label must be version 1.
-	(JUMP-NOT-EQUAL READ-MEMORY-DATA A-1 ERROR-BAD-LABEL)
-	;; quux: words 2-5, the pack's geometry, are not needed by block-disk.
-	((M-C) ADD M-C A-4)			;5
-	((VMA-START-READ M-C) ADD M-C A-1)	;6
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((M-B) READ-MEMORY-DATA)
-	((VMA-START-READ M-C)			;200
-		DPB M-ONES (BYTE-FIELD 1 7) A-ZERO)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((M-D) READ-MEMORY-DATA)		;M-D gets number of partitions
-	((VMA-START-READ M-C) ADD M-C A-1)	;201
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((M-A) READ-MEMORY-DATA)		;M-A gets words per partition descriptor
-	((M-C) ADD M-C A-1)			;202 (start of partition table)
+	;; m-b/ the microcode's type, 9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da, its
+	;; first word 23614306365.
+	((m-b) dpb m-ones (byte-field 1 0) a-zero)
+	((m-b) dpb m-ones (byte-field 1 2) a-b)
+	((m-b) dpb m-ones (byte-field 4 4) a-b)
+	((m-b) dpb m-ones (byte-field 2 10.) a-b)
+	((m-b) dpb m-ones (byte-field 2 15.) a-b)
+	((m-b) dpb m-ones (byte-field 2 20.) a-b)
+	((m-b) dpb m-ones (byte-field 4 25.) a-b)
+	((m-b) dpb m-ones (byte-field 1 31.) a-b)
+	((m-d) setz)					;no entries in the buffer yet
 
-
-	;; M-B/ Name of microload partition.
-	;; M-C/ Address of partition descriptor.
-	;; M-D/ Number of partitions
-	;; M-A/ Number of words per partition descriptor.
-SEARCH-LABEL
-	(JUMP-EQUAL M-D A-ZERO ERROR-NO-MICR)
-	((VMA-START-READ) M-C)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	(JUMP-EQUAL READ-MEMORY-DATA A-B FOUND-PARTITION)
-	((M-C) ADD M-C A-A)
-	(JUMP-XCT-NEXT SEARCH-LABEL)
-       ((M-D) SUB M-D A-1)
+	;; m-b/ the type's first word.
+	;; m-c/ the address of an entry in the buffer.
+	;; m-d/ the entries left in the buffer.
+search-gpt
+	(jump-equal m-zero a-gpt-count error-no-current-micr)
+	(jump-not-equal m-d a-zero search-gpt-entry)
+	((m-temp-1) a-gpt-block)
+	(call-xct-next disk-read)
+       ((m-a) a-1400)
+	((a-gpt-block) m+a+1 m-zero a-gpt-block)
+	((m-d) a-10)
+	((m-c) setz)
+search-gpt-entry
+	((vma-start-read) m-c)			;word 0, the type's first word
+	(jump-if-page-fault error-page-fault)
+	(jump-not-equal read-memory-data a-b search-gpt-next)
+	((m-temp-1) dpb m-ones (byte-field 1 3) a-5)	;15, word 13
+	((vma-start-read) add m-c a-temp-1)
+	(jump-if-page-fault error-page-fault)
+	(jump-if-bit-set (byte-field 1 16.) read-memory-data found-partition)
+search-gpt-next
+	((m-c) add m-c a-40)				;the next entry, 40 words on
+	((m-d) sub m-d a-1)
+	(jump-xct-next search-gpt)
+       ((a-gpt-count) add m-ones a-gpt-count)	;subtract 1
 
+	;; m-c/ the address of the microcode's entry in the buffer.
 FOUND-PARTITION
-	((VMA-START-READ M-C) ADD M-C A-1)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-MICR-ADDRESS) READ-MEMORY-DATA)
+	((vma-start-read) add m-c a-10)		;word 10, the first sector
+	(jump-if-page-fault error-page-fault)
+	(jump-if-bit-set (byte-field 1 0) read-memory-data error-odd-micr-start)
+	((m-a) read-memory-data)
+	((A-MICR-ADDRESS) (byte-field 31. 1) read-memory-data)
 	((A-MICR-ORIGIN) A-MICR-ADDRESS)
-	((VMA-START-READ) ADD M-C A-1)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	((A-MICR-N-BLOCKS) READ-MEMORY-DATA)
+	((m-temp-1) dpb m-ones (byte-field 1 1) a-10)	;12, word 10, the last sector
+	((vma-start-read) add m-c a-temp-1)
+	(jump-if-page-fault error-page-fault)
+	((m-temp-1) sub read-memory-data a-a)		;last - first
+	((m-temp-1) m+a+1 m-temp-1 a-zero)		;its sectors
+	((A-MICR-N-BLOCKS) (byte-field 31. 1) m-temp-1)	;its blocks
 	((M-MICR-OFFSET) A-400)	;So will read in a new page first off
 
 ;;; Process one section.  Each section starts with three words:
@@ -757,5 +825,24 @@ DISK-WAIT
 	(POPJ)
 
 ;;; quux: DIV, taken from UCADR 108, is gone with the geometry it divided by.
+
+;;; quux: the gpt's error halts (contract q8), here rather than with the
+;;; others so that go keeps its address.  each halt is at an even address,
+;;; as the others are.
+	(no-op)				;so that the halts below are at even addresses
+	(no-op)
+error-no-gpt
+	(jump halt-cons error-no-gpt)
+    (error-table error-no-gpt)
+
+	(no-op)
+error-no-current-micr
+	(jump halt-cons error-no-current-micr)
+    (error-table error-no-current-micr)
+
+	(no-op)
+error-odd-micr-start
+	(jump halt-cons error-odd-micr-start)
+    (error-table error-odd-micr-start)
 
 )))

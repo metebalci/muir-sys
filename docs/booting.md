@@ -73,6 +73,15 @@ channel command word of each disk transfer.
 
 ### Finding the microcode
 
+On QUUX the disk has a GPT, not a label, and the PROM finds the microcode
+through it (`READ-LABEL` to `FOUND-PARTITION` in `promh.text`): block 0, sectors
+0 and 1, holds the GPT header in words 200-377; the PROM checks the signature
+"EFI PART", reads the entry array's first sector, count and entry size, then
+reads the entries a block of eight at a time and takes the first of the
+microcode's type with attribute bit 48, the current bit. Its halts are
+`ERROR-NO-GPT`, `ERROR-NO-CURRENT-MICR` and `ERROR-ODD-MICR-START`. What
+follows is MIT's label, which the CADR keeps.
+
 The label is block 0. Word 0 must be the four characters `LABL` and word 1 must
 be 1, or the PROM halts at `ERROR-BAD-LABEL` (`DECODE-LABEL`, `:460-466`).
 Words 2 to 5 give the disk geometry, which QUUX's PROM skips: block-disk is
@@ -150,10 +159,14 @@ memory is assumed valid and it jumps straight to `BEG0000`.
 A cold boot enters `COLD-BOOT` (`uc-cold-disk.lisp:326`), which is
 `%DISK-RESTORE` asked for the current band. It resets the machine, sizes main
 memory by writing and reading in 16K steps until a location does not answer
-(`:346-356`), and reads the label to find **both the paging partition and the
-band's partition** (`COLD-READ-LABEL`, `:824-865`); `A-DISK-OFFSET` becomes the
-disk address of virtual location 0, the start of the paging partition
-(`:853`).
+(`:346-356`), and reads the disk's GPT to find **both the paging partition and
+the band's partition** (`COLD-READ-GPT`, `:839-953`). The paging partition is
+the first PAGE-type entry, and the band is the first band-type entry with
+attribute bit 48, or the one named in `%DISK-RESTORE`'s argument. A block is
+two of the GPT's LBAs, so partitions are whole blocks, and a QUUX disk is at
+most 8 GiB, so only an LBA's low word is read. `A-DISK-OFFSET` becomes the disk
+address of virtual location 0, the start of the paging partition (`:947`).
+The microcode only reads the GPT; the host writes it with sgdisk.
 
 ### The map, and which machine this is
 
