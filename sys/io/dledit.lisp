@@ -15,124 +15,50 @@ UNIT can also be a disk drive number; however, it is the disk on
 drive zero which is used for booting."
   (SET-CURRENT-BAND BAND UNIT T))
 
-(DEFUN SET-CURRENT-BAND (BAND &OPTIONAL (UNIT 0) MICRO-P &AUX RQB LABEL-INDEX DONT-DISPOSE)
-  "Specify the LOD band to be used for loading the Lisp system at boot time.
-If the LOD band you specify goes with a different microcode,
-you will be given the option of selecting that microcode as well.  Usually, do so.
-
+(DEFUN SET-CURRENT-BAND (BAND &OPTIONAL (UNIT 0) MICRO-P &AUX RQB LOC OLD DONT-DISPOSE)
+  "Print the sgdisk command that makes BAND the LOD band loaded at boot time.
+QUUX's GPT is written only on the host: the current band, and the current
+microcode partition with MICRO-P, is the one of its type with attribute bit 48.
 Do PRINT-DISK-LABEL to see what bands are available and what they contain.
-UNIT can be a string containing a machine's name, or /"CC/";
-then the specified or debugged machine's current band is set.
-The last works even if the debugged machine is down.
+UNIT can be a string containing a machine's name, or /"CC/".
 UNIT can also be a disk drive number; however, it is the disk on
 drive zero which is used for booting.
-
-Returns T if the band was set as specified, NIL if not
- (probably because user said no to a query)."
+Returns NIL, as nothing is set on the disk."
+  ;; quux (contract q8): the machine writes no gpt; mit's wrote the name of
+  ;; the band (or microload) into the label's word 7 (or 6).
   (SETF (VALUES UNIT DONT-DISPOSE)
 	(DECODE-UNIT-ARGUMENT UNIT
 	         (FORMAT NIL "(SET-CURRENT-~:[BAND~;MICROLOAD~] ~D)" MICRO-P BAND)))
   (UNWIND-PROTECT
-   (PROG ((UCODE-NAME "MCR"))			;the Lambda's LMC is gone.
-    (SETQ RQB (GET-DISK-LABEL-RQB))
-    (SETQ BAND (COND ((OR (SYMBOLP BAND) (STRINGP BAND))
-		      (STRING-UPCASE (STRING BAND)))
-		     (T (FORMAT NIL "~A~D"
-				(COND (MICRO-P UCODE-NAME)
-				      (T "LOD"))
-				BAND))))
-    (MULTIPLE-VALUE (NIL NIL LABEL-INDEX)
-      (FIND-DISK-PARTITION-FOR-READ BAND RQB UNIT))	;Does a READ-DISK-LABEL
-    (OR (STRING-EQUAL (SUBSTRING BAND 0 3)
-		      (IF MICRO-P UCODE-NAME "LOD"))
-	(FQUERY NIL "The specified band is not a ~A band.  Select it anyway? "
-		(IF MICRO-P UCODE-NAME "LOD"))
-	(RETURN NIL))
-    (PUT-DISK-STRING RQB BAND (COND (MICRO-P 6) (T 7)) 4)
-    (IF (NOT MICRO-P)
-	(MULTIPLE-VALUE-BIND (NIL MEMORY-SIZE-OF-BAND UCODE-VERSION-OF-BAND)
-	    (MEASURED-SIZE-OF-PARTITION BAND UNIT)
-	  (LET ((CURRENT-UCODE-VERSION
-		  (GET-UCODE-VERSION-FROM-COMMENT (GET-DISK-STRING RQB 6 4) UNIT RQB T))
-		(MACHINE-MEMORY-SIZE
-		  (MEASURED-SIZE-OF-PARTITION "PAGE" UNIT)))
-	    (AND (> MEMORY-SIZE-OF-BAND MACHINE-MEMORY-SIZE)
-		 (NOT (FQUERY NIL "~A requires a ~D block PAGE partition, but there is only ~D.  Select ~A anyway? "
-			      BAND MEMORY-SIZE-OF-BAND MACHINE-MEMORY-SIZE BAND))
-		 (RETURN))
-	    (MULTIPLE-VALUE-BIND (BASE-BAND-NAME BASE-BAND-VALID)
-		(INC-BAND-BASE-BAND BAND UNIT)
-	      (WHEN BASE-BAND-NAME
-		(FORMAT T "~%Band ~A is an incremental save with base band ~A."
-			BAND BASE-BAND-NAME)
-		(UNLESS BASE-BAND-VALID
-		  (FORMAT T "~2%It appears that ~A's contents have been changed
- since ~A was dumped.  Therefore, booting ~A may fail to work!"
-			  BASE-BAND-NAME BAND BAND)
-		  (UNLESS (FQUERY FORMAT:YES-OR-NO-P-OPTIONS "~%Select ~A anyway? "
-				  BAND)
-		    (RETURN NIL)))))
-	    (IF UCODE-VERSION-OF-BAND
-		(IF (EQ CURRENT-UCODE-VERSION UCODE-VERSION-OF-BAND)
-		    (FORMAT T "~%The new current band ~A should work properly
-with the ucode version that is already current." BAND)
-		  (LET ((BAND-UCODE-PARTITION
-			  (FIND-MICROCODE-PARTITION RQB UCODE-VERSION-OF-BAND)))
-		    (IF BAND-UCODE-PARTITION
-			(IF (FQUERY NIL "~A goes with ucode ~D, which is not selected.
-Partition ~A claims to contain ucode ~D.  Select it? "
-				    BAND UCODE-VERSION-OF-BAND
-				    BAND-UCODE-PARTITION UCODE-VERSION-OF-BAND)
-			    (PUT-DISK-STRING RQB BAND-UCODE-PARTITION 6 4)
-			  (UNLESS (FQUERY FORMAT:YES-OR-NO-P-OPTIONS
-					  "~2%The machine may fail to boot if ~A is selected
- with the wrong microcode version.  It wants ucode ~D.
-Currently ucode version ~D is selected.
-Do you know that ~A will run with this ucode? "
-					  BAND UCODE-VERSION-OF-BAND
-					  CURRENT-UCODE-VERSION BAND)
-			    (RETURN NIL)))
-		      ;; Band's desired microcode doesn't seem present.
-		      (FORMAT T "~%~A claims to go with ucode ~D,
-which does not appear to be present on this machine.
-It may or may not run with other ucode versions.
-Currently ucode ~D is selected."
-			      BAND UCODE-VERSION-OF-BAND CURRENT-UCODE-VERSION)
-		      (UNLESS (FQUERY FORMAT:YES-OR-NO-P-OPTIONS
-				      "~%Should I really select ~A? " BAND)
-			(RETURN NIL))))))))
-      ;; Here to validate a MCR partition.
-      (WHEN (> LABEL-INDEX (- #o400 3))
-	(FORMAT T "~%Band ~A may not be selected since it is past the first page of the label.
-The bootstrap prom only looks at the first page.  Sorry.")
-	(RETURN NIL)))
-    (WRITE-DISK-LABEL RQB UNIT)
-    (RETURN T))
-   (RETURN-DISK-RQB RQB)
-   (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))))
+      (let ((type (if micro-p :microcode :band)))
+	(setq rqb (get-disk-label-rqb))
+	(setq band (cond ((or (symbolp band) (stringp band))
+			  (string-upcase (string band)))
+			 (t (format nil "~A~D" (if micro-p "MCR" "LOD") band))))
+	(setq loc (nth-value 2 (find-disk-partition-for-read band rqb unit)))
+	(unless (eq (gpt-entry-type rqb loc) type)
+	  (ferror nil "~A is not a ~:[band~;microcode~] partition." band micro-p))
+	(setq old (nth-value 2 (find-disk-partition-by-type type rqb unit t t)))
+	(format t "~&QUUX writes no GPT; to make ~A the current ~:[band~;microcode~], on the host:~%  ~
+		   sgdisk ~@[-A ~D:clear:48 ~]-A ~D:set:48 <disk image>~%"
+		band micro-p (and old (not (= old loc)) (gpt-entry-number old))
+		(gpt-entry-number loc))
+	nil)
+    (RETURN-DISK-RQB RQB)
+    (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))))
 
-(DEFUN FIND-MICROCODE-PARTITION (RQB MICROCODE-VERSION
-				 &AUX N-PARTITIONS WORDS-PER-PART DESIRED-COMMENT)
+;; quux (contract q8): a microcode partition is one of the microcode type
+;; whose comment is "UCADR <version>"; mit's looked for the name MCR in the
+;; label's first page, which was all the prom read.
+(DEFUN FIND-MICROCODE-PARTITION (RQB MICROCODE-VERSION &AUX DESIRED-COMMENT)
   ;; the CADR's names only; the Lambda's ULAMBDA and LMC are gone.
   (SETQ DESIRED-COMMENT (FORMAT NIL "~A ~D" "UCADR" MICROCODE-VERSION))
-  (SETQ N-PARTITIONS (GET-DISK-FIXNUM RQB 200))
-  (SETQ WORDS-PER-PART (GET-DISK-FIXNUM RQB 201))
-  (IF ( WORDS-PER-PART 3)			;Partition comment
-      NIL
-    (DO ((I 0 (1+ I))
-	 (PARTITION-NAME)
-	 (COMMENT)
-	 (LEN (STRING-LENGTH DESIRED-COMMENT))
-	 (LOC #o202 (+ LOC WORDS-PER-PART)))
-	((OR (= I N-PARTITIONS)
-	     ;; Bootstrap prom only searches first label page,
-	     ;; so don't consider any MCR partitions outside that!
-	     (> (+ LOC WORDS-PER-PART) #o400)))
-      (SETQ PARTITION-NAME (GET-DISK-STRING RQB LOC 4))
-      (SETQ COMMENT (GET-DISK-STRING RQB (+ LOC 3) 16.))
-      (AND (STRING-EQUAL PARTITION-NAME "MCR" 0 0 3 3)
-	   (STRING-EQUAL COMMENT DESIRED-COMMENT 0 0 LEN LEN)
-	   (RETURN PARTITION-NAME)))))
+  (dotimes (i (gpt-n-entries rqb))
+    (let ((loc (gpt-entry-loc i))
+	  (len (string-length desired-comment)))
+      (and (eq (gpt-entry-type rqb loc) :microcode)
+	   (string-equal (gpt-entry-comment rqb loc) desired-comment 0 0 len len)
+	   (return (gpt-entry-name rqb loc))))))
 
 (DEFUN CURRENT-MICROLOAD (&OPTIONAL (UNIT 0))
   "Return the name of the current microload band.
@@ -142,35 +68,25 @@ or a string containing CC."
 
 (DEFUN CURRENT-BAND (&OPTIONAL (UNIT 0) MICRO-P &AUX RQB DONT-DISPOSE)
   "Return the name of the current Lisp system (LOD) band.
+With MICRO-P, the current microcode partition's.  On QUUX's GPT, it is the
+first partition of the type with attribute bit 48; NIL if there is none.
 UNIT can be a name of a machine, a number of a disk drive,
 or a string containing CC."
+  ;; quux (contract q8): by type and bit 48; mit's read the label's word 7 (or 6).
   (UNWIND-PROTECT
       (PROGN (SETF (VALUES UNIT DONT-DISPOSE) (DECODE-UNIT-ARGUMENT UNIT "Reading Label"))
 	     (SETQ RQB (GET-DISK-LABEL-RQB))
 	     (READ-DISK-LABEL RQB UNIT)
-	     (GET-DISK-STRING RQB (IF MICRO-P 6 7) 4))
+	     (nth-value 3 (find-disk-partition-by-type (if micro-p :microcode :band)
+						       rqb unit t t)))
     (RETURN-DISK-RQB RQB)			;Doesn't complain for NIL
     (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))))
 
-;;; Copy the label from unit 0 on this machine to unit 0 of the debuggee machine.
-;;; You may want to use this right after formatting the debuggee's disk pack.
+;;; quux (contract q8): retired: the gpt is written only on the host.
 (DEFUN COPY-DISK-LABEL (&OPTIONAL (FROM-UNIT 0) (TO-UNIT "CC"))
-  "Copy the disk label from one unit to another.
-A unit can be a disk drive number, the name of a machine (the chaosnet is used)
-or /"CC/" meaning the machine being debugged by this one.
-The last can be used even if that machine is down."
-  (AND (FQUERY FORMAT:YES-OR-NO-P-OPTIONS
-	       "Should I really smash the label on unit ~D with a copy of the label from unit ~D?"
-	       TO-UNIT FROM-UNIT)
-       (LET ((RQB (GET-DISK-LABEL-RQB)))
-	 (UNWIND-PROTECT
-	   (PROGN (SETQ FROM-UNIT (DECODE-UNIT-ARGUMENT FROM-UNIT "reading label" T NIL)
-			TO-UNIT (DECODE-UNIT-ARGUMENT TO-UNIT "writing label" T T))
-		  (READ-DISK-LABEL RQB FROM-UNIT)
-		  (WRITE-DISK-LABEL RQB TO-UNIT))
-	   (DISPOSE-OF-UNIT FROM-UNIT)
-	   (DISPOSE-OF-UNIT TO-UNIT)
-	   (RETURN-DISK-RQB RQB)))))
+  "Retired on QUUX: its GPT is written only on the host, with sgdisk."
+  from-unit to-unit
+  (ferror nil "COPY-DISK-LABEL is retired on QUUX; use sgdisk on the host."))
 
 (DEFUN PRINT-DISK-LABEL (&OPTIONAL (UNIT 0) (STREAM STANDARD-OUTPUT)
                          &AUX RQB)
@@ -204,68 +120,20 @@ Each item looks like: (name value start-x start-y width)")
     (PUSH (LIST NAME VALUE X Y WIDTH) LE-STRUCTURE))
   NIL)
 
-(DEFUN PRINT-DISK-LABEL-FROM-RQB (STREAM RQB CONS-UP-LE-STRUCTURE-P
-				  &AUX N-PARTITIONS WORDS-PER-PART THIS-END NEXT-BASE
-				  CURRENT-MICROLOAD CURRENT-BAND)
-  (TERPRI STREAM)
-  (LE-OUT 'PACK-NAME (GET-DISK-STRING RQB #o20 32.) STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC ": " STREAM)
-  (LE-OUT 'DRIVE-NAME (GET-DISK-STRING RQB #o10 32.) STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC ", " STREAM)
-  (LE-OUT 'COMMENT (GET-DISK-STRING RQB #o30 96.) STREAM CONS-UP-LE-STRUCTURE-P)
-  (FORMAT STREAM "~%~A version ~D, "		;You can't edit these
-	  (GET-DISK-STRING RQB 0 4) (GET-DISK-FIXNUM RQB 1))
-  (LE-OUT 'N-CYLINDERS (GET-DISK-FIXNUM RQB 2) STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC " cylinders, " STREAM)
-  (LE-OUT 'N-HEADS (GET-DISK-FIXNUM RQB 3) STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC " heads, " STREAM)
-  (LE-OUT 'N-BLOCKS-PER-TRACK (GET-DISK-FIXNUM RQB 4) STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC " blocks//track, " STREAM)
-  (FORMAT STREAM "~D" (GET-DISK-FIXNUM RQB 5))
-  (PRINC " blocks//cylinder" STREAM)
-  (TERPRI STREAM)
-  (PRINC "Current microload = " STREAM)
-  (LE-OUT 'CURRENT-MICROLOAD (SETQ CURRENT-MICROLOAD (GET-DISK-STRING RQB 6 4))
-	  STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC ", current virtual memory load (band) = " STREAM)
-  (LE-OUT 'CURRENT-BAND (SETQ CURRENT-BAND (GET-DISK-STRING RQB 7 4))
-	  STREAM CONS-UP-LE-STRUCTURE-P)
-  (TERPRI STREAM)
-  (LE-OUT 'N-PARTITIONS (SETQ N-PARTITIONS (GET-DISK-FIXNUM RQB #o200))
-	  STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC " partitions, " STREAM)
-  (LE-OUT 'WORDS-PER-PART (SETQ WORDS-PER-PART (GET-DISK-FIXNUM RQB #o201))
-	  STREAM CONS-UP-LE-STRUCTURE-P)
-  (PRINC "-word descriptors:" STREAM)
-  (DO ((I 0 (1+ I))
-       (PARTITION-NAME)
-       (LOC #o202 (+ LOC WORDS-PER-PART)))
-      ((= I N-PARTITIONS))
-    (SETQ PARTITION-NAME (GET-DISK-STRING RQB LOC 4))
-    (IF (OR (STRING-EQUAL PARTITION-NAME CURRENT-MICROLOAD)
-	    (STRING-EQUAL PARTITION-NAME CURRENT-BAND))
-	(FORMAT STREAM "~%* ")
-	(FORMAT STREAM "~%  "))
-    (LE-OUT 'PARTITION-NAME (GET-DISK-STRING RQB LOC 4) STREAM CONS-UP-LE-STRUCTURE-P)
-    (PRINC " at block " STREAM)
-    (LE-OUT 'PARTITION-START (GET-DISK-FIXNUM RQB (1+ LOC)) STREAM CONS-UP-LE-STRUCTURE-P)
-    (PRINC ", " STREAM)
-    (LE-OUT 'PARTITION-SIZE (GET-DISK-FIXNUM RQB (+ LOC 2)) STREAM CONS-UP-LE-STRUCTURE-P)
-    (PRINC " blocks long" STREAM)
-    (WHEN (> WORDS-PER-PART 3)			;Partition comment
-      (PRINC ", /"" STREAM)
-      (LE-OUT 'PARTITION-COMMENT (GET-DISK-STRING RQB (+ LOC 3)
-						  (* 4 (- WORDS-PER-PART 3)))
-	      STREAM CONS-UP-LE-STRUCTURE-P)
-      (TYO #/" STREAM))
-    (SETQ THIS-END (+ (GET-DISK-FIXNUM RQB (1+ LOC)) (GET-DISK-FIXNUM RQB (+ LOC 2)))
-	  NEXT-BASE (COND ((= (1+ I) N-PARTITIONS)
-			   (* (GET-DISK-FIXNUM RQB 2) (GET-DISK-FIXNUM RQB 5)))
-			  ((GET-DISK-FIXNUM RQB (+ LOC 1 WORDS-PER-PART)))))
-    (COND ((> (- NEXT-BASE THIS-END) 0)
-	   (FORMAT STREAM ", ~D blocks free at ~D" (- NEXT-BASE THIS-END) THIS-END))
-	  ((< (- NEXT-BASE THIS-END) 0)
-	   (FORMAT STREAM ", ~D blocks overlap" (- THIS-END NEXT-BASE))))))
+(DEFUN PRINT-DISK-LABEL-FROM-RQB (STREAM RQB CONS-UP-LE-STRUCTURE-P)
+  ;; quux (contract q8): print the gpt: each used entry, its sgdisk number,
+  ;; name, type, place, size and comment, * marking the current ones (bit 48).
+  cons-up-le-structure-p
+  (format stream "~%GPT, ~D entries from block ~D; * marks the current microcode and band:"
+	  (get-disk-fixnum rqb #o224) (floor (get-disk-fixnum rqb #o222) 2))
+  (dotimes (i (gpt-n-entries rqb))
+    (let ((loc (gpt-entry-loc i)))
+      (when (gpt-entry-type rqb loc)
+	(format stream "~%~:[ ~;*~]~3D ~4A ~10A at block ~8D, ~8D blocks long, /"~A/""
+		(gpt-entry-current-p rqb loc) (1+ i) (gpt-entry-name rqb loc)
+		(string-downcase (gpt-entry-type rqb loc))
+		(gpt-entry-start rqb loc) (gpt-entry-size rqb loc)
+		(gpt-entry-comment rqb loc))))))
 
 (DEFUN P-BIGNUM (ADR)
   (DPB (%P-LDB #o2020 ADR) #o2020 (%P-LDB #o0020 ADR)))
@@ -414,45 +282,13 @@ Each item looks like: (name value start-x start-y width)")
 
 (DEFVAR LE-SOMETHING-CHANGED NIL "Used to figure out if we've made any editing changes.")
 
-(DEFUN EDIT-DISK-LABEL (&OPTIONAL (LE-UNIT 0) (INIT-P NIL)
-					      ;If t, dont try to save page 1 since current
-					      ; label is garbage.  It can bomb setting
-					      ; blocks-per-track to 0, etc.
-			&AUX LE-RQB LE-STRUCTURE (LE-ITEM-NUMBER 0) CH COM ABORT)
-  "Edit the label of a disk pack.
-LE-UNIT is the disk drive number, or a name of a machine (the chaosnet is used),
-or /"CC/" which refers to the machine being debugged by this one."
-  (SETQ LE-SOMETHING-CHANGED NIL)		;restart
-  (SETQ LE-UNIT (DECODE-UNIT-ARGUMENT LE-UNIT "editing label" INIT-P))
-  (UNWIND-PROTECT
-     (PROGN (WITHOUT-INTERRUPTS
-	     (SETQ LE-RQB (GET-DISK-LABEL-RQB)))
-	    (LE-INITIALIZE-LABEL LE-RQB (CAR PACK-TYPES))
-	    ;; editing an existing label showed a fresh one, the label never
-	    ;; having been read.
-	    (IF (NULL INIT-P)
-		(READ-DISK-LABEL LE-RQB LE-UNIT))
-	    (LE-DISPLAY-LABEL LE-RQB LE-UNIT T)
-	    (FORMAT T "Use Control-R to read and edit existing label; hit HELP for help.~%")
-	    (PRINC "Label Edit Command: ")
-	    (*CATCH 'LE-EXIT
-		    (DO-FOREVER
-		      (SETQ CH (SEND *TERMINAL-IO* ':TYI))
-		      (SETQ COM (INTERN-SOFT (STRING-UPCASE (FORMAT NIL "LE-COM-~:C" CH))
-					     "SI"))
-		      (COND ((OR (NULL COM)	;nothing typed
-				 (NOT (FBOUNDP COM)))	;command not defined
-			     (BEEP)
-			     (FORMAT T "~%~:C is not a known edit-disk-label command.  Type ~:C for help, or ~:C to exit." CH #/HELP #/END))
-			    (T (MULTIPLE-VALUE (NIL ABORT)
-				 (CATCH-ERROR-RESTART ((ERROR SYS:ABORT)
-						       "Return to EDIT-DISK-LABEL.")
-				   (FUNCALL COM)))
-			       (AND ABORT (LE-DISPLAY-LABEL LE-RQB LE-UNIT)))))))
-     (RETURN-DISK-RQB LE-RQB)
-     (DISPOSE-OF-UNIT LE-UNIT)))
+(DEFUN EDIT-DISK-LABEL (&OPTIONAL (LE-UNIT 0) (INIT-P NIL))
+  "Retired on QUUX: its GPT is written only on the host, with sgdisk."
+  ;; quux (contract q8): the label editor edited mit's LABL label; the gpt is
+  ;; the host's to write.
+  le-unit init-p
+  (ferror nil "The disk label editor is retired on QUUX; use sgdisk on the host."))
 
-;;; Redisplay
 (DEFUN LE-COM-FORM ()
   (LE-DISPLAY-LABEL LE-RQB LE-UNIT))
 

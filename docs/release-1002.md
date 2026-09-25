@@ -284,8 +284,100 @@ a comment in that file saying why.
     same writer makes the boot PROM's file. `UA:*MCR-PARTITION-ORDER*`,
     `T` by default, bound to `NIL` gives MIT's order (`sys/qwmcr.lisp`).
     Lisp's readers of `.mcr` files still expect MIT's order:
-    `SI:LOAD-MCR-FILE` (`io/disk.lisp`), `READ-MCR-FILE`
-    (`sys2/usymld.lisp`) and `COMPARE-MCR-FILE` (`cc/cadld.lisp`).
+    `READ-MCR-FILE` (`sys2/usymld.lisp`) and `COMPARE-MCR-FILE`
+    (`cc/cadld.lisp`); `SI:LOAD-MCR-FILE` takes partition order (below).
+  - **The boot PROM finds the microcode through the GPT**
+    (`ucadr/promh.text`), in place of MIT's label. Block 0 is sectors 0
+    and 1, so the header is its words 200-377: the signature "EFI PART" in
+    words 200-201, the entry array's first sector in 222 (even, and 223
+    zero) and an entry's size in 225 (200 bytes), or it halts at
+    `ERROR-NO-GPT`. It reads the entries a block of eight at a time into its
+    buffer and takes the first of the microcode's type (by the type's first
+    word) with attribute bit 48; it halts at `ERROR-NO-CURRENT-MICR` if none
+    is current and at `ERROR-ODD-MICR-START` if that partition starts on an
+    odd sector. The partition's length is its own, from the entry. The new
+    halts are after the last code (36632, 36634, 36636), so `GO` stays at
+    36043; `ERROR-BAD-LABEL` and `ERROR-NO-MICR` are no longer reached. It
+    still writes nothing to the disk, and in main memory only pages 3-6 and
+    word 777. Tested on muir fcbe6e8, 9a37436 and caea66b, micro and rtl,
+    with microcode `ucode-1000-gpt2` and the GPT band: cold boot, a warm
+    boot that keeps the world, a save into LOD3 and `(disk-restore 3)` into
+    it at 1280x1024; it boots with MCR1 current, with MCR2
+    current (MCR1 zeroed), with both current (MCR2 zeroed: the first is
+    taken), with the microcode's entry in the second block of entries, and
+    with the entry array moved to sector 12; it halts at its named error on
+    disks with none current, an odd start, a broken signature and an odd
+    entry-array sector; both GPT copies are unchanged after every boot.
+  - **The microcode reads the GPT** (`ucadr/uc-cold-disk.lisp`).
+    `COLD-READ-GPT` replaces `COLD-READ-LABEL` and `COLD-FIND-PARTITION`.
+    It checks for "EFI PART" in LBA 1 (block 0, word 200), for an even entry
+    LBA and for 128-byte entries. It reads the entry array a block (8
+    entries) at a time and scans every entry. The first PAGE entry gives
+    `A-DISK-OFFSET` and `A-DISK-MAXIMUM`. The band is the first band (LOD)
+    entry whose name starts with the four characters asked for; with none
+    asked, it is the first with attribute bit 48, the current band.
+    `A-LOADED-BAND` is set as before. It halts at `GPT-MISSING`,
+    `GPT-NO-PAGE`, `GPT-NO-BAND` (no current band, or none of that name) or
+    `GPT-ODD-START` (a partition that is not whole blocks); the halt's PC
+    is the named location plus 1. An LBA is halved to a block. It reads
+    into a page and uses a CCW address given by the caller, in new A
+    variables (`A-GPT-BUFFER-PAGE`, `A-GPT-CCW`, `A-GPT-BLOCK`,
+    `A-GPT-COUNT`, placed last so nothing moves, `ucadr/uc-parameters.lisp`).
+    The cold boot and `%DISK-RESTORE` use page 0 with CCW 777, and
+    `%DISK-SAVE` uses the copy buffer. The warm boot (`WARM-READ-GPT`)
+    parks physical page 0 in PDL buffer 0-377 while it reads. So the
+    microcode no longer writes blocks 1, 3 and 5, where MIT's saved pages
+    0-2 and where GPT entries now are.
+  - **Lisp reads the GPT** (`io/disk.lisp`). `READ-DISK-LABEL` reads block 0
+    and up to 16 blocks of entries (`DISK-LABEL-RQB-PAGES` is 17). New
+    accessors give an entry's type (by muir's four type GUIDs,
+    `GPT-PARTITION-TYPES`), its name (the first four characters), its
+    comment (after a space, at most 31 characters), bit 48, its start and
+    its size. `FIND-DISK-PARTITION-BY-TYPE` finds a partition by type,
+    optionally only one with bit 48. `FIND-DISK-PARTITION`, `PARTITION-LIST`
+    (every used entry), `PARTITION-COMMENT` and their
+    callers keep their signatures. `DISK-INIT` finds PAGE by type.
+  - **The machine writes no GPT.** `WRITE-DISK-LABEL`, `SET-PACK-NAME`, the
+    label editor and `COPY-DISK-LABEL` signal that they are retired and to
+    use sgdisk. `UPDATE-PARTITION-COMMENT`, which `DISK-SAVE` calls, and
+    `SET-CURRENT-BAND` and `SET-CURRENT-MICROLOAD` write nothing; each
+    prints the sgdisk command that would do the change (`io/disk.lisp`,
+    `io/dledit.lisp`). `CURRENT-BAND` and `CURRENT-MICROLOAD` go by type
+    and bit 48. `FIND-MICROCODE-PARTITION` goes by type and the comment
+    "UCADR n". `DISK-RESTORE` with no band restores the band with bit 48
+    (`sys/qmisc.lisp`). `PRINT-DISK-LABEL` prints the GPT.
+  - **The herald and `MACHINE-INSTANCE` name the machine from the host
+    table** (`SI:LOCAL-MACHINE-NAME`, looked up when printed), since the GPT
+    has no pack name (`io/disk.lisp`, `sys/genric.lisp`).
+  - **`SI:LOAD-MCR-FILE` copies a partition-order `.mcr` unchanged.** It
+    also writes a partial last block, which MIT's dropped (`io/disk.lisp`).
+  - **A QUUX disk is at most 8 GiB** (2^24 LBAs), so the microcode and Lisp
+    read only an LBA's low word.
+  Tested on muir fcbe6e8, on T-300-size disks with a GPT, with a test PROM
+  that loads the microcode from block 17 (the real PROM's GPT reader was not
+  done yet). Cold boots by bit 48 of LOD4, LOD3 and LOD1; QLD; saves into
+  LOD4, LOD1 and LOD3; an incremental save and its cold boot from its base
+  band, found by name; a warm boot that keeps the world; `LOAD-MCR-FILE`.
+  The Lisp readers match a host oracle, and the halts match negative disks.
+  Both GPT copies are byte for byte unchanged after every run, and
+  `(disk-restore 3)` works at 1280x1024, 1024x768 and 1920x1080 (the next
+  item).
+- **`%DISK-RESTORE` from a running band no longer hangs** (found and
+  measured by muir). `DISK-RESTORE-1` gives the disk registers and the run
+  light each a fake level-2 entry in the invalid block, in the slot their
+  VMA<12:8> picks, so the two must differ. Lisp moves the run light to MONO
+  TV's last line (`TV::INITIALIZE-RUN-LIGHT-LOCATIONS`, `sys/ltop.lisp`).
+  When the buffer is a multiple of 8K words, as at 1280x1024 and 1024x768,
+  that is slot 37, the registers' own. The second entry replaced the first,
+  the disk commands went to the frame buffer, and `DISK-AWAIT-READY` waited
+  for ever on the command word it had written itself. A cold boot never
+  hit this, because its run light is still at the microcode's boot address.
+  `DISK-RESTORE-1` now resets `A-DISK-RUN-LIGHT` to that boot address
+  before the two entries, as a cold boot has it; Lisp sets it again after
+  the restore. A guard between the two entries halts at
+  `RUN-LIGHT-SHARES-DISK-SLOT` if the two ever share a slot, rather than
+  hang (`ucadr/uc-cold-disk.lisp`). Microcode `run/ucode-1000-gpt2`. The
+  guard fired, halting at its PC, in a test build that left the reset out.
 - **The band takes the PDL buffer's length from the machine.** A stack
   group's saved PDL phase is masked with `SI:PDL-BUFFER-LENGTH`
   (`sys2/proces.lisp`, and `eh/eh.lisp` rebuilding a frame), which was the

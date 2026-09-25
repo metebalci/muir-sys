@@ -1240,6 +1240,18 @@ a-level-1-map-invalid
 a-qdiv-numerator
 	(0)
 
+;; quux (contract q8): cold-read-gpt's buffer page and ccw address (the
+;; caller's), the next block of gpt entries and the entries left to scan.
+;; last, so that no earlier location moves.
+a-gpt-buffer-page
+	(0)
+a-gpt-ccw
+	(777)
+a-gpt-block
+	(0)
+a-gpt-count
+	(0)
+
 ;Arrays at fixed locations in A memory, used for the mouse
 (ASSIGN MOUSE-CURSOR-PATTERN-AMEM-LOC 1600)	;32x32 BIT ARRAY
 (ASSIGN MOUSE-BUTTONS-BUFFER-AMEM-LOC 1640)	;8 4-WORD ART-Q ENTRIES

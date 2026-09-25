@@ -1688,7 +1688,7 @@ with the microcode that is running."
 	(SETQ NAME (IF PARTITION
 		       (STRING-APPEND (LDB #o0010 (CADR L)) (LDB #o1010 (CADR L))
 				      (LDB #o0010 (CAR L)) (LDB #o1010 (CAR L)))
-		     (GET-DISK-STRING RQB 7 4)))
+		     (current-band 0)))	;quux (contract q8): bit 48, not word 7
 	(SETQ BLOCK (FIND-DISK-PARTITION-FOR-READ NAME RQB)
 	      COMMENT (PARTITION-COMMENT NAME 0))
 	(MULTIPLE-VALUE-BIND (BASE-BAND VALID-FLAG)

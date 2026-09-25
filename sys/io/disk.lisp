@@ -271,9 +271,11 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 	 (DEALLOCATE-RESOURCE 'RQB RQB)))
   NIL)
 
-(DEFCONST DISK-LABEL-RQB-PAGES 3)
+;; quux (contract q8): the label is the gpt, block 0 and the entry array's
+;; 16 blocks (128 entries of 128 bytes); mit's label took three pages.
+(defconst disk-label-rqb-pages 17.)
 (DEFUN GET-DISK-LABEL-RQB ()
-  "Get a disk RQB for reading the label into."
+  "Get a disk RQB for reading the label (quux's GPT) into."
   (GET-DISK-RQB DISK-LABEL-RQB-PAGES))
 
 (DEFUN COUNT-FREE-RQBS (N-PAGES)
@@ -761,51 +763,140 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 
 ;;;; Internals
 
-;;; Read the label from specified unit into an RQB, and set up the
-;;; disk configuration table if it is a local unit.
-;;; The label uses even-numbered pages, with the odd-numbered pages ignored.
-;;; That is because booting uses them as scratch pages.
-;;; CC-DISK-HANDLER also uses block 1 and 3 as scratch.
-(DEFUN READ-DISK-LABEL (RQB UNIT)
-  (LET (RQB1)
-    (UNWIND-PROTECT
-	(PROGN
-	  (SETQ RQB1 (GET-DISK-RQB))
-	  (DISK-READ RQB1 UNIT 0)
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE)
-			      (RQB-BUFFER RQB) 0 (* 2 PAGE-SIZE))
-	  (DISK-READ RQB1 UNIT 2)
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE)
-			      (RQB-BUFFER RQB) (* 2 PAGE-SIZE) (* 4 PAGE-SIZE))
-	  (DISK-READ RQB1 UNIT 4)
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE)
-			      (RQB-BUFFER RQB) (* 4 PAGE-SIZE) (* 6 PAGE-SIZE)))
-      (AND RQB1 (RETURN-DISK-RQB RQB1))))
-  (IF (NUMBERP UNIT)
-      (LET ((BFR (RQB-BUFFER RQB)))
-	(COND ((AND (= (AREF BFR 0) (+ (LSH #/A 8) #/L))
-		    (= (AREF BFR 1) (+ (LSH #/L 8) #/B))
-		    (= (AREF BFR 2) 1))
-	       (ASET (AREF BFR 6) DISK-HEADS-PER-CYLINDER-ARRAY UNIT)
-	       (ASET (AREF BFR 10) DISK-SECTORS-PER-TRACK-ARRAY UNIT))))))
+;;;; The disk's GPT
 
-(DEFUN WRITE-DISK-LABEL (RQB UNIT)
-  (OR (STRING-EQUAL (GET-DISK-STRING RQB 0 4) "LABL")
-      (FERROR NIL "Attempt to write garbage label"))
-  (LET (RQB1)
-    (UNWIND-PROTECT
-	(PROGN
-	  (SETQ RQB1 (GET-DISK-RQB))
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB) 0 (* 2 PAGE-SIZE)
-			      (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE))
-	  (DISK-WRITE RQB1 UNIT 0)
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB) (* 2 PAGE-SIZE) (* 4 PAGE-SIZE)
-			      (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE))
-	  (DISK-WRITE RQB1 UNIT 2)
-	  (COPY-ARRAY-PORTION (RQB-BUFFER RQB) (* 4 PAGE-SIZE) (* 6 PAGE-SIZE)
-			      (RQB-BUFFER RQB1) 0 (* 2 PAGE-SIZE))
-	  (DISK-WRITE RQB1 UNIT 4))
-      (AND RQB1 (RETURN-DISK-RQB RQB1)))))
+;;; quux (contract q8): quux's disk carries a gpt, and the machine only reads
+;;; it; partitions are made and changed on the host with sgdisk.  mit's LABL
+;;; label (block 0, its partition table from word 200) is gone.  A block is
+;;; 1024 bytes, two of the gpt's 512-byte lbas, so an lba is halved to a
+;;; block, and a partition is whole blocks: its first lba even, its last odd.
+;;; A disk is at most 8 GiB, so an lba's high word is not read.  The label
+;;; rqb holds block 0 (the protective mbr, and in its second half, from word
+;;; #o200, the gpt header) and after it the entry array, 8 entries a block:
+;;; entry i at word (+ #o400 (* #o40 i)).  An entry's name is its partition's
+;;; name, 4 characters, then a space and the partition's comment, up to 31
+;;; characters; its attribute bit 48 marks the current microcode partition
+;;; and the current band, as the label's words 6 and 7 did.
+
+(defconst gpt-partition-types
+	  '((:microcode #o106365 #o117061 #o124533 #o45473 #o126662 #o161632 #o130006 #o155342)
+	    (:band #o2160 #o121663 #o142724 #o40701 #o124207 #o62722 #o41220 #o134114)
+	    (:page #o137245 #o43122 #o3257 #o45731 #o135662 #o40465 #o467 #o144121)
+	    (:file #o112462 #o75372 #o72736 #o40237 #o144215 #o174776 #o32566 #o152421))
+  "Each partition type of quux's GPT with its type guid, as the 8 halfwords
+the disk holds, in order (muir's docs/quux.md, checked with sgdisk):
+microcode 9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da, band a3b30470-c5d4-41c1-87a8-d26590424cb8,
+page 4652bea5-06af-4bd9-b2bb-3541370151c8, file 7afa9532-75de-409f-8dc8-fef9763511d5.
+No other type is QUUX's; an entry of any other type is :OTHER.")
+
+;;; Read the gpt of the specified unit into an RQB: block 0, then as many
+;;; blocks of the entry array as the rqb holds after it.
+(defun read-disk-label (rqb unit)
+  "Read the GPT of disk unit UNIT into RQB: block 0, then the entry array."
+  (let (rqb1 n-blocks)
+    (unwind-protect
+	(progn
+	  (setq rqb1 (get-disk-rqb 1))
+	  (disk-read rqb1 unit 0)
+	  (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size)
+			      (rqb-buffer rqb) 0 (* 2 page-size))
+	  (unless (and (string-equal (get-disk-string rqb #o200 8.) "EFI PART")
+		       (= (get-disk-fixnum rqb #o225) 128.)
+		       (evenp (get-disk-fixnum rqb #o222)))
+	    (ferror nil "Disk unit ~A has no GPT that QUUX reads." unit))
+	  (setq n-blocks (min (floor (+ (get-disk-fixnum rqb #o224) 7) 8.)
+			      (1- disk-label-rqb-pages)))
+	  (when (plusp n-blocks)
+	    (return-disk-rqb rqb1)
+	    (setq rqb1 nil)
+	    (setq rqb1 (get-disk-rqb n-blocks))
+	    (disk-read rqb1 unit (floor (get-disk-fixnum rqb #o222) 2))
+	    (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size n-blocks)
+				(rqb-buffer rqb) (* 2 page-size)
+				(* 2 page-size (1+ n-blocks)))))
+      (and rqb1 (return-disk-rqb rqb1)))))
+
+(defun write-disk-label (rqb unit)
+  "Retired on QUUX: its GPT is written only on the host, with sgdisk."
+  rqb unit
+  (ferror nil "Writing the disk label is retired on QUUX; use sgdisk on the host."))
+
+(defun gpt-n-entries (rqb)
+  "The number of GPT entries READ-DISK-LABEL read into RQB."
+  (min (get-disk-fixnum rqb #o224) (* 8. (1- disk-label-rqb-pages))))
+
+(defun gpt-entry-loc (i)
+  "The word in a label rqb where GPT entry I starts."
+  (+ #o400 (* #o40 i)))
+
+(defun gpt-entry-number (loc)
+  "The partition number sgdisk gives the GPT entry at word LOC: its index plus one."
+  (1+ (floor (- loc #o400) #o40)))
+
+(defun gpt-entry-type (rqb loc)
+  "The type of the GPT entry at word LOC of RQB: one of GPT-PARTITION-TYPES' keywords,
+NIL for an unused entry, or :OTHER."
+  (let ((buf (rqb-buffer rqb)) (hw (* 2 loc)))
+    (if (do ((i 0 (1+ i))) ((= i 8.) t)
+	  (unless (zerop (aref buf (+ hw i))) (return nil)))
+	nil
+      (dolist (type gpt-partition-types :other)
+	(when (do ((i 0 (1+ i)) (l (cdr type) (cdr l))) ((null l) t)
+		(unless (= (car l) (aref buf (+ hw i))) (return nil)))
+	  (return (car type)))))))
+
+(defun gpt-entry-full-name (rqb loc)
+  "The name of the GPT entry at word LOC of RQB, up to its first null:
+the low byte of each of its utf-16 characters, which are ascii."
+  (let ((buf (rqb-8-bit-buffer rqb))
+	(start (+ (* 4 loc) 56.))
+	(string (make-array 36. :type 'art-string :fill-pointer 0)))
+    (do ((i 0 (1+ i))) ((or (= i 36.) (zerop (aref buf (+ start (* 2 i))))))
+      (array-push string (aref buf (+ start (* 2 i)))))
+    string))
+
+(defun gpt-entry-name (rqb loc)
+  "The partition name of the GPT entry at word LOC of RQB: its name's first 4 characters."
+  (let ((name (gpt-entry-full-name rqb loc)))
+    (substring name 0 (min 4 (length name)))))
+
+(defun gpt-entry-comment (rqb loc)
+  "The comment of the GPT entry at word LOC of RQB: its name after the partition name
+and a space, at most 31 characters."
+  (let ((name (gpt-entry-full-name rqb loc)))
+    (if (> (length name) 5) (substring name 5) "")))
+
+(defun gpt-entry-current-p (rqb loc)
+  "T if the GPT entry at word LOC of RQB has attribute bit 48, the current one's."
+  (oddp (aref (rqb-buffer rqb) (1+ (* 2 (+ loc 13.))))))
+
+(defun gpt-entry-start (rqb loc)
+  "The first block of the GPT entry at word LOC of RQB."
+  (floor (get-disk-fixnum rqb (+ loc 8.)) 2))
+
+(defun gpt-entry-size (rqb loc)
+  "The size in blocks of the GPT entry at word LOC of RQB."
+  (- (floor (get-disk-fixnum rqb (+ loc 10.)) 2) (gpt-entry-start rqb loc) -1))
+
+(defun find-disk-partition-by-type (type &optional rqb (unit 0) already-read-p current-p
+				    &aux return-rqb)
+  "Find the first partition of type TYPE (see GPT-PARTITION-TYPES) on disk unit UNIT,
+or with CURRENT-P the first of that type with attribute bit 48, the current one.
+Returns the values FIND-DISK-PARTITION does, or NIL if there is none."
+  (declare (values first-block n-blocks label-loc name))
+  (unwind-protect
+      (progn
+	(when (null rqb)
+	  (setq return-rqb t rqb (get-disk-label-rqb)))
+	(or already-read-p (read-disk-label rqb unit))
+	(dotimes (i (gpt-n-entries rqb))
+	  (let ((loc (gpt-entry-loc i)))
+	    (when (and (eq (gpt-entry-type rqb loc) type)
+		       (or (not current-p) (gpt-entry-current-p rqb loc)))
+	      (return-from find-disk-partition-by-type
+		(values (gpt-entry-start rqb loc) (gpt-entry-size rqb loc)
+			loc (gpt-entry-name rqb loc)))))))
+    (when return-rqb (return-disk-rqb rqb))))
 
 (DEFUN GET-DISK-STRING (RQB WORD-ADDRESS N-CHARACTERS &OPTIONAL (SHARE-P NIL))
   "Return a string containing the contents of a part of RQB's data.
@@ -844,9 +935,11 @@ N-CHARACTERS characters are stored, padding STR with zeros if it is not that lon
   (SETF (AREF (RQB-BUFFER RQB) (* 2 WORD-ADDRESS)) (LDB #o0020 VAL))
   (SETF (AREF (RQB-BUFFER RQB) (1+ (* 2 WORD-ADDRESS))) (LDB #o2020 VAL)))
 
+;; quux (contract q8): the partitions are the gpt's entries; LABEL-LOC is the
+;; word in the label rqb where the entry starts.
 (DEFUN FIND-DISK-PARTITION (NAME &OPTIONAL RQB (UNIT 0) (ALREADY-READ-P NIL) CONFIRM-WRITE
 			    &AUX (RETURN-RQB NIL))
-  "Search the label of disk unit UNIT for a partition named NAME.
+  "Search the GPT of disk unit UNIT for a partition named NAME.
 Returns three values describing what was found, or NIL if none found.
 The values are the first block number of the partition,
 the length in disk blocks of the partition,
@@ -861,25 +954,18 @@ and the location in the label (in words) of the data for this partition."
 	      (SETQ RETURN-RQB T
 		    RQB (GET-DISK-LABEL-RQB)))
 	  (OR ALREADY-READ-P (READ-DISK-LABEL RQB UNIT))
-	  (DO ((N-PARTITIONS (GET-DISK-FIXNUM RQB #o200))
-	       (WORDS-PER-PART (GET-DISK-FIXNUM RQB #o201))
-	       (I 0 (1+ I))
-	       (LOC #o202 (+ LOC WORDS-PER-PART)))
-	      ((= I N-PARTITIONS) NIL)
-	    (WHEN (STRING-EQUAL (GET-DISK-STRING RQB LOC 4) NAME)
-	      (AND CONFIRM-WRITE
-		   (NOT (FQUERY FORMAT:YES-OR-NO-QUIETLY-P-OPTIONS
-				"Do you really want to clobber partition ~A ~
-				 ~:[~*~;on unit ~D ~](~A)? "
-				NAME (NUMBERP UNIT) UNIT
-				(GET-DISK-STRING RQB
-						 (+ LOC 3)
-						 (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3)))))
-		   (RETURN-FROM FIND-DISK-PARTITION (VALUES NIL T)))
-	      (RETURN-FROM FIND-DISK-PARTITION (VALUES (GET-DISK-FIXNUM RQB (+ LOC 1))
-						       (GET-DISK-FIXNUM RQB (+ LOC 2))
-						       LOC
-						       NAME)))))
+	  (dotimes (i (gpt-n-entries rqb))
+	    (let ((loc (gpt-entry-loc i)))
+	      (when (and (gpt-entry-type rqb loc)
+			 (string-equal (gpt-entry-name rqb loc) name))
+		(and confirm-write
+		     (not (fquery format:yes-or-no-quietly-p-options
+				  "Do you really want to clobber partition ~A ~
+				   ~:[~*~;on unit ~D ~](~A)? "
+				  name (numberp unit) unit (gpt-entry-comment rqb loc)))
+		     (return-from find-disk-partition (values nil t)))
+		(return-from find-disk-partition
+		  (values (gpt-entry-start rqb loc) (gpt-entry-size rqb loc) loc name))))))
       (WHEN RETURN-RQB (RETURN-DISK-RQB RQB)))))
 
 (DEFUN FIND-DISK-PARTITION-FOR-READ (NAME &OPTIONAL RQB (UNIT 0) (ALREADY-READ-P NIL)
@@ -943,8 +1029,9 @@ will work properly."
 	  (FERROR NIL "No partition named /"~A/" exists on disk unit ~D." NAME UNIT)
 	NIL))))
 
+;; quux (contract q8): one element for each used gpt entry, whatever its type.
 (DEFUN PARTITION-LIST (&OPTIONAL RQB (UNIT 0) ALREADY-READ-P &AUX RETURN-RQB)
-  "Returns the data of the disk label on unit UNIT.
+  "Returns the data of the disk label (GPT) on unit UNIT.
 The value is a list with one element per partition,
 with the format (<name> <base> <size> <comment> <desc-loc>).
 RQB is an rqb to use, or NIL meaning allocate one temporarily."
@@ -955,18 +1042,14 @@ RQB is an rqb to use, or NIL meaning allocate one temporarily."
 			 RQB (GET-DISK-LABEL-RQB))))
 	     (UNLESS ALREADY-READ-P
 	       (READ-DISK-LABEL RQB UNIT))
-	     (LET ((RESULT (MAKE-LIST (GET-DISK-FIXNUM RQB #o200)))
-		   (WORDS-PER-PART (GET-DISK-FIXNUM RQB #o201)))
-	       (DO ((LOC #o202 (+ LOC WORDS-PER-PART))
-		    (R RESULT (CDR R)))
-		   ((NULL R) RESULT)
-		 (SETF (CAR R)
-		       (LIST (GET-DISK-STRING RQB LOC 4)
-			     (GET-DISK-FIXNUM RQB (+ LOC 1))
-			     (GET-DISK-FIXNUM RQB (+ LOC 2))
-			     (GET-DISK-STRING RQB (+ LOC 3)
-					          (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3)))
-			     LOC)))))
+	     (let ((result nil))
+	       (dotimes (i (gpt-n-entries rqb))
+		 (let ((loc (gpt-entry-loc i)))
+		   (when (gpt-entry-type rqb loc)
+		     (push (list (gpt-entry-name rqb loc) (gpt-entry-start rqb loc)
+				 (gpt-entry-size rqb loc) (gpt-entry-comment rqb loc) loc)
+			   result))))
+	       (nreverse result)))
     (IF RETURN-RQB (RETURN-DISK-RQB RQB))))
 
 ;;; This is a hack to allow one to easily find if a partition he wants is available.
@@ -1160,12 +1243,24 @@ or /"CC/" which refers to the machine being debugged by this one."
       (PROGN (SETQ RQB (GET-DISK-LABEL-RQB))
 	     (READ-DISK-LABEL RQB 0)
 	     ;; Update things which depend on the location and size of the paging area
-	     (MULTIPLE-VALUE (PAGE-OFFSET SIZE)
-	       (FIND-DISK-PARTITION "PAGE" RQB 0 T))
+	     ;; quux (contract q8): PAGE is found by its type, as the microcode
+	     ;; finds it; the gpt has no pack name, so DISK-PACK-NAME is not set
+	     ;; (see LOCAL-MACHINE-NAME).
+	     (multiple-value (page-offset size)
+	       (find-disk-partition-by-type :page rqb 0 t))
 	     (SETQ VIRTUAL-MEMORY-SIZE (* (MIN (LDB #o1020 A-MEMORY-VIRTUAL-ADDRESS) SIZE)
-					  PAGE-SIZE))
-	     (SETQ DISK-PACK-NAME (GET-DISK-STRING RQB #o20 32.)))
+					  PAGE-SIZE)))
     (RETURN-DISK-RQB RQB)))
+
+;; quux (contract q8): the gpt has no pack name, which named the machine in
+;; the herald and MACHINE-INSTANCE; the host table's name for this machine
+;; does, found when it is printed, as the network may not know it at boot.
+(defun local-machine-name ()
+  "The name of this machine in the host table, or /"UNKNOWN/" if it is not known yet."
+  (declare (special local-host))
+  (if (and (boundp 'local-host) local-host)
+      (send local-host :name)
+    "UNKNOWN"))
 
 (DEFUN PRINT-LOADED-BAND (&OPTIONAL (STREAM T))	;Can be NIL to return a string
   "Prints on STREAM a description of the loaded band.
@@ -1178,7 +1273,7 @@ This is obsolete -- You probably want PRINT-HERALD"
     (FRESH-LINE STREAM)
     (FORMAT STREAM "This is band ~C of ~A, with ~A"
 	    (LDB #o2010 CURRENT-LOADED-BAND)	;4th char in string (only high 3 stored)
-	    DISK-PACK-NAME
+	    (local-machine-name)		;quux: the gpt has no pack name
 	    (IF (FBOUNDP 'SYSTEM-VERSION-INFO)	;For the cold load
 		(SYSTEM-VERSION-INFO)
               "[fresh cold load]"))
@@ -1198,7 +1293,7 @@ This is obsolete -- You probably want PRINT-HERALD"
   (format stream "~&~A System, band ~C of ~A."
 	  (or (and (variable-boundp site-name) site-name) "UNKNOWN")
 	  (LDB #o2010 CURRENT-LOADED-BAND)
-	  DISK-PACK-NAME)
+	  (local-machine-name))			;quux: the gpt has no pack name
   (AND (BOUNDP 'SYSTEM-ADDITIONAL-INFO)
        (PLUSP (ARRAY-ACTIVE-LENGTH SYSTEM-ADDITIONAL-INFO))
        (FORMAT STREAM " (~A)" SYSTEM-ADDITIONAL-INFO))
@@ -1294,7 +1389,9 @@ This is obsolete -- You probably want PRINT-HERALD"
 (ADD-INITIALIZATION "DISK-INIT" '(DISK-INIT) '(SYSTEM))
 
 ;;; Put a microcode file onto my own disk.
-;;; Note that the cretinous halfwords are out of order
+;;; quux (contract q8): quux's .mcr is written in partition order (see
+;;; sys/qwmcr.lisp), so its halfwords are copied in the file's order; mit's
+;;; had each word's halves swapped, and this swapped them back.
 (DEFUN LOAD-MCR-FILE (FILENAME PART &OPTIONAL (UNIT 0)
                                     &AUX PART-BASE PART-SIZE RQB)
   "Load microcode from file FILENAME into partition PART on unit UNIT.
@@ -1329,17 +1426,25 @@ or /"CC/" which refers to the machine being debugged by this one."
 		(SETQ LH (SEND FILE :TYI)
 		      RH (SEND FILE :TYI))
 		(WHEN (OR (NULL LH) (NULL RH))
+		  ;; quux: a partial last block is written too, zero-filled;
+		  ;; mit's dropped it.  a partition-order file ends on a whole
+		  ;; block, so there is none.
+		  (unless (zerop i)
+		    (array-initialize buf16 0 i #o1000)
+		    (disk-write rqb unit block))
 		  (UPDATE-PARTITION-COMMENT
 		    PART
 		    (LET ((PATHNAME (SEND FILE :TRUENAME)))
 		      (FORMAT NIL "~A ~D" (SEND PATHNAME :NAME) (SEND PATHNAME :VERSION)))
 		    UNIT)
 		  (RETURN-FROM DONE NIL))
-		(SETF (AREF BUF16 I) RH)
-		(SETF (AREF BUF16 (1+ I)) LH))))))
+		(setf (aref buf16 i) lh)
+		(setf (aref buf16 (1+ i)) rh))))))
     (DISPOSE-OF-UNIT UNIT)
     (RETURN-DISK-RQB RQB)))
 
+;; quux (contract q8): a partition's comment is its gpt entry's name after the
+;; partition name and a space, at most 31 characters.
 (DEFUN PARTITION-COMMENT (PART UNIT &AUX RQB DESC-LOC)
   "Return the comment in the disk label for partition PART, unit UNIT.
 UNIT can be a disk unit number, the name of a machine on the chaos net,
@@ -1350,12 +1455,7 @@ or /"CC/" which refers to the machine being debugged by this one."
     (UNWIND-PROTECT
 	(PROGN (SETQ RQB (GET-DISK-LABEL-RQB))
 	       (SETQ DESC-LOC (NTH-VALUE 2 (FIND-DISK-PARTITION PART RQB UNIT)))
-	       (COND ((NULL DESC-LOC) NIL)
-		     (( (GET-DISK-FIXNUM RQB #o201) 7)
-		      (GET-DISK-STRING RQB
-				       (+ DESC-LOC 3)
-				       (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3))))
-		     (T "")))
+	       (and desc-loc (gpt-entry-comment rqb desc-loc)))
       (RETURN-DISK-RQB RQB))))
 
 (DEFUN MAXIMUM-PARTITION-COMMENT-LENGTH (PART UNIT &AUX RQB DESC-LOC)
@@ -1363,10 +1463,7 @@ or /"CC/" which refers to the machine being debugged by this one."
   (UNWIND-PROTECT
       (PROGN (SETQ RQB (GET-DISK-LABEL-RQB))
 	     (SETQ DESC-LOC (NTH-VALUE 2 (FIND-DISK-PARTITION PART RQB UNIT)))
-	     (COND ((NULL DESC-LOC) NIL)
-		   (( (GET-DISK-FIXNUM RQB #o201) 7)
-		    (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3)))
-		   (T 0)))
+	     (and desc-loc 31.))
     (RETURN-DISK-RQB RQB)))
 
 (DEFUN GET-UCODE-VERSION-FROM-COMMENT (PART UNIT &OPTIONAL RQB ALREADY-READ-P
@@ -1381,11 +1478,7 @@ or /"CC/" which refers to the machine being debugged by this one."
 	  (SETQ RETURN-RQB T
 		RQB (GET-DISK-LABEL-RQB)))
       (SETQ DESC-LOC (NTH-VALUE 2 (FIND-DISK-PARTITION PART RQB UNIT ALREADY-READ-P)))
-      (LET ((COMMENT (AND DESC-LOC
-			  ( (GET-DISK-FIXNUM RQB #o201) 7)
-			  (GET-DISK-STRING RQB
-					   (+ DESC-LOC 3)
-					   (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3))))))
+      (LET ((COMMENT (and desc-loc (gpt-entry-comment rqb desc-loc))))
 	;; only UCADR comments; the Lambda's ULAMBDA ones are gone.
 	(AND COMMENT
 	     (STRING-EQUAL COMMENT "UCADR " :END1 6)
@@ -1394,8 +1487,11 @@ or /"CC/" which refers to the machine being debugged by this one."
     (AND RETURN-RQB (RETURN-DISK-RQB RQB))))
 	    
 ;;; Change the comment on a partition
+;;; quux (contract q8): the machine writes no gpt, so this writes nothing and
+;;; prints the sgdisk command that sets the comment on the host.
 (DEFUN UPDATE-PARTITION-COMMENT (PART STRING UNIT &AUX RQB DESC-LOC) 
-  "Set the comment in the disk label for partition PART, unit UNIT to STRING.
+  "Print the sgdisk command that sets the comment of partition PART, unit UNIT, to STRING.
+The comment is at most 31 characters.  QUUX's GPT is written only on the host.
 UNIT can be a disk unit number, the name of a machine on the chaos net,
 or /"CC/" which refers to the machine being debugged by this one."
   (IF (AND (CLOSUREP UNIT)
@@ -1405,14 +1501,13 @@ or /"CC/" which refers to the machine being debugged by this one."
 	(PROGN (SETQ RQB (GET-DISK-LABEL-RQB))
 	       (SETQ DESC-LOC (NTH-VALUE 2
 				(FIND-DISK-PARTITION-FOR-READ PART RQB UNIT NIL NIL)))
-	       (AND ( (GET-DISK-FIXNUM RQB #o201) 7)
-		    (PUT-DISK-STRING RQB
-				     STRING
-				     (+ DESC-LOC 3)
-				     (* 4 (- (GET-DISK-FIXNUM RQB #o201) 3))))
-	       (WRITE-DISK-LABEL RQB UNIT))
+	       (format t "~&QUUX writes no GPT; to set ~A's comment, on the host:~%  ~
+			  sgdisk -c ~D:/"~A ~A/" <disk image>~%"
+		       (gpt-entry-name rqb desc-loc) (gpt-entry-number desc-loc)
+		       (gpt-entry-name rqb desc-loc)
+		       (substring string 0 (min 31. (length string)))))
       (RETURN-DISK-RQB RQB))))
-
+
 (DEFUN COPY-DISK-PARTITION-BACKGROUND (FROM-UNIT FROM-PART TO-UNIT TO-PART STREAM
 				       STARTING-HUNDRED)
   (PROCESS-RUN-FUNCTION "copy partition"
@@ -1782,26 +1877,15 @@ FROM and TO are lists of subscripts, or NIL."
 ;;;used by the lambda to find the machine name (since there is nothing like the
 ;;; chaos address set on the IO board)  Must be in this file since is needed when
 ;;; real chaos routines are initialized after MINI has done its thing.
-(defun get-pack-name (&optional (unit 0) &aux rqb pack-name)
-  (setq unit (decode-unit-argument unit "reading label"))
-  (unwind-protect
-      (progn (setq rqb (get-disk-label-rqb))
-	     (read-disk-label rqb unit)
-	     (setq pack-name (get-disk-string rqb #o20 32.)))
-    (return-disk-rqb rqb))
-  (dispose-of-unit unit)
-  pack-name)
+;;; quux (contract q8): the gpt has no pack name; the machine's name is the
+;;; host table's (LOCAL-MACHINE-NAME), and setting it is retired.
+(defun get-pack-name (&optional (unit 0))
+  unit
+  (local-machine-name))
 
-(defun set-pack-name (pack-name &optional (unit 0) &aux rqb)
-  (setq unit (decode-unit-argument unit "writing label"))
-  (unwind-protect
-      (progn (setq rqb (get-disk-label-rqb))
-	     (read-disk-label rqb unit)
-	     (put-disk-string rqb pack-name #o20 32.)
-	     (write-disk-label rqb unit))
-    (return-disk-rqb rqb))
-  (dispose-of-unit unit)
-  pack-name)
+(defun set-pack-name (pack-name &optional (unit 0))
+  pack-name unit
+  (ferror nil "The pack name is retired on QUUX, whose GPT has none; the host table names the machine."))
 
 ;This is a test function.
 (DEFUN READ-ALL-BLOCKS (&OPTIONAL (UNIT 0) &AUX RQB BUF BLOCKS-PER-TRACK N-CYLS N-HEADS)
