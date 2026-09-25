@@ -36,7 +36,7 @@ levels of the map, I-memory and D-memory, so their parity is good
 
 | virtual page | maps to |
 |---|---|
-| 0 | the first page of main memory |
+| 0 | the first page of main memory; on QUUX physical page 3, the PROM's buffer (below) |
 | 1 | the disk control registers |
 | 2 | the debug (spy) interface at Unibus 766000 |
 | 3 | the second page of main memory, the system communication area |
@@ -49,19 +49,27 @@ clears 64 blocks, writing a level-1 entry's bits 4:0 from VMA<31:27> and its
 bit 5 from VMA<24>, which a CADR ignores; on a CADR blocks 40-77 are 0-37
 again (`:323-334`).
 
-### Why it saves physical page 0
+### Its buffer, and why it saves nothing
 
-The PROM has no buffer of its own. It reads the disk label into physical page
-0, and `GET-NEXT-PAGE` reads every block of the microcode partition into
-physical page 0 as well (`:636-644`). So merely running destroys one page of
-main memory --- and on a warm boot that page belongs to a live Lisp world.
+The PROM has no buffer of its own. MIT's read the disk label into physical page
+0, and `GET-NEXT-PAGE` read every block of the microcode partition into
+physical page 0 as well. So merely running destroyed one page of main memory
+--- and on a warm boot that page belongs to a live Lisp world. MIT's PROM
+therefore wrote physical page 0 out to disk block 1 first (`SAVE-A-PAGE`),
+after rewriting every word of it for good parity (`PAGE-0-PARITY-FIX`), and
+read the block back into page 0 at `DONE-LOADING`.
 
-Before touching it, the PROM therefore writes physical page 0 out to disk block
-1, which the label format reserves for this purpose (`SAVE-A-PAGE`, `:427-441`).
-MIT's PROM verified the write with a read-compare and retried on failure. On
-QUUX's disk, block-disk, there is no read-compare, so the PROM writes the
-block once and halts at `ERROR-DISK-ERROR` if the write fails. At `DONE-LOADING` it reads the block
-back into page 0 (`:587-591`). The page is borrowed and returned.
+QUUX's PROM saves nothing and writes nothing to the disk (muir's contract Q8,
+where block 1 of a disk with a GPT is the partition table). Its buffer, virtual
+page 0, is physical page 3 (`SET-UP-FOUR-PAGES`): the first of pages 3-6, which
+the microcode's own main-memory section, the microcode symbol area, fills. The
+PROM records that section when it meets it (`PROCESS-MAIN-MEM-SECTION`), and
+loads it at `DONE-LOADING`, after the last word has been read through the
+buffer, so what the buffer held is overwritten by what belongs there. It halts
+at `ERROR-TWO-MAIN-MEM-SECTIONS` on a second section with blocks in it, and at
+`ERROR-BUFFER-NOT-LOADED`, before loading anything, if the section does not
+cover all of page 3. In main memory it writes only pages 3-6 and word 777, the
+channel command word of each disk transfer.
 
 ### Finding the microcode
 
@@ -89,7 +97,7 @@ PROM dispatches on the type (`:528-532`):
 |---|---|---|
 | 1 | I-memory | two words per microinstruction, written with `WRITE-I-MEM` (`:534-547`) |
 | 2 | D-memory, the dispatch RAM | one word each, through `WRITE-DISPATCH-RAM` (`:549-559`) |
-| 3 | main memory | a fourth header word gives the physical address, and whole blocks are read straight from the partition (`:561-574`) |
+| 3 | main memory | a fourth header word gives the physical address, and whole blocks are read straight from the partition (`:561-574`); QUUX's PROM reads them last, at `DONE-LOADING` |
 | 4 | A and M memory | words are pushed onto the PDL buffer (`:576-585`) |
 
 The other end of this format is `sys/sys/qwmcr.lisp`, which writes it: "An MCR

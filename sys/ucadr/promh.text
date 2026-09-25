@@ -53,13 +53,21 @@ A-2		(0)
 A-3		(0)
 A-4		(0)
 A-5		(0)
-A-11		(0)
+;; quux: a-11, the write command, went with disk-write, and a-377 with
+;; page-0-parity-fix: the prom writes nothing to the disk (contract q8).
 A-40		(0)
 A-400		(0)
+a-1400		(0)	;quux: physical page 3, the prom's buffer
+a-2000		(0)	;quux: the first word past the buffer
 A-20000		(0)
 A-36000		(0)	;quux: the prom's first address; the microcode ends below it
-A-377		(0)	;quux: the last word of page 0
 A-DISK-ERROR	(0)
+
+;;; quux: the main-memory section (the microcode symbol area), recorded as
+;;; it is met and loaded last, over the buffer (contract q8).
+a-main-mem-n-blocks	(0)	;its number of blocks; 0 until one is met
+a-main-mem-block	(0)	;its first block on the disk
+a-main-mem-address	(0)	;the physical address of its first word
 
 ;;; quux: block-disk takes a block number, so the label's geometry (the
 ;;; number of cylinders, heads and blocks a track), the recalibrate command,
@@ -169,6 +177,21 @@ ERROR-PDL-BUFFER
 ERROR-MICROCODE-TOO-BIG
 	(JUMP HALT-CONS ERROR-MICROCODE-TOO-BIG)
     (ERROR-TABLE ERROR-MICROCODE-TOO-BIG)
+
+	;; quux: a second main-memory section with blocks in it.  the prom
+	;; records one and loads it last, over its buffer (contract q8).
+	(no-op)
+error-two-main-mem-sections
+	(jump halt-cons error-two-main-mem-sections)
+    (error-table error-two-main-mem-sections)
+
+	;; quux: the main-memory section does not cover the buffer, physical
+	;; page 3, so loading it would leave the microcode partition's last
+	;; block there instead of what the microcode expects (contract q8).
+	(no-op)
+error-buffer-not-loaded
+	(jump halt-cons error-buffer-not-loaded)
+    (error-table error-buffer-not-loaded)
 
 ;;; Program starts here.  Create M-ZERO and M-ONES, and check the hardware a little.
 GO	((M-ZERO Q-R) SETZ)		;Make all zeros.  Result to Q-R, not to depend on M mem
@@ -288,12 +311,12 @@ MAKE-CONSTANTS
 	((A-3)   DPB M-ONES (BYTE-FIELD 2 0) A-ZERO)
 	((A-4)   DPB M-ONES (BYTE-FIELD 1 2) A-ZERO)
 	((A-5)   DPB M-ONES (BYTE-FIELD 1 2) A-1)
-	((A-11)  DPB M-ONES (BYTE-FIELD 1 3) A-1)
 	((A-40)  DPB M-ONES (BYTE-FIELD 1 5) A-ZERO)
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
+	((a-1400) dpb m-ones (byte-field 2 8) a-zero)
+	((a-2000) dpb m-ones (byte-field 1 10.) a-zero)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
 	((A-36000) DPB M-ONES (BYTE-FIELD 4 10.) A-ZERO)
-	((A-377) DPB M-ONES (BYTE-FIELD 8. 0) A-ZERO)
 	;;; A-DISK-ERROR/ 4421000
 	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
 	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
@@ -386,6 +409,14 @@ SET-UP-THE-MAP
 
 ;;; Set up four pages:
 ;;;  Page 0: Mapped to the first page of main memory.
+;;;  quux: page 0 is mapped to physical page 3, the prom's buffer (contract
+;;;  q8).  it is the first of the four pages, 3-6, that the microcode's
+;;;  main-memory section (the microcode symbol area) fills, and the prom
+;;;  loads that section last, so the buffer is overwritten by what belongs
+;;;  there and nothing needs saving.  mit's buffer was physical page 0, which
+;;;  on a warm boot is the live world's, so it saved that page to disk block
+;;;  1 first and read it back at the end; on a disk with a gpt, block 1 is
+;;;  the partition table.
 ;;;  Page 1: Mapped to the disk control registers.
 ;;;  Page 2: Mapped to the debug (spy) interface registers at 766000 .
 ;;;  quux: page 2 is the register page, 17377000 (contract q2), for its word
@@ -393,7 +424,8 @@ SET-UP-THE-MAP
 ;;;  Page 3: Mapped to the second page of main memory. (system communication area)
 ;;; M-A holds the bits to write the level 1 map with r/w access, MD has zero initially.
 SET-UP-FOUR-PAGES
-	((M-A VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 22.) A-ZERO);Sets bit 24 which is ignored
+	((m-a) dpb m-ones (byte-field 4 22.) a-zero)	;Sets bit 24 which is ignored
+	((vma-write-map) add m-a a-3)			;quux: virtual page 0, physical 3
 
 	((M-B) DPB M-ONES (BYTE-FIELD 11 0) A-A)
 	((MD) A-400)
@@ -408,18 +440,10 @@ SET-UP-FOUR-PAGES
 	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 0) A-A)	;M-A + 1
 	(NO-OP)
 
-	((VMA) SETO)			;Make sure page 0 has good parity
-PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
-	((VMA-START-READ) ADD VMA A-1)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-			;Next instruction mustn't be ((VMA-START-WRITE) VMA).
-	((WRITE-MEMORY-DATA-START-WRITE) READ-MEMORY-DATA)
-	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
-	;; quux: stop at 377, the last word of page 0.  mit's test, against 400,
-	;; did "one extra location, too bad": virtual 400, page 1, the disk's
-	;; page, whose word 0 nothing answers on quux, an xbus nxm (muir traced
-	;; it at 17377400).
-	(JUMP-LESS-THAN VMA A-377 PAGE-0-PARITY-FIX)
+;;; quux: page-0-parity-fix, which read and rewrote every word of page 0
+;;; so that saving it to the disk found good parity, is gone with the save
+;;; (contract q8).  the prom writes main memory only in its buffer, the
+;;; section it loads there, and word 777, the ccw.
 
 ;;; Now turn on parity checking
 ;; quux: error stop is bit 0 of the register page's word 102, the mode, at
@@ -435,22 +459,18 @@ PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
 
 ;;; In order to not clobber core, save a page (page 0) of physical
 ;;; memory on disk.  Block 1 is allocated to us for this purpose.
-;;; quux: block-disk has no read-compare (command 10 stops by error), so
-;;; the write is not read back; an error in it halts at error-disk-error.
-SAVE-A-PAGE
-	((M-A) DPB M-ONES (BYTE-FIELD 1 18.) A-ZERO)	;Delay for 0.1 second in case
-SAPDLY	(JUMP-NOT-EQUAL-XCT-NEXT M-A A-ZERO SAPDLY)	; something random is happening
-       ((M-A) SUB M-A A-1)
-	((M-TEMP-1) A-1)
-	(CALL-XCT-NEXT DISK-WRITE)
-       ((M-A) SETZ)
+;;; quux: save-a-page, and the 0.1 second delay before its write, are gone:
+;;; the buffer is physical page 3, which the microcode's own main-memory
+;;; section overwrites, and the prom writes nothing to the disk (contract
+;;; q8).
 
 ;;; Read the label (block 0) into physical memory page 0, get disk
 ;;; parameters, and find out where the MICR partition is.
+;;; quux: into the buffer, physical page 3, virtual page 0.
 READ-LABEL
 	((M-TEMP-1) SETZ)
 	(CALL-XCT-NEXT DISK-READ)
-       ((M-A) SETZ)
+       ((m-a) a-1400)
 
 	;; M-B/ LABL = 114 102 101 114 = 11420440514
 	((M-B) DPB M-ONES (BYTE-FIELD 2 02.) A-ZERO)
@@ -560,15 +580,17 @@ PROCESS-MAIN-MEM-SECTION
 	;;; M-C/ Number of blocks.
 	;;; M-D/ Address of first block, relative to beginning of partition.
 	;;; M-A/ Physical memory address of first word.
-	((M-B) ADD M-D A-MICR-ORIGIN)
-MAIN-MEM-LOOP
-	(JUMP-EQUAL M-C A-ZERO PROCESS-SECTION)
-	(CALL-XCT-NEXT DISK-READ)
-       ((M-TEMP-1) M-B)
-	((M-B) ADD M-B A-1)
-	((M-A) ADD M-A A-400)
-	(JUMP-XCT-NEXT MAIN-MEM-LOOP)
-       ((M-C) SUB M-C A-1)
+	;; quux: record the section and load it at done-loading, after the
+	;; last word has been read through the buffer it overwrites (contract
+	;; q8); mit loaded it here.  a section of no blocks, such as the header
+	;; that says a base version follows, loads nothing and is passed over.
+	;; there is one section with blocks, the microcode symbol area.
+	(jump-equal m-c a-zero process-section)
+	(jump-not-equal m-zero a-main-mem-n-blocks error-two-main-mem-sections)
+	((a-main-mem-n-blocks) m-c)
+	((a-main-mem-block) add m-d a-micr-origin)
+	(jump-xct-next process-section)
+       ((a-main-mem-address) m-a)
 
 PROCESS-A-MEM-SECTION
 	((PDL-BUFFER-POINTER) SUB M-C A-1)
@@ -583,9 +605,30 @@ A-MEM-LOOP
 
 DONE-LOADING
 ;;; Read back page 0 of physical memory, which we saved on block 1.
-	((M-TEMP-1) A-1)
-	(CALL-XCT-NEXT DISK-READ)
-       ((M-A) SETZ)
+;;; quux: nothing was saved (contract q8).  load the main-memory section
+;;; recorded by process-main-mem-section, now that nothing more is read
+;;; through the buffer, physical page 3.  the section must cover the whole
+;;; buffer, or the partition's last block would be left there: halt at
+;;; error-buffer-not-loaded unless it starts at or below 1400 and ends at or
+;;; above 2000.  the check comes first, so a section that fails it is never
+;;; loaded.
+	((m-c) a-main-mem-n-blocks)
+	(jump-equal m-c a-zero error-buffer-not-loaded)
+	((m-a) a-main-mem-address)
+	(jump-greater-than m-a a-1400 error-buffer-not-loaded)
+	((m-b) dpb m-c (byte-field 22. 8.) a-zero)	;its length in words
+	((m-b) add m-b a-main-mem-address)		;the first word past it
+	(jump-less-than m-b a-2000 error-buffer-not-loaded)
+	((m-b) a-main-mem-block)
+main-mem-loop
+	(jump-equal m-c a-zero main-mem-loaded)
+	(call-xct-next disk-read)
+       ((m-temp-1) m-b)
+	((m-b) add m-b a-1)
+	((m-a) add m-a a-400)
+	(jump-xct-next main-mem-loop)
+       ((m-c) sub m-c a-1)
+main-mem-loaded
 	((Q-R) A-400)			;Set up constant needed below.
 	;; quux: no md and vma for the prom-disable write; see jump-to-6.
 
@@ -634,7 +677,7 @@ GET-NEXT-PAGE
 	((A-MICR-N-BLOCKS) ADD M-ONES A-MICR-N-BLOCKS)	;Subtract 1
 	((M-TEMP-1) A-MICR-ADDRESS)
 	(CALL-XCT-NEXT DISK-READ)
-       ((M-A) SETZ)
+       ((m-a) a-1400)				;quux: the buffer, physical page 3
 	(JUMP-XCT-NEXT GET-NEXT-WORD)
        ((A-MICR-ADDRESS) M+A+1 M-ZERO A-MICR-ADDRESS)
 
@@ -661,13 +704,8 @@ DISK-READ
 	(JUMP-XCT-NEXT DISK-OP)
        ((M-TEMP-2) SETZ)
 
-;;; Write one block.
-;;; Takes disk block number in M-TEMP-1, phys. mem. address in M-A
-;;; Does not clobber M-A.
-;;; Clobbers M-TEMP-1, M-TEMP-2 (quux: not Q-R, as nothing divides).
-DISK-WRITE
-	((M-TEMP-2) A-11)
-	; drops in.
+;;; quux: disk-write, which wrote one block, is gone: the prom writes
+;;; nothing to the disk (contract q8).  disk-read goes to disk-op itself.
 
 DISK-OP
 	(CALL DISK-OP-LOW)
