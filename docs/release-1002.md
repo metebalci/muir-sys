@@ -413,6 +413,20 @@ a comment in that file saying why.
   cached table at boot, so it is read from `SYS: UBIN;` each time, as it was
   already whenever the version number changed.
 
+- **QLD no longer stops at its second load of `CHSNCP QFASL`** with
+  "(:INTERNAL GET-NEXT-PKT 0) is an invalid function". That load replaces
+  the network code over the network, and fasload installs a function
+  before the `#'(LAMBDA ...)` inside it, so until the lambda arrives the
+  function holds the list `(:INTERNAL GET-NEXT-PKT 0)`. The loader, waiting
+  for the next packet of that very file in the gap, called it; with that
+  one named, the scheduler stopped the same way on the receiver's,
+  `(:INTERNAL CHAOS::RECEIVE-ANY-FUNCTION 0)`. Every wait in the file now
+  uses a named predicate defined above its user: those of `GET-NEXT-PKT`,
+  `SEND-PKT`, `ALLOCATE-INT-PKT`, `RECEIVE-ANY-FUNCTION` and `BACKGROUND`
+  (`network/chaos/chsncp.lisp`). MIT's; it shows only when a wait falls in
+  the gap, which a file server that sends a packet for each
+  acknowledgement makes likely.
+
 ## Known faults found, not yet fixed
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`

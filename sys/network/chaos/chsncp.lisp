@@ -903,6 +903,17 @@ The PKT-NBYTES field is updated."
        (AND ,FREE-PKT-FLAG (FREE-INT-PKT ,INT-PKT-I))
        ,PKT)))
 
+;; a reload of this file over the running ncp, as qld's second load of it over
+;; chaos is, must never see a half-fixed-up internal lambda: fasload installs
+;; a function before the #'(lambda ...) inside it, and until then the
+;; function holds the list (:internal <name> 0).  the loader, waiting for the
+;; next packet of this very file in that gap, stopped qld with
+;; "(:internal get-next-pkt 0) is an invalid function".  so the wait
+;; predicates of the ncp's own waits are named functions defined above their users.
+(defun int-free-list-p ()
+  "non-nil when an int-pkt is free: allocate-int-pkt's wait predicate."
+  (int-free-list))
+
 (DEFUN ALLOCATE-INT-PKT (&OPTIONAL (WAIT-IF-NECESSARY T) &AUX INT-PKT FREE-LIST)
   "Allocates a new INT-PKT may have to wait for one, so be careful
 that it is ok that the process this gets called from can be safely suspended
@@ -913,7 +924,7 @@ not rely on the caller!)."
 	   (SETQ FREE-LIST (INT-FREE-LIST))
 	   (COND ((NULL FREE-LIST)
 		  (IF WAIT-IF-NECESSARY
-		      (PROCESS-WAIT "Chaos buffer" #'(LAMBDA () (INT-FREE-LIST)))
+		      (process-wait "Chaos buffer" #'int-free-list-p)	;named: see int-free-list-p
 		    (RETURN NIL)))
 		 ((%STORE-CONDITIONAL INT-FREE-LIST-POINTER
 				      FREE-LIST (INT-PKT-THREAD FREE-LIST))
@@ -1162,6 +1173,12 @@ When you are finished with it, call RETURN-PKT to allow it to be reused."
   (RELEASE-PKT PKT)
   PKT)
 
+;; send-pkt's wait predicate, named for the reason given above int-free-list-p.
+(defun conn-may-transmit-or-not-open-p (conn)
+  "non-nil when conn may transmit or is no longer open."
+  (or (may-transmit conn)
+      (neq (state conn) 'open-state)))
+
 ;;; CONN must be in OPEN-STATE, and the OPCODE must be a DAT opcode.
 (DEFUN SEND-PKT (CONN PKT &OPTIONAL (OPCODE DAT-OP))
   "Send the data packet PKT to connection CONN.  OPCODE specifies the type of packet;
@@ -1172,10 +1189,9 @@ The value is the packet number assigned to the packet."
     (OPEN-STATE
       (OR (BIT-TEST DAT-OP OPCODE) (= EOF-OP OPCODE)
 	  (FERROR NIL "~O is not a legal opcode." OPCODE))
-      (PROCESS-WAIT "Chaosnet Output"
-		    (FUNCTION (LAMBDA (X) (OR (MAY-TRANSMIT X)
-					      (NEQ (STATE X) 'OPEN-STATE))))
-		    CONN)
+      (process-wait "Chaosnet Output"
+		    #'conn-may-transmit-or-not-open-p	;named: see int-free-list-p
+		    conn)
       (COND ((EQ (STATE CONN) 'OPEN-STATE)
 	     (OR (EQ (PKT-STATUS PKT) 'RELEASED)
 		 (FERROR NIL "Attempt to transmit ~S, which is not released." PKT))
@@ -1236,6 +1252,13 @@ Returns T if the connection is still open."
 
 ;;;; Input-Main Program level
 
+;; get-next-pkt's wait predicate, named for the reason given above int-free-list-p:
+;; qld's loader stopped in exactly this wait.
+(defun conn-input-or-not-open-p (conn)
+  "non-nil when conn has an input packet waiting or is no longer open."
+  (or (read-pkts conn)
+      (not (memq (state conn) '(open-state foreign-state)))))
+
 (DEFUN GET-NEXT-PKT (CONN &OPTIONAL (NO-HANG-P NIL) (WHOSTATE "Chaosnet Input")
 		     (CHECK-CONN-STATE (NOT NO-HANG-P))
 		     &AUX PKT)
@@ -1277,10 +1300,9 @@ a connection which has been closed by foreign host."
 	 (RELEASE-PKT PKT))
     (AND (OR PKT NO-HANG-P) (RETURN PKT))	;If satisfied, return
     ;; Not satisfied, wait for something interesting to happen
-    (PROCESS-WAIT WHOSTATE
-		  #'(LAMBDA (X) (OR (READ-PKTS X)
-				    (NOT (MEMQ (STATE X) '(OPEN-STATE FOREIGN-STATE)))))
-		  CONN)))
+    (process-wait whostate
+		  #'conn-input-or-not-open-p	;named: see int-free-list-p
+		  conn)))
 
 (DEFPROP REPORT-BAD-CONNECTION-STATE T :ERROR-REPORTER)
 (DEFUN REPORT-BAD-CONNECTION-STATE (CONN OPERATION-STRING)
@@ -1721,6 +1743,15 @@ PKT should be a /"released/" packet, obtained with GET-PKT or GET-NEXT-PKT."
 
 ;;;; Timed Responses and background tasks
 
+;; background's wait predicate, named for the reason given above int-free-list-p.
+(defun background-wait-p (last-wakeup-time last-probe-time &aux (time (time)))
+  "non-nil when the chaos background process has work: a probe or a retransmission is due, or a request waits."
+  (or ( (time-difference time last-probe-time) probe-interval)
+      (and retransmission-needed
+	   ( (time-difference time last-wakeup-time)
+	      retransmission-interval))
+      background-requests))
+
 (DEFUN BACKGROUND (&AUX LAST-WAKEUP-TIME (LAST-PROBE-TIME (TIME)) TASKS TIME)
   (RESET-ROUTING-TABLE)
   (DO-FOREVER
@@ -1729,12 +1760,7 @@ PKT should be a /"released/" packet, obtained with GET-PKT or GET-NEXT-PKT."
     (DO () ((OR ( (TIME-DIFFERENCE TIME LAST-WAKEUP-TIME) RETRANSMISSION-INTERVAL)
 		( (TIME-DIFFERENCE TIME LAST-PROBE-TIME) PROBE-INTERVAL)))
       (PROCESS-WAIT "Background Task"
-		    #'(LAMBDA (LAST-WAKEUP-TIME LAST-PROBE-TIME &AUX (TIME (TIME)))
-			(OR ( (TIME-DIFFERENCE TIME LAST-PROBE-TIME) PROBE-INTERVAL)
-			    (AND RETRANSMISSION-NEEDED
-				 ( (TIME-DIFFERENCE TIME LAST-WAKEUP-TIME)
-				    RETRANSMISSION-INTERVAL))
-			    BACKGROUND-REQUESTS))
+		    #'background-wait-p	;named: see int-free-list-p
 		    LAST-WAKEUP-TIME LAST-PROBE-TIME)
       (WITHOUT-INTERRUPTS
 	(SETQ TASKS (NREVERSE BACKGROUND-REQUESTS))
@@ -1832,6 +1858,14 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
 		 (DPB 1 %%CHAOS-CSR-RECEIVER-CLEAR
 		      (%xbus-read CONTROL-STATUS-REGISTER))))
 
+;; the receiver's wait predicate, named for the reason given above int-free-list-p:
+;; the scheduler calls it, so its internal lambda stopped qld in the scheduler, with
+;; "(:internal chaos::receive-any-function 0) is an invalid function", once
+;; get-next-pkt's was named.
+(defun receive-any-wait-p ()
+  "non-nil when the chaos receiver has a packet to take."
+  (and enable (or fake-receive-list (int-receive-list))))
+
 ;;; Top level function for receiver to be called directly from scheduler. (Instead of the
 ;;; old thing where something like this was the top level of the RECEIVER process.)
 (DEFUN RECEIVE-ANY-FUNCTION (&AUX INT-PKT)
@@ -1843,7 +1877,7 @@ CONN ~S, (PKT-SOURCE-CONN PKT) ~S." PKT CONN (PKT-SOURCE-CONN PKT))))
     (WHEN RESERVED-INT-PKT
       (FERROR NIL "Int PKT about to be lost!")))	;Hopefully this will get printed
   (SI:SET-PROCESS-WAIT CURRENT-PROCESS
-		       #'(LAMBDA () (AND ENABLE (OR FAKE-RECEIVE-LIST (INT-RECEIVE-LIST))))
+		       #'receive-any-wait-p	;named: see receive-any-wait-p
 		       NIL)
   (SETF (SI:PROCESS-WAIT-WHOSTATE CURRENT-PROCESS) "Chaos Packet"))
 
