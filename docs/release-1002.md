@@ -79,8 +79,10 @@ a comment in that file saying why.
     accesses go: boot no longer enables Unibus interrupts at 766040
     (`ucadr/uc-cold-disk.lisp`), and `INTR` dismisses an interrupt the
     register page's word 100 does not explain rather than look it up at
-    766040 (`ucadr/uc-interrupt.lisp`). muir counted every Unibus access
-    over a boot to the listener and on: none.
+    766040 (`ucadr/uc-interrupt.lisp`). The cold load's own file client,
+    MINI, read the host's address from Unibus 764142; it reads word 141
+    (`cold/mini.lisp`). muir counted every Unibus access over a boot to
+    the listener and on, and over a cold load's boot: none.
   - **The Chaosnet interface is on the register page** (muir's contract
     Q4), words 140-147, word 140+k for Unibus 764140+2k: the same
     registers in the same order. The microcode's accesses are all made from
