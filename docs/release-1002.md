@@ -504,6 +504,14 @@ a comment in that file saying why.
   "CADR" whatever the machine, names it from the type code the microcode set
   at boot.
 
+- **The site defines seven Lisp Machines, LISPM-1 to LISPM-7** (the user,
+  2026-09-25), at Chaos 177201 to 177207 (`site/hosts.text`), each with a
+  location (`site/lmlocs.lisp`), "Lisp Machine One" to "Seven", so up to
+  seven machines run at the default site with nothing to configure. A machine
+  at an address the site did not know called itself UNKNOWN-CHAOS-177203 in
+  the herald, "Unknown" by location, with ED-FILE as its associated machine;
+  at 177203 it is now LISPM-3, "Lisp Machine Three", with OZ.
+
 ## Asking the machine
 
 - **`SI:MACHINE-TYPE-CODE`** returns 1 on a CADR and 4 on QUUX, the type code
