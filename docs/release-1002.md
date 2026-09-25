@@ -428,6 +428,77 @@ a comment in that file saying why.
   11 s ahead in 66 s; the who-line shows the clock's time; on muir caea66b
   (revision 8) the offset is NIL and the band asks the network, as before.
 
+## Time zones
+
+- **The site's `:TIMEZONE` takes a tzdata zone name** (the user,
+  2026-09-25), such as `"Europe/Berlin"` (written `"Europe//Berlin"` in a
+  site file, whose readtable escapes with a slash), and the default site
+  now names that zone. The name is looked up in `SYS: IO1; TZDATA`, a
+  table of every zone and link of tzdata 2026c (598 names) with the POSIX
+  TZ string its compiled file ends with, today's rule; `sys/io1/gen-tzdata.py`
+  makes it from the host's tzdata. The string gives the standard offset and
+  the rule for daylight savings time: `PARSE-TZ-STRING` reads the POSIX
+  format (IEEE Std 1003.1, `TZ`: `std offset [dst [offset] [,rule]]`, names
+  of three letters or more or `<...>`, `Mm.w.d`, `Jn` and `n` dates, times
+  from -167 to 167 hours as RFC 8536 allows), and a string with daylight
+  savings time but no rule takes glibc's default, `M3.2.0,M11.1.0`.
+  `*TIMEZONE*` stays a number, the hours west of standard time, which every
+  reader of it expects; an offset that is not whole hours makes it a ratio
+  (-11\2 for Asia/Kolkata), which decoding and encoding take. The parsed
+  string is in `TIME:*TIMEZONE-RULE*` and the name in
+  `TIME:*TIMEZONE-NAME*`; `SET-TIMEZONE-FROM-SITE` sets all three at every
+  site initialization. A name tzdata does not know, a malformed string, and
+  a zone whose daylight savings time is not one hour from standard
+  (Antarctica/Troll, two hours; Australia/Lord_Howe and its link
+  Australia/LHI, half an hour; the time code shifts by one hour) are errors
+  that say which. Daylight savings time an hour behind standard, Europe/Dublin's
+  winter, is turned round into an hour ahead.
+- **A number in `:TIMEZONE` is a fixed offset with no daylight savings time.**
+  This changes every site that gives a number: before, whatever the number,
+  the machine applied the United States' rule of 1967 to 1986, from the
+  last Sunday of April to the last Sunday of October, so the default site's
+  `-1` was in summer time then, not from the last Sunday of March. `(:TIMEZONE 5)` is now EST all
+  year; `"America/New_York"` gives today's United States rule.
+- **`*DAYLIGHT-SAVINGS-TIME-P-FUNCTION*`** now defaults to
+  `TIMEZONE-RULE-DAYLIGHT-SAVINGS-TIME-P`, which follows `*TIMEZONE-RULE*`
+  and is never true without one. A function put there by hand stays when
+  the site is initialized again, and it is now called with the year in full
+  and the seconds and minutes from `ENCODE-UNIVERSAL-TIME` too, which gave
+  it the hour alone and the year less 1900. `DAYLIGHT-SAVINGS-TIME-IN-NORTH-AMERICA-P`,
+  `LAST-SUNDAY-IN-APRIL` (which took 2000 for a common year) and
+  `LAST-SUNDAY-IN-OCTOBER` are gone; nothing else used them and none was
+  exported. `WEEKDAY-IN-MONTH` finds the n-th or last weekday of a month on
+  `GREGORIAN-DAY-COUNT`, the day count `ENCODE-UNIVERSAL-TIME` now shares
+  (`io1/time.lisp`).
+- Tested on muir 73c15f0, micro unpaced, on the dev11 band with Q9 part 1
+  and the calendar fix, with the change loaded: 31,774 times from 2026 to
+  2106 decoded as Python's zoneinfo (tzdata 2026c) does for Europe/Berlin,
+  Europe/London, America/New_York, Australia/Sydney, Asia/Tokyo,
+  Pacific/Auckland and ten more zones, as glibc does for six strings with
+  `J`, `n`, negative and over-24-hour times and the default rule, and as a
+  fixed offset for `5`: the second before and at each change, an hour and
+  two hours either side, and the middle of each season; those two hours or
+  more from a change also encoded back. Every table entry but the three
+  refused parses, to the offset the host's reading gives, and 35 malformed
+  strings each give their error. The who-line and `PRINT-CURRENT-TIME`
+  showed Berlin's summer time, as the host's `TZ=Europe/Berlin date` did,
+  and a file's date over OZ came back 7200 s behind the clock, as before.
+  Saved into the band, a cold boot comes up with the zone set from the
+  site. Around every change from 2026 to 2106, `ENCODE-UNIVERSAL-TIME` of
+  the decoded time gives the time back, and so does
+  `PARSE-UNIVERSAL-TIME` of it printed (DD-MMM-YYYY), except in the hour
+  that happens twice as summer time ends, where both take standard time
+  (162 times a zone); given the decoded zone, encoding gives every time
+  back. At noon GMT on 1095 days from 1900 to 2106 (29 February and the
+  days around 1 March 1900, 2000 and 2100 among them), decoding gives the
+  day and parsing the printed day gives the time back.
+- **A band from before this change cannot take a site that names a zone.**
+  Its site initialization puts the string in `*TIMEZONE*`, and then every
+  decoding fails ("The first argument to *, "Europe/Berlin", was of the
+  wrong type"), measured on the dev11 band. A build on such a band loads
+  the new `SYS: IO1; TZDATA` and `TIME` before the new site file, and
+  `TZDATA` loads before `TIME` in the `TIME` system (`sys/sysdcl.lisp`).
+
 ## Faults fixed
 
 - **Dates in 1900, 2000 and from 2100 on are right.**
@@ -480,7 +551,30 @@ a comment in that file saying why.
   the gap, which a file server that sends a packet for each
   acknowledgement makes likely.
 
+- **Encoding and parsing a date agree with decoding on summer time.**
+  `ENCODE-UNIVERSAL-TIME`, and `PARSE-UNIVERSAL-TIME` through it, asked the
+  rule about the year less 1900, and `LAST-SUNDAY-IN-APRIL` took 1900 off
+  again, so from 2000 on they put the change on other days than decoding
+  did: at noon GMT on 27 April 2026 the old band decoded 14:00 and encoded
+  and parsed that back an hour late, and on 26 October an hour early. The
+  rule now gets the year in full (`io1/time.lisp`); MIT's.
+- **The directory date parser checks its fields.** `FS:PARSE-DIRECTORY-DATE-PROPERTY`
+  took any two digits, so a month of 13 stopped it with "The subscript 13
+  ... was out of range", and a day of 99 or a time of 25:61 made another
+  time silently. A date out of range is now no date, as 00/00/00 already
+  was (`io/file/open.lisp`); MIT's. Only dates over OZ go through it.
+
 ## Known faults found, not yet fixed
+
+- **A date printed MM/DD parses as DD/MM outside the United States.** The
+  default print mode is `:MM//DD//YY`, but `SET-MONTH-AND-DATE`
+  (`io1/timpar.lisp`) reads two numbers of 12 or less as month and day only
+  when `*TIMEZONE*` is 4 to 10, and as day and month otherwise. At noon GMT
+  on 1095 days from 1900 to 2106, the MM/DD/YYYY form parsed back wrong on
+  212, every one whose day and month are both 12 or less and differ (1 to
+  4 March, less 3 March), in Europe/Berlin
+  and Australia/Sydney, and on none in America/New_York or at zone 5. MIT's;
+  the default site had it with -1 already.
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
   returns 0 for a zero dividend before it looks at the divisor. MIT's.

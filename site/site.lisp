@@ -9,8 +9,10 @@
   ;; How to log in to get system files
   (:SYS-LOGIN-NAME "LISPM")
   (:SYS-LOGIN-PASSWORD "LISPM")
-  ;; CET: one hour east of Greenwich
-  (:TIMEZONE -1)
+  ;; the zone by its tzdata name, which gives the offset, one hour east of
+  ;; Greenwich, and the rule for summer time (SYS: IO1; TIME and TZDATA).
+  ;; a number here is a fixed offset in hours west, with no summer time.
+  (:timezone "Europe//Berlin")
   ;; OZ is the associated machine: files, time and host table
   (:CHAOS-FILE-SERVER-HOSTS '("OZ"))
   (:CHAOS-TIME-SERVER-HOSTS '("OZ"))

@@ -1442,8 +1442,14 @@ where alist's elements look like (propstring propsymbol parser printer cvv-type)
 	    (SETQ HOURS 0 MINUTES 0 SECONDS 0))
 	;; The file job is wont to give dates of the form 00/00/00 for things made by
 	;; DSKDMP, e.g..  Avoid errors later.
-	(AND (PLUSP MONTH)
-	     (TIME:ENCODE-UNIVERSAL-TIME SECONDS MINUTES HOURS DAY MONTH YEAR)))
+	;; the fields are not checked otherwise, so a month past 12 indexed past the
+	;; end of the month table in ENCODE-UNIVERSAL-TIME, and a day, hour, minute
+	;; or second out of range made some other time.  a date out of range is no
+	;; date, as 00/00/00 is.
+	(and (plusp month) (<= month 12.) (plusp day) (<= day 31.)
+	     (>= hours 0) (<= hours 23.) (>= minutes 0) (<= minutes 59.)
+	     (>= seconds 0) (<= seconds 59.)
+	     (time:encode-universal-time seconds minutes hours day month year)))
     ;;Not in simple format, escape to full parser
     (CONDITION-CASE ()
 	(TIME:PARSE-UNIVERSAL-TIME STRING START END)
