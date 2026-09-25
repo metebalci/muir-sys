@@ -23,6 +23,16 @@ a comment in that file saying why.
 - **So a 1002 band is built on QUUX.** Compiling and making the cold load
   can still run on a 1001 band on the CADR; booting the cold load, QLD and
   the save run on QUUX with microcode 1000.
+- **The whole build now runs on QUUX** (the user, 2026-09-25): the previous
+  1002 band, in LOD2, compiles the changed files and makes the cold load in
+  LOD3, which it boots with `(si:disk-restore "LOD3")`, or, for a new
+  microcode, by a cold boot with bit 48 moved to LOD3; QLD and the save
+  follow as before. Two builds of the same tree, one from a CADR-built band
+  and one from its result, made cold loads byte for byte the CADR route's,
+  and compiled files that differ from its only in their headers' time,
+  system version and order, and in generated symbol numbers
+  (docs/building.md, "Building a System 1002 band on QUUX"). The CADR route
+  stays as the fallback until it is retired.
 
 ## QUUX
 
