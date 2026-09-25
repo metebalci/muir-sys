@@ -75,7 +75,10 @@
 ;;; Get a connection to a file server
 (DEFUN MINI-OPEN-CONNECTION (HOST CONTACT-NAME)
   (OR (BOUNDP 'MINI-PKT) (MINI-INIT))
-  (SETQ MINI-LOCAL-HOST (%UNIBUS-READ #o764142)
+  ;; quux (contracts q4, q5): the chaosnet interface's my-address register is
+  ;; the register page's word 141; unibus 764142 is an nxm on quux, and read
+  ;; as 0 there the cold load's first file transfer failed.
+  (SETQ MINI-LOCAL-HOST (%xbus-read #o377141)
 	MINI-REMOTE-HOST HOST
 	MINI-OUT-PKT-NUMBER 1)
   (AND (= (LDB #o1010 MINI-LOCAL-HOST) (LDB #o1010 MINI-REMOTE-HOST))
