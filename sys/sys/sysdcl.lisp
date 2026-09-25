@@ -150,7 +150,8 @@
 (DEFSYSTEM TIME
   (:PACKAGE TIME)
   (:PATHNAME-DEFAULT "SYS: IO1;")
-  (:COMPILE-LOAD ("TIME" "TIMPAR")))
+  ;; tzdata first: TIME looks the site's zone name up in it as it loads.
+  (:compile-load ("TZDATA" "TIME" "TIMPAR")))
 
 (DEFSYSTEM SUPDUP
   (:PACKAGE SUPDUP)

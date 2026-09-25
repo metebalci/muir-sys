@@ -10,12 +10,30 @@
 ;; in case we want more precision.
 
 
-(DEFINE-SITE-VARIABLE *TIMEZONE* :TIMEZONE "The timezone.")
+;; the site's :TIMEZONE is a number or a zone name.  a number is hours west
+;; of greenwich, a fixed offset with no daylight savings time.  a name, such
+;; as "Europe/Berlin", is looked up in *TZDATA-ZONES* (SYS: IO1; TZDATA, made
+;; from tzdata by sys/io1/gen-tzdata.py), and its POSIX TZ string gives both the
+;; standard offset and the rule for daylight savings time.  *TIMEZONE* stays
+;; a number, hours west in standard time, as every reader of it expects; the
+;; option itself goes through SET-TIMEZONE-FROM-SITE, at the end of this file.
+;; *TIMEZONE* was a site variable holding the option as it was, and every
+;; site had the united states' rule from 1967 to 1986, whatever its zone.
+(defvar *timezone* :unbound
+  "The timezone: hours west of Greenwich in local standard time.
+A ratio, such as -11\2, for a zone whose offset is not whole hours.")
 
-;; these should probably be site variables too
-(DEFVAR *DAYLIGHT-SAVINGS-TIME-P-FUNCTION* 'DAYLIGHT-SAVINGS-TIME-IN-NORTH-AMERICA-P
+(defvar *timezone-name* nil
+  "The tzdata zone name the site's :TIMEZONE gave, or NIL if it gave a number.")
+
+(defvar *timezone-rule* nil
+  "The site's zone as PARSE-TZ-STRING returns it, or NIL: no daylight savings time.")
+
+(defvar *daylight-savings-time-p-function* 'timezone-rule-daylight-savings-time-p
   "A function, which when applied to arguments of seconds minutes hours day month year,
-will return T if daylight savings time is in effect in the local timezonew at that time.")
+will return T if daylight savings time is in effect in the local timezone at that time.
+The arguments are local standard time, with the year in full.  The default follows
+*TIMEZONE-RULE*; a function put here stays when the site is initialized again.")
 
 (DEFVAR *DEFAULT-DATE-PRINT-MODE* :MM//DD//YY	;perhaps site variable?
   "Defines the default way to print the date. Possible values include:
@@ -145,6 +163,21 @@ the hour and date are computed as for standard time."
       (MOD YEAR 100.)
     YEAR))
 
+;; the days from 1 january 1900 to a date, the day count ENCODE-UNIVERSAL-TIME
+;; and WEEKDAY-IN-MONTH share.  the leap days from 1900 to the year before, by
+;; the gregorian rule (460 of them up to 1899), and the year's own after
+;; february.  ENCODE-UNIVERSAL-TIME's count before took every fourth year,
+;; 2100 too, so from 2101 on it came out a day late; it counted one before 1900
+;; (FLOOR of -1), a day early all through 1900; and it asked LEAP-YEAR-P about
+;; the year less 1900, 100 for 2000, which said no, so 2000's dates from march
+;; came out a day early.
+(defun gregorian-day-count (day month year)
+  "The number of days from 1 January 1900 to DAY MONTH YEAR (the year in full)."
+  (let ((y (1- year)))
+    (+ (1- day) (aref *cumulative-month-days-table* month) (* (- year 1900.) 365.)
+       (floor y 4) (- (floor y 100.)) (floor y 400.) -460.
+       (if (and (> month 2) (leap-year-p year)) 1 0))))  ;after 29 february in a leap year.
+
  (DEFUN ENCODE-UNIVERSAL-TIME (SECONDS MINUTES HOURS DAY MONTH YEAR
 			      &OPTIONAL TIMEZONE &AUX TEM)
   "Given a time, return a universal-time encoding of it.
@@ -158,58 +191,243 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
 	      (+ CURRENT-YEAR
 		 (- (MOD (+ 50. (- YEAR (\ CURRENT-YEAR 100.))) 100.) 50.)))))
   (SETQ YEAR (- YEAR 1900.))
-  (OR TIMEZONE
-      (SETQ TIMEZONE (IF (DAYLIGHT-SAVINGS-TIME-P HOURS DAY MONTH YEAR)
-			 (1- *TIMEZONE*) *TIMEZONE*)))
-  ;; the leap days from 1900 to the year before, by the gregorian rule (460
-  ;; of them up to 1899), and the year's own after february.  this counted
-  ;; every fourth year, 2100 too, so from 2101 on it came out a day late; it
-  ;; counted one before 1900 (FLOOR of -1), a day early all through 1900; and
-  ;; it asked LEAP-YEAR-P about the year less 1900, 100 for 2000, which said
-  ;; no, so 2000's dates from march came out a day early.
-  (let ((y (+ year 1899.)))
-    (setq tem (+ (1- day) (aref *cumulative-month-days-table* month) (* year 365.)
-		 (floor y 4) (- (floor y 100.)) (floor y 400.) -460.)))
-  (and (> month 2) (leap-year-p (+ year 1900.))
-       (setq tem (1+ tem)))				;after 29 february in a leap year.
+  ;; the rule gets the seconds and minutes too, and the year in full, as
+  ;; DECODE-UNIVERSAL-TIME gives it: through DAYLIGHT-SAVINGS-TIME-P it had
+  ;; the hour alone and the year less 1900.
+  (or timezone
+      (setq timezone (if (funcall *daylight-savings-time-p-function*
+                                  seconds minutes hours day month (+ year 1900.))
+                         (1- *timezone*) *timezone*)))
+  (setq tem (gregorian-day-count day month (+ year 1900.)))
   (+ SECONDS (* 60. MINUTES) (* 3600. HOURS) (* TEM (* 60. 60. 24.)) (* TIMEZONE 3600.)))
 
 
 ;;;; domain-dependent knowledge
-(DEFUN DAYLIGHT-SAVINGS-TIME-IN-NORTH-AMERICA-P (SECONDS MINUTES HOURS DAY MONTH YEAR)
-  "T if daylight savings time would be in effect at specified time in North America."
-  (DECLARE (IGNORE SECONDS MINUTES))
-  (COND ((OR (< MONTH 4)		;Standard time if before 2 am last Sunday in April
-	     (AND (= MONTH 4)
-		  (LET ((LSA (LAST-SUNDAY-IN-APRIL YEAR)))
-		    (OR (< DAY LSA)
-			(AND (= DAY LSA) (< HOURS 2))))))
-	 NIL)
-	((OR (> MONTH 10.)		;Standard time if after 1 am last Sunday in October
-	     (AND (= MONTH 10.)
-		  (LET ((LSO (LAST-SUNDAY-IN-OCTOBER YEAR)))
-		    (OR (> DAY LSO)
-			(AND (= DAY LSO) ( HOURS 1))))))
-	 NIL)
-	(T T)))
 
-(DEFUN LAST-SUNDAY-IN-OCTOBER (YEAR)
-  (LET ((LSA (LAST-SUNDAY-IN-APRIL YEAR)))
-    ;; Days between April and October = 31+30+31+31+30 = 153  6 mod 7
-    ;; Therefore the last Sunday in October is one less than the last Sunday in April
-    ;; unless that gives 24. or 23. in which case it is six greater.
-    (IF ( LSA 25.) (+ LSA 6) (1- LSA))))
+;; the zone's rules, from its POSIX TZ string (IEEE Std 1003.1, "TZ", with
+;; RFC 8536's extension of a rule's time to -167 through 167 hours), such as
+;; CET-1CEST,M3.5.0,M10.5.0/3: std offset [dst [offset] [,start[/time],end[/time]]].
+;; this replaces DAYLIGHT-SAVINGS-TIME-IN-NORTH-AMERICA-P, the only rule
+;; there was (the last sunday of april to the last of october, the united
+;; states' from 1967 to 1986, for every zone), and its
+;; LAST-SUNDAY-IN-APRIL, which took 2000 for a common year, as the calendar
+;; did before (see DECODE-UNIVERSAL-TIME-WITHOUT-DST).
+;;
+;; a parsed string is a list (std-name std-offset dst-name dst-offset start
+;; end): offsets in seconds west of greenwich, as POSIX signs them; dst-name
+;; NIL for a zone with no daylight savings time; start and end as
+;; (:month m w d time), (:julian n time) or (:day n time), time in seconds.
+;; the time code shifts by one hour for daylight savings time ((1- *TIMEZONE*)
+;; here and in UPDATE-TIMEBASE and GET-UNIVERSAL-TIME), so daylight savings
+;; time one hour behind standard (europe/dublin's winter) is turned round,
+;; and any other difference (antarctica/troll's two hours, lord howe's half
+;; hour) is refused.
+(defsubst tz-std-name (rule) (first rule))
+(defsubst tz-std-offset (rule) (second rule))
+(defsubst tz-dst-name (rule) (third rule))
+(defsubst tz-dst-offset (rule) (fourth rule))
+(defsubst tz-start (rule) (fifth rule))
+(defsubst tz-end (rule) (sixth rule))
 
-(DEFUN LAST-SUNDAY-IN-APRIL (YEAR)
-  (IF (> YEAR 100.)
-      (SETQ YEAR (- YEAR 1900.)))
-  ;; This copied from GDWOBY routine in ITS
-  (LET ((DOW-BEG-YEAR
-	  (LET ((B (\ (+ YEAR 1899.) 400.)))
-	    (\ (- (+ (1+ B) (SETQ B (FLOOR B 4))) (FLOOR B 25.)) 7)))
-	(FEB29 (IF (LEAP-YEAR-P YEAR) 1 0)))
-    (LET ((DOW-APRIL-30 (\ (+ DOW-BEG-YEAR 119. FEB29) 7)))
-      (- 30. DOW-APRIL-30))))
+(defun tz-string-error (string zone index format-string &rest args)
+  (ferror nil "Bad POSIX TZ string ~S~A at character ~D: ~A."
+          string (if zone (format nil " (the zone ~A)" zone) "") index
+          (apply #'format nil format-string args)))
+
+(defun tz-expect (string i char zone)
+  (unless (and (< i (string-length string)) (= (aref string i) char))
+    (tz-string-error string zone i "~C is expected" char)))
+
+(defun parse-tz-number (string i zone what)
+  "The decimal digits at I in STRING: the number and the index after them."
+  (do ((j i (1+ j)) (n 0) (d)) (())
+    (setq d (and (< j (string-length string)) (digit-char-p (aref string j))))
+    (cond (d (setq n (+ (* n 10.) d)))
+          ((= j i) (tz-string-error string zone i "~A, a number, is missing" what))
+          (t (return (values n j))))))
+
+(defun parse-tz-name (string i zone)
+  "The zone abbreviation at I in STRING, three letters or more, or <...> of
+letters, digits, + and -: the name and the index after it."
+  (let ((len (string-length string)) (end))
+    (cond ((and (< i len) (= (aref string i) #/<))
+           (setq end (string-search-char #/> string (1+ i)))
+           (or end (tz-string-error string zone i "the name begun with < has no >"))
+           (do ((j (1+ i) (1+ j))) ((>= j end))
+             (let ((c (aref string j)))
+               (or (alpha-char-p c) (digit-char-p c) (= c #/+) (= c #/-)
+                   (tz-string-error string zone j "~C is not allowed in a name" c))))
+           (and (< (- end i 1) 3)
+                (tz-string-error string zone i "a name has three characters or more"))
+           (values (substring string (1+ i) end) (1+ end)))
+          (t
+           (setq end (do ((j i (1+ j)))
+                         ((or (>= j len) (not (alpha-char-p (aref string j)))) j)))
+           (and (< (- end i) 3)
+                (tz-string-error string zone i "a name has three letters or more"))
+           (values (substring string i end) end)))))
+
+(defun parse-tz-time (string i zone what max-hours)
+  "[+-]hh[:mm[:ss]] at I in STRING: the seconds and the index after them."
+  (let ((len (string-length string)) (start i) (sign 1) (h) (m 0) (s 0))
+    (when (and (< i len) (or (= (aref string i) #/+) (= (aref string i) #/-)))
+      (and (= (aref string i) #/-) (setq sign -1))
+      (setq i (1+ i)))
+    (multiple-value (h i) (parse-tz-number string i zone what))
+    (and (> h max-hours)
+         (tz-string-error string zone start "~A has ~D hours, more than ~D" what h max-hours))
+    (when (and (< i len) (= (aref string i) #/:))
+      (multiple-value (m i) (parse-tz-number string (1+ i) zone what))
+      (and (> m 59.) (tz-string-error string zone start "~A has ~D minutes" what m))
+      (when (and (< i len) (= (aref string i) #/:))
+        (multiple-value (s i) (parse-tz-number string (1+ i) zone what))
+        (and (> s 59.) (tz-string-error string zone start "~A has ~D seconds" what s))))
+    (values (* sign (+ (* h 3600.) (* m 60.) s)) i)))
+
+(defun parse-tz-date (string i zone)
+  "A rule's date and time at I in STRING: the date as a list, and the index after it."
+  (let ((len (string-length string)) (start i) (date) (a) (b) (c) (time 7200.))
+    (cond ((>= i len) (tz-string-error string zone i "a date is missing"))
+          ((= (aref string i) #/M)              ;Mm.w.d: day d (0 sunday) of week w (5 last) of month m
+           (multiple-value (a i) (parse-tz-number string (1+ i) zone "the month"))
+           (tz-expect string i #/. zone)
+           (multiple-value (b i) (parse-tz-number string (1+ i) zone "the week"))
+           (tz-expect string i #/. zone)
+           (multiple-value (c i) (parse-tz-number string (1+ i) zone "the day of the week"))
+           (or (and (>= a 1) (<= a 12.) (>= b 1) (<= b 5) (<= c 6))
+               (tz-string-error string zone start "M~D.~D.~D is not a date" a b c))
+           (setq date (list :month a b c)))
+          ((= (aref string i) #/J)              ;Jn: 1 to 365, 29 february never counted
+           (multiple-value (a i) (parse-tz-number string (1+ i) zone "the day"))
+           (or (and (>= a 1) (<= a 365.))
+               (tz-string-error string zone start "J~D is not a day, 1 to 365" a))
+           (setq date (list :julian a)))
+          ((digit-char-p (aref string i))       ;n: 0 to 365, 29 february counted
+           (multiple-value (a i) (parse-tz-number string i zone "the day"))
+           (or (<= a 365.)
+               (tz-string-error string zone start "~D is not a day, 0 to 365" a))
+           (setq date (list :day a)))
+          (t (tz-string-error string zone i "a date is Mm.w.d, Jn or n")))
+    (when (and (< i len) (= (aref string i) #//))
+      (multiple-value (time i) (parse-tz-time string (1+ i) zone "the time" 167.)))
+    (values (nconc date (list time)) i)))
+
+(defun parse-tz-string (string &optional zone)
+  "Parse STRING, a POSIX TZ string, into the list *TIMEZONE-RULE* holds.
+ZONE, the zone name it came from, goes into any error's message."
+  (let ((len (string-length string)) (i 0)
+        (std-name) (std-offset) (dst-name) (dst-offset) (start) (end))
+    (multiple-value (std-name i) (parse-tz-name string i zone))
+    (multiple-value (std-offset i) (parse-tz-time string i zone "the standard offset" 24.))
+    (when (< i len)
+      (and (= (aref string i) #/,)
+           (tz-string-error string zone i "a rule needs a daylight savings name before it"))
+      (multiple-value (dst-name i) (parse-tz-name string i zone))
+      (if (and (< i len) (not (= (aref string i) #/,)))
+          (multiple-value (dst-offset i)
+            (parse-tz-time string i zone "the daylight savings offset" 24.))
+        (setq dst-offset (- std-offset 3600.)))
+      (cond ((>= i len)
+             ;; POSIX leaves the rule of a string with none to the system.
+             ;; this is glibc's own, the united states' from 2007.
+             (setq start (list :month 3 2 0 7200.) end (list :month 11. 1 0 7200.)))
+            (t
+             (tz-expect string i #/, zone)
+             (multiple-value (start i) (parse-tz-date string (1+ i) zone))
+             (tz-expect string i #/, zone)
+             (multiple-value (end i) (parse-tz-date string (1+ i) zone))
+             (and (< i len)
+                  (tz-string-error string zone i "~S follows the rule" (substring string i))))))
+    (when dst-name
+      (let ((delta (- std-offset dst-offset)))
+        (cond ((= delta 3600.))
+              ((= delta -3600.)
+               ;; daylight savings time an hour behind: the other name is
+               ;; standard time, the end is the start and the start the end.
+               ;; each rule's time is in the local time before it, so it holds.
+               (psetq std-name dst-name dst-name std-name
+                      std-offset dst-offset dst-offset std-offset
+                      start end end start))
+              (t (ferror nil "The POSIX TZ string ~S~A puts daylight savings time ~D minute~:P from standard time: this system knows only one hour."
+                         string (if zone (format nil " (the zone ~A)" zone) "")
+                         (// (abs delta) 60.))))))
+    (list std-name std-offset dst-name dst-offset start end)))
+
+(defun weekday-in-month (week weekday month year)
+  "The day of MONTH in YEAR that is the WEEKth WEEKDAY of it, as POSIX counts:
+WEEKDAY 0 is Sunday, WEEK 1 the first and 5 the last."
+  ;; 1 january 1900, day 0 of the count, was a monday, weekday 1.
+  (let* ((first (\ (1+ (gregorian-day-count 1 month year)) 7))
+         (day (+ 1 (\ (+ 7 (- weekday first)) 7) (* 7 (1- week)))))
+    (if (> day (month-length month year)) (- day 7) day)))
+
+(defun tz-transition (date year shift)
+  "When DATE of a rule falls in YEAR, less SHIFT seconds: the day of the year
+from 0, and the second of that day."
+  (let ((day (selectq (first date)
+               (:month (+ (aref *cumulative-month-days-table* (second date))
+                          (if (and (> (second date) 2) (leap-year-p year)) 1 0)
+                          (1- (weekday-in-month (third date) (fourth date) (second date) year))))
+               (:julian (+ (1- (second date)) (if (and (> (second date) 59.) (leap-year-p year)) 1 0)))
+               (:day (second date)))))
+    (multiple-value-bind (days seconds) (floor (- (car (last date)) shift) 86400.)
+      (values (+ day days) seconds))))
+
+(defun tz-earlier-p (day1 second1 day2 second2)
+  (or (< day1 day2) (and (= day1 day2) (< second1 second2))))
+
+(defun timezone-rule-daylight-savings-time-p (seconds minutes hours day month year
+                                              &aux (rule *timezone-rule*))
+  "T if *TIMEZONE-RULE* has daylight savings time at the given local standard time."
+  (when (and rule (tz-dst-name rule))
+    ;; a year less 1900, as ENCODE-UNIVERSAL-TIME passed it before, is taken
+    ;; as LAST-SUNDAY-IN-APRIL took it.
+    (and (< year 1900.) (setq year (+ year 1900.)))
+    (multiple-value-bind (start-day start-second) (tz-transition (tz-start rule) year 0)
+      ;; the end's time is in daylight savings time, an hour ahead.
+      (multiple-value-bind (end-day end-second) (tz-transition (tz-end rule) year 3600.)
+        (let* ((now-day (+ (1- day) (aref *cumulative-month-days-table* month)
+                           (if (and (> month 2) (leap-year-p year)) 1 0)))
+               (now-second (+ seconds (* 60. minutes) (* 3600. hours)))
+               (after-start (not (tz-earlier-p now-day now-second start-day start-second)))
+               (before-end (tz-earlier-p now-day now-second end-day end-second)))
+          (if (tz-earlier-p start-day start-second end-day end-second)
+              (and after-start before-end)         ;northern: start to end
+            (or after-start before-end)))))))     ;southern: end to start is standard
+
+(defun lookup-timezone-name (name &aux entry)
+  "The POSIX TZ string of the tzdata zone NAME (case does not matter),
+and the name as tzdata spells it."
+  (declare (values tz-string name))
+  (or (boundp '*tzdata-zones*)
+      (ferror nil "The zone ~S cannot be looked up: the zone table, SYS: IO1; TZDATA, is not loaded."
+              name))
+  (or (setq entry (ass #'string-equal name *tzdata-zones*))
+      (ferror nil "~S is not a zone name tzdata ~A knows (SYS: IO1; TZDATA)."
+              name *tzdata-version*))
+  (values (cdr entry) (car entry)))
+
+(defun timezone-option-values (option)
+  "What a site's :TIMEZONE, OPTION, means: the value for *TIMEZONE*, the rule for
+*TIMEZONE-RULE* and the value for *TIMEZONE-NAME*.  A number is hours west of
+Greenwich with no daylight savings time; a string is a tzdata zone name."
+  (declare (values timezone rule name))
+  (cond ((null option) (values nil nil nil))
+        ((numberp option) (values option nil nil))
+        ((stringp option)
+         (multiple-value-bind (tz-string name) (lookup-timezone-name option)
+           (let ((rule (parse-tz-string tz-string name)))
+             ;; CLI:// gives a ratio for an offset that is not whole hours;
+             ;; decoding and encoding take one (measured, run/dst/frac-2.log).
+             (values (cli:// (tz-std-offset rule) 3600.) rule name))))
+        (t (ferror nil "The site's :TIMEZONE, ~S, is neither a number of hours west of Greenwich nor a zone name."
+                   option))))
+
+(defun set-timezone-from-site ()
+  "Set *TIMEZONE*, *TIMEZONE-RULE* and *TIMEZONE-NAME* from the site's :TIMEZONE."
+  (multiple-value (*timezone* *timezone-rule* *timezone-name*)
+    (timezone-option-values (si:get-site-option :timezone))))
+
 
 ;;;; Maintenance functions
 
@@ -725,6 +943,11 @@ by centuries until it is within 50 years of the present."
 			  (DAY-OF-THE-WEEK-STRING DAY-OF-THE-WEEK))))))
 	(T
 	 NIL)))
+
+;; the site's :TIMEZONE, at every site initialization and now.  the name is
+;; the one DEFINE-SITE-VARIABLE gave the initialization that set *TIMEZONE*
+;; before, so a band that had it gets this one in its place.
+(add-initialization "SITE:*TIMEZONE*" '(set-timezone-from-site) '(site-option))
 
 (ADD-INITIALIZATION "Initialize Timebase" 
   '(PROGN (SETQ LAST-BOOT-TIME (TIME) WAS-NEGATIVE NIL HIGH-TIME-BITS 0)
