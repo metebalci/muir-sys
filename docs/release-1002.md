@@ -260,6 +260,32 @@ a comment in that file saying why.
   cold load boots and QLDs, the saved band boots; Lisp reads the label and
   a band's first blocks, writes and reads back a block, read-compares, and
   a read past the end reports it; the host's reading of the pack agrees.
+- **QUUX's disk in standard formats** (muir's contract Q8, approved by the
+  user on 2026-09-25; in progress):
+  - **The boot PROM saves nothing and writes nothing to the disk.** MIT's
+    PROM used physical page 0 as its buffer, so it rewrote page 0 for good
+    parity, saved it to disk block 1 and read it back at the end; on a disk
+    with a GPT, block 1 is the partition table. Its buffer is now physical
+    page 3, the first of pages 3-6 that the microcode's main-memory section
+    (the microcode symbol area) fills: the PROM records that section when
+    it meets it and loads it last, after the last word has been read
+    through the buffer. `SAVE-A-PAGE`, its 0.1 s delay, `PAGE-0-PARITY-FIX`,
+    `DISK-WRITE` and the read-back are gone. Two new error halts:
+    `ERROR-TWO-MAIN-MEM-SECTIONS` for a second section with blocks, and
+    `ERROR-BUFFER-NOT-LOADED` if the section does not cover page 3, checked
+    before anything is loaded. The halts before them keep their addresses;
+    `GO` moves from 36037 to 36043 (`ucadr/promh.text`). Tested on muir
+    f7b5e8a, micro and rtl, with band dev9: cold and warm boots keep the
+    world; up to the microcode's location 6 the pack is unchanged, and of
+    main memory only pages 3-6 and word 777 change.
+  - **QUUX's `.mcr` is written in partition order**: each word's low half
+    first, as the word lies in a microcode partition, padded to a whole
+    block, so `dd` writes the file into a partition with no conversion. The
+    same writer makes the boot PROM's file. `UA:*MCR-PARTITION-ORDER*`,
+    `T` by default, bound to `NIL` gives MIT's order (`sys/qwmcr.lisp`).
+    Lisp's readers of `.mcr` files still expect MIT's order:
+    `SI:LOAD-MCR-FILE` (`io/disk.lisp`), `READ-MCR-FILE`
+    (`sys2/usymld.lisp`) and `COMPARE-MCR-FILE` (`cc/cadld.lisp`).
 - **The band takes the PDL buffer's length from the machine.** A stack
   group's saved PDL phase is masked with `SI:PDL-BUFFER-LENGTH`
   (`sys2/proces.lisp`, and `eh/eh.lisp` rebuilding a frame), which was the

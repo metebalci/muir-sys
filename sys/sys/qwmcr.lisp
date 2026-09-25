@@ -11,13 +11,34 @@
 ;it a whole lot easier to gobble the file with the real machine).
 ;From the Lisp machine, we write this as 2 16-bit pieces
 
+;;; quux: the microcode and the boot prom this tree assembles are quux's,
+;;; whose .mcr is written in partition order (muir's contract q8): each
+;;; 32-bit word's low half first, then its high half, exactly as the word
+;;; lies in a microcode partition, and the file padded with zeros to a whole
+;;; block, so that dd copies it into a partition with no conversion.  mit's
+;;; order, high half first, which every copy into a partition swapped (see
+;;; load-mcr-file in io/disk.lisp), is had by binding this to nil; the
+;;; cadr's microcode, mit's 323, stays in mit's order.  every section writes
+;;; its words as pairs of halves, high then low, so out16 holds the high
+;;; half until the low one comes and writes the two swapped.
+(defvar *mcr-partition-order* t
+  "T writes a .mcr file in partition order (quux's), NIL in mit's order.")
+(defvar mcr-held-high-half nil
+  "The high half of the word being written in partition order, until its low half comes.")
+
 (DEFVAR CONSLP-OUTPUT-SYMBOL-PREDICTED-FILEPOS)
 (DEFVAR CONSLP-OUTPUT-CURRENT-FILEPOS)
 (PROCLAIM '(SPECIAL CONSLP-OUTPUT VERSION-NUMBER CONSLP-OUTPUT-PATHNAME))
 
 (DEFUN OUT16 (FILE HALFWORD)
   (INCF CONSLP-OUTPUT-CURRENT-FILEPOS)
-  (SEND FILE :TYO HALFWORD))
+  (cond ((not *mcr-partition-order*)
+	 (SEND FILE :TYO HALFWORD))
+	((null mcr-held-high-half)
+	 (setq mcr-held-high-half halfword))
+	(t (send file :tyo halfword)
+	   (send file :tyo mcr-held-high-half)
+	   (setq mcr-held-high-half nil))))
 
 (DEFUN OUT32 (FILE WORD)
   (OUT16 FILE (LDB #o2020 WORD))		;Note non-standard order of 16-bit bytes
@@ -35,7 +56,8 @@
     (LET ((*READ-BASE* 8) (*PRINT-BASE* 8)
 	  (*NOPOINT T) (*PRINT-RADIX* NIL) (*READTABLE* SI:INITIAL-READTABLE))
       (WITH-OPEN-FILE (FILE PATHNAME :DIRECTION :OUTPUT :CHARACTERS NIL :IF-EXISTS :SUPERSEDE)
-	(LET ((CONSLP-OUTPUT-CURRENT-FILEPOS 0))
+	(LET ((CONSLP-OUTPUT-CURRENT-FILEPOS 0)
+	      (mcr-held-high-half nil))
 	  (WHEN BASE-VERSION-NUMBER
 	    (OUT32 FILE 3)			;a fake main memory block
 	    (OUT32 FILE 0)			;blocks to xfer
@@ -46,7 +68,14 @@
 	  (WRITE-D-MEM D-MEM 2 FILE)
 	  (WRITE-MICRO-CODE-SYMBOL-AREA-PART-1 FILE)
 	  (WRITE-A-MEM A-MEM 4 FILE)
-	  (WRITE-MICRO-CODE-SYMBOL-AREA-PART-2 FILE)))
+	  (WRITE-MICRO-CODE-SYMBOL-AREA-PART-2 FILE)
+	  ;; quux: partition order ends on a whole block, 1000 halves, and
+	  ;; with no half of a word left held.
+	  (when *mcr-partition-order*
+	    (do () ((zerop (\ conslp-output-current-filepos 1000)))
+	      (out16 file 0))
+	    (when mcr-held-high-half
+	      (ferror nil "Half a word left over in partition order")))))
       (WRITE-SYMBOL-TABLE-FILE (SEND PATHNAME :NEW-CANONICAL-TYPE :CADR-MICROCODE-SYMBOLS)))))
 
 (DEFUN WRITE-D-MEM (ARRAY CODE FILE)
