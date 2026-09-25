@@ -410,9 +410,39 @@ a comment in that file saying why.
   2^31 and 2^32-1 and on the host's clock: the universal time is the clock
   plus the constant, and a boot sends no TIME request; on a revision 8
   muir the band asks for the time as before.
+- **With the real-time clock, the wall clock reads it every time** (Q9, the
+  user's ruling relayed by muir): `GET-UNIVERSAL-TIME` returns the clock
+  plus `TIME:*RTC-OFFSET*`, and `UPDATE-TIMEBASE`, under `GET-TIME`, the
+  who-line's clock, `PRINT-CURRENT-TIME` and the rest, decodes it, instead
+  of counting seconds on the microsecond clock from a base taken at boot.
+  The offset is 0, or what a time given to `SET-LOCAL-TIME` differs from the
+  clock (`INITIALIZE-TIMEBASE` sets it, and keeps uptime as before); it is
+  NIL without the clock, and the old count stands. The time is unknown
+  exactly when it was (`*LAST-TIME-UPDATE-TIME*` NIL). `(TIME)`, timeouts,
+  `PROCESS-SLEEP` and the scheduler stay on the tick and the microsecond
+  clock (`io1/time.lisp`). Tested on muir 73c15f0, micro unpaced, with the
+  change saved into a band: with `--rtc` fixed, `GET-UNIVERSAL-TIME` equals
+  the clock at every sample over 65 s (it and the old count agree in rate
+  there, but the count lagged the clock by up to a second); on the host's
+  clock it equals the clock and the host's second, where the old count ran
+  11 s ahead in 66 s; the who-line shows the clock's time; on muir caea66b
+  (revision 8) the offset is NIL and the band asks the network, as before.
 
 ## Faults fixed
 
+- **Dates in 1900, 2000 and from 2100 on are right.**
+  `DECODE-UNIVERSAL-TIME-WITHOUT-DST` took every fourth year for a leap year,
+  so it gave 29 February for 1 March 1900 and 2100, a day early for the rest
+  of 1900 and from 2100 on, and 6 February 2106 for the real-time clock's
+  last second, 2^32-1 (the 7th); it now uses Howard Hinnant's
+  `civil_from_days`. `ENCODE-UNIVERSAL-TIME` counted every fourth year too
+  (a day late from 2101), counted one leap day before 1900 (a day early all
+  through 1900), and asked `LEAP-YEAR-P` about the year less 1900, which
+  said 2000 was none (a day early from 1 March 2000); it now counts by the
+  Gregorian rule. Both were MIT's (`io1/time.lisp`). Checked against the
+  host's calendar at 1384 times from 1900 to 2^32-1 of the clock, every
+  year's 1 January, 28 February, 29 February, 1 March and 31 December among
+  them: decoding was wrong at 43 and encoding at 45; now at none.
 - **Dividing by the most negative fixnum no longer corrupts or halts.**
   Negating -2^24, the most negative fixnum, gives 2^24, which must become a
   bignum, and making the bignum clobbers registers. `QDIV` kept a ratio's

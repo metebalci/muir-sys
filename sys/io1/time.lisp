@@ -112,27 +112,24 @@ the hour and date are computed as for standard time."
   (SETQ UNIVERSAL-TIME (- UNIVERSAL-TIME (* TIMEZONE 3600.)))
   (SETQ SECS (\ UNIVERSAL-TIME (* 24. 60. 60.))
 	X (TRUNCATE UNIVERSAL-TIME (* 24. 60. 60.)))	;Days since genesis.
-  (MULTIPLE-VALUE-BIND (A B) (FLOOR X 365.)
-    (UNLESS (ZEROP A)
-      (DECF B (LSH (1- A) -2))
-      (WHEN (< B 0)
-	(SETQ A (+ A -1 (TRUNCATE B 365.)))	;We must allow for times so far in the future
-	(SETQ B (\ B 365.))			;as to produce >> 365. Feb 29's.
-	(SETQ B (+ B 365.))			;(Of course, this doesn't allow for
-						;the year 2100 not being a leap-year.)
-	(AND (NOT (BIT-TEST A 3))
-	     (INCF B))))
-    (DO ((C 12. (1- C)))
-	(( B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C))
-	 (WHEN (AND (NOT (BIT-TEST A 3))
-		    (> C 2))
-	   (DECF B)
-	   (IF (< B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C)) (DECF C))
-	   (IF (= C 2) (INCF B)))
-	 (DECF B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C))
-	 (SETQ YEAR (+ 1900. A))
-	 (SETQ MONTH C)
-	 (SETQ DAY (1+ B)))))
+  ;; the date from the day count by Howard Hinnant's civil_from_days
+  ;; (howardhinnant.github.io/date_algorithms.html), in 400-year eras that
+  ;; begin on 1 march, so that a leap day ends its year.  KLH's algorithm
+  ;; here took every fourth year for a leap year, 1900 and 2100 too: for the
+  ;; rest of 1900 from 1 march, and from 1 march 2100 on, it gave the day
+  ;; before (1 march as 29 february), and at the real-time clock's last
+  ;; second (2^32-1, 7 february 2106) the 6th.  day 0, 1 january 1900, is
+  ;; day 693901 counted from 1 march of the year 0.
+  (let* ((z (+ x 693901.))
+	 (era (floor z 146097.))
+	 (doe (- z (* era 146097.)))		;day of the era, 0 to 146096
+	 (yoe (floor (- (+ doe (floor doe 36524.)) (floor doe 1460.) (floor doe 146096.))
+		     365.))				;year of the era, 0 to 399
+	 (doy (- doe (* 365. yoe) (floor yoe 4) (- (floor yoe 100.))))	;from 1 march, 0 to 365
+	 (mp (floor (+ (* 5 doy) 2) 153.)))	;month from march, 0 to 11
+    (setq day (1+ (- doy (floor (+ (* 153. mp) 2) 5)))
+	  month (if (< mp 10.) (+ mp 3) (- mp 9.))
+	  year (+ yoe (* era 400.) (if (<= month 2) 1 0))))
   (SETQ HOURS (FLOOR SECS 3600.)
 	MINUTES (FLOOR (\ SECS 3600.) 60.)
 	SECS (\ SECS 60.))
@@ -164,10 +161,17 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
   (OR TIMEZONE
       (SETQ TIMEZONE (IF (DAYLIGHT-SAVINGS-TIME-P HOURS DAY MONTH YEAR)
 			 (1- *TIMEZONE*) *TIMEZONE*)))
-  (SETQ TEM (+ (1- DAY) (AREF *CUMULATIVE-MONTH-DAYS-TABLE* MONTH)
-	       (FLOOR (1- YEAR) 4) (* YEAR 365.)))	;Number of days since 1-Jan-1900.
-  (AND (> MONTH 2) (LEAP-YEAR-P YEAR)
-       (SETQ TEM (1+ TEM)))				;After 29-Feb in a leap year.
+  ;; the leap days from 1900 to the year before, by the gregorian rule (460
+  ;; of them up to 1899), and the year's own after february.  this counted
+  ;; every fourth year, 2100 too, so from 2101 on it came out a day late; it
+  ;; counted one before 1900 (FLOOR of -1), a day early all through 1900; and
+  ;; it asked LEAP-YEAR-P about the year less 1900, 100 for 2000, which said
+  ;; no, so 2000's dates from march came out a day early.
+  (let ((y (+ year 1899.)))
+    (setq tem (+ (1- day) (aref *cumulative-month-days-table* month) (* year 365.)
+		 (floor y 4) (- (floor y 100.)) (floor y 400.) -460.)))
+  (and (> month 2) (leap-year-p (+ year 1900.))
+       (setq tem (1+ tem)))				;after 29 february in a leap year.
   (+ SECONDS (* 60. MINUTES) (* 3600. HOURS) (* TEM (* 60. 60. 24.)) (* TIMEZONE 3600.)))
 
 
@@ -248,14 +252,27 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
       (and (plusp seconds)
 	   (+ seconds unix-epoch-universal-time)))))
 
-(DEFUN INITIALIZE-TIMEBASE (&OPTIONAL UT)
+;; quux: with the real-time clock, the wall clock reads it every time (q9,
+;; the user's ruling relayed by muir, 2026-09-25): GET-UNIVERSAL-TIME,
+;; GET-TIME and all that decode it, the who-line's clock among them.  it is a
+;; register read, so it never drifts and needs no resync; the count of
+;; seconds on the microsecond clock below follows the machine's time, and
+;; on an unpaced engine ran 11 s ahead of the host's clock in 66 s (muir
+;; 73c15f0, micro).  without the clock the count stays.  (TIME),
+;; timeouts, PROCESS-SLEEP and the scheduler stay on the tick and the
+;; microsecond clock, which never jump when the host's clock is set.
+(defvar *rtc-offset* nil
+  "Seconds the wall clock runs ahead of the RTC, or NIL if it counts without one.
+0 unless SET-LOCAL-TIME was given a time; set by INITIALIZE-TIMEBASE.")
+
+(DEFUN INITIALIZE-TIMEBASE (&OPTIONAL UT &aux rtc)
   "Set the clock.
 Possible sources of the time include the real-time clock, the network,
 and, failing that, the luser who happens to be around."
   ;; the Lambda's battery clock is no longer a source, nor set here.
   ;; quux: its real-time clock is, ahead of the network, which stays the
   ;; source on a machine without one.
-  (and (null ut) *read-rtc* (setq ut (rtc-universal-time)))
+  (and (null ut) *read-rtc* (setq ut (setq rtc (rtc-universal-time))))
   (AND (NULL UT) (NOT (SI:GET-SITE-OPTION :STANDALONE)) *NETWORK-TIME-FUNCTION* 
        (SETQ UT (FUNCALL *NETWORK-TIME-FUNCTION*)))
   (TAGBODY
@@ -276,6 +293,9 @@ and, failing that, the luser who happens to be around."
       (COND ((NOT (Y-OR-N-P (FORMAT NIL "Time is ~A, OK? " (PRINT-UNIVERSAL-DATE UT NIL))))
 	     (GO STRING)))
    DO-IT
+      ;; quux: the wall clock reads the real-time clock from here on, offset by
+      ;; what a time given here differs from it (none if it came from it).
+      (or rtc (setq rtc (rtc-universal-time)))
       (WITHOUT-INTERRUPTS
 	(IF (NOT (NULL *UT-AT-BOOT-TIME*))
 	    ;;if we are randomly changing the time while up, mung uptime
@@ -289,6 +309,7 @@ and, failing that, the luser who happens to be around."
 			 *LAST-TIME-DAY* *LAST-TIME-MONTH* *LAST-TIME-YEAR*
 			 *LAST-TIME-DAY-OF-THE-WEEK* *LAST-TIME-DAYLIGHT-SAVINGS-P*)
 	  (DECODE-UNIVERSAL-TIME UT))
+	(setq *rtc-offset* (and rtc (- ut rtc)))
 	(RETURN-FROM INITIALIZE-TIMEBASE T))))
 
 (DEFUN SET-LOCAL-TIME (&OPTIONAL NEW-TIME)
@@ -309,6 +330,9 @@ and, failing that, the luser who happens to be around."
 (DEFUN UPDATE-TIMEBASE (&AUX TIME TICK TOP-9-TIME-BITS INCREMENTAL-TOP-10-TIME-BITS
 			(OLD-HOUR *LAST-TIME-HOURS*))
   "Update our information on the current time."
+  ;; quux: with the real-time clock, decode it instead of counting.
+  (when (and *last-time-update-time* *rtc-offset*)
+    (return-from update-timebase (update-timebase-from-rtc)))
   (WHEN (NOT (NULL *LAST-TIME-UPDATE-TIME*))
     (WITHOUT-INTERRUPTS
       ;; Put the following code back if the TIME function ever makes any attempt
@@ -390,6 +414,19 @@ and, failing that, the luser who happens to be around."
 	(GET-INTERNAL-RUN-TIME))
       T)))
 
+;; quux: UPDATE-TIMEBASE on the real-time clock.  like the count, it must not
+;; process-wait (the who-line calls it in the scheduler) and returns T.
+(defun update-timebase-from-rtc (&aux (old-hour *last-time-hours*))
+  (without-interrupts
+    (multiple-value (*last-time-seconds* *last-time-minutes* *last-time-hours*
+		     *last-time-day* *last-time-month* *last-time-year*
+		     *last-time-day-of-the-week* *last-time-daylight-savings-p*)
+      (decode-universal-time (+ (rtc-universal-time) *rtc-offset*))))
+  ;; as the count does, let GET-INTERNAL-RUN-TIME see (TIME) at least hourly.
+  (or (eql old-hour *last-time-hours*)
+      (get-internal-run-time))
+  t)
+
 (DEFVAR *MONTH-LENGTHS* '#10r(0 31 28 31 30 31 30 31 31 30 31 30 31)
   "One-based list of lengths of months.")
 
@@ -436,11 +473,14 @@ Returns NIL if the time is not known (during startup or DISK-SAVE)."
 (DEFUN GET-UNIVERSAL-TIME ()
   "Return the current time as a universal-time.
 A universal-time is the number of seconds since 01-Jan-1900 00:00-GMT (a bignum)"
-  (UPDATE-TIMEBASE)
-  (ENCODE-UNIVERSAL-TIME *LAST-TIME-SECONDS* *LAST-TIME-MINUTES* *LAST-TIME-HOURS*
-			 *LAST-TIME-DAY* *LAST-TIME-MONTH* *LAST-TIME-YEAR*
-			 (IF *LAST-TIME-DAYLIGHT-SAVINGS-P*
-			     (1- *TIMEZONE*) *TIMEZONE*)))
+  ;; quux: with the real-time clock, it and the offset, with no decoding.
+  (if (and *last-time-update-time* *rtc-offset*)
+      (+ (rtc-universal-time) *rtc-offset*)
+    (UPDATE-TIMEBASE)
+    (ENCODE-UNIVERSAL-TIME *LAST-TIME-SECONDS* *LAST-TIME-MINUTES* *LAST-TIME-HOURS*
+			   *LAST-TIME-DAY* *LAST-TIME-MONTH* *LAST-TIME-YEAR*
+			   (IF *LAST-TIME-DAYLIGHT-SAVINGS-P*
+			       (1- *TIMEZONE*) *TIMEZONE*))))
 
 
 ;;;args to format: DAY MONTH MONTH-STRING DONT-PRINT-YEAR-P YEAR2 YEAR4
