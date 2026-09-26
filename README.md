@@ -70,6 +70,7 @@ This is the system. Three projects provide the machine:
 | `sys/` | the Lisp Machine sources, as the machine sees them: `SYS: SYS2;` is `sys/sys2/` |
 | `site/` | the site files a machine loads, for the example site `MIT` |
 | `docs/` | how the system is built, and what has been found out about it |
+| `tools/` | `lispm-check`, which checks a Lisp change on a band in seconds |
 
 ## Documents
 
@@ -84,6 +85,8 @@ This is the system. Three projects provide the machine:
   after System 100, and which of them were taken.
 - [`docs/fonts.md`](docs/fonts.md) --- the fonts are the last binaries with no
   source here: what became of their sources, and where copies of some survive.
+- [`docs/lispm-check.md`](docs/lispm-check.md) --- `tools/lispm-check`:
+  checking a Lisp change on a band in seconds, from a checkpoint.
 
 Faults found along the way are logged as issues in this repository.
 

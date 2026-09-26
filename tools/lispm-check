@@ -1,0 +1,720 @@
+#!/usr/bin/env python3
+"""lispm-check: check a Lisp change on a band in seconds.
+
+Usage:
+  tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
+                    [--tree DIR] [--files a.lisp,b.lisp] [--compile]
+                    [--timeout S] [--keep] CASES
+
+It resumes a checkpoint of the band booted to its TELNET prompt, lays the
+changed files over a private copy of the tree, loads them (or compiles them
+with qc-file and loads the QFASLs, with --compile), runs every case of CASES in
+one session and prints one line per case.  The first run for a band and a quux
+build boots the band cold and writes the checkpoint (about 15 s); later runs
+resume it: about 0.6 s with no files, 0.13 s a case, about 0.8 s to load a
+small file and 1.7 s to compile and load it, and as long as qc-file takes for
+a large one (half a minute for sys/io1/time.lisp).
+
+CASES holds one case per form; a form may run over several lines.  Blank lines
+and lines starting with ; are skipped.  After the form, on its last line:
+  FORM                    passes unless it signals an error
+  FORM => TEXT            passes if the value, printed with prin1, is TEXT
+  FORM =>!                passes only if it signals an error
+  FORM =>! TEXT           ... an error whose message contains TEXT
+Forms are read by the listener: base 10, traditional syntax, where / escapes,
+so a slash inside a string is written twice.  A value is compared with its
+whitespace runs collapsed to one space.  Each form runs inside a
+condition-case, so an error is reported by its message and the listener goes
+on with the next case; a form must not read from the terminal.
+
+Output, one line per case, then a summary:
+  PASS  FORM  -> VALUE
+  FAIL  FORM  -> VALUE, expected TEXT
+  ERROR  FORM  -> the error's message
+Before them, a FILE line for each file, and a WARN line for each line the
+compiler or the loader printed about it.
+Exit status: 0 if every case passes, 1 if any fails or errors, 2 if the run
+itself failed (bad arguments, a boot, a file that would not load or compile,
+where a compiler heading "<< Error ..." counts as not compiling, or a case
+that did not answer within --timeout).  A failed run keeps its run directory
+(TELNET, quux and ozd logs) under the cache and says where; --keep keeps it
+always.
+
+--files takes paths, comma separated.  A file inside the tree's sys/ is served
+at its own place and loaded by its logical name (sys/io1/time.lisp as
+"SYS: IO1; TIME LISP"), so the world sees the same source file; any other file
+is served in the login's home directory.  The tree itself is never written:
+the machine is served a copy under the cache, so QFASLs land there.  Some sys
+files do not load as source, since they use functions only the compiler opens
+(sys/io1/time.lisp: "The function %PUSH is undefined"); check those with
+--compile.
+
+Defaults, each overridden by its flag or an environment variable:
+  --band  LISPM_CHECK_BAND  run/check/band.img in the tree
+  --ubin  LISPM_CHECK_UBIN  ubin/ beside the band: the sys/ubin/ the band's
+                            microcode was assembled into; the cold boot reads
+                            its ucadr.tbl
+  --quux  LISPM_CHECK_QUUX  ../muir/target/release/quux beside the tree
+  --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
+  --tree  LISPM_CHECK_TREE  the tree this tool is in
+  LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
+  cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
+The band is opened read-only (,ro) and never written: a boot's writes live in
+the checkpoint, so any number of checks, also at once, resume one checkpoint
+on one band.  A checkpoint is keyed by the band's and quux's sha256 and made
+again when either changes.  Every run takes four free ports of its own (ozd's
+UDP, quux's UDP, TELNET and quux's RFB) under a lock, so parallel runs never
+meet, and it stops everything it started before it exits.
+
+The file server is ozd, and everything that knows about it is in the class
+OzdFileServer: to serve the tree another way, replace that class.
+
+The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
+docs/lispm-check.md has the same usage.
+"""
+
+import argparse, fcntl, hashlib, json, os, random, re, shutil, signal, socket
+import subprocess, sys, time
+
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+CHAOS_HOST, CHAOS_LISPM = '177200', '177201'   # ozd's and the band's addresses
+TV_SIZE = '1280x1024'
+LOGIN = '(login "LISPM" "OZ" t)'
+
+
+def now():
+    return time.monotonic()
+
+
+class RunFailed(Exception):
+    """The run itself failed: exit status 2."""
+
+
+# --------------------------------------------------------------------------
+# Paths, hashes and the cache.
+
+def cache_dir():
+    base = os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache')
+    d = os.path.join(base, 'muir-sys-check')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def sha256_cached(path):
+    """sha256 of a file, remembered by (device, inode, size, mtime) so that a
+    270 MB band is not hashed again on every check."""
+    st = os.stat(path)
+    key = '%d:%d:%d:%d' % (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    db = os.path.join(cache_dir(), 'sha256.json')
+    try:
+        with open(db) as f:
+            known = json.load(f)
+    except (OSError, ValueError):
+        known = {}
+    if known.get(os.path.realpath(path), {}).get('key') == key:
+        return known[os.path.realpath(path)]['sha256']
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            h.update(block)
+    known[os.path.realpath(path)] = {'key': key, 'sha256': h.hexdigest()}
+    tmp = '%s.%d' % (db, os.getpid())
+    with open(tmp, 'w') as f:
+        json.dump(known, f, indent=1)
+    os.replace(tmp, db)
+    return h.hexdigest()
+
+
+class Lock:
+    """An flock on a file under the cache, held until release()."""
+    def __init__(self, name, block=True):
+        d = os.path.join(cache_dir(), 'locks')
+        os.makedirs(d, exist_ok=True)
+        self.f = open(os.path.join(d, name), 'w')
+        try:
+            fcntl.flock(self.f, fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
+        except BlockingIOError:
+            self.f.close()
+            raise
+
+    def release(self):
+        self.f.close()
+
+
+# --------------------------------------------------------------------------
+# Ports: four free ones for each run, locked so that parallel runs differ.
+
+def port_free(port, kind):
+    s = socket.socket(socket.AF_INET, kind)
+    try:
+        s.bind(('127.0.0.1', port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def take_ports():
+    """Four ports in a block of four within LISPM_CHECK_PORTS, every one free
+    and the block locked: (ozd UDP, quux UDP, TELNET TCP, RFB TCP)."""
+    lo, hi = (int(x) for x in os.environ.get('LISPM_CHECK_PORTS', '44000-44999').split('-'))
+    bases = list(range(lo - lo % 4 + (4 if lo % 4 else 0), hi - 2, 4))
+    random.shuffle(bases)
+    for base in bases:
+        try:
+            lock = Lock('port-%d' % base, block=False)
+        except BlockingIOError:
+            continue
+        kinds = (socket.SOCK_DGRAM, socket.SOCK_DGRAM, socket.SOCK_STREAM, socket.SOCK_STREAM)
+        if all(port_free(base + i, k) for i, k in enumerate(kinds)):
+            return lock, tuple(base + i for i in range(4))
+        lock.release()
+    raise RunFailed('no free block of four ports in %d-%d' % (lo, hi))
+
+
+def listener_owned_by(port, pid):
+    """True if the TCP socket listening on port belongs to process pid: the
+    check that a connection reaches this run's machine and no other."""
+    inodes = set()
+    for table in ('/proc/net/tcp', '/proc/net/tcp6'):
+        try:
+            with open(table) as f:
+                for line in f.readlines()[1:]:
+                    p = line.split()
+                    if int(p[1].split(':')[1], 16) == port and p[3] == '0A':
+                        inodes.add(p[9])
+        except OSError:
+            pass
+    try:
+        for fd in os.listdir('/proc/%d/fd' % pid):
+            try:
+                link = os.readlink('/proc/%d/fd/%s' % (pid, fd))
+            except OSError:
+                continue
+            m = re.match(r'socket:\[(\d+)\]', link)
+            if m and m.group(1) in inodes:
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def stop_process(p, stdin_command=None, wait=10):
+    """Stop a process started in its own session, and all of its group."""
+    if p is None or p.poll() is not None:
+        return
+    if stdin_command is not None:
+        try:
+            p.stdin.write(stdin_command)
+            p.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+        try:
+            p.wait(wait)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            p.wait(5)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+# --------------------------------------------------------------------------
+# The file server.  Everything that knows about ozd is here: its flags, the
+# tree it serves, the pathnames the band uses for served files, the TELNET
+# listener it carries to the band, and the quux flags that plug the band into
+# it.  To serve the tree another way (muir's own file device), replace this
+# class and keep its methods.
+
+class OzdFileServer:
+    def __init__(self, ozd, run_dir, ports, log):
+        self.ozd, self.run_dir, self.log = ozd, run_dir, log
+        self.udp, self.quux_udp, self.telnet = ports[0], ports[1], ports[2]
+        self.root = os.path.join(run_dir, 'served')
+        self.proc = None
+
+    def lay_out(self, tree, ubin=None):
+        """Copy the tree's sys/ and site/ to be served (the tree is never
+        served itself, so a compile writes its QFASLs into the copy), with
+        ubin/ as sys/ubin/ when given, and an empty home for the login."""
+        for d in ('sys', 'site'):
+            shutil.copytree(os.path.join(tree, d), os.path.join(self.root, d), symlinks=True)
+        if ubin:
+            dest = os.path.join(self.root, 'sys', 'ubin')
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(ubin, dest)
+        os.makedirs(os.path.join(self.root, 'lispm'))
+
+    def place(self, path, tree):
+        """Serve the file at path and return the pathname the band loads it
+        by, without its type, and whether that is a logical SYS: name."""
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
+        if rel.startswith('sys' + os.sep):
+            dest = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if os.path.lexists(dest):
+                os.unlink(dest)
+            shutil.copyfile(path, dest)
+            parts = rel.split(os.sep)[1:]
+            name = os.path.splitext(parts[-1])[0]
+            return 'SYS: ' + ''.join(d.upper() + '; ' for d in parts[:-1]) + name.upper(), True
+        name = os.path.basename(path)
+        shutil.copyfile(path, os.path.join(self.root, 'lispm', name))
+        return 'OZ: //lispm//' + os.path.splitext(name)[0], False
+
+    def start(self):
+        self.logfile = open(os.path.join(self.run_dir, 'ozd.log'), 'wb')
+        cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
+               '--listen', '127.0.0.1:%d' % self.udp,
+               '--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
+               '--root', 'lispm=%s/lispm' % self.root,
+               '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
+               '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.quux_udp),
+               '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
+               '--log-file', '--log-simple']
+        self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.DEVNULL,
+                                     stdout=self.logfile, stderr=self.logfile,
+                                     start_new_session=True)
+        return self.proc.pid
+
+    def quux_flags(self):
+        return ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.quux_udp,
+                '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
+                '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
+
+    def connect_listener(self, machine_alive, deadline):
+        """Connect to the band's TELNET listener through ozd and return the
+        socket and the text read up to its banner."""
+        while now() < deadline:
+            if not machine_alive():
+                raise RunFailed('quux exited before the TELNET banner')
+            if self.proc.poll() is not None:
+                raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
+            if not listener_owned_by(self.telnet, self.proc.pid):
+                time.sleep(0.05)
+                continue
+            try:
+                s = socket.create_connection(('127.0.0.1', self.telnet), timeout=5)
+            except OSError:
+                time.sleep(0.1)
+                continue
+            s.settimeout(0.2)
+            text, until = '', min(deadline, now() + 30)
+            while now() < until:
+                try:
+                    d = s.recv(4096)
+                except socket.timeout:
+                    continue
+                if not d:
+                    break
+                text += d.decode('latin-1')
+                self.log.write(d.decode('latin-1'))
+                if 'Telnet server here' in text:
+                    return s, text
+            s.close()
+            time.sleep(0.1)
+        raise RunFailed('no TELNET banner in time')
+
+    def stop(self):
+        stop_process(self.proc)
+
+
+# --------------------------------------------------------------------------
+# The machine: quux, cold with --checkpoint or resumed from one.
+
+class Machine:
+    def __init__(self, quux, band, run_dir, rfb_port, server):
+        self.quux, self.band, self.run_dir = quux, band, run_dir
+        self.rfb, self.server, self.proc = rfb_port, server, None
+
+    def start(self, checkpoint_out=None, resume=None):
+        cmd = [self.quux, '-c', '/dev/null', '--micro', '--mono-tv-size', TV_SIZE,
+               '--disk-pack', self.band + ',ro', '--terminal', '127.0.0.1:%d' % self.rfb]
+        cmd += self.server.quux_flags()
+        if checkpoint_out:
+            cmd += ['--checkpoint', checkpoint_out]
+        if resume:
+            cmd += ['--resume', resume]
+        self.logfile = open(os.path.join(self.run_dir, 'quux.log'), 'wb')
+        self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.PIPE,
+                                     stdout=self.logfile, stderr=self.logfile,
+                                     start_new_session=True)
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def stop(self, wait=10):
+        stop_process(self.proc, b'quit\n', wait)
+
+
+# --------------------------------------------------------------------------
+# The session: forms over TELNET, each wrapped to print its value between
+# markers, and an error answered No so the listener goes back to top level.
+
+# The function every case is run through, defined and compiled into the
+# checkpoint at setup.  SETUP_VERSION is part of the checkpoint's key: change it
+# whenever this or the setup's forms change.
+HELPER = ('(defun lispm-check-case (k form)'
+          ' (condition-case (e) (format t "~%{~D{~S}~D}~%" k (eval form) k)'
+          ' (error (format t "~%{~D!~A!~D}~%" k (send e \':report-string) k))))')
+SETUP_VERSION = '1'
+
+ERROR_RE = re.compile(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)')
+
+
+class Session:
+    def __init__(self, sock, log, helper):
+        self.s, self.log, self.helper = sock, log, helper
+        self.buf = ''
+        self.tag = random.randrange(100000, 900000)
+
+    def _read(self):
+        try:
+            d = self.s.recv(4096)
+        except socket.timeout:
+            return
+        if not d:
+            raise RunFailed('the TELNET connection closed')
+        t = d.decode('latin-1')
+        self.buf += t
+        self.log.write(t)
+
+    def run(self, form, timeout):
+        """Evaluate form; return ('value', printed value, output before it)
+        or ('error', message, output before it).  The form runs inside a
+        condition-case, so an error prints its message rather than asking
+        whether to enter the debugger; in a checkpointed world through
+        HELPER, compiled at setup, since the listener takes 0.3 s more to
+        evaluate a condition-case form than to call a compiled function.  The
+        markers are printed with ~D from numbers, so the echo of the form
+        never holds them."""
+        self.tag += 1
+        k = self.tag
+        self.buf = ''
+        self.log.write('\n=== %.2f %s\n' % (now(), form))
+        if self.helper:
+            sent = "(lispm-check-case %d '%s)" % (k, form)
+        else:
+            sent = ('(condition-case (e) (format t "~%%{~D{~S}~D}~%%" %d %s %d)'
+                    ' (error (format t "~%%{~D!~A!~D}~%%" %d (send e \':report-string) %d)))'
+                    % (k, form, k, k, k))
+        self.s.sendall((sent + '\r\n').encode('latin-1'))
+        echo_end = sent[-24:]
+        answer = re.compile(r'\{%d([{!])(.*?)[}!]%d\}' % (k, k), re.S)
+        deadline = now() + timeout
+        while True:
+            m = answer.search(self.buf)
+            if m:
+                # what the form printed: after the echoed line, before the answer
+                out = self.buf[:m.start()].split(echo_end, 1)[-1]
+                return ('value' if m.group(1) == '{' else 'error'), m.group(2), out
+            m = ERROR_RE.search(self.buf)
+            if m and ('(Y or N)' in self.buf[m.start():] or '\n->' in self.buf[m.start():]):
+                # An error the condition-case did not catch: leave it for top level.
+                msg = self.buf[m.start():].split('\r\n\r\n', 1)[0]
+                out = self.buf[:m.start()].split(echo_end, 1)[-1]
+                self._abort(deadline)
+                return 'error', msg, out
+            if now() > deadline:
+                raise RunFailed('no answer in %g s to %s' % (timeout, oneline(form)))
+            self._read()
+
+    def _abort(self, deadline):
+        """Answer the debugger's question No, or leave the debugger with
+        control-Z, and wait for the listener's top level."""
+        self.s.sendall(b'N' if '(Y or N)' in self.buf else b'\x1a')
+        self.buf = ''
+        while 'Back to top level' not in self.buf:
+            if now() > deadline:
+                raise RunFailed('the listener did not come back to top level')
+            self._read()
+
+
+def oneline(form):
+    return ' '.join(form.split())
+
+
+def normal(text):
+    return ' '.join(text.replace('\r', ' ').split())
+
+
+# --------------------------------------------------------------------------
+# The cases file.
+
+def parse_cases(path):
+    """Cases as (form, kind, text): kind None (no error), '=>' or '=>!'."""
+    text = open(path, encoding='latin-1').read()
+    cases, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in ' \t\r\n':
+            i += 1
+            continue
+        if c == ';':
+            i = text.find('\n', i)
+            i = n if i < 0 else i
+            continue
+        start, depth, instr, inbar = i, 0, False, False
+        while i < n:
+            c = text[i]
+            if c == '/':
+                i += 2
+                continue
+            if instr:
+                instr = c != '"'
+            elif inbar:
+                inbar = c != '|'
+            elif c == '"':
+                instr = True
+            elif c == '|':
+                inbar = True
+            elif c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            elif depth == 0 and c in ' \t\r\n':
+                break
+            elif depth > 0 and c == ';':
+                i = text.find('\n', i)
+                i = n if i < 0 else i
+                continue
+            i += 1
+            if depth == 0 and not instr and not inbar and c == '"' and i > start + 1:
+                break
+        form = text[start:i]
+        if depth != 0 or instr or inbar:
+            raise RunFailed('%s: unbalanced form: %s' % (path, oneline(form)[:80]))
+        end = text.find('\n', i)
+        end = n if end < 0 else end
+        rest = text[i:end].strip()
+        i = end
+        if rest.startswith('=>!'):
+            cases.append((form, '=>!', rest[3:].strip()))
+        elif rest.startswith('=>'):
+            cases.append((form, '=>', rest[2:].strip()))
+        elif rest == '' or rest.startswith(';'):
+            cases.append((form, None, ''))
+        else:
+            raise RunFailed('%s: after %s: expected => or =>!, found %s'
+                            % (path, oneline(form)[:60], rest[:40]))
+    return cases
+
+
+# --------------------------------------------------------------------------
+# Setup: the checkpoint of the band at its prompt.
+
+def run_dir_new(kind):
+    d = os.path.join(cache_dir(), 'runs', '%s-%s-%d-%04x' % (
+        kind, time.strftime('%Y%m%d-%H%M%S'), os.getpid(), random.randrange(65536)))
+    os.makedirs(d)
+    return d
+
+
+def ensure_checkpoint(a, key):
+    chk = os.path.join(cache_dir(), 'checkpoints', key + '.chk')
+    if os.path.exists(chk):
+        return chk, None
+    os.makedirs(os.path.dirname(chk), exist_ok=True)
+    lock = Lock('setup-' + key)
+    try:
+        if os.path.exists(chk):
+            return chk, None
+        if not os.path.isfile(os.path.join(a.ubin, 'ucadr.tbl')):
+            raise RunFailed('no ucadr.tbl in %s (--ubin): the cold boot reads it' % a.ubin)
+        t0 = now()
+        print('lispm-check: setting up a checkpoint for this band and quux (cold boot)', flush=True)
+        run_dir = run_dir_new('setup')
+        ports_lock, ports = take_ports()
+        log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+        server = OzdFileServer(a.ozd, run_dir, ports, log)
+        machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+        tmp = chk + '.%d.tmp' % os.getpid()
+        try:
+            server.lay_out(a.tree, a.ubin)
+            server.start()
+            machine.start(checkpoint_out=tmp)
+            sock, _ = server.connect_listener(machine.alive, now() + 300)
+            sock.settimeout(0.2)
+            sess = Session(sock, log, helper=False)
+            # Log in, define and compile the helper, then close the band's file connection, so the first file
+            # access after a resume opens a new one rather than using a
+            # connection whose ozd has gone (which closed the TELNET session).
+            for form in (LOGIN, HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
+                r = sess.run(form, 120)
+                if r[0] != 'value':
+                    raise RunFailed('setup: %s: %s' % (form, r[1]))
+            sock.close()
+            machine.stop(wait=120)
+            if machine.proc.returncode != 0 or not os.path.exists(tmp):
+                raise RunFailed('quux wrote no checkpoint (see %s/quux.log)' % run_dir)
+            os.replace(tmp, chk)
+            with open(chk[:-4] + '.json', 'w') as f:
+                json.dump({'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
+                           'quux': os.path.abspath(a.quux), 'quux_sha256': a.quux_sha,
+                           'quux_version': a.quux_version, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
+                          f, indent=1)
+        finally:
+            machine.stop(wait=5)
+            server.stop()
+            ports_lock.release()
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        shutil.rmtree(run_dir, ignore_errors=True)
+        return chk, now() - t0
+    finally:
+        lock.release()
+
+
+# --------------------------------------------------------------------------
+# A check.
+
+def check(a, chk, cases):
+    run_dir = run_dir_new('check')
+    ports_lock, ports = take_ports()
+    log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+    server = OzdFileServer(a.ozd, run_dir, ports, log)
+    machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+    results, t0 = [], now()
+    ok_run = False
+    try:
+        server.lay_out(a.tree)
+        loads = [server.place(f, a.tree) for f in a.files]
+        server.start()
+        machine.start(resume=chk)
+        sock, _ = server.connect_listener(machine.alive, now() + 60)
+        sock.settimeout(0.2)
+        sess = Session(sock, log, helper=True)
+        t_banner = now() - t0
+        for (name, logical), path in zip(loads, a.files):
+            t1 = now()
+            if a.compile:
+                steps = ['(qc-file "%s LISP")' % name if logical else '(qc-file "%s.lisp")' % name,
+                         '(let ((si:inhibit-fdefine-warnings t)) (load "%s QFASL"))' % name if logical
+                         else '(let ((si:inhibit-fdefine-warnings t)) (load "%s.qfasl"))' % name]
+            else:
+                steps = ['(let ((si:inhibit-fdefine-warnings t)) (load "%s LISP"))' % name if logical
+                         else '(let ((si:inhibit-fdefine-warnings t)) (load "%s.lisp"))' % name]
+            for step in steps:
+                r = sess.run(step, a.file_timeout)
+                if r[0] == 'error':
+                    raise RunFailed('%s: %s: %s' % (path, step, normal(r[1])))
+                # What the step printed besides ;Loading lines: the compiler's
+                # diagnostics, headed "<< While compiling F >>".  qc-file
+                # reports a reader error as "<< Error in reading >>" and still
+                # writes a QFASL, so such a heading fails the run.
+                said = [l.strip() for l in r[2].replace('\r', '\n').split('\n')
+                        if l.strip() and not l.strip().startswith((';', 'Loading '))]
+                for w in said:
+                    print('WARN  %s: %s' % (os.path.basename(path), w))
+                if any(re.match(r'<< *Error', w) for w in said):
+                    raise RunFailed('%s: %s: the compiler reported an error' % (path, step))
+            shown = os.path.relpath(path, a.tree)
+            shown = path if shown.startswith('..') else shown
+            print('FILE  %s  %s in %.2f s' % (shown, 'compiled and loaded' if a.compile else 'loaded',
+                                             now() - t1), flush=True)
+        for form, kind, text in cases:
+            r = sess.run(form, a.timeout)
+            shown = oneline(form)
+            if r[0] == 'value':
+                val = normal(r[1])
+                if kind == '=>!':
+                    verdict, why = 'FAIL', '%s, expected an error' % val
+                elif kind == '=>' and val != normal(text):
+                    verdict, why = 'FAIL', '%s, expected %s' % (val, normal(text))
+                else:
+                    verdict, why = 'PASS', val
+            else:
+                msg = normal(r[1])
+                if kind == '=>!' and normal(text) in msg:
+                    verdict, why = 'PASS', msg
+                elif kind == '=>!':
+                    verdict, why = 'FAIL', '%s, expected an error with %s' % (msg, normal(text))
+                else:
+                    verdict, why = 'ERROR', msg
+            results.append(verdict)
+            print('%s  %s  -> %s' % (verdict, shown, why), flush=True)
+        sock.close()
+        ok_run = True
+    finally:
+        log.write('\n=== %.2f stop\n' % now())
+        machine.stop()
+        log.write('\n=== %.2f quux stopped (rc %s)\n' % (now(), machine.proc and machine.proc.returncode))
+        server.stop()
+        log.write('\n=== %.2f ozd stopped\n' % now())
+        ports_lock.release()
+        if ok_run and not a.keep:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        else:
+            print('lispm-check: run files kept in %s' % run_dir, file=sys.stderr)
+    return results, t_banner, now() - t0
+
+
+def main():
+    tree_default = os.environ.get('LISPM_CHECK_TREE') or os.path.dirname(TOOL_DIR)
+    p = argparse.ArgumentParser(description='Check a Lisp change on a band.',
+                                epilog='See the header of this file for the CASES syntax.')
+    p.add_argument('cases')
+    p.add_argument('--tree', default=tree_default)
+    p.add_argument('--band', default=os.environ.get('LISPM_CHECK_BAND'))
+    p.add_argument('--ubin', default=os.environ.get('LISPM_CHECK_UBIN'))
+    p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
+    p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+    p.add_argument('--files', default='')
+    p.add_argument('--compile', action='store_true')
+    p.add_argument('--timeout', type=float, default=120, help='seconds a case may take')
+    p.add_argument('--file-timeout', type=float, default=900,
+                   help='seconds a file may take to compile or load')
+    p.add_argument('--keep', action='store_true', help='keep the run directory')
+    a = p.parse_args()
+    a.tree = os.path.abspath(a.tree)
+    up = os.path.dirname(a.tree)
+    a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
+    a.ubin = a.ubin or os.path.join(os.path.dirname(a.band), 'ubin')
+    a.quux = a.quux or os.path.join(up, 'muir', 'target', 'release', 'quux')
+    a.ozd = a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd')
+    # quux and ozd run in the run directory, so every path is made absolute
+    a.band, a.ubin, a.quux, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.quux, a.ozd))
+    a.files = [os.path.abspath(f) for f in a.files.split(',') if f]
+
+    def on_signal(sig, frame):
+        raise SystemExit(128 + sig)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, on_signal)
+
+    try:
+        for what, path in (('band', a.band), ('quux', a.quux), ('ozd', a.ozd), ('cases', a.cases)):
+            if not os.path.isfile(path):
+                raise RunFailed('no %s at %s' % (what, path))
+        for f in a.files:
+            if not os.path.isfile(f):
+                raise RunFailed('no file %s' % f)
+        cases = parse_cases(a.cases)
+        a.band_sha = sha256_cached(a.band)
+        a.quux_sha = sha256_cached(a.quux)
+        a.quux_version = subprocess.run([a.quux, '-V'], capture_output=True, text=True).stdout.strip()
+        chk, t_setup = ensure_checkpoint(a, '%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION))
+        if t_setup is not None:
+            print('lispm-check: checkpoint made in %.1f s' % t_setup)
+        results, t_banner, t_all = check(a, chk, cases)
+    except RunFailed as e:
+        print('lispm-check: %s' % e, file=sys.stderr)
+        return 2
+    passed = results.count('PASS')
+    print('lispm-check: %d passed, %d failed, %d errors, of %d (banner %.2f s, all %.2f s)'
+          % (passed, results.count('FAIL'), results.count('ERROR'), len(results), t_banner, t_all))
+    return 0 if passed == len(results) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
