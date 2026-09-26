@@ -266,7 +266,7 @@ a comment in that file saying why.
     log (`io/dledit.lisp`) and the band receiver (`sys2/band.lisp`) speak
     of blocks; `cold/qcom.lisp` names block-disk's status bits and masks.
   The label keeps its geometry words, for the tools that print them.
-  Tested on muir 71953a2 with block-disk: the PROM loads the microcode, a
+  Tested on muir 08a5fa3 with block-disk: the PROM loads the microcode, a
   cold load boots and QLDs, the saved band boots; Lisp reads the label and
   a band's first blocks, writes and reads back a block, read-compares, and
   a read past the end reports it; the host's reading of the pack agrees.
@@ -285,7 +285,7 @@ a comment in that file saying why.
     `ERROR-BUFFER-NOT-LOADED` if the section does not cover page 3, checked
     before anything is loaded. The halts before them keep their addresses;
     `GO` moves from 36037 to 36043 (`ucadr/promh.text`). Tested on muir
-    f7b5e8a, micro and rtl, with band dev9: cold and warm boots keep the
+    b7d3e82, micro and rtl, with band dev9: cold and warm boots keep the
     world; up to the microcode's location 6 the pack is unchanged, and of
     main memory only pages 3-6 and word 777 change.
   - **QUUX's `.mcr` is written in partition order**: each word's low half
@@ -309,7 +309,7 @@ a comment in that file saying why.
     halts are after the last code (36632, 36634, 36636), so `GO` stays at
     36043; `ERROR-BAD-LABEL` and `ERROR-NO-MICR` are no longer reached. It
     still writes nothing to the disk, and in main memory only pages 3-6 and
-    word 777. Tested on muir fcbe6e8, 9a37436 and caea66b, micro and rtl,
+    word 777. Tested on muir 7dfc41c, 0d14efc and 53ee46d, micro and rtl,
     with microcode `ucode-1000-gpt2` and the GPT band: cold boot, a warm
     boot that keeps the world, a save into LOD3 and `(disk-restore 3)` into
     it at 1280x1024; it boots with MCR1 current, with MCR2
@@ -363,7 +363,7 @@ a comment in that file saying why.
     also writes a partial last block, which MIT's dropped (`io/disk.lisp`).
   - **A QUUX disk is at most 8 GiB** (2^24 LBAs), so the microcode and Lisp
     read only an LBA's low word.
-  Tested on muir fcbe6e8, on T-300-size disks with a GPT, with a test PROM
+  Tested on muir 7dfc41c, on T-300-size disks with a GPT, with a test PROM
   that loads the microcode from block 17 (the real PROM's GPT reader was not
   done yet). Cold boots by bit 48 of LOD4, LOD3 and LOD1; QLD; saves into
   LOD4, LOD1 and LOD3; an incremental save and its cold boot from its base
@@ -406,7 +406,7 @@ a comment in that file saying why.
   ahead of the network, which stays the source below revision 9, and
   `SET-LOCAL-TIME` reads neither: with no argument it still asks for the
   time. The clock is read-only; the time zone stays the site's
-  (`io1/time.lisp`). Tested on muir 52614fd with `--rtc` at 1790000000,
+  (`io1/time.lisp`). Tested on muir 09e88ef with `--rtc` at 1790000000,
   2^31 and 2^32-1 and on the host's clock: the universal time is the clock
   plus the constant, and a boot sends no TIME request; on a revision 8
   muir the band asks for the time as before.
@@ -420,12 +420,12 @@ a comment in that file saying why.
   NIL without the clock, and the old count stands. The time is unknown
   exactly when it was (`*LAST-TIME-UPDATE-TIME*` NIL). `(TIME)`, timeouts,
   `PROCESS-SLEEP` and the scheduler stay on the tick and the microsecond
-  clock (`io1/time.lisp`). Tested on muir 73c15f0, micro unpaced, with the
+  clock (`io1/time.lisp`). Tested on muir e11026a, micro unpaced, with the
   change saved into a band: with `--rtc` fixed, `GET-UNIVERSAL-TIME` equals
   the clock at every sample over 65 s (it and the old count agree in rate
   there, but the count lagged the clock by up to a second); on the host's
   clock it equals the clock and the host's second, where the old count ran
-  11 s ahead in 66 s; the who-line shows the clock's time; on muir caea66b
+  11 s ahead in 66 s; the who-line shows the clock's time; on muir 53ee46d
   (revision 8) the offset is NIL and the band asks the network, as before.
 
 ## Time zones
@@ -470,7 +470,7 @@ a comment in that file saying why.
   exported. `WEEKDAY-IN-MONTH` finds the n-th or last weekday of a month on
   `GREGORIAN-DAY-COUNT`, the day count `ENCODE-UNIVERSAL-TIME` now shares
   (`io1/time.lisp`).
-- Tested on muir 73c15f0, micro unpaced, on the dev11 band with Q9 part 1
+- Tested on muir e11026a, micro unpaced, on the dev11 band with Q9 part 1
   and the calendar fix, with the change loaded: 31,774 times from 2026 to
   2106 decoded as Python's zoneinfo (tzdata 2026c) does for Europe/Berlin,
   Europe/London, America/New_York, Australia/Sydney, Asia/Tokyo,

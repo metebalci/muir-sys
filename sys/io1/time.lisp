@@ -476,7 +476,7 @@ Greenwich with no daylight savings time; a string is a tzdata zone name."
 ;; register read, so it never drifts and needs no resync; the count of
 ;; seconds on the microsecond clock below follows the machine's time, and
 ;; on an unpaced engine ran 11 s ahead of the host's clock in 66 s (muir
-;; 73c15f0, micro).  without the clock the count stays.  (TIME),
+;; e11026a, micro).  without the clock the count stays.  (TIME),
 ;; timeouts, PROCESS-SLEEP and the scheduler stay on the tick and the
 ;; microsecond clock, which never jump when the host's clock is set.
 (defvar *rtc-offset* nil
