@@ -1,0 +1,27 @@
+; tools/lispm-check's self-test, run with --files selftest.lisp.
+; Three cases fail on purpose: one expected value is wrong, one error's message
+; is not the one expected, and one form signals an error it was not marked for. The self-test (run.sh) checks each verdict
+; and the exit status 1.
+
+; passing cases: a value compared, a value printed, a form over two lines
+(check-selftest-square 7) => 49
+(+ 1 2)
+(list 'a
+      (check-selftest-square 3)) => (A 9)
+"a string" => "a string"
+
+; a deliberately failing case: the expected value is wrong
+(check-selftest-square 4) => 17
+
+; expected errors: any error, and one whose message must contain a text
+(car 1) =>!
+(check-selftest-fail 3) =>! Self-test error with 3
+
+; a deliberately failing case: an error, but not with the expected message
+(check-selftest-fail 4) =>! Self-test error with 5
+
+; an unexpected error
+(check-selftest-undefined 1)
+
+; the listener is still there after the errors
+(check-selftest-square 5) => 25

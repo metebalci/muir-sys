@@ -1,0 +1,3 @@
+; Only passing cases: the tool must exit 0.
+(check-selftest-square 6) => 36
+(check-selftest-fail 1) =>! Self-test error

@@ -1,0 +1,3 @@
+; Only passing forms but one wrong expected value: the tool must exit 1.
+(check-selftest-square 2) => 4
+(check-selftest-square 3) => 10
