@@ -6,7 +6,7 @@ function. It follows the tree's own code, and each claim cites a file and line.
 
 It was carried over from the System 2000 line (lmz-sys `fecd0a5`) and every
 citation re-checked against this tree. Line numbers in `promh.text`,
-`uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `0ec714d`, before
+`uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `07c7648`, before
 QUUX's disk became block-disk; the labels named with them are still there,
 except those block-disk removed, as noted below. Nothing here is about compiling or
 building; `docs/building.md` covers that.
@@ -24,7 +24,7 @@ building; `docs/building.md` covers that.
 The PROM is `sys/ucadr/promh.text`, assembled to `sys/ubin/promh.mcr`. It runs
 from I-memory location 0 and knows nothing about bands, Lisp or virtual memory.
 This tree's PROM is version 1000, MIT's version 9 changed so that one PROM
-serves the CADR and QUUX (commit `d85b54a`).
+serves the CADR and QUUX (commit `f7740f4`).
 
 It first tests the hardware a bit at a time --- every bit of a word of zeros,
 the ALU's carries, the byte hardware, M-memory, A-memory and the PDL buffer
