@@ -243,6 +243,12 @@ COLD-BOOT is T if this is for a cold boot."
 
   (INITIALIZE-WIRED-KBD-BUFFER)
 
+  ;; quux: reset the file device and point it at the driver's rings, which a
+  ;; boot left unwired (io/fdev.lisp).  it must be here: the error table
+  ;; below is read before any initialization list runs, and on quux it may
+  ;; come through the device.
+  (and (fboundp 'file-device-boot-reset) (file-device-boot-reset))
+
   ;; Flush any closure binding forwarding pointers
   ;; left around from a closure we were in when we warm booted.
   (UNCLOSUREBIND '(PRIN1 *PRINT-BASE* *READ-BASE*

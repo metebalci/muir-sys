@@ -427,6 +427,68 @@ a comment in that file saying why.
   clock it equals the clock and the host's second, where the old count ran
   11 s ahead in 66 s; the who-line shows the clock's time; on muir 53ee46d
   (revision 8) the offset is NIL and the band asks the network, as before.
+- **Files from QUUX's host through the file device, as `HOST:`** (muir's
+  contract Q9, revision 9; migration step M2: `SYS:` stays on OZ).
+  `io/fdev.lisp` drives the device polled, with its interrupt enable off:
+  command and response rings of 16 entries of 8 words in one wired page,
+  two wired pages a slot for names, a stream's data in its own wired
+  four-page RQB, one READ or WRITE a page naming only the bytes wanted.
+  Responses come in command order, so the tables are indexed by the command
+  number. The reset (disable, wait for quiet with a timeout and a message,
+  ring bases and sizes, enable, check the status) runs in
+  `LISP-REINITIALIZE` before the error table is read, so every boot, cold or
+  warm, re-points the device at the rings; a `:BEFORE-COLD` initialization
+  disables it before a `DISK-SAVE`, and the next command enables it again.
+  A command in flight at a disable may have taken effect on the host without
+  an answer, and its waiter is told so. The constants are
+  `SI:%FILE-DEVICE-...`, in that file alone.
+- **`HOST`, the pathname host** (`io/file/hostfs.lisp`): Unix syntax, so
+  `HOST: /sys/io/disk.lisp` names what `OZ: /sys/io/disk.lisp` names; on no
+  network, so QFILE never takes it; the same instance always, put on the
+  pathname host list when the file is loaded (before any translation names
+  it) and again after `SITE-PATHNAME-INITIALIZE` drops every file host
+  (`network/host.lisp`). Its access opens, reads, writes (supersede, error,
+  append; the file lands whole at CLOSE), probes, lists directories (the
+  wildcards matched in Lisp, exactly), completes, deletes, renames (never
+  over a file) and creates directories. Characters are translated by the
+  streams with ozd's tables, measured through ozd for all 256 bytes: reading
+  maps LF to Return and CR to Line, Return and Line back to CR and LF, and
+  BS, TAB, FF and DEL to their Lisp Machine characters and back; writing is
+  the inverse. `:CHARACTERS :DEFAULT` is decided by the QFASL magic, as ozd
+  does. Dates are the device's Unix seconds plus 2,208,988,800, never text;
+  an output file's creation date comes only from CLOSE's reply, and
+  `COPY-FILE` keeps a file's date. The home directory is
+  `HOST: /home/<user>/`, the user id in lower case. Names are checked (1 to
+  255 bytes of 040-176 a component) and `..` resolved before a command is
+  sent. muir e11026a's own behaviour, as built: a DIRECTORY of a missing
+  directory is DNF, names the host refuses are not listed, writes in
+  progress (`.quux-write-*`) are hidden, and a name the host refuses with
+  EINVAL is IPS.
+- **The cold load reads its files through the file device** (muir's
+  contract Q9, revision 9; migration step M3: after MINI, QLD still takes
+  `SYS:` from OZ over Chaos). MINI (`cold/mini.lisp`) keeps a command ring
+  and a response ring of two entries each and one 512-byte buffer in the
+  free words `#o1100`-`#o1377` of `SCRATCH-PAD-INIT-AREA`, which is wired
+  and straight-mapped. It resets the device (disable, quiet, ring bases,
+  enable, check the status) whenever it finds the device off or with other
+  rings, sends one command at a time and polls the response index: OPEN,
+  a READ at an offset for each 512 bytes, CLOSE at the end of the file, and
+  LOG. No server address is compiled into it any more, and it no longer
+  touches the Chaos interface. Characters go through the same byte mapping
+  ozd applied to MINI's character files, measured over Chaos on all 256
+  bytes: BS, TAB, LF, FF, CR and DEL become Backspace, Tab, Return, Page,
+  Line and Rubout, and those six characters' codes become BS, TAB, LF, FF,
+  CR and DEL. The truename is the name asked for, and the date string is
+  the file's time as ozd wrote it. The reports go to muir's log with the
+  LOG command as `report: ...`, so a build watches muir's log for
+  `report: script-ends`. MINI also logs one `mini: read NAME BYTES` line
+  for each file. After QLD, `MINI-REPORT` uses the driver's
+  `FILE-DEVICE-LOG` when it is loaded. Measured in a full build on QUUX
+  (muir b777f19, micro engine), with the driver: 40 files, 1,508,398 bytes,
+  all through the device, each byte for byte the host's file; the 38 that
+  MINI also read over Chaos in the earlier build match it. ozd saw no MINI
+  connection. QLD passed
+  with no keys typed, and the band passed the usual checks.
 
 ## Time zones
 

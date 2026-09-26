@@ -296,10 +296,16 @@
   (:MODULE HOST-PATHNAMES ("PATHST" "LOGICAL" "SYS:FILE;LMPARS"))
   (:MODULE FILE-IO ("OPEN" "BALDIR"))
   (:MODULE CHAOS-FILE-IO ("SYS: NETWORK; CHAOS; QFILE"))
+  ;; quux: the file device's driver and the pathname host HOST over it
+  ;; (contract q9).  mini loads them too, from rest-of-pathnames-file-alist.
+  (:module file-device "SYS: IO; FDEV" :package si)
+  (:module host-file-io ("HOSTFS"))
   (:COMPILE-LOAD BASIC-PATHNAMES)
   (:COMPILE-LOAD HOST-PATHNAMES (:FASLOAD BASIC-PATHNAMES))
   (:COMPILE-LOAD FILE-IO (:FASLOAD BASIC-PATHNAMES))
-  (:COMPILE-LOAD CHAOS-FILE-IO (:FASLOAD HOST-PATHNAMES)))
+  (:COMPILE-LOAD CHAOS-FILE-IO (:FASLOAD HOST-PATHNAMES))
+  (:compile-load file-device)
+  (:compile-load host-file-io (:fasload host-pathnames file-device)))
 
 (DEFSYSTEM MATH
   (:PACKAGE MATH)
@@ -488,7 +494,12 @@
 	    ("SYS: IO; FILE; OPEN QFASL >" "FS")
 	    ("SYS: NETWORK; CHAOS; CHSNCP QFASL >" "CHAOS")
 	    ("SYS: NETWORK; CHAOS; CHUSE QFASL >" "CHAOS")
-	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")))
+	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")
+	    ;; quux: the file device and HOST, loaded here so that HOST is a
+	    ;; pathname host before the site's translations are read, and the
+	    ;; device is reset by qld's lisp-reinitialize (contract q9).
+	    ("SYS: IO; FDEV QFASL >" "SI")
+	    ("SYS: IO; FILE; HOSTFS QFASL >" "FS")))
 
 (DEFCONST SITE-FILE-ALIST
 	  '(("SYS: SITE; SITE QFASL >" "SI")))

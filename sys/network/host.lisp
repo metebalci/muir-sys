@@ -232,6 +232,10 @@ Each element is a HOST-ALIST-ELEM structure, and looks like
        (FS:SITE-PATHNAME-INITIALIZE))
   (AND (FBOUNDP 'FS:LM-HOST-INITIALIZE)
        (FS:LM-HOST-INITIALIZE))			;For local file, if loaded
+  ;; quux: site-pathname-initialize dropped HOST with every file host; put
+  ;; the same instance back (io/file/hostfs.lisp).
+  (and (fboundp 'fs:file-device-host-initialize)
+       (fs:file-device-host-initialize))
   (AND (FBOUNDP 'FS:DEFINE-SYS-LOGICAL-DEVICE)
        (FS:DEFINE-SYS-LOGICAL-DEVICE)))
 
