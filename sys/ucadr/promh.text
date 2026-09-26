@@ -400,11 +400,19 @@ CLEAR-D-MEMORY
 ;;; before the label is read (mit's fudge-initial-disk-parameters is gone).
 
 ;;; Generate RESET on the I/O busses
-	((INTERRUPT-CONTROL) DPB M-ONES		;RESET THE BUS INTERFACE AND I/O DEVS
-		(BYTE-FIELD 1 28.) A-ZERO)
-	((M-A) A-400)				;RESET FOR ABOUT 80 MICROSECONDS
-RST	(JUMP-NOT-EQUAL-XCT-NEXT M-A A-ZERO RST)
-       ((M-A) SUB M-A A-1)
+;; quux (contract q11, revision 10): quux has no prog.unibus.reset, and from
+;; revision 10 on a rise of interrupt-control <28> resets no device, so the
+;; pulse and its 80-microsecond wait are gone; the devices are reset through
+;; the register page's word 104, reset devices, once the map reaches the page
+;; (below).  on revision 9, where word 104 is reserved, this prom therefore
+;; resets no device: a file device left enabled runs on through the prom
+;; until the microcode's own reset-machine pulses <28>, before any band is
+;; loaded.
+;	((INTERRUPT-CONTROL) DPB M-ONES		;RESET THE BUS INTERFACE AND I/O DEVS
+;		(BYTE-FIELD 1 28.) A-ZERO)
+;	((M-A) A-400)				;RESET FOR ABOUT 80 MICROSECONDS
+;RST	(JUMP-NOT-EQUAL-XCT-NEXT M-A A-ZERO RST)
+;       ((M-A) SUB M-A A-1)
 	((INTERRUPT-CONTROL) DPB M-ONES		;CLEAR RESET, SET HALFWORD-MODE,
 		(BYTE-FIELD 1 27.) A-ZERO)	;AND ENABLE INTERRUPTS
 
@@ -464,6 +472,32 @@ SET-UP-FOUR-PAGES
 	((M-TEMP-1) DPB M-ONES (BYTE-FIELD 1 6) A-2)		;102
 	((VMA-START-WRITE) DPB M-ONES (BYTE-FIELD 1 9) A-TEMP-1)	;1102
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
+
+;;; quux (contract q11, revision 10): reset the devices, then give timer 0
+;;; its period.  a reboot, a jump to 36000 without -reset, would otherwise
+;;; start the microcode with timers 1 and 2 still running, the file device
+;;; still enabled with its queue, and block-disk mid-transfer, since <28> no
+;;; longer resets them; and timer 0 has no reset period, so without the
+;;; period the band's tick, turned on at beg06, would never rise: no mouse
+;;; tracking and no clock sequence break.  both after the map, since the
+;;; page is reached through virtual page 2, and before the first disk
+;;; command, so that block-disk is reset first.  the period is written
+;;; after the reset because register writes are taken in the order
+;;; started, so the reset cannot undo it; timer 0 stays off with its
+;;; interrupt enable 0 until the microcode turns it on.  on revision 9
+;;; words 104 and 111 are reserved and the writes go nowhere.
+	((md) a-1)					;<0>: reset devices
+	((m-temp-1) dpb m-ones (byte-field 1 6) a-4)		;104
+	((vma-start-write) dpb m-ones (byte-field 1 9) a-temp-1)	;1104
+	(jump-if-page-fault error-page-fault)
+	((m-temp-2) dpb m-ones (byte-field 2 0) a-zero)		;3
+	((m-temp-2) dpb m-ones (byte-field 2 3) a-temp-2)	;33
+	((m-temp-2) dpb m-ones (byte-field 1 8.) a-temp-2)	;433
+	((md) dpb m-ones (byte-field 1 14.) a-temp-2)		;40433, 16,667 us: 60 hz
+	((m-temp-1) dpb m-ones (byte-field 1 6) a-10)		;110
+	((m-temp-1) dpb m-ones (byte-field 1 0) a-temp-1)	;111, timer 0's period
+	((vma-start-write) dpb m-ones (byte-field 1 9) a-temp-1)	;1111
+	(jump-if-page-fault error-page-fault)
 
 ;;; Initialize the disk.
 	(CALL DISK-AWAIT-PACK)

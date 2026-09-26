@@ -489,6 +489,26 @@ a comment in that file saying why.
   MINI also read over Chaos in the earlier build match it. ozd saw no MINI
   connection. QLD passed
   with no keys typed, and the band passed the usual checks.
+- **The boot PROM resets the devices and gives timer 0 its period** (muir's
+  contract Q11, QUUX revision 10; in progress: the Q11 microcode comes
+  after M4). On revision 10 a rise of `INTERRUPT-CONTROL<28>` resets no
+  device and timer 0 has no reset period, so with the old PROM a reboot
+  left timers and the file device running into the new microcode, and the
+  band's tick never rose. The PROM no longer pulses `<28>` for 80 us
+  (`ucadr/promh.text:402-415`, commented out); after the map and error stop
+  it writes the register page's word 104 with `<0>` set, reset devices, and
+  then word 111, timer 0's period, with 16,667 us, before its first disk
+  command (`ucadr/promh.text:476-500`). Timer 0 stays off; the band turns it
+  on at `BEG06`. On revision 9 both words are reserved, so this PROM resets
+  no device there: a file device left enabled runs on through the PROM
+  until the microcode's `RESET-MACHINE` pulses `<28>`. `GO` stays at 36043;
+  the code ends at 36646 (was 36636), and the GPT halts move to 36642,
+  36644 and 36646. Tested with dev11's microcode on muir 7a5136c (revision
+  10) and b777f19 (revision 9), micro and rtl, with bands dev11 and M23b:
+  each boots to its listener, and to it again after a `%DISK-RESTORE`, and
+  `INTR-TICK` runs 600 times in 10 s of simulated time after each on both
+  revisions (with the old PROM on revision 10: 0); muir's M9, M10 and M11
+  pass with it, and fail with the old PROM.
 
 ## Time zones
 
