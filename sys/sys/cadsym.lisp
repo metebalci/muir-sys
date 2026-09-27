@@ -451,15 +451,15 @@
 ;; word, in place of the i/o board's unibus clock at 764120 and 764122.
 ;; muir's docs/quux.md holds the contract.
 ;; revision 10 (contract q11) moves the tick to the register page: it is
-;; timer 0 there, one of three interval timers (words 110-115), and q1's
-;; interval timer is gone, so destination 4 writes only m and source 17
-;; reads all ones, as on the cadr.  interval-period and tick-status, which
+;; timer 0 there, one of three interval timers (words 110-115), reached only
+;; from the register page, and q1's tick control and interval timer are
+;; gone, so destinations 3 and 4 write only m and source 17 reads all ones,
+;; as on the cadr.  tick-control, interval-period and tick-status, which
 ;; named them, are commented out so that nothing assembles against codes the
-;; machine no longer has.  destination 3 stays, as the destination 3 alias
-;; of timer 0's control, for microcode older than revision 10's until a later
-;; revision retires it; this system's microcode no longer writes it.
-(defprop tick-control (or (source-p (error))
-			  (field function-destination 3)) cons-lap-sym)
+;; machine no longer has.  the cadr's microcode needs none of them: they
+;; came with quux's tick, and mit's microcode never named these codes.
+;(defprop tick-control (or (source-p (error))
+;			  (field function-destination 3)) cons-lap-sym)
 ;(defprop interval-period (or (source-p (error))
 ;			     (field function-destination 4)) cons-lap-sym)
 ;(defprop tick-status (or (source-p (field function-source 17))

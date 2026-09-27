@@ -888,8 +888,8 @@ BEG06	(CALL-NOT-EQUAL MICRO-STACK-PNTR-AND-DATA 	;CLEAR THE MICRO STACK PNTR (TO
 	;; page, which has no reset period: reset-machine wrote its 16,667
 	;; microseconds to word 111 after reset devices.  word 110 gets 401: on,
 	;; periodic (<2> clear, taken at the turn-on), and its interrupt enable
-	;; <8>.  destination 3, which q1's tick control was, is only an alias of
-	;; timer 0 at revision 10, for older microcode, and is no longer written.
+	;; <8>.  destination 3, which q1's tick control was, writes only m at
+	;; revision 10 and drives no timer, so it is no longer written.
 ;	((tick-control) (a-constant 1))
 	((md) (a-constant 401))
 	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))

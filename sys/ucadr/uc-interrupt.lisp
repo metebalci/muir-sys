@@ -369,7 +369,8 @@ intr-tick
 ;	((tick-control) (a-constant 3))		;quux: keep the tick on, clear its flag
 	;; quux revision 10 (contract q11): the tick is timer 0, word 110 of the
 	;; register page; 403 keeps it on with its interrupt enable <8> and clears
-	;; its flag (<1>), in place of the destination 3 alias.  md held word 100,
+	;; its flag (<1>), in place of destination 3, which writes only m at
+	;; revision 10 and drives no timer.  md held word 100,
 	;; which nothing below reads; intr restores vma and md at its end.
 	((md) (a-constant 403))
 	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))

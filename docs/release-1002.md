@@ -546,26 +546,30 @@ a comment in that file saying why.
   would reset nothing and never start the tick. `INITIAL-MAP-A`'s own check
   stays at 6 (:85-91). In place of the 10-microsecond pulse of
   `INTERRUPT-CONTROL<28>` (commented out, :25-29), which drives nothing on
-  revision 10, `RESET-MACHINE` writes word 104 with `<0>` set, reset
-  devices (:30-32), so that a `%DISK-RESTORE`, which does not pass through
-  the PROM, still leaves no file device enabled to complete queued commands
-  into the new band's memory, and resets block-disk and the network as the
-  pulse did; it then reads word 161 until the file device is quiet (`<1>`),
-  for at most 2 seconds, the driver's own bound until muir-fpga measures the
+  revision 10, `RESET-MACHINE` writes word 104 with `RESET-DEVICES` (`<0>`)
+  set (:30-32), so that a `%DISK-RESTORE`, which does not pass through the
+  PROM, still leaves no file device enabled to complete queued commands into
+  the new band's memory, and resets block-disk and the network as the pulse
+  did; it then reads word 161 until the file device is quiet (`<1>`), for at
+  most 2 seconds, the driver's own bound until muir-fpga measures the
   boards', and halts at `FILE-DEVICE-NOT-QUIET` past it (:33-47, the halt at
   :172-177); then it writes timer 0's period, 16,667 us, to word 111, since
   reset devices zeroes it (:51-55). `BEG06` turns the tick on by a write of
   401 to word 110 (on, periodic, its interrupt enable) through the map, and
-  `INTR-TICK` clears it with 403, in place of their destination 3 writes,
-  which revision 10 keeps only as an alias for older microcode
-  (`ucadr/uc-cold-disk.lisp:884-896`, `ucadr/uc-interrupt.lisp:368-377`).
+  `INTR-TICK` clears it with 403, in place of their destination 3 writes
+  (`ucadr/uc-cold-disk.lisp:884-896`, `ucadr/uc-interrupt.lisp:368-378`).
+  Revision 10 keeps no alias of timer 0 there: destination 3 writes only M,
+  as destination 4 does (Q11 as amended on 27 Sep; muir 1a89ed0), so a band
+  on the previous microcode 1000 has no tick on revision 10, and this
+  system's bands move to this microcode.
   `INTR` turns timer 1 or 2 off when word 100 `<1>` or `<7>` interrupts,
   since nothing uses them and a level nothing clears would interrupt for
   ever (`ucadr/uc-interrupt.lisp:75-82`, `INTR-TIMER-1-STRAY` and
   `INTR-TIMER-2-STRAY` at :350-361). The register page's new words are
   named in `ucadr/uc-cadr.lisp:65-82`. The assembler no longer names
-  `INTERVAL-PERIOD` and `TICK-STATUS`, codes revision 10 does not have;
-  `TICK-CONTROL` stays for the alias (`sys/cadsym.lisp:453-466`).
+  `TICK-CONTROL`, `INTERVAL-PERIOD` and `TICK-STATUS`, codes revision 10
+  does not have; they came with QUUX's tick, and the CADR's microcode never
+  named them (`sys/cadsym.lisp:453-466`, commented out).
   `SI:PRINT-FEATURE-PAGE` names words 15 and 16, the RTC and file device and
   the number of interval timers, and word 14 the microsecond clock alone
   (`sys/genric.lisp:1839-1853`). Named A, M and D memory is where it was, so
