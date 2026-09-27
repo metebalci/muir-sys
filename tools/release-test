@@ -105,9 +105,14 @@ def tree_tarball(dst, edit=None, owner=None, owners=None):
     (uid, gid, uname, gname) of that one member."""
     names = subprocess.run(['git', '-C', TREE, 'ls-files', '-z', '-co', '--exclude-standard'],
                            capture_output=True, check=True).stdout.split(b'\0')
+    names = sorted(x.decode() for x in names if x)
+    # A fault planted into a file the tree does not have would leave the
+    # tarball clean and the case failing for the wrong reason; refuse it.
+    missing = [n for n in list(edit or ()) + list(owners or ()) if n not in names]
+    assert not missing, 'release-test: not in the tree: %s' % ', '.join(missing)
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode='w', format=tarfile.PAX_FORMAT) as t:
-        for n in sorted(x.decode() for x in names if x):
+        for n in names:
             p = os.path.join(TREE, n)
             if not os.path.isfile(p) or os.path.islink(p):
                 continue
@@ -198,7 +203,10 @@ def main():
     tree_tarball(W('src.tar.gz'))
     case('sources', [SCAN, W('src.tar.gz')], 0,
          passes=[('pass (2)', 'sys/man/bug-mail.txt')])
-    lisp = 'sys/io/file/hostfs.lisp'
+    # A Lisp file both lines have: main's case planted into
+    # sys/io/file/hostfs.lisp, QUUX's file device, which the CADR's line does
+    # not have, so the plant went nowhere and the case wrongly saw no FAIL.
+    lisp = 'sys/io/file/open.lisp'
     tree_tarball(W('a.tar.gz'), {lisp: lambda d: d + b'\n;; ' + HOME + b'\n'})
     case('(a) a home directory in a Lisp file', [SCAN, W('a.tar.gz')], 1,
          fails=[(lisp, 'a home directory', FOUND)])
