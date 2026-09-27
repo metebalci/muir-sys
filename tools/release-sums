@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""release-sums: write and check a release's SHA256SUMS.
+
+Usage:
+  tools/release-sums DIR                 write DIR/SHA256SUMS
+  tools/release-sums --check DIR [--api FILE [--api-prefix PREFIX]]
+                                         check DIR against DIR/SHA256SUMS
+
+DIR holds a release's assets exactly as they are uploaded, and nothing else
+(Q12 contract, sections 1.3 and 1.6): the disk or pack (release-1NNN-pack.img.gz,
+release-2NNN-disk.vhd.gz, dev-system-for-quux-disk.vhd.gz), the sources, QUUX's
+PROM, the rolling release's README.
+
+Writing: one line for every file in DIR but SHA256SUMS itself, the README
+included, plus one line for the disk or pack uncompressed, under its name
+without .gz (release-2000-disk.vhd), which is no asset: the fetch scripts
+check the disk as they decompress it.  GNU format ("DIGEST  NAME", as
+sha256sum prints it), in byte order of the names (LC_ALL=C).  A directory with
+a subdirectory, a name sha256sum would escape, or not exactly one disk or pack
+is refused.
+
+Checking: every line's file is read and its digest compared, the
+uncompressed disk or pack's by decompressing its .gz; a named file that is
+missing fails, and so does a file in DIR that no line names, a malformed or
+repeated line, and a disk or pack with no uncompressed line.  (This is what
+sha256sum -c does not do with --ignore-missing, which passes a missing file;
+never check a release that way.)  With --api FILE, also the digests GitHub
+computed for the uploaded assets: FILE is the JSON of
+  gh release view TAG -R metebalci/muir-sys --json assets
+(an object whose "assets" hold "name" and "digest", "sha256:..."), and its
+assets must be exactly DIR's files, SHA256SUMS included, each with the
+digest of the file here.  With --api-prefix next-, the rolling release's
+replacement: only the release's assets named next-<name> are compared, each
+with DIR's <name> (the files downloaded back and renamed without next-), and
+its other assets, the ones being replaced, are left out.
+
+Exit status: 0 if all holds, 1 if anything fails, 2 on bad arguments or an
+unreadable file.
+"""
+
+import argparse, gzip, hashlib, json, os, re, sys
+
+SUMS = 'SHA256SUMS'
+DISK = re.compile(r'^(?:release-1\d{3}-pack\.img|release-2\d{3}-disk\.vhd'
+                  r'|dev-system-for-quux-disk\.vhd)\.gz$')
+LINE = re.compile(r'^([0-9a-f]{64})  ([^/\\\n]+)$')
+
+
+def die(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
+def sha256_file(path, gunzip=False):
+    h = hashlib.sha256()
+    with (gzip.open(path, 'rb') if gunzip else open(path, 'rb')) as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def assets(d):
+    names = sorted(os.listdir(d), key=lambda n: n.encode())
+    for n in names:
+        if not os.path.isfile(os.path.join(d, n)) or os.path.islink(os.path.join(d, n)):
+            die('release-sums: %s is not a plain file; DIR holds the assets alone'
+                             % n)
+        if not LINE.match('0' * 64 + '  ' + n):
+            die('release-sums: %r is not a name to publish' % n)
+    return [n for n in names if n != SUMS]
+
+
+def write(d):
+    files = assets(d)
+    disks = [n for n in files if DISK.match(n)]
+    if len(disks) != 1:
+        die('release-sums: %d disks or packs in %s (%s); a release has one'
+                         % (len(disks), d, ', '.join(disks) or 'none'))
+    lines = {n: sha256_file(os.path.join(d, n)) for n in files}
+    lines[disks[0][:-3]] = sha256_file(os.path.join(d, disks[0]), gunzip=True)
+    out = ''.join('%s  %s\n' % (lines[n], n) for n in sorted(lines, key=lambda n: n.encode()))
+    with open(os.path.join(d, SUMS), 'w', encoding='ascii') as o:
+        o.write(out)
+    sys.stdout.write(out)
+    return 0
+
+
+def check(d, api, prefix=''):
+    fails = []
+
+    def ok(msg):
+        print('OK    ' + msg)
+
+    def fail(msg):
+        fails.append(msg)
+        print('FAIL  ' + msg)
+
+    files = assets(d)
+    if not os.path.isfile(os.path.join(d, SUMS)):
+        print('FAIL  no %s in %s' % (SUMS, d))
+        return 1
+    named = {}
+    for n, line in enumerate(open(os.path.join(d, SUMS), encoding='ascii',
+                                  errors='replace').read().split('\n')[:-1], 1):
+        m = LINE.match(line)
+        if not m:
+            fail('%s:%d: not a line of SHA256SUMS: %r' % (SUMS, n, line))
+            continue
+        if m.group(2) in named:
+            fail('%s:%d: %s named twice' % (SUMS, n, m.group(2)))
+            continue
+        named[m.group(2)] = m.group(1)
+    for name, want in named.items():
+        path = os.path.join(d, name)
+        if os.path.isfile(path):
+            got = sha256_file(path)
+        elif DISK.match(name + '.gz') and os.path.isfile(path + '.gz'):
+            got = sha256_file(path + '.gz', gunzip=True)
+            name += ' (from %s.gz, decompressed)' % name
+        else:
+            fail('%s is named in %s and missing' % (name, SUMS))
+            continue
+        (ok if got == want else fail)('%s %s' % (name, 'matches' if got == want
+                                                 else 'is %s, not %s' % (got, want)))
+    for n in files:
+        if n not in named:
+            fail('%s is in %s and not in %s' % (n, d, SUMS))
+        if DISK.match(n) and n[:-3] not in named:
+            fail('%s has no line for its uncompressed %s' % (n, n[:-3]))
+    if api:
+        try:
+            doc = json.load(open(api, encoding='utf-8'))
+        except (OSError, ValueError) as e:
+            die('release-sums: %s: %s' % (api, e))
+        got = doc.get('assets') if isinstance(doc, dict) else doc
+        if not isinstance(got, list):
+            die('release-sums: %s holds no list of assets' % api)
+        remote = {}
+        for a in got:
+            n = a.get('name') or ''
+            if n.startswith(prefix):
+                remote[n[len(prefix):]] = a.get('digest')
+        local = set(files) | {SUMS}
+        for n in sorted(local - set(remote)):
+            fail('%s is here and not among the release\'s assets' % n)
+        for n in sorted(set(remote) - local):
+            fail('the release has %s, which is not here' % n)
+        for n in sorted(local & set(remote)):
+            want = 'sha256:' + sha256_file(os.path.join(d, n))
+            if remote[n] is None:
+                fail('the API gives no digest for %s' % n)
+            elif remote[n] != want:
+                fail('the API\'s digest of %s is %s, the file here %s' % (n, remote[n], want))
+            else:
+                ok('the API\'s digest of %s matches' % n)
+    print('release-sums: %d lines, %d files, %s' % (len(named), len(files) + 1,
+                                                    'FAIL' if fails else 'all match'))
+    return 1 if fails else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('dir', metavar='DIR')
+    ap.add_argument('--check', action='store_true')
+    ap.add_argument('--api', metavar='FILE')
+    ap.add_argument('--api-prefix', metavar='PREFIX', default='')
+    a = ap.parse_args()
+    if not os.path.isdir(a.dir):
+        ap.error('%s is not a directory' % a.dir)
+    if a.api and not a.check:
+        ap.error('--api goes with --check')
+    try:
+        return check(a.dir, a.api, a.api_prefix) if a.check else write(a.dir)
+    except OSError as e:
+        print('release-sums: %s' % e, file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,56 @@
+# The baseline of tools/release-scan (Q12 contract, section 1.5), written by
+# tools/release-scan --make-baseline from the scan of these files:
+#   507d1fe89e8a8890a42c4a8630ef5eddb058fbebebc4c66df7e33ea708a42269  release-1001-sys.tar.gz
+#   7ddf071b28a6e8b14fe0501683458ee8ae640291751e2c306e35316ee15ba713  release-1001-pack.img.gz
+# 44 findings in all, 25 distinct: rule (1).  A finding of this machine's or
+# user's name is never written here (22 left out).  "seen PATTERN DIGEST": the
+# matched text's SHA-256; "mit-address FILE DIGEST": one of MIT's addresses in
+# that file, rule (2); 23 of them.  The scan prints each finding's text.
+seen email 014f4f4047864fbac9be63e1d3439755efdc238b4c799e00d354decb6a4436f8  # 1
+seen email 0a29edad08f168a74e863c0172b866e8f078e7ec17eff1a76518a382a059bbac  # 3
+seen email 0a9f3bdbbbc0d8872771088d59d1bcfbe0dc0b76a850de43edbccd0c8ec5af93  # 4
+seen email 0f62d4b6ef779805be0179b3ddfcd5f0488a2e8179f64e12298a5f729744f6af  # 1
+seen email 100d059b4165d695da851a87c25974487d962042acdb4690e67f62f6cfd93b30  # 3
+seen email 1b66511d5fec3e5e4d22464a88ddf39ac32a1fa7a7f967fec18cc67fe4dc8d56  # 1
+seen email 3084f0a435baacee51d18f3ee19fedf236af329ab14295d6aee76a56c0806bad  # 1
+seen email 3b98b2a8cafc874eaf6409e68c7fcbabe8bc71ebbd9f07f057c55f12054ea42d  # 1
+seen email 3f7ff78af5067639ece0290c63b38b360b616313e4be627df46a8470df23f6ae  # 1
+seen email 4675a451a09839eb95c4d1d3788f3ded67ce3aab9600e21c5a56121f2651f8ff  # 1
+seen email 5238bc318d1d50430d38a880ca66bb267773e5e7152715402d9e3c66a1ca80ec  # 2
+seen email 77735bb12de8f492dd74904f21fa25b6561ca11b08c088bbcf1158da8b5b82e6  # 1
+seen email 79f75ddd5535503e355c5c6473e3d4504e2c26f05f2ac9079339f79489328f12  # 5
+seen email 8725fbdee8e307f75a916e8cc9f1ddbbe8a672635761d7683447e56d10bb1ac1  # 1
+seen email 8a39ca9f6fca2ca2aa66125cf024e314487ff7c44e51eaea5a01581a5370ec64  # 1
+seen email 8c0375d6a75c703d9ee5c5ea06f67de8ba3e695f366a4f1754b930bfdf3e70bc  # 1
+seen email 95a71a5ed03be55440bb2a2b3d642eb7b2bc019cefd7bd5b9df1950e5c07766b  # 1
+seen email a2d48cd85ad591def436fdba3804ce08c0d0643e5df08de7a99cf6a12afc349b  # 1
+seen email acbf259b0c1d3e0de88883316e49b7a99d18437435cf5c2fd1c47ba99b193beb  # 1
+seen email d1086d8f432f3ccb309e0b9f0e5c9c633dbc528f565d9bf2ee4dd9ae9d7c5dd5  # 1
+seen email d50ea9b60fef9694e7287253a9ff38f837f2d7ca93ea6c8a7028d7079f056cd9  # 1
+seen email da869a95fad8c3187ce8c79615f37f30d578161f37813f959c11119d9851e5d6  # 4
+seen email db374c44caae33069291c86b32188618caecb0716d5e11e0bd2a07c56eac62c2  # 2
+seen email e10f43b28cddab53ad4e7bac7fd38b23a29d29e55e70ec00392b1175b04e9fce  # 2
+seen email f14edee15fd2c7e2a7c0e3adc600647318c97b0ed51a62a3732174899011eefb  # 3
+mit-address sys/man/bug-mail.txt 014f4f4047864fbac9be63e1d3439755efdc238b4c799e00d354decb6a4436f8
+mit-address sys/man/bug-mail.txt 0a29edad08f168a74e863c0172b866e8f078e7ec17eff1a76518a382a059bbac
+mit-address sys/man/bug-mail.txt 0a9f3bdbbbc0d8872771088d59d1bcfbe0dc0b76a850de43edbccd0c8ec5af93
+mit-address sys/man/bug-mail.txt 0f62d4b6ef779805be0179b3ddfcd5f0488a2e8179f64e12298a5f729744f6af
+mit-address sys/man/bug-mail.txt 100d059b4165d695da851a87c25974487d962042acdb4690e67f62f6cfd93b30
+mit-address sys/man/bug-mail.txt 1b66511d5fec3e5e4d22464a88ddf39ac32a1fa7a7f967fec18cc67fe4dc8d56
+mit-address sys/man/bug-mail.txt 3084f0a435baacee51d18f3ee19fedf236af329ab14295d6aee76a56c0806bad
+mit-address sys/man/bug-mail.txt 3b98b2a8cafc874eaf6409e68c7fcbabe8bc71ebbd9f07f057c55f12054ea42d
+mit-address sys/man/bug-mail.txt 3f7ff78af5067639ece0290c63b38b360b616313e4be627df46a8470df23f6ae
+mit-address sys/man/bug-mail.txt 4675a451a09839eb95c4d1d3788f3ded67ce3aab9600e21c5a56121f2651f8ff
+mit-address sys/man/bug-mail.txt 77735bb12de8f492dd74904f21fa25b6561ca11b08c088bbcf1158da8b5b82e6
+mit-address sys/man/bug-mail.txt 79f75ddd5535503e355c5c6473e3d4504e2c26f05f2ac9079339f79489328f12
+mit-address sys/man/bug-mail.txt 8a39ca9f6fca2ca2aa66125cf024e314487ff7c44e51eaea5a01581a5370ec64
+mit-address sys/man/bug-mail.txt 8c0375d6a75c703d9ee5c5ea06f67de8ba3e695f366a4f1754b930bfdf3e70bc
+mit-address sys/man/bug-mail.txt 95a71a5ed03be55440bb2a2b3d642eb7b2bc019cefd7bd5b9df1950e5c07766b
+mit-address sys/man/bug-mail.txt a2d48cd85ad591def436fdba3804ce08c0d0643e5df08de7a99cf6a12afc349b
+mit-address sys/man/bug-mail.txt acbf259b0c1d3e0de88883316e49b7a99d18437435cf5c2fd1c47ba99b193beb
+mit-address sys/man/bug-mail.txt d1086d8f432f3ccb309e0b9f0e5c9c633dbc528f565d9bf2ee4dd9ae9d7c5dd5
+mit-address sys/man/bug-mail.txt d50ea9b60fef9694e7287253a9ff38f837f2d7ca93ea6c8a7028d7079f056cd9
+mit-address sys/man/bug-mail.txt da869a95fad8c3187ce8c79615f37f30d578161f37813f959c11119d9851e5d6
+mit-address sys/man/bug-mail.txt db374c44caae33069291c86b32188618caecb0716d5e11e0bd2a07c56eac62c2
+mit-address sys/man/bug-mail.txt e10f43b28cddab53ad4e7bac7fd38b23a29d29e55e70ec00392b1175b04e9fce
+mit-address sys/man/bug-mail.txt f14edee15fd2c7e2a7c0e3adc600647318c97b0ed51a62a3732174899011eefb

@@ -629,3 +629,169 @@ This needed a fault fixed in `sys/cdmp.lisp` first.
 **MCR1.** `diskpack <pack> load MCR1 sys/ubin/ucadr.mcr`, then
 `modify MCR1 keep UCADR 323`. The partition it writes is block for block the
 one LM-3's System 100 pack has.
+
+## Publishing a release
+
+A release is built and checked by the SHA of one commit, never by a branch
+or a working tree, and published in the order below: the checks come before
+anything is public, and a draft is downloaded back and checked before it is
+published. The CADR's releases (`release-1NNN`) come from `cadr`, QUUX's
+(`release-2NNN`) and the rolling release `dev-system-for-quux` from `main`.
+The commands say `release-2000` and `main`; for a CADR release put its tag,
+`cadr` for `main` and `main` for `cadr`. They are run from a checkout of the
+line; `<sha>`, `<dir>`, `<dl>`, `<body>` and `<msg>` are placeholders, and
+`<remote>` is the repository's SSH URL (user `git`, host `github.com`, path
+`metebalci/muir-sys.git`; written out, it has the shape of an e-mail
+address, which the scan refuses in the sources).
+
+**The assets.** `<dir>` holds exactly what is uploaded, and nothing is
+written into it after the checks:
+
+| | the CADR's `release-1NNN` | QUUX's `release-2NNN` | `dev-system-for-quux` |
+|---|---|---|---|
+| Disk or pack | `release-1NNN-pack.img.gz` | `release-2NNN-disk.vhd.gz` | `dev-system-for-quux-disk.vhd.gz` |
+| Sources | `release-1NNN-sys.tar.gz` | `release-2NNN-sys.tar.gz` | `dev-system-for-quux-sys.tar.gz` |
+| PROM | none | `release-2NNN-promh.mcr` | `dev-system-for-quux-promh.mcr` |
+| README | none | none | `README` |
+| Sums | `SHA256SUMS` | `SHA256SUMS` | `SHA256SUMS` |
+
+The sources are `git archive --prefix=<tag>/ <sha>` plus `sys/ubin/`
+assembled from that commit's `sys/ucadr/`, with no COLDRUN, gzipped with no
+name and no date (`gzip -9 -n`); the disk or pack is gzipped the same way.
+Every member of the tarball is owned by root, as `git archive` writes them:
+a member added from the build tree carries its owner's user name in its tar
+header, as `release-1001-sys.tar.gz`'s eleven `sys/ubin/` members do, and
+the scan refuses it. The PROM is QUUX's alone; the CADR's is MIT's and its
+files stay in `sys/ubin/`.
+
+**1. Build and check by SHA**, then write and check the sums and scan
+everything that will be public:
+
+```
+tools/release-sums <dir>                       # writes <dir>/SHA256SUMS
+tools/release-sums --check <dir>
+tools/release-scan <dir> <body> <msg>
+```
+
+`tools/release-sums` writes one line per asset in byte order of the names,
+the README included, plus one for the disk or pack uncompressed under its
+name without `.gz`, which is no asset (the fetch scripts check the disk as
+they decompress it). `--check` fails on a missing file, where `sha256sum -c
+--ignore-missing` would pass it, and on a file that no line names.
+`<body>` is the release body, written from the line's
+`docs/release-<N>.md`; `<msg>` a file holding the tag message of step 3.
+`tools/release-scan` reads every byte: each file in the sources tarball and
+its tar headers, the disk as the machine reads it and the VHD's own
+structures, the pack, the PROM, the README. It passes only what its four
+rules allow (MIT's addresses in `sys/man/bug-mail.txt`, what
+`release-1001`'s assets already hold, the system's own `/home/lispm`, and
+the cache default of `tools/lispm-check`); anything else fails the release.
+Its baseline, `tools/release-scan.baseline`, is written from
+`release-1001`'s two assets, checked against their published digests
+first: `tools/release-scan --make-baseline tools/release-scan.baseline
+release-1001-sys.tar.gz release-1001-pack.img.gz`. The self-test of both
+tools is `tools/release-test --pack <a CADR pack> --disk <a QUUX disk>`.
+
+**2. The SHA is on its own line and not the other's.** This clone has no
+remote, so both tips are fetched by `<remote>`:
+
+```
+git fetch <remote> \
+    +refs/heads/main:refs/remotes/origin/main \
+    +refs/heads/cadr:refs/remotes/origin/cadr
+git merge-base --is-ancestor <sha> origin/main &&
+    ! git merge-base --is-ancestor <sha> origin/cadr && echo on main alone
+```
+
+For a CADR release the two are the other way round. `release-1001`
+(`d0d68de`) and older are on both lines.
+
+**3. An annotated tag at the SHA**, like `release-1000`'s and
+`release-1001`'s, with Mete's identity as the tagger, unsigned:
+
+```
+git tag -a release-2000 -F <msg> <sha>        # <msg>: "Release 2000: <one line>"
+tools/release-scan --tag release-2000
+git push <remote> refs/tags/release-2000
+git ls-remote <remote> 'refs/tags/release-2000^{}'
+```
+
+The last prints `<sha>`. From here the tag is public and never moves;
+everything before this step can still be done again.
+
+**4. A draft:**
+
+```
+gh release create release-2000 -R metebalci/muir-sys --draft --verify-tag \
+    --target <sha> --title "System 2000" --notes-file <body> <dir>/*
+```
+
+`--verify-tag` refuses a tag that is not on GitHub. The title is "System N";
+the rolling release's is "QUUX's system in development", with `--prerelease`
+added.
+
+**5. Downloaded back and checked**, into an empty directory `<dl>`, with the
+API's JSON kept outside it:
+
+```
+gh release download release-2000 -R metebalci/muir-sys -D <dl>
+gh release view release-2000 -R metebalci/muir-sys --json assets > <api.json>
+tools/release-sums --check <dl> --api <api.json>
+tools/release-scan <dl>
+tar -tzf <dl>/release-2000-sys.tar.gz | cut -d/ -f1 | sort -u
+gzip -dc <dl>/release-2000-disk.vhd.gz | tail -c 512 | head -c 8; echo
+```
+
+`--api` compares the digests GitHub computed for the uploaded assets with
+the files: the release's assets must be exactly the directory's, each with
+its file's SHA-256 (it fails, saying so, if the JSON gives no digest). The
+`tar` line prints the tag alone (`release-1NNN` for the CADR's,
+`dev-system-for-quux` for the rolling release), and the last line
+`conectix`, a VHD; the disk converted to raw with `qemu-img convert -O raw`
+has `EFI PART` at byte 512. A CADR pack begins with `LABL` instead: `gzip
+-dc <dl>/release-1002-pack.img.gz | head -c 4`. While it is a draft an
+asset's URL is not public, so `curl -fsI` of it fails. Whether `gh release
+download` reads a draft's assets is measured on the first draft; if it does
+not, the API's digests of the uploaded bytes and the scan of `<dir>` stand
+in. A failure is mended in the draft (`gh release delete-asset`, `gh release
+upload`, and step 5 again); the tag stays.
+
+**6. Published with Latest explicit:**
+
+```
+gh release edit release-2000 -R metebalci/muir-sys --draft=false --latest
+gh api repos/metebalci/muir-sys/releases/latest --jq .tag_name
+```
+
+The newest QUUX release is Latest once one exists; a CADR release after it
+is published with `--latest=false`, and before it with `--latest`. GitHub
+orders releases by their tag's date, so Latest is always set and read back.
+The rolling release is a prerelease and never Latest (`--latest=false`).
+Last, a fresh download without credentials, by the path the fetch scripts
+use (`https://github.com/metebalci/muir-sys/releases/download/release-2000/<asset>`,
+each asset and `SHA256SUMS`, with `curl -fsSLO`), passes `tools/release-sums
+--check`.
+
+**The rolling release.** Its tag `dev-system-for-quux` is made once on
+`main` and never moves; its first publish is steps 1 to 6 with
+`--prerelease` and `--latest=false`, and only from a clean, pushed commit of
+`main` whose band was built from that same commit. Each later build replaces
+its assets: `SHA256SUMS` is written in `<dir>` under the real names, and
+every asset, `SHA256SUMS` included, is copied to `next-<name>` in a
+directory of its own and uploaded from there with `gh release upload
+dev-system-for-quux -R metebalci/muir-sys`. They are downloaded back into
+`<dl>`, renamed there without `next-`, and checked as in step 5, with
+`--api-prefix next-` added to `tools/release-sums`, which then compares the
+`next-` assets alone. Only then
+are they swapped, each old asset deleted and its `next-` asset renamed
+through the API, `SHA256SUMS` next to last and the README last:
+
+```
+gh api repos/metebalci/muir-sys/releases/assets/<old id> -X DELETE
+gh api repos/metebalci/muir-sys/releases/assets/<next id> -X PATCH -f name=<name>
+```
+
+The asset ids are in `gh api repos/metebalci/muir-sys/releases/tags/dev-system-for-quux
+--jq '.assets[] | [.id, .name] | @tsv'`. A fetch in the middle of a swap
+fails its sums and tries again. muir-sys must not turn on GitHub's immutable
+releases, or the rolling release could not roll.

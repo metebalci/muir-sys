@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""release-test: the self-test of tools/release-scan and tools/release-sums.
+
+Usage:
+  tools/release-test --pack PACK --disk DISK [--qemu-img PATH] [--keep]
+
+PACK is a CADR pack as published (release-1001-pack.img.gz, or a raw pack),
+DISK a QUUX disk (a VHD, dynamic or fixed, or raw) with a GPT whose band
+partition has bit 48 set.  qemu-img is --qemu-img, else $QEMU_IMG, else the
+one on the path.  The work is done in muir-sys-release-test under
+$XDG_CACHE_HOME (by default the home directory's .cache), and removed at the
+end unless --keep.
+
+Each case builds a release-shaped file, runs the tool on it, and checks the
+exit status and the lines it prints; a planted fault must fail with exactly
+the one FAIL line it planted, so the case shows the fault reaching the check
+while everything else in the same file passes.  The cases (Q12 contract,
+section 1.5, planted faults (a)-(d), and section 1.3):
+  sources      the tree as it would be committed (tracked files and the
+               untracked ones not ignored), as release-test/..., tar.gz with
+               owner root: passes
+  (a)          the same with a home directory planted in a Lisp file: fails
+  (d)          the same with a new address added to sys/man/bug-mail.txt:
+               fails, while MIT's addresses there pass by rule (2)
+  owner        the same with every member owned by this user, as
+               release-1001-sys.tar.gz's sys/ubin/ is: fails
+  pack         PACK decompressed and gzipped again (gzip -9 -n): passes
+  (c) band     the home directory written by dd into the band's partition
+               (the current LOD), gzipped: fails
+  (c) zero     the same written into a partition that is all zero: fails
+  disk         DISK as raw, converted to a dynamic VHD as a release disk is
+               (qemu-img convert -O vpc -o subformat=dynamic,force_size=on)
+               and gzipped: passes
+  (b) band     the home directory written into the band's partition (bit
+               48), converted and gzipped: fails
+  (b) zero     the same into a partition that is all zero: fails
+  sums         release-sums writes SHA256SUMS for a release directory of the
+               sources and the disk, and --check passes; sha256sum -c agrees
+  sums faults  --check fails on: an asset changed by one byte; an asset
+               missing; a file no line names; the uncompressed disk's line
+               wrong; a malformed line; and --api fails on a digest that
+               differs, and passes on the right ones; --api-prefix next-
+               passes with the old assets beside the next- ones and fails
+               when a next- asset is missing.
+The planted strings are made at run time, so this file matches no pattern
+itself.  Exit status 0 if every case holds, 1 otherwise.
+"""
+
+import argparse, getpass, gzip, io, os, shutil, struct, subprocess, sys, tarfile, json
+import hashlib
+
+TOOLS = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(TOOLS)
+SCAN = os.path.join(TOOLS, 'release-scan')
+SUMS = os.path.join(TOOLS, 'release-sums')
+
+# The planted texts, put together here so that no line holds one.
+HOME = ('/' + 'home' + '/' + 'ada' + '/x').encode()
+FOUND = HOME.decode().rsplit('/', 1)[0]      # what the pattern matches of it
+ADDRESS = ('nobody' + '@' + 'example' + '.org').encode()
+
+results = []
+
+
+def run(cmd):
+    r = subprocess.run(cmd, capture_output=True)
+    return r.returncode, r.stdout.decode('latin-1') + r.stderr.decode('latin-1')
+
+
+def case(name, cmd, status, fails=(), passes=()):
+    """Run cmd; it must exit with status, print a FAIL line containing each
+    of fails and no other FAIL line, and a line containing each of passes."""
+    code, out = run(cmd)
+    lines = out.splitlines()
+    fail_lines = [l for l in lines if l.startswith('FAIL')]
+    ok = code == status and len(fail_lines) == len(fails)
+    for f in fails:
+        ok = ok and any(all(p in l for p in f) for l in fail_lines)
+    for p in passes:
+        ok = ok and any(all(q in l for q in p) for l in lines)
+    results.append((name, ok))
+    print('%s  %s (exit %d, %d FAIL lines)' % ('PASS' if ok else 'WRONG', name, code,
+                                               len(fail_lines)))
+    for l in fail_lines + [l for l in lines if l.startswith('release-')]:
+        print('      ' + l)
+    if not ok:
+        print('      full output:')
+        for l in lines:
+            print('        ' + l)
+
+
+def gz(src, dst):
+    subprocess.run(['gzip', '-9', '-n', '-c', src], stdout=open(dst, 'wb'), check=True)
+
+
+def tree_tarball(dst, edit=None, owner=None):
+    """The tree as it would be committed, as release-test/..., tar.gz."""
+    names = subprocess.run(['git', '-C', TREE, 'ls-files', '-z', '-co', '--exclude-standard'],
+                           capture_output=True, check=True).stdout.split(b'\0')
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w', format=tarfile.PAX_FORMAT) as t:
+        for n in sorted(x.decode() for x in names if x):
+            p = os.path.join(TREE, n)
+            if not os.path.isfile(p) or os.path.islink(p):
+                continue
+            data = open(p, 'rb').read()
+            if edit and n in edit:
+                data = edit[n](data)
+            ti = tarfile.TarInfo('release-test/' + n)
+            ti.size, ti.mode, ti.mtime = len(data), 0o644, 0
+            ti.uname = ti.gname = owner or 'root'
+            ti.uid = ti.gid = 0 if owner is None else os.getuid()
+            t.addfile(ti, io.BytesIO(data))
+    with gzip.GzipFile(dst, 'wb', mtime=0) as g:
+        g.write(buf.getvalue())
+
+
+def plant(path, offset, text):
+    """Write text into the file at offset, as dd conv=notrunc would."""
+    subprocess.run(['dd', 'of=' + path, 'bs=1', 'seek=%d' % offset, 'conv=notrunc',
+                    'status=none'], input=text, check=True)
+
+
+def pack_partitions(raw):
+    """A CADR pack's partitions from its LABL: {name: (start byte, length)},
+    and the current band's name.  Blocks are 1024 bytes."""
+    with open(raw, 'rb') as f:
+        lab = f.read(1024)
+    assert lab[:4] == b'LABL', 'not a CADR pack'
+    w = struct.unpack('<256I', lab)
+    band = lab[28:32].decode()
+    n, per = w[0o200], w[0o201]
+    parts = {}
+    for i in range(n):
+        e = w[0o202 + i * per:0o202 + (i + 1) * per]
+        parts[struct.pack('<I', e[0]).decode()] = (e[1] * 1024, e[2] * 1024)
+    return parts, band
+
+
+def gpt_partitions(raw):
+    """A QUUX disk's partitions from its GPT: {name: (start, length, bit 48)}."""
+    with open(raw, 'rb') as f:
+        f.seek(512)
+        hdr = f.read(92)
+        assert hdr[:8] == b'EFI PART', 'no GPT'
+        lba, count, size = struct.unpack('<QII', hdr[72:88])
+        f.seek(lba * 512)
+        table = f.read(count * size)
+    parts = {}
+    for i in range(count):
+        e = table[i * size:(i + 1) * size]
+        if e[:16] == bytes(16):
+            continue
+        first, last, attrs = struct.unpack('<QQQ', e[32:56])
+        name = e[56:128].decode('utf-16-le').rstrip('\0')
+        parts[name] = (first * 512, (last - first + 1) * 512, bool(attrs >> 48 & 1))
+    return parts
+
+
+def all_zero(raw, start, length):
+    with open(raw, 'rb') as f:
+        f.seek(start)
+        left = length
+        while left:
+            b = f.read(min(left, 1 << 20))
+            if b.strip(b'\0'):
+                return False
+            left -= len(b)
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--pack', required=True)
+    ap.add_argument('--disk', required=True)
+    ap.add_argument('--qemu-img', default=os.environ.get('QEMU_IMG', 'qemu-img'))
+    ap.add_argument('--keep', action='store_true')
+    a = ap.parse_args()
+    cache = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')
+    work = os.path.join(cache, 'muir-sys-release-test')
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
+    W = lambda n: os.path.join(work, n)
+    print('release-test: working in %s' % work)
+
+    # The sources, and faults (a) and (d).
+    tree_tarball(W('src.tar.gz'))
+    case('sources', [SCAN, W('src.tar.gz')], 0,
+         passes=[('pass (2)', 'sys/man/bug-mail.txt')])
+    lisp = 'sys/io/file/hostfs.lisp'
+    tree_tarball(W('a.tar.gz'), {lisp: lambda d: d + b'\n;; ' + HOME + b'\n'})
+    case('(a) a home directory in a Lisp file', [SCAN, W('a.tar.gz')], 1,
+         fails=[(lisp, 'a home directory', FOUND)])
+    bug = 'sys/man/bug-mail.txt'
+    tree_tarball(W('d.tar.gz'), {bug: lambda d: d + b'\n' + ADDRESS + b'\n'})
+    case('(d) a new address in bug-mail.txt', [SCAN, W('d.tar.gz')], 1,
+         fails=[(bug, 'an e-mail address', ADDRESS.decode())],
+         passes=[('pass (2)', bug)])
+    tree_tarball(W('owner.tar.gz'), owner=getpass.getuser())
+    code, out = run([SCAN, W('owner.tar.gz')])
+    ok = code == 1 and 'this user' in out and '(tar header)' in out
+    results.append(('owner: members owned by this user', ok))
+    print('%s  owner: members owned by this user (exit %d, %d FAIL lines)'
+          % ('PASS' if ok else 'WRONG', code, out.count('\nFAIL') + out.startswith('FAIL')))
+
+    # The CADR pack, fault (c).
+    with open(W('pack.img'), 'wb') as o:
+        src = gzip.open(a.pack) if open(a.pack, 'rb').read(2) == b'\x1f\x8b' else open(a.pack, 'rb')
+        shutil.copyfileobj(src, o)
+    parts, band = pack_partitions(W('pack.img'))
+    zero = next(n for n in sorted(parts) if n.startswith('LOD') and n != band
+                and all_zero(W('pack.img'), *parts[n]))
+    print('      pack: band %s, zero partition %s' % (band, zero))
+    gz(W('pack.img'), W('pack.img.gz'))
+    case('pack', [SCAN, W('pack.img.gz')], 0)
+    for label, pname in (('band', band), ('zero', zero)):
+        shutil.copy(W('pack.img'), W('c.img'))
+        off = parts[pname][0] + (1 << 20) + 123
+        plant(W('c.img'), off, HOME)
+        gz(W('c.img'), W('c-%s.img.gz' % label))
+        os.unlink(W('c.img'))
+        case('(c) %s in %s of the pack' % (label, pname), [SCAN, W('c-%s.img.gz' % label)], 1,
+             fails=[('@%d' % off, 'a home directory', FOUND)])
+
+    # The QUUX disk, fault (b).
+    raw = W('disk.raw')
+    code, out = run([a.qemu_img, 'convert', '-O', 'raw', a.disk, raw])
+    if code:
+        print('release-test: qemu-img: ' + out)
+        return 1
+    ver = run([a.qemu_img, '--version'])[1].splitlines()[0]
+    print('      disk: converted with %s' % ver)
+    gparts = gpt_partitions(raw)
+    band = next(n for n, p in sorted(gparts.items()) if n.startswith('LOD') and p[2])
+    zero = next(n for n, p in sorted(gparts.items()) if n.startswith('LOD') and not p[2]
+                and all_zero(raw, p[0], p[1]))
+    print('      disk: band %r, zero partition %r' % (band, zero))
+
+    def vhd_gz(src, dst):
+        subprocess.run([a.qemu_img, 'convert', '-f', 'raw', '-O', 'vpc', '-o',
+                        'subformat=dynamic,force_size=on', src, dst + '.vhd'], check=True)
+        gz(dst + '.vhd', dst + '.vhd.gz')
+        os.unlink(dst + '.vhd')
+    vhd_gz(raw, W('disk'))
+    case('disk', [SCAN, W('disk.vhd.gz')], 0)
+    for label, pname in (('band', band), ('zero', zero)):
+        shutil.copy(raw, W('b.raw'))
+        off = gparts[pname][0] + (1 << 20) + 321
+        plant(W('b.raw'), off, HOME)
+        vhd_gz(W('b.raw'), W('b-%s' % label))
+        os.unlink(W('b.raw'))
+        case('(b) %s in %s of the disk' % (label, pname), [SCAN, W('b-%s.vhd.gz' % label)], 1,
+             fails=[('(disk) @%d' % off, 'a home directory', FOUND)])
+
+    # SHA256SUMS.
+    rel = W('rel')
+    os.makedirs(rel)
+    shutil.copy(W('src.tar.gz'), os.path.join(rel, 'release-2999-sys.tar.gz'))
+    shutil.copy(W('disk.vhd.gz'), os.path.join(rel, 'release-2999-disk.vhd.gz'))
+    code, out = run([SUMS, rel])
+    lines = out.splitlines()
+    ok = code == 0 and [l.split('  ')[1] for l in lines] == [
+        'release-2999-disk.vhd', 'release-2999-disk.vhd.gz', 'release-2999-sys.tar.gz']
+    results.append(('sums: written', ok))
+    print('%s  sums: written, %d lines' % ('PASS' if ok else 'WRONG', len(lines)))
+    case('sums: --check', [SUMS, '--check', rel], 0)
+    subprocess.run(['gzip', '-dk', os.path.join(rel, 'release-2999-disk.vhd.gz')], check=True)
+    code, out = run(['sh', '-c', 'cd "$1" && sha256sum -c SHA256SUMS', 'sh', rel])
+    os.unlink(os.path.join(rel, 'release-2999-disk.vhd'))
+    results.append(('sums: sha256sum -c agrees', code == 0))
+    print('%s  sums: sha256sum -c agrees (exit %d)' % ('PASS' if code == 0 else 'WRONG', code))
+    good = open(os.path.join(rel, 'SHA256SUMS')).read()
+
+    def fault(name, change, fails, api=None):
+        f = W('relf')
+        shutil.rmtree(f, ignore_errors=True)
+        shutil.copytree(rel, f)
+        change(f)
+        case('sums: ' + name, [SUMS, '--check', f] + (['--api', api] if api else []), 1,
+             fails=fails)
+
+    def flip(f):
+        p = os.path.join(f, 'release-2999-sys.tar.gz')
+        b = bytearray(open(p, 'rb').read())
+        b[len(b) // 2] ^= 1
+        open(p, 'wb').write(b)
+    fault('an asset changed by one byte', flip, [('release-2999-sys.tar.gz', 'is ')])
+    fault('an asset missing', lambda f: os.unlink(os.path.join(f, 'release-2999-sys.tar.gz')),
+          [('release-2999-sys.tar.gz', 'missing')])
+    fault('a file no line names', lambda f: open(os.path.join(f, 'README'), 'w').write('x\n'),
+          [('README', 'not in SHA256SUMS')])
+
+    def edit(old, new):
+        def ch(f):
+            p = os.path.join(f, 'SHA256SUMS')
+            s = open(p).read()
+            assert old(s) != s
+            open(p, 'w').write(old(s))
+        return ch
+    vhd_line = [l for l in good.splitlines() if l.endswith('disk.vhd')][0]
+    fault('the uncompressed disk\'s line wrong',
+          edit(lambda s: s.replace(vhd_line, '0' * 64 + vhd_line[64:]), None),
+          [('release-2999-disk.vhd', 'decompressed', 'is ')])
+    fault('a malformed line', edit(lambda s: s.replace(vhd_line, vhd_line.replace('  ', ' ')),
+                                   None),
+          [('not a line',), ('no line for its uncompressed',)])
+
+    def api_json(bad):
+        assets = []
+        for n in ('SHA256SUMS', 'release-2999-disk.vhd.gz', 'release-2999-sys.tar.gz'):
+            h = hashlib.sha256(open(os.path.join(rel, n), 'rb').read()).hexdigest()
+            if bad and n == 'release-2999-sys.tar.gz':
+                h = '1' + h[1:] if h[0] != '1' else '2' + h[1:]
+            assets.append({'name': n, 'digest': 'sha256:' + h})
+        p = W('api-%s.json' % ('bad' if bad else 'good'))
+        json.dump({'assets': assets}, open(p, 'w'))
+        return p
+    case('sums: --api with the right digests', [SUMS, '--check', rel, '--api', api_json(False)],
+         0)
+    fault('--api with a digest that differs', lambda f: None,
+          [('API', 'release-2999-sys.tar.gz')], api=api_json(True))
+    # The rolling release's replacement: the next- assets beside the old ones.
+    doc = json.load(open(api_json(False)))
+    old = [dict(a, digest='sha256:' + '0' * 64) for a in doc['assets']]
+    nxt = [dict(a, name='next-' + a['name']) for a in doc['assets']]
+    json.dump({'assets': old + nxt}, open(W('api-next.json'), 'w'))
+    case('sums: --api-prefix next- with old assets beside',
+         [SUMS, '--check', rel, '--api', W('api-next.json'), '--api-prefix', 'next-'], 0)
+    json.dump({'assets': old + nxt[1:]}, open(W('api-next-short.json'), 'w'))
+    case('sums: --api-prefix next- with a next- asset missing',
+         [SUMS, '--check', rel, '--api', W('api-next-short.json'), '--api-prefix', 'next-'], 1,
+         fails=[(nxt[0]['name'][5:], 'not among')])
+
+    if not a.keep:
+        shutil.rmtree(work)
+    bad = [n for n, ok in results if not ok]
+    print('release-test: %d cases, %d hold%s' % (len(results), len(results) - len(bad),
+                                                 '' if not bad else '; WRONG: ' + ', '.join(bad)))
+    return 1 if bad else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
