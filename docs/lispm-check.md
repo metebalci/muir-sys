@@ -8,7 +8,8 @@ cases in one listener session, printing one line per case.
 ```
 tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                   [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                  [--file-server auto|device|ozd] [--timeout S] [--keep] CASES
+                  [--file-server auto|device|ozd] [--timeout S] [--keep]
+                  [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 ```
 
 ## What it does
@@ -72,6 +73,27 @@ quux). A quux without a file device (no `--file-root` in its `--help`) means
 lispm-check: files served by device: the band's SYS: is on HOST (auto, from its checkpoint)
 ```
 
+## ozd's dates
+
+`--ozd-file-dates mit|utc` and `--ozd-timezone N` are passed to ozd as its
+`--file-dates` and `--timezone`: how FILE writes and reads a file's date.
+Given neither, ozd takes its own defaults, `utc`: plain UTC, as Systems 1002
+and 2000 read FILE dates. A band of Systems 100 to 1001 reads them at its
+site's zone, with MIT's daylight savings time on top, so it wants
+`--ozd-file-dates mit --ozd-timezone` and that zone: `-1` for System 1001's
+release band, `5` for System 100's site. Without them every file date such a
+band reads is off by the zone's offset: on the 1001 band, a file of 12:00 GMT
+on 15 January read as 3600 s early and one on 15 July as 7200 s early, and
+exact with the two flags. ozd refuses a zone under `utc`, and the tool refuses
+`--ozd-timezone` without `--ozd-file-dates mit` before it starts anything.
+They change only what ozd serves, not the checkpoint, whose setup reads no
+file.
+
+```
+tools/lispm-check --band release-1001-pack.img --file-server ozd \
+                  --ozd-file-dates mit --ozd-timezone -1 ... CASES
+```
+
 ## Cases
 
 One case per form; a form may run over several lines. Blank lines and lines
@@ -130,6 +152,8 @@ Each is overridden by its flag or an environment variable.
 | `--ozd` | `LISPM_CHECK_OZD` | `../ozd/target/release/ozd` beside the tree |
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
 | `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
+| `--ozd-file-dates` | `LISPM_CHECK_OZD_FILE_DATES` | none: ozd's own, `utc` ([ozd's dates](#ozds-dates)) |
+| `--ozd-timezone` | `LISPM_CHECK_OZD_TIMEZONE` | none: ozd's own |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
 
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check

@@ -4,7 +4,8 @@
 Usage:
   tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                     [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                    [--file-server auto|device|ozd] [--timeout S] [--keep] CASES
+                    [--file-server auto|device|ozd] [--timeout S] [--keep]
+                    [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 
 It resumes a checkpoint of the band booted to its TELNET prompt, lays the
 changed files over a private copy of the tree, loads them (or compiles them
@@ -60,6 +61,8 @@ Defaults, each overridden by its flag or an environment variable:
   --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
   --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
+  --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
+  --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
@@ -83,6 +86,16 @@ the copy served both ways, about 15 s, once for each band and quux); a quux
 without a file device means ozd.  Every run says which it chose and why.  A
 setup checks that the band's SYS: is on the chosen server's host.
 Everything that knows how the tree is served is in these classes.
+
+--ozd-file-dates mit|utc and --ozd-timezone N are passed to ozd as its
+--file-dates and --timezone: how FILE writes and reads its dates.  ozd's
+default is utc, plain UTC, as Systems 1002 and 2000 read them; a band of
+Systems 100 to 1001 reads them at its site's zone, so it wants
+--ozd-file-dates mit --ozd-timezone <that zone> (-1 for System 1001's
+release band, 5 for System 100's site), or every file date it reads is off by
+the zone's offset.  ozd refuses a zone under utc, and so does this tool.  The
+flags change only what ozd serves, not the checkpoint, whose setup reads no
+file.
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
@@ -259,8 +272,11 @@ class OzdFileServer:
     # files and the login's home are on OZ
     mode, login_host = 'ozd', 'OZ'
 
-    def __init__(self, ozd, run_dir, ports, log):
+    def __init__(self, ozd, run_dir, ports, log, ozd_flags=()):
         self.ozd, self.run_dir, self.log = ozd, run_dir, log
+        # --file-dates and --timezone for ozd, as --ozd-file-dates and
+        # --ozd-timezone give them; none, ozd's defaults
+        self.ozd_flags = list(ozd_flags)
         self.udp, self.quux_udp, self.telnet = ports[0], ports[1], ports[2]
         self.root = os.path.join(run_dir, 'served')
         self.proc = None
@@ -308,7 +324,7 @@ class OzdFileServer:
                '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
                '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.quux_udp),
                '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
-               '--log-file', '--log-simple']
+               '--log-file', '--log-simple'] + self.ozd_flags
         self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.DEVNULL,
                                      stdout=self.logfile, stderr=self.logfile,
                                      start_new_session=True)
@@ -621,7 +637,7 @@ def ensure_checkpoint(a, key):
         run_dir = run_dir_new('setup')
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log)
+        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
         machine = Machine(a.quux, a.band, run_dir, ports[3], server)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
@@ -687,7 +703,7 @@ def check(a, chk, cases):
     run_dir = run_dir_new('check')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log)
+    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
     machine = Machine(a.quux, a.band, run_dir, ports[3], server)
     results, t0 = [], now()
     ok_run = False
@@ -774,7 +790,7 @@ def probe_sys_host(a):
     run_dir = run_dir_new('probe')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = ProbeFileServer(a.ozd, run_dir, ports, log)
+    server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
     machine = Machine(a.quux, a.band, run_dir, ports[3], server)
     ok = False
     try:
@@ -873,6 +889,14 @@ def main():
     p.add_argument('--file-timeout', type=float, default=900,
                    help='seconds a file may take to compile or load')
     p.add_argument('--keep', action='store_true', help='keep the run directory')
+    p.add_argument('--ozd-file-dates', choices=('mit', 'utc'),
+                   default=os.environ.get('LISPM_CHECK_OZD_FILE_DATES') or None,
+                   help="ozd's --file-dates: FILE's dates in UTC (ozd's default), or at"
+                        " --ozd-timezone as Systems 100 to 1001 read them (mit)")
+    p.add_argument('--ozd-timezone', type=int,
+                   default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
+                   help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
+                        " hours west of Greenwich")
     a = p.parse_args()
     a.tree = os.path.abspath(a.tree)
     up = os.path.dirname(a.tree)
@@ -883,6 +907,11 @@ def main():
     # quux and ozd run in the run directory, so every path is made absolute
     a.band, a.ubin, a.quux, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.quux, a.ozd))
     a.files = [os.path.abspath(f) for f in a.files.split(',') if f]
+    a.ozd_flags = []
+    if a.ozd_file_dates:
+        a.ozd_flags += ['--file-dates', a.ozd_file_dates]
+    if a.ozd_timezone is not None:
+        a.ozd_flags += ['--timezone', str(a.ozd_timezone)]
 
     def on_signal(sig, frame):
         raise SystemExit(128 + sig)
@@ -896,6 +925,11 @@ def main():
         for f in a.files:
             if not os.path.isfile(f):
                 raise RunFailed('no file %s' % f)
+        # ozd refuses a zone under utc, its default; said here rather than
+        # left to ozd's log
+        if a.ozd_timezone is not None and a.ozd_file_dates != 'mit':
+            raise RunFailed('--ozd-timezone needs --ozd-file-dates mit: ozd refuses a zone'
+                            ' under utc, its default')
         cases = parse_cases(a.cases)
         a.band_sha = sha256_cached(a.band)
         a.quux_sha = sha256_cached(a.quux)
