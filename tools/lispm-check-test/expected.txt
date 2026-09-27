@@ -2,6 +2,7 @@ PASS (check-selftest-square 7)
 PASS (+ 1 2)
 PASS (list 'a (check-selftest-square 3))
 PASS "a string"
+PASS (not (null (probef "SYS: SYS; SYSDCL LISP")))
 FAIL (check-selftest-square 4)
 PASS (car 1)
 PASS (check-selftest-fail 3)

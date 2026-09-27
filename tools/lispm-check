@@ -4,7 +4,7 @@
 Usage:
   tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                     [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                    [--timeout S] [--keep] CASES
+                    [--file-server auto|device|ozd] [--timeout S] [--keep] CASES
 
 It resumes a checkpoint of the band booted to its TELNET prompt, lays the
 changed files over a private copy of the tree, loads them (or compiles them
@@ -13,7 +13,8 @@ one session and prints one line per case.  The first run for a band and a quux
 build boots the band cold and writes the checkpoint (about 15 s); later runs
 resume it: about 0.6 s with no files, 0.13 s a case, about 0.8 s to load a
 small file and 1.7 s to compile and load it, and as long as qc-file takes for
-a large one (half a minute for sys/io1/time.lisp).
+a large one (half a minute for sys/io1/time.lisp), the same with either file
+server.
 
 CASES holds one case per form; a form may run over several lines.  Blank lines
 and lines starting with ; are skipped.  After the form, on its last line:
@@ -43,7 +44,8 @@ always.
 --files takes paths, comma separated.  A file inside the tree's sys/ is served
 at its own place and loaded by its logical name (sys/io1/time.lisp as
 "SYS: IO1; TIME LISP"), so the world sees the same source file; any other file
-is served in the login's home directory.  The tree itself is never written:
+is served in the login's home directory (OZ: /lispm/ or HOST: /home/lispm/).
+The tree itself is never written:
 the machine is served a copy under the cache, so QFASLs land there.  Some sys
 files do not load as source, since they use functions only the compiler opens
 (sys/io1/time.lisp: "The function %PUSH is undefined"); check those with
@@ -57,29 +59,46 @@ Defaults, each overridden by its flag or an environment variable:
   --quux  LISPM_CHECK_QUUX  ../muir/target/release/quux beside the tree
   --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
+  --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
-on one band.  A checkpoint is keyed by the band's and quux's sha256 and made
-again when either changes.  Every run takes four free ports of its own (ozd's
-UDP, quux's UDP, TELNET and quux's RFB) under a lock, so parallel runs never
-meet, and it stops everything it started before it exits.
+on one band.  A checkpoint is keyed by the band's and quux's sha256 and the
+file server, and made again when one changes.  Every run takes four free
+ports of its own (ozd's UDP, quux's UDP, TELNET and quux's RFB) under a lock,
+so parallel runs never meet, and it stops everything it started before it
+exits.
 
-The file server is ozd, and everything that knows about it is in the class
-OzdFileServer: to serve the tree another way, replace that class.
+The copy is served the way the band reads its SYS: files.  With
+--file-server ozd, by ozd (the class OzdFileServer), for a band whose SYS: is
+on OZ; the setup logs in to OZ.  With --file-server device, by quux's own file
+device (DeviceFileServer), for a band whose SYS: is on HOST: quux mounts the
+copy as HOST's / (--file-root), ozd serves no file and is only the TELNET
+gateway, and the setup logs in to HOST.  A band boots to its prompt only with
+its SYS: host served.  auto, the default, takes the host the band's SYS: is on
+from a checkpoint of this band and quux (its setup asked the band), else from
+the answers remembered under the cache, else from a probe (a cold boot with
+the copy served both ways, about 15 s, once for each band and quux); a quux
+without a file device means ozd.  Every run says which it chose and why.  A
+setup checks that the band's SYS: is on the chosen server's host.
+Everything that knows how the tree is served is in these classes.
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
 """
 
-import argparse, fcntl, hashlib, json, os, random, re, shutil, signal, socket
+import argparse, fcntl, glob, hashlib, json, os, random, re, shutil, signal, socket
 import subprocess, sys, time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAOS_HOST, CHAOS_LISPM = '177200', '177201'   # ozd's and the band's addresses
 TV_SIZE = '1280x1024'
-LOGIN = '(login "LISPM" "OZ" t)'
+# The host SYS: translates to in the band: HOST when the band reads its
+# sources through quux's file device, OZ when through ozd.  Asked before the
+# login, since a translation opens no file.
+SYS_HOST = ('(send (send (send (fs:parse-pathname "SYS: SYS; SYSDCL LISP")'
+            ' :translated-pathname) :host) :name)')
 
 
 def now():
@@ -228,18 +247,26 @@ def stop_process(p, stdin_command=None, wait=10):
 
 
 # --------------------------------------------------------------------------
-# The file server.  Everything that knows about ozd is here: its flags, the
-# tree it serves, the pathnames the band uses for served files, the TELNET
-# listener it carries to the band, and the quux flags that plug the band into
-# it.  To serve the tree another way (muir's own file device), replace this
-# class and keep its methods.
+# The file servers.  Everything that knows how the tree is served is here:
+# ozd's flags, the copy of the tree and its layout, the pathnames the band uses
+# for served files, the TELNET listener ozd carries to the band in either
+# mode, and the quux flags that plug the band into them.  OzdFileServer serves
+# the copy by ozd, DeviceFileServer by quux's file device; a third way is a
+# class with the same methods, named in FILE_SERVERS.
 
 class OzdFileServer:
+    # the --file-server name, and the host the setup logs in to: the band's
+    # files and the login's home are on OZ
+    mode, login_host = 'ozd', 'OZ'
+
     def __init__(self, ozd, run_dir, ports, log):
         self.ozd, self.run_dir, self.log = ozd, run_dir, log
         self.udp, self.quux_udp, self.telnet = ports[0], ports[1], ports[2]
         self.root = os.path.join(run_dir, 'served')
         self.proc = None
+
+    def login(self):
+        return '(login "LISPM" "%s" t)' % self.login_host
 
     def lay_out(self, tree, ubin=None):
         """Copy the tree's sys/ and site/ to be served (the tree is never
@@ -270,12 +297,14 @@ class OzdFileServer:
         shutil.copyfile(path, os.path.join(self.root, 'lispm', name))
         return 'OZ: //lispm//' + os.path.splitext(name)[0], False
 
+    def ozd_roots(self):
+        return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
+                '--root', 'lispm=%s/lispm' % self.root]
+
     def start(self):
         self.logfile = open(os.path.join(self.run_dir, 'ozd.log'), 'wb')
         cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
-               '--listen', '127.0.0.1:%d' % self.udp,
-               '--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
-               '--root', 'lispm=%s/lispm' % self.root,
+               '--listen', '127.0.0.1:%d' % self.udp] + self.ozd_roots() + [
                '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
                '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.quux_udp),
                '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
@@ -325,6 +354,60 @@ class OzdFileServer:
 
     def stop(self):
         stop_process(self.proc)
+
+
+class DeviceFileServer(OzdFileServer):
+    """The tree served by quux's own file device, for a band whose SYS: is on
+    HOST.  Against such a band OzdFileServer never reaches the prompt: the
+    boot reads SYS: through the device, which with nothing mounted serves an
+    empty /, and ozd saw only "No server for this contact name" from the
+    band's TELNET contact for minutes.  Here quux mounts the private copy as
+    HOST's / (sys/, site/ and home/lispm/, --file-root), and ozd stays only as
+    the TELNET gateway: its one root is an empty read-only folder, since ozd
+    wants one, so it serves no file.  The copy is laid out and written as
+    OzdFileServer's is; only the folders and the pathnames differ."""
+    mode, login_host = 'device', 'HOST'
+
+    def lay_out(self, tree, ubin=None):
+        """The copy as HOST's /: sys/ and site/ of the tree (ubin/ as
+        sys/ubin/ when given) and an empty home/lispm/ for the login."""
+        super().lay_out(tree, ubin)
+        os.rmdir(os.path.join(self.root, 'lispm'))
+        os.makedirs(os.path.join(self.root, 'home', 'lispm'))
+        os.makedirs(os.path.join(self.run_dir, 'no-files'))
+
+    def place(self, path, tree):
+        """A sys/ file as OzdFileServer places it (SYS: translates to HOST in
+        the band); any other in the login's home, HOST: /home/lispm/."""
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
+        if rel.startswith('sys' + os.sep):
+            return super().place(path, tree)
+        name = os.path.basename(path)
+        shutil.copyfile(path, os.path.join(self.root, 'home', 'lispm', name))
+        return 'HOST: //home//lispm//' + os.path.splitext(name)[0], False
+
+    def ozd_roots(self):
+        return ['--root', '%s/no-files,ro' % self.run_dir]
+
+    def quux_flags(self):
+        return super().quux_flags() + ['--file-root', self.root]
+
+
+class ProbeFileServer(DeviceFileServer):
+    """Only for --file-server auto's probe: the copy served both ways at once,
+    on the device and as ozd's roots, so that a band boots to its prompt
+    whichever host its SYS: is on and can be asked which that is.  A band
+    boots only with its SYS: host served: one on OZ served by the device alone,
+    or a band whose SYS: is on HOST served by ozd alone, waits at boot with
+    no TELNET server.  Nothing is checked in a probe's boot."""
+    mode = 'probe'
+
+    def ozd_roots(self):
+        return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
+                '--root', 'lispm=%s/home/lispm' % self.root]
+
+
+FILE_SERVERS = {c.mode: c for c in (OzdFileServer, DeviceFileServer)}
 
 
 # --------------------------------------------------------------------------
@@ -533,24 +616,42 @@ def ensure_checkpoint(a, key):
         if not os.path.isfile(os.path.join(a.ubin, 'ucadr.tbl')):
             raise RunFailed('no ucadr.tbl in %s (--ubin): the cold boot reads it' % a.ubin)
         t0 = now()
-        print('lispm-check: setting up a checkpoint for this band and quux (cold boot)', flush=True)
+        print('lispm-check: setting up a checkpoint for this band and quux, files served by %s'
+              ' (cold boot)' % a.file_server, flush=True)
         run_dir = run_dir_new('setup')
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        server = OzdFileServer(a.ozd, run_dir, ports, log)
+        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log)
         machine = Machine(a.quux, a.band, run_dir, ports[3], server)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
             server.lay_out(a.tree, a.ubin)
             server.start()
             machine.start(checkpoint_out=tmp)
-            sock, _ = server.connect_listener(machine.alive, now() + 300)
+            try:
+                sock, _ = server.connect_listener(machine.alive, now() + 300)
+            except RunFailed as e:
+                # A band whose SYS: is on HOST waits at boot, with no TELNET
+                # server, when its files are not on quux's file device.
+                raise RunFailed('%s: the band did not reach its TELNET prompt with its files served'
+                                ' by %s; is its SYS: on %s? (--file-server)'
+                                % (e, a.file_server, server.login_host))
             sock.settimeout(0.2)
             sess = Session(sock, log, helper=False)
+            # The server must be the one the band reads SYS: from: a band
+            # whose SYS: is on OZ boots with the tree on the file device too,
+            # but would then load every SYS: file from nowhere.
+            r = sess.run(SYS_HOST, 120)
+            if r[0] != 'value':
+                raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
+            sys_host = r[1].strip('"')
+            if sys_host != server.login_host:
+                raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
+                                % (sys_host, a.file_server, server.login_host))
             # Log in, define and compile the helper, then close the band's file connection, so the first file
             # access after a resume opens a new one rather than using a
             # connection whose ozd has gone (which closed the TELNET session).
-            for form in (LOGIN, HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
+            for form in (server.login(), HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
                 r = sess.run(form, 120)
                 if r[0] != 'value':
                     raise RunFailed('setup: %s: %s' % (form, r[1]))
@@ -562,7 +663,8 @@ def ensure_checkpoint(a, key):
             with open(chk[:-4] + '.json', 'w') as f:
                 json.dump({'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
                            'quux': os.path.abspath(a.quux), 'quux_sha256': a.quux_sha,
-                           'quux_version': a.quux_version, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
+                           'quux_version': a.quux_version, 'file_server': a.file_server,
+                           'sys_host': sys_host, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
                           f, indent=1)
         finally:
             machine.stop(wait=5)
@@ -570,6 +672,8 @@ def ensure_checkpoint(a, key):
             ports_lock.release()
             if os.path.exists(tmp):
                 os.unlink(tmp)
+            if not os.path.exists(chk):
+                print('lispm-check: setup files kept in %s' % run_dir, file=sys.stderr)
         shutil.rmtree(run_dir, ignore_errors=True)
         return chk, now() - t0
     finally:
@@ -583,7 +687,7 @@ def check(a, chk, cases):
     run_dir = run_dir_new('check')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = OzdFileServer(a.ozd, run_dir, ports, log)
+    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log)
     machine = Machine(a.quux, a.band, run_dir, ports[3], server)
     results, t0 = [], now()
     ok_run = False
@@ -660,6 +764,96 @@ def check(a, chk, cases):
     return results, t_banner, now() - t0
 
 
+def quux_has_file_device(quux):
+    return '--file-root' in subprocess.run([quux, '--help'], capture_output=True, text=True).stdout
+
+
+def probe_sys_host(a):
+    """Boot the band cold with the tree served both ways and ask it which
+    host its SYS: is on (about 15 s)."""
+    run_dir = run_dir_new('probe')
+    ports_lock, ports = take_ports()
+    log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+    server = ProbeFileServer(a.ozd, run_dir, ports, log)
+    machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+    ok = False
+    try:
+        server.lay_out(a.tree, a.ubin)
+        server.start()
+        machine.start()
+        sock, _ = server.connect_listener(machine.alive, now() + 300)
+        sock.settimeout(0.2)
+        r = Session(sock, log, helper=False).run(SYS_HOST, 120)
+        sock.close()
+        if r[0] != 'value':
+            raise RunFailed('probe: %s: %s' % (SYS_HOST, r[1]))
+        ok = True
+        return r[1].strip('"')
+    finally:
+        machine.stop(wait=5)
+        server.stop()
+        ports_lock.release()
+        if ok:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        else:
+            print('lispm-check: probe files kept in %s' % run_dir, file=sys.stderr)
+
+
+def choose_file_server(a):
+    """--file-server auto: device when the band's SYS: is on HOST, ozd when it
+    is on OZ, and ozd with a quux that has no file device.  The band's answer
+    is taken from a checkpoint of this band and quux already made (its setup
+    asked the band), else from the answers remembered under the cache, else
+    from a probe: a cold boot that asks the band, once for each band and quux.
+    Every run says which server it chose and why."""
+    has_device = quux_has_file_device(a.quux)
+    if a.file_server == 'device' and not has_device:
+        raise RunFailed('--file-server device: %s has no file device (no --file-root)' % a.quux)
+    if a.file_server != 'auto':
+        return a.file_server
+    if not has_device:
+        print('lispm-check: files served by ozd: quux has no file device (auto)')
+        return 'ozd'
+    pair = '%s-%s' % (a.band_sha[:16], a.quux_sha[:16])
+    sys_host, source = None, None
+    for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
+        try:
+            with open(chk_json) as f:
+                sys_host, source = json.load(f).get('sys_host'), 'its checkpoint'
+        except (OSError, ValueError):
+            continue
+        if sys_host:
+            break
+    db = os.path.join(cache_dir(), 'sys-hosts.json')
+    if not sys_host:
+        lock = Lock('probe-' + pair)
+        try:
+            try:
+                with open(db) as f:
+                    known = json.load(f)
+            except (OSError, ValueError):
+                known = {}
+            sys_host, source = known.get(pair, {}).get('sys_host'), 'the probe remembered'
+            if not sys_host:
+                print("lispm-check: asking the band where its SYS: is (auto; a cold boot, once)", flush=True)
+                t0 = now()
+                sys_host, source = probe_sys_host(a), 'the probe, %.1f s' % (now() - t0)
+                known[pair] = {'band': os.path.abspath(a.band), 'quux': os.path.abspath(a.quux),
+                               'sys_host': sys_host, 'asked': time.strftime('%Y-%m-%d %H:%M:%S')}
+                tmp = '%s.%d' % (db, os.getpid())
+                with open(tmp, 'w') as f:
+                    json.dump(known, f, indent=1)
+                os.replace(tmp, db)
+        finally:
+            lock.release()
+    mode = {'HOST': 'device', 'OZ': 'ozd'}.get(sys_host)
+    if mode is None:
+        raise RunFailed("auto: the band's SYS: is on %s, which neither server serves" % sys_host)
+    print("lispm-check: files served by %s: the band's SYS: is on %s (auto, from %s)"
+          % (mode, sys_host, source))
+    return mode
+
+
 def main():
     tree_default = os.environ.get('LISPM_CHECK_TREE') or os.path.dirname(TOOL_DIR)
     p = argparse.ArgumentParser(description='Check a Lisp change on a band.',
@@ -671,6 +865,9 @@ def main():
     p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
     p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
     p.add_argument('--files', default='')
+    p.add_argument('--file-server', choices=('auto', 'device', 'ozd'),
+                   default=os.environ.get('LISPM_CHECK_FILE_SERVER', 'auto'),
+                   help="how the tree is served: quux's file device, ozd, or auto")
     p.add_argument('--compile', action='store_true')
     p.add_argument('--timeout', type=float, default=120, help='seconds a case may take')
     p.add_argument('--file-timeout', type=float, default=900,
@@ -703,7 +900,14 @@ def main():
         a.band_sha = sha256_cached(a.band)
         a.quux_sha = sha256_cached(a.quux)
         a.quux_version = subprocess.run([a.quux, '-V'], capture_output=True, text=True).stdout.strip()
-        chk, t_setup = ensure_checkpoint(a, '%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION))
+        a.file_server = choose_file_server(a)
+        # The key names the file server, since the setup logs in to that
+        # server's host.  The device's folders are not in it: a checkpoint
+        # carries none, quux mounting each check's own copy from its flags.
+        # ozd's keeps the key it had before there was a choice, so its
+        # checkpoints stay valid.
+        key = '%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION)
+        chk, t_setup = ensure_checkpoint(a, key if a.file_server == 'ozd' else key + '-' + a.file_server)
         if t_setup is not None:
             print('lispm-check: checkpoint made in %.1f s' % t_setup)
         results, t_banner, t_all = check(a, chk, cases)

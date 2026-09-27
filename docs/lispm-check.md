@@ -8,21 +8,26 @@ cases in one listener session, printing one line per case.
 ```
 tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                   [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                  [--timeout S] [--keep] CASES
+                  [--file-server auto|device|ozd] [--timeout S] [--keep] CASES
 ```
 
 ## What it does
 
-1. **Setup, once per band and quux build.** A checkpoint resumes only on the
-   quux build that wrote it, so the tool keys it by the sha256 of the band and
-   of quux. When there is none, it boots the band cold, logs in, compiles a
-   small helper that runs each case, and has quux write the checkpoint at the
-   prompt. This takes about 15 s, most of it the cold boot.
-2. **Each check** takes four free ports of its own, starts a private ozd
-   serving a copy of the tree's `sys/` and `site/` with the changed files laid
-   over it, resumes the checkpoint, and loads each file (`load` of the source,
-   or with `--compile`, `qc-file` and `load` of the QFASL). It then runs every
-   case, stops quux and ozd, and exits.
+1. **Setup, once per band, quux build and file server.** A checkpoint resumes
+   only on the quux build that wrote it, so the tool keys it by the sha256 of
+   the band and of quux, and by the [file server](#the-file-server). When
+   there is none, it boots the band cold with the tree served, asks the band
+   which host its `SYS:` is on and stops unless that is the server's, logs in
+   to that host, compiles a small helper that runs each case, and has quux
+   write the checkpoint at the prompt. This takes about 15 s, most of it the
+   cold boot.
+2. **Each check** takes four free ports of its own, serves a copy of the
+   tree's `sys/` and `site/` with the changed files laid over it, starts a
+   private ozd, resumes the checkpoint, and loads each file (`load` of the
+   source, or with `--compile`, `qc-file` and `load` of the QFASL). It then
+   runs every case, stops quux and ozd, and exits. With either file server a
+   check takes about 0.6 s with no files, and a small file adds about 0.8 s
+   to load it or 1.6 s to compile and load it.
 
 The band is always opened read-only (`--disk-pack PACK,ro`): the writes of the
 boot live in the checkpoint, so the band file never changes, and any number
@@ -31,10 +36,41 @@ is never written either; QFASLs land in the copy.
 
 A file inside the tree's `sys/` is served in its own place and loaded by its
 logical name, `sys/io1/time.lisp` as `SYS: IO1; TIME LISP`, so the world sees
-the source file it already knows. Any other file is served in the login's
-home directory. Some `sys/` files do not load as source because they use
-functions only the compiler open-codes (`sys/io1/time.lisp` stops at "The
-function %PUSH is undefined"): check those with `--compile`.
+the source file it already knows. Any other file is served in the login's home
+directory, `OZ: /lispm/` or `HOST: /home/lispm/`. Some `sys/` files do not
+load as source because they use functions only the compiler open-codes
+(`sys/io1/time.lisp` stops at "The function %PUSH is undefined"): check those
+with `--compile`.
+
+## The file server
+
+The copy is served the way the band reads its `SYS:` files, since a band
+boots to its prompt only with its `SYS:` host served: a band whose `SYS:` is
+on OZ served by the file device alone, or one whose `SYS:` is on HOST served
+by ozd alone, waits at boot with no TELNET server, and ozd logs "No server
+for this contact name" until the tool gives up after 300 s.
+
+| `--file-server` | For a band whose `SYS:` is on | The copy is served by | The setup logs in to |
+|---|---|---|---|
+| `ozd` | OZ | ozd: its roots `sys`, `site` and `lispm` | `OZ` |
+| `device` | HOST | quux's file device: the copy is HOST's `/` (`--file-root`), holding `sys/`, `site/` and `home/lispm/` | `HOST` |
+
+In both, ozd carries the band's TELNET listener; with `device` that is all it
+does: its one root is an empty read-only folder (ozd wants one), so it serves
+no file. A checkpoint carries none of the device's folders (quux takes the
+mounts from its flags on every resume), so each check mounts its own copy.
+
+`auto`, the default, chooses by the host the band's `SYS:` is on: `device`
+for HOST, `ozd` for OZ. It takes that from a checkpoint of this band and quux
+already made, whose setup asked the band; else from the answers remembered in
+`sys-hosts.json` under the cache; else from a probe, a cold boot with the copy
+served both ways that only asks the band (about 15 s, once for each band and
+quux). A quux without a file device (no `--file-root` in its `--help`) means
+`ozd`. Every run says which server it chose and why:
+
+```
+lispm-check: files served by device: the band's SYS: is on HOST (auto, from its checkpoint)
+```
 
 ## Cases
 
@@ -93,28 +129,39 @@ Each is overridden by its flag or an environment variable.
 | `--quux` | `LISPM_CHECK_QUUX` | `../muir/target/release/quux` beside the tree |
 | `--ozd` | `LISPM_CHECK_OZD` | `../ozd/target/release/ozd` beside the tree |
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
+| `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
 
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check
-against, or a copy) and `run/check/ubin/` are set up once per clone. The cache
-is `$XDG_CACHE_HOME/muir-sys-check`, or `~/.cache/muir-sys-check`: the
-checkpoints, the run directories and the locks, never inside the tree.
+against, or a copy) and `run/check/ubin/` are set up once per clone, and for
+the self-test's device mode `run/check/device/band.img` and
+`run/check/device/ubin/`. The cache is `$XDG_CACHE_HOME/muir-sys-check`, or
+`~/.cache/muir-sys-check`: the checkpoints, the probes' answers, the run
+directories and the locks, never inside the tree.
 
 Each run takes a block of four ports (ozd's UDP, quux's UDP, TELNET and
 quux's RFB display) under a lock, checks that each is free, and connects only
 to a TELNET listener owned by its own ozd, so parallel runs do not meet. It
 stops quux and ozd on every exit, also on a timeout or a signal.
 
-The file server is ozd. Everything that knows about it (its flags, the copy
-of the tree it serves, the pathnames of served files, the TELNET listener it
-carries and the quux flags that plug the band into it) is the class
-`OzdFileServer` in the tool, so it can be replaced by another way of serving
-the tree without touching the rest.
+Everything that knows how the tree is served (ozd's flags, the copy of the
+tree and its layout, the pathnames of served files, the TELNET listener ozd
+carries and the quux flags that plug the band into them) is in the classes
+`OzdFileServer` and `DeviceFileServer` in the tool; a third way of serving the
+tree is a class with the same methods, named in `FILE_SERVERS`.
 
 ## Self-test
 
-`tools/lispm-check-test/run.sh` runs the tool six times on the files beside
-it and checks each exit status and verdict: the case file loaded as source and
-compiled (status 1, with a wrong value, a wrong error message and an unexpected error on purpose), a
-wrong expected value (1), only passing cases (0), and a file with an unclosed
-form, loaded and compiled (2). It takes the tool's flags.
+`tools/lispm-check-test/run.sh` runs the tool seven times on the files beside
+it, for each file server, and checks each exit status and verdict: the case
+file loaded as source and compiled (status 1, with a wrong value, a wrong
+error message and an unexpected error on purpose, and a case that the tree's
+`sys/` is served), a wrong expected value (1), only passing cases (0), and a
+file with an unclosed form, loaded and compiled (2, with the tool's message
+naming the file and the step that failed); and then the passing cases once
+more with no `--file-server`, where `auto` must choose that mode's server for
+that band. The `ozd` runs use `run/check/band.img` (or `LISPM_CHECK_BAND`), a
+band whose `SYS:` is on OZ; the `device` runs use `run/check/device/band.img`
+(or `LISPM_CHECK_DEVICE_BAND`), a band whose `SYS:` is on HOST; each with the
+`ubin/` beside it. `LISPM_CHECK_TEST_MODES` picks the modes, `ozd device` by
+default. It passes its arguments on to every run (`--quux` and so on).
