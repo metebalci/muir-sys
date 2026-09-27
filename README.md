@@ -34,7 +34,8 @@ and the number steps from 100 to 1000.
 
 In short, the fault that stopped a cold load in silence and MINI's two stream
 faults are fixed; the routing table covers every subnet, and MINI finds its
-file server by itself; about forty faults are fixed across the tree; the tape,
+file server by itself; about forty faults are fixed across the tree, and 36 of
+LM-3's later fixes are taken, one at a time; the tape,
 LMFILE and Xerox printing systems are gone; only System is patchable; and what
 is not MIT's, or not wanted, was never imported. The band is compiled by the
 system itself, and the microcode is assembled from its sources.
