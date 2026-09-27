@@ -148,6 +148,10 @@ System 100's `;;;---!!!` questions, answered in place (#12):
 
 - **The MIT site** in `site/`. `sys.translations` doubles its slashes and names
   no readtable, because a cold load reads it in the traditional readtable (#9).
-  `hsttbl.lisp` is not carried: the SITE system writes it from `hosts.text`.
+  `hsttbl.lisp` is not carried: the SITE system writes it from `hosts.text`. Its
+  name is MIT's, as System 100 has it, so the herald says "MIT System"; only
+  the name is taken. Its hosts are this site's own, numbered from the first
+  address of subnet 376: OZ is 177200 and LISPM-*n* is 177200+*n*, so LISPM-1
+  is 177201.
 - **The GNU Affero General Public License, version 3 or later**, in `LICENSE`,
   continuing LM-3's declaration for System 100.
