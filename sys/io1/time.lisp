@@ -104,27 +104,24 @@ the hour and date are computed as for standard time."
   (SETQ UNIVERSAL-TIME (- UNIVERSAL-TIME (* TIMEZONE 3600.)))
   (SETQ SECS (\ UNIVERSAL-TIME (* 24. 60. 60.))
 	X (TRUNCATE UNIVERSAL-TIME (* 24. 60. 60.)))	;Days since genesis.
-  (MULTIPLE-VALUE-BIND (A B) (FLOOR X 365.)
-    (UNLESS (ZEROP A)
-      (DECF B (LSH (1- A) -2))
-      (WHEN (< B 0)
-	(SETQ A (+ A -1 (TRUNCATE B 365.)))	;We must allow for times so far in the future
-	(SETQ B (\ B 365.))			;as to produce >> 365. Feb 29's.
-	(SETQ B (+ B 365.))			;(Of course, this doesn't allow for
-						;the year 2100 not being a leap-year.)
-	(AND (NOT (BIT-TEST A 3))
-	     (INCF B))))
-    (DO ((C 12. (1- C)))
-	(( B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C))
-	 (WHEN (AND (NOT (BIT-TEST A 3))
-		    (> C 2))
-	   (DECF B)
-	   (IF (< B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C)) (DECF C))
-	   (IF (= C 2) (INCF B)))
-	 (DECF B (AREF *CUMULATIVE-MONTH-DAYS-TABLE* C))
-	 (SETQ YEAR (+ 1900. A))
-	 (SETQ MONTH C)
-	 (SETQ DAY (1+ B)))))
+  ;; the date from the day count by Howard Hinnant's civil_from_days
+  ;; (howardhinnant.github.io/date_algorithms.html), in 400-year eras that
+  ;; begin on 1 march, so that a leap day ends its year.  KLH's algorithm
+  ;; here took every fourth year for a leap year, 1900 and 2100 too: for the
+  ;; rest of 1900 from 1 march, and from 1 march 2100 on, it gave the day
+  ;; before (1 march as 29 february), and at the real-time clock's last
+  ;; second (2^32-1, 7 february 2106) the 6th.  day 0, 1 january 1900, is
+  ;; day 693901 counted from 1 march of the year 0.
+  (let* ((z (+ x 693901.))
+	 (era (floor z 146097.))
+	 (doe (- z (* era 146097.)))		;day of the era, 0 to 146096
+	 (yoe (floor (- (+ doe (floor doe 36524.)) (floor doe 1460.) (floor doe 146096.))
+		     365.))				;year of the era, 0 to 399
+	 (doy (- doe (* 365. yoe) (floor yoe 4) (- (floor yoe 100.))))	;from 1 march, 0 to 365
+	 (mp (floor (+ (* 5 doy) 2) 153.)))	;month from march, 0 to 11
+    (setq day (1+ (- doy (floor (+ (* 153. mp) 2) 5)))
+	  month (if (< mp 10.) (+ mp 3) (- mp 9.))
+	  year (+ yoe (* era 400.) (if (<= month 2) 1 0))))
   (SETQ HOURS (FLOOR SECS 3600.)
 	MINUTES (FLOOR (\ SECS 3600.) 60.)
 	SECS (\ SECS 60.))
@@ -156,10 +153,17 @@ A universal-time is the number of seconds since 1-Jan-1900 00:00-GMT (a bignum).
   (OR TIMEZONE
       (SETQ TIMEZONE (IF (DAYLIGHT-SAVINGS-TIME-P HOURS DAY MONTH YEAR)
 			 (1- *TIMEZONE*) *TIMEZONE*)))
-  (SETQ TEM (+ (1- DAY) (AREF *CUMULATIVE-MONTH-DAYS-TABLE* MONTH)
-	       (FLOOR (1- YEAR) 4) (* YEAR 365.)))	;Number of days since 1-Jan-1900.
-  (AND (> MONTH 2) (LEAP-YEAR-P YEAR)
-       (SETQ TEM (1+ TEM)))				;After 29-Feb in a leap year.
+  ;; the leap days from 1900 to the year before, by the gregorian rule (460
+  ;; of them up to 1899), and the year's own after february.  this counted
+  ;; every fourth year, 2100 too, so from 2101 on it came out a day late; it
+  ;; counted one before 1900 (FLOOR of -1), a day early all through 1900; and
+  ;; it asked LEAP-YEAR-P about the year less 1900, 100 for 2000, which said
+  ;; no, so 2000's dates from march came out a day early.
+  (let ((y (+ year 1899.)))
+    (setq tem (+ (1- day) (aref *cumulative-month-days-table* month) (* year 365.)
+		 (floor y 4) (- (floor y 100.)) (floor y 400.) -460.)))
+  (and (> month 2) (leap-year-p (+ year 1900.))
+       (setq tem (1+ tem)))				;after 29 february in a leap year.
   (+ SECONDS (* 60. MINUTES) (* 3600. HOURS) (* TEM (* 60. 60. 24.)) (* TIMEZONE 3600.)))
 
 
