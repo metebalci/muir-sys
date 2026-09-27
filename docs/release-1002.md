@@ -142,19 +142,54 @@ loaded.
   is generated from `hosts.text` by the SITE system.
 - **The site names the zone Europe/Berlin** (see Time zones).
 
+## Microcode 1000
+
+- **The CADR's first changed microcode is 1000** (Mete, 2026-09-27: the
+  CADR's numbers are in the 1000s and QUUX's in the 2000s; MIT's 323 stays
+  as it is). It is 323 with the two fixes below and the PDL buffer's width
+  named, assembled from `sys/ucadr/` with `ua:version-number` 1000 as
+  `docs/building.md` describes; a band takes it from the MCR partition the
+  label names, and reads its `ucadr.tbl` from `SYS: UBIN;`. It uses one more
+  A-memory word (1177 against 323's 1176) and five more I-memory locations.
+  The outputs as assembled on 2026-09-27 (sha256):
+  - `ucadr.mcr` `6b94aab756b4e3c1882c6f2b0715b8122137c59e163e6f4abb3240f57f056e19`
+  - `ucadr.tbl` `0545fbc2e9e5a2980ec322802b5b0ca5da75aeb1b8cf632e015ac4931e360762`
+  - `ucadr.locs` `77f365af6009161e2b8e0bca20d4833bc0ee3d517b3e61fb3c9b2561aaf5267c`
+  - `ucadr.sym` `7c750b55835484b4f01d5cd98454e14436f4e43981e1fae68efeae43cbbc24d6`
+- **The PDL buffer's width by name** (`ucadr/uc-macrocode.lisp`,
+  `uc-page-fault.lisp`, `uc-stack-groups.lisp`): five masks written as
+  `(BYTE-FIELD 10. 0)` and one comparison with the literal 2000 use
+  `PDL-BUFFER-ADDRESS-MASK` and `PDL-BUFFER-SIZE-IN-WORDS`, which on the
+  CADR are 10 bits and 2000 (`ucadr/uc-parameters.lisp:271,275`). Assembled
+  on its own as 323 on a freshly booted 1001 band, it gave `ucadr.mcr`,
+  `.tbl` and `.locs` byte for byte System 1001's.
+- **Dividing by the most negative fixnum no longer corrupts or halts.**
+  Negating -2^24, the most negative fixnum, gives 2^24, which must become a
+  bignum, and making the bignum clobbers registers. `QDIV` kept a ratio's
+  numerator in Q-R while its denominator was boxed, so on the 1001 band
+  `(%div 5 -16777216)` gave `25\16777216`; `NORMALIZED-RATIONAL-FIX-SIGNS`,
+  on the way from a bignum dividend, kept the numerator in M-J while it
+  negated the denominator, and the next negation then got a raw integer and
+  halted the machine, as `(floor 4294967295 -16777216)` did, in `XMINUS`.
+  The unboxed numerator now waits in an A-memory word of its own,
+  `A-QDIV-NUMERATOR` (`ucadr/uc-parameters.lisp:1221`, after the last
+  variable, so no location moves), and the boxed one on the stack
+  (`ucadr/uc-arith.lisp:1272`, `:3693`). MIT's. On System 1001's band booted
+  on microcode 1000, `(%div 5 -16777216)` gives `-5\16777216`, the `FLOOR`
+  gives -256 and -1, and `TRUNCATE`, `FLOOR`, `CEILING` and `%DIV` over 24
+  values, the edges of the fixnum range and bignums among them, 2304 cases,
+  agree with exact arithmetic on the host, but for `(%div 0 0)` (below).
+- **`%DRAW-RECTANGLE` reads no row below the rectangle.** `XTVERS1` tested
+  the column's remaining height at the top of its loop, after the jump back
+  had started the read of the next row, so every erase read one row below
+  its bottom; the count is now tested after each row, before the next read
+  (`ucadr/uc-tv.lisp:327-342`). MIT's. With a read MAR on the word below a
+  rectangle of four rows, drawn into a one-bit array laid over a vector,
+  the MAR went off on 323 and does not on 1000; a MAR on the rectangle's
+  last row goes off on both, and the words are left as they were.
+
 ## Known faults found, not yet fixed
 
-- **Dividing by the most negative fixnum corrupts or halts.** On the 1001
-  band `(%div 5 -16777216)` gives `25\16777216`, and
-  `(floor 4294967295 -16777216)` halts the machine in `XMINUS`. MIT's, in
-  the microcode (`ucadr/uc-arith.lisp`); the fix waits for the CADR's first
-  changed microcode, 1000 (the CADR's numbers are in the 1000s, QUUX's in
-  the 2000s; MIT's 323 stays as it is).
-- **`%DRAW-RECTANGLE` reads one row below each rectangle it erases.** MIT's,
-  in the microcode (`ucadr/uc-tv.lisp:327`, `XTVERS1`): on the 1001 band a
-  read MAR on the word below a rectangle of four rows, drawn into a one-bit
-  array laid over a vector, went off. Nothing else is known to show it on
-  the CADR. The fix waits for the CADR's microcode 1000 too.
 - **The boot PROM's `PAGE-0-PARITY-FIX` touches one word past page 0,**
   virtual 400, as MIT's own comment says. Left as it is for now (Mete,
   2026-09-27), with a comment at it in `ucadr/promh.text:403` so that a
@@ -162,7 +197,10 @@ loaded.
 - **A date printed MM/DD parses as DD/MM outside the United States.** The
   default print mode is `:MM//DD//YY`, but `SET-MONTH-AND-DATE`
   (`io1/timpar.lisp`) reads two numbers of 12 or less as month and day only
-  when `*TIMEZONE*` is 4 to 10. MIT's.
+  when `*TIMEZONE*` is 4 to 10: with Europe/Berlin `03/01/2026` parses as
+  3 January. MIT's.
+- **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
+  returns 0 for a zero dividend before it looks at the divisor. MIT's.
 
 ## Around the system
 
