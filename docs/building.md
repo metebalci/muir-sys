@@ -288,6 +288,21 @@ The symbol cannot be read before the package exists, so in a world where COLD ha
 
 The COLD system has the same resume trap as the others: `COLD; COLDUT` and `COLD; COLDLD` must be compiled by hand with `qc-file` before `(make-system 'cold :compile :noconfirm)` will run, since it reads their compiled files' properties.
 
+**Files the cold load reads over MINI use spaces only, and no page marks.**
+MINI's character stream hands the server's bytes to the reader untranslated
+(`MINI-ASCII-STREAM`, `sys/cold/mini.lisp:265`), unlike the streams the file
+system uses after the handover, which map ASCII 10, 11, 12, 14, 15 and 177 to
+the machine's own Backspace, Tab, Line, Page, Newline and Rubout
+(`TYI-FROM-ASCII-STREAM`, `sys/io/stream.lisp:611`). An ASCII tab therefore
+arrives as a character the traditional readtable does not class as
+whitespace, and a continuation line that begins with one is read as part of
+the token above it: the form acquires an argument nobody wrote, and the error
+surfaces far from the file. This binds `site/sys.translations` and
+`site/coldrun.lisp`; the sources QLD reads later are full of tabs and page
+marks and are fine. The System 2000 line met this in practice (lmz-sys
+`2e684c2`); it has not been reproduced here, where the site files have never
+contained a tab.
+
 **Choose the destination explicitly.** The verified unattended build used
 the temporary `FQUERY` override shown above after checking and clearing LOD3.
 The earlier System 100 bring-up required console input because of TELNET
@@ -466,6 +481,18 @@ and assembly 3 on muir's micro engine. It writes `ucadr.mcr`, `.sym`, `.tbl`
 and `.locs`: `mcr`, `tbl` and `locs` are byte for byte System 100's. `sym`
 holds the same symbols in the order of a hash table, and names its source host
 OZ, not MIT-OZ.
+
+**Reboot before assembling again.** A second `ua:assemble-system` in the
+same band reuses the source it read the first time, even when the files have
+changed: on 2026-09-23 a second assembly after a source edit came out byte for
+byte the same as the first, and its log had no "Read-in time" line. Boot the
+band afresh for every assembly of changed sources.
+
+**Serve the table of the microcode that runs.** A band whose microcode is not
+the one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, and ozd serves
+files without versions, so the served `sys/ubin/` must hold the running
+microcode's `ucadr.tbl`. With System 1001's band on microcode 1000 and 323's
+table served, the machine never reached its TELNET server.
 
 **PROMH, the boot PROM.** `(ua:assemble "SYS: UCADR; PROMH TEXT")`, with
 standard input answering `9` for the version and `T` for "T IF FOR PROM", and
