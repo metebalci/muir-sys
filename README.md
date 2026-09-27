@@ -109,7 +109,6 @@ This is the system. Three projects provide the machine:
 | `site/` | the site files a machine loads, for the example site `MIT` |
 | `docs/` | how the system is built, and what has been found out about it |
 | `tools/` | `lispm-check`, which checks a Lisp change on a band in seconds, its files served by ozd or by quux's file device |
-| `pages/` | the project's web page and its release notes, written by hand, published at <https://muir-sys.metebalci.com/> |
 
 ## Documents
 
