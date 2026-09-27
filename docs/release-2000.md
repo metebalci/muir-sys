@@ -759,6 +759,32 @@ a comment in that file saying why.
   which reads FILE dates at its site's zone, is served them so. Measured on
   the 1001 band: a file's date is exact with `mit` and `-1`, and 3600 s early
   in January and 7200 s early in July with ozd's default, `utc`.
+- **The release tools** (`1331881`, `f5a60d5`, `2ab511f`), tracked by
+  `.gitignore:39-42`. `tools/release-scan` reads every byte a release
+  publishes by what a file holds (a gzip and its header, a tar's members and
+  headers, a VHD through its block table, anything else raw) and fails on a
+  local path, a private address, an e-mail address, this machine's or
+  user's name, or a tar member not owned by root, uid and gid 0 and both
+  names root (`tools/release-scan:300-308`), unless one of its four rules
+  passes it (`tools/release-scan:42-54`); the names and the owner pass by no
+  rule. Its baseline, `tools/release-scan.baseline`, holds the digests of
+  what `release-1001`'s two assets already hold, the sources tarball as
+  replaced with its members owned by root. `tools/release-sums` writes and
+  checks `SHA256SUMS`, with a line for the disk or pack uncompressed, and
+  with `--api` compares GitHub's digests of the uploaded assets.
+  `tools/release-test` holds both to planted faults; its home directory is
+  planted in `sys/io/file/open.lisp`, which both lines have
+  (`tools/release-test:209`), and it refuses a fault planted into a file the
+  tree does not have (`tools/release-test:108-112`).
+- **`docs/building.md` says how a release is published**
+  (`docs/building.md:633`): the assets of each kind of release, every
+  tarball member owned by root, one gzip route (Python's `gzip`, no name, no
+  date; `docs/building.md:669-681`), then by the SHA of one commit: the sums,
+  the scan and the owners, the commit on its own line and not the other's,
+  the annotated tag, a draft, the draft downloaded back and checked (sums
+  against GitHub's digests, scan, owners, the VHD's `conectix` or the pack's
+  `LABL`), and publishing with Latest set and read back
+  (`docs/building.md:784-794`).
 
 ## Faults fixed
 
