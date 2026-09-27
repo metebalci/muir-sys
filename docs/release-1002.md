@@ -72,8 +72,9 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   or sends goes through these two: the OPEN and CLOSE replies
   (`network/chaos/qfile.lisp:500`), directory listings and file properties
   (`READ-DIRECTORY-STREAM-ENTRY`, `io/file/open.lisp:1372`), CHANGE-PROPERTIES
-  (`network/chaos/qfile.lisp:680-691`) and the dates the cold load records
-  (`io/file/pathst.lisp:473`). A date in any other form still goes to
+  (`network/chaos/qfile.lisp:680-691`) and, through
+  `PARSE-COLD-LOADED-TIME` (below), the dates recorded before the time parser
+  loads. A date in any other form still goes to
   `TIME:PARSE-UNIVERSAL-TIME` at local time (`io/file/open.lisp:1468`).
 - **The "date or never" properties go on the wire in UTC too**
   (`:REFERENCE-DATE` and the rest): their printer in
@@ -130,9 +131,71 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   as NIL; before, 24 October came back 7200 s late at Berlin and 3600 s at
   `-1`, and each half put back fails those cases. The server itself was
   not run: the band has neither it nor the local file system it serves.
+- **A date recorded before the time parser loads is the server's UTC text.**
+  While a cold load has no time parser, QFILE records a file's date as the
+  text the server sent, less the month's leading zero
+  (`network/chaos/qfile.lisp:495-500`), and the cold-load builder records
+  each cold-loaded file's date as text too. QLD's `MAKE-SYSTEM` compares the
+  two to tell whether a cold-loaded file must be loaded again, and TIMPAR's
+  initialization later parses every such text (`CANONICALIZE-COLD-LOADED-TIMES`,
+  `io/file/pathst.lisp:481`). With FILE dates in UTC on the wire both went
+  wrong. The builder printed its own local time (`TIME:PRINT-UNIVERSAL-TIME`),
+  an hour or two from the server's text, so QLD loaded every cold-loaded file
+  again and stopped at `**MORE**` on the cold-load stream: measured in two
+  builds from this branch, one as it was and one with `main`'s change, which
+  records the date as a number (`8c2f00e`) and so never equals QFILE's text
+  either. And a month before October, its zero gone, went to the full parser
+  at the site's local time. Now the builder records the date as the server
+  sends it, UTC with the month's zero dropped (`COLD-FILE-DATE-STRING`,
+  `cold/coldld.lisp:120`, used at `:137`), and `PARSE-COLD-LOADED-TIME`
+  (`io/file/pathst.lisp:473`) puts the zero back so that the fast parser
+  reads the text as UTC. `main` keeps its numbers, which fit its file
+  device, whose dates are numbers too. QFILE's comment, and MINI's, which
+  records the same text, say whom their text matches now
+  (`network/chaos/qfile.lisp:498`, `cold/mini.lisp:131`). This is
+  `main`'s cold-load date fix (`8c2f00e`, Q12's backport inventory) taken in
+  this branch's own form. Checked in builds from this branch on muir-sim's
+  `cadr` (System 1001's band compiling and making the cold load, microcode
+  1000), each incremental over System 1001's build tree; step 8 of Q12
+  repeats the checks on the clean release build (`docs/building.md`,
+  "Building System 1002's release"). QLD read none of the cold load's files
+  again, the 19 of `COLD-LOAD-FILE-LIST` and the readtables `RDTBL` and
+  `CRDTBL`, and ran to its end unattended, with the files dated in September
+  and with every QFASL dated 5 October 2026 12:00 UTC; in the saved bands
+  every loaded id that is a number, the cold load's 21 among them, equals the
+  date the server gives (all 294 in the last build, with TIMPAR's fix under
+  Faults fixed).
+  On the 1001 band with `TIME` and `OPEN` loaded, a recorded text of
+  15 January or 15 July 2026 12:00 came back 3600 and 7200 s off, and exact
+  with `PARSE-COLD-LOADED-TIME`. `COLD-FILE-DATE-STRING` gives the text
+  `date -u` does, the month's zero dropped, from 1970 to 2099, and the text
+  parses back to the instant from 2000 to 2026; a two-digit year means the
+  year within 50 years of the present (`io1/time.lisp:177-184`), as in every
+  FILE date of that form, so 1970 came back as 2070 and 2099 as 1999.
+- **The date check** (Q12, 1.11): a band built from this branch (the last
+  of the incremental builds above), System 1002 on microcode 1000 under
+  muir-sim's `cadr`, with ozd at its default
+  `--file-dates utc`, once with the site at Europe/Berlin and once at `-1`.
+  At noon UTC on 15 January, 15 April, 27 April, 15 July and 26 October
+  2026, 1 March and 31 December 2000, and at 00:30 and 01:30 UTC on
+  25 October 2026, both 02:30 of Berlin's repeated hour: a file whose mtime
+  is the instant lists with that universal time, and a date the band sets on
+  a file lists back as itself and is the file's mtime, to the second, in
+  both runs. The control, ozd's `--file-dates mit --timezone -1`, is off by
+  an hour in winter and two in summer; 1 March 2000 a day more, and
+  31 December 2000 reads as no date at all.
 
 ## Faults fixed
 
+- **TIMPAR's own date is a number too.** Its initialization parses the
+  recorded texts before TIMPAR's own loaded id is set, so that one stayed
+  text, never equal to the file's date, and `MAKE-SYSTEM` took
+  `SYS: IO1; TIMPAR` for a new file ever after. The id is text on the 1001
+  band, and on a band built from this branch without this change
+  `(make-system 'system :print-only)` listed TIMPAR. QLD now parses the
+  recorded texts once more at its end (`sys/ltop.lisp:928-933`). MIT's;
+  `main` has it fixed by the numbers of its file device. In a band built
+  with the change no loaded id is text and `:print-only` lists nothing.
 - **Dates in 1900, 2000 and from 2100 on are right.**
   `DECODE-UNIVERSAL-TIME-WITHOUT-DST` took every fourth year for a leap year,
   so it gave 29 February for 1 March 1900 and 2100, a day early for the rest
@@ -211,7 +274,6 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   second holds the last word, swapped as the first block's are, and zeros.
   MIT's; taken from `main` (`b729b53`, only this part of its
   `LOAD-MCR-FILE` change: the rest reads QUUX's partition order).
-
 
 ## The site
 
@@ -298,7 +360,12 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   and 1001 added, why files the cold load reads over MINI use spaces only
   (also in `site/sys.translations`), that a second assembly in one band
   reuses the sources it read, and that the served `SYS: UBIN;` must hold the
-  running microcode's table.
+  running microcode's table. It says how System 1002's release is built
+  (`docs/building.md:199`): a clean build from the commit on System 1001's
+  band, ozd at `--file-dates mit --timezone -1` while that band compiles and
+  makes the cold load and at `utc` from the cold boot on, the builder kept
+  on its own site and time code, the gates after QLD, and the one hour of
+  QFASL dates it cannot take.
 - **`cold/export.lisp` says where the sync functions live**: `SETUP-CPT`,
   `START-SYNC`, `STOP-SYNC` and `FILL-SYNC` are all defined in
   `WINDOW; COLD` (`cold/export.lisp:156-169`). From lmz-sys (`189eeea`).

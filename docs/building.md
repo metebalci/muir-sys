@@ -166,7 +166,8 @@ subnet. The band it builds can, so the last step moves it:
   The site files loaded here may have been compiled at the old site; the
   build compiles them again. Make the saved partition current and compile
   from it, so a reboot during the build keeps the new site. The header also
-  records the user and the machine's location name.
+  records the user and the machine's location name. **Not for System 1002**
+  built on System 1001's band: see "Building System 1002's release" below.
 - **Clear generated QFASLs by the tracked list, not by pattern.** The tree
   tracks some binaries (`sys/sys/ucinit.qfasl`, `sys/demo/tvbgar.qfasl` and
   fonts), and a clean build must keep them. Compare against the release
@@ -194,6 +195,117 @@ current MCR1
 `load-from` copies blocks, not partition comments, hence the two `modify` steps. Take the release's checksum from a pack that has never been booted: a running machine writes its own pack. Boot-test a disposable copy against
 the sources extracted from the release archive. All unused release partitions,
 including PAGE, must contain only zeroes.
+
+## Building System 1002's release
+
+System 1002 is built on System 1001's band, whose time code is MIT's and
+which reads FILE dates at its site's zone, and it is booted and checked with
+ozd serving FILE dates in UTC, as 1002 reads them. So the build runs in two
+halves with two ozd settings, and a few gates after QLD show that the halves
+met. This is the procedure for the release (Q12, §1.4). The bands built from
+this branch so far (`docs/release-1002.md`) were incremental builds over
+System 1001's build tree; the release is built clean, and repeats their
+checks.
+
+**Inputs.**
+
+- **The tree, exported from the release's commit**: `git archive <sha>`, never
+  a working tree. An export holds no generated file. A tree used before must
+  first lose its generated QFASLs by the tracked list (above), keeping the
+  tracked binaries.
+- **`sys/ubin/`, assembled from that commit's `sys/ucadr/`**: microcode 1000,
+  `ua:version-number` 1000 (see "Assembling the microcode"), twice, byte for
+  byte, and equal to the four SHA-256 in `docs/release-1002.md`; the PROM
+  files unchanged, `promh.mcr` SHA-256 `2c667f99...`.
+- **The builder: `release-1001-pack.img`, LOD1** ("Exp 1001"), the pack
+  checked by its SHA-256 `279e597891a0d8263a82d52898dbc2194e7c0f19cbca194d8aaf5750226b7298`
+  before use (LOD1's blocks, 65569 to 114987, `29aefb7e...`), with MCR1
+  loaded with microcode 1000 from the step above, "UCADR 1000". The build
+  runs on muir-sim's `cadr`, micro engine, and the served `SYS: UBIN;` holds
+  microcode 1000's `ucadr.tbl`.
+- **ozd `d2908d9` or later** (`--file-dates`), named in the build record
+  with muir-sim's commit.
+
+**Do not give the builder 1002's site, `TZDATA`, `TIME` or `OPEN`.** Its site
+stays System 1001's (`:MIT`, zone `-1`, the name the QFASLs record, as 1002's
+is), so skip "Give the build band the new site first". System 1001's site
+initialization cannot take 1002's zone name, and 1002's `TIME` or `OPEN` in
+the builder would change how it reads and prints the dates of stages 1-4.
+The build only compiles 1002's files; it never loads them.
+
+**Stages 1-4 on the builder, ozd at `--file-dates mit --timezone -1`**, the
+builder's own site zone, so that it reads every file's date exactly:
+readtables, site and SYSTEM compiled with `:recompile` (a clean build, not
+`:compile` over an older tree), WORMCH, the COLD system and `MAKE-COLD`:
+
+```lisp
+(login "LISPM" "OZ" t)
+(qc-file "SYS: SYS; SYSDCL LISP")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: SYS; SYSDCL QFASL"))
+;; SYSTEM's six ALLDEFS files by qc-file, in order (above)
+(make-system 'site :recompile :noload :noconfirm :nowarn)
+(qc-file-load "SYS: IO; RTC LISP")
+(si:rtc-file "SYS: IO; RDTBL LISP")
+(si:rtc-file "SYS: IO; CRDTBL LISP")
+;; WORMCH from its AST source (above)
+(make-system 'system :recompile :noload :noconfirm :nowarn :no-increment-patch)
+(or (numberp time:*timezone*) (ferror nil "The builder's time zone is no longer a number"))
+(load "SYS: COLD; COLDPK LISP")
+(qc-file "SYS: COLD; COLDUT LISP")
+(qc-file "SYS: COLD; COLDLD LISP")
+(make-system 'cold :noconfirm)
+(or (numberp time:*timezone*) (ferror nil "The builder's time zone is no longer a number"))
+;; MAKE-COLD into LOD3 with FQUERY answered (section 4)
+```
+
+The gate before `MAKE-COLD` stops the build if anything loaded 1002's time
+code into the builder: `*TIMEZONE*` a string is 1002's site on 1001's code.
+
+**Then stop the machine and ozd.** Make LOD3 current, and start ozd again
+with `--file-dates utc` (its default) and no `--timezone`.
+
+**Stages 5-7 and every check at `utc`**: the cold boot, QLD by COLDRUN
+(section 6), the save to LOD4 (section 7), and all the checks below and of
+Q12 §1.4.
+
+**The gates after QLD.** Each must hold; the first two read ozd's log from
+the cold boot on, the others run on the saved band with the build's tree
+served.
+
+1. **No second load of the cold load's files**: after the cold boot, ozd's
+   log shows no read of a file of `COLD-LOAD-FILE-LIST`
+   (`sys/sys/sysdcl.lisp:420`), nor of `IO; RDTBL` or `CRDTBL`. A read means
+   a recorded date differed from the server's, and QLD then also stops at
+   `**MORE**` on the cold-load stream.
+2. **QLD ran unattended**: COLDRUN reported `qld-complete` and then
+   `script-ends` (ozd's `--log-mini`).
+3. **Every loaded id is right**: no file's loaded id holds its date as text,
+   and every numeric one is the file's mtime plus 2208988800 (the ids are on
+   the generic pathnames' `:FILE-ID-PACKAGE-ALIST`, in
+   `FS:*PATHNAME-HASH-TABLE*`).
+4. **Nothing is new**: `(make-system 'system :print-only :noconfirm)` lists
+   nothing.
+5. **The date check** of Q12 §1.11 (`docs/release-1002.md`, Time zones).
+
+**The one hole, and its remedy.** Stages 1-4 read dates at zone `-1` with
+MIT's summer time, and that rule's encoding has one repeated hour a year in
+which a printed local time means two instants: for a file whose mtime is in
+2026-10-26T23:00Z to 24:00Z the builder reads the date an hour early, and
+QLD loads the cold load's files again and stops at `**MORE**`, so gate 1
+fails. Measured with every QFASL dated 23:30Z: the cold load recorded
+`10/26/26 22:30:00`; with every QFASL dated 22:00Z, an hour before, the
+build passed. So before `MAKE-COLD`, look for such QFASLs,
+
+```
+find <tree> -name '*.qfasl' -newermt '2026-10-26 23:00Z' ! -newermt '2026-10-27 00:00Z'
+```
+
+and, if there are any, date them to the present (`touch`) once that hour has
+passed.
+
+**From System 1003 on** the builder is a 1002 band, which reads FILE dates in
+UTC, and the whole build runs with ozd at `utc`: there are no two halves, no
+`--timezone`, and no hole.
 
 ## The stages
 

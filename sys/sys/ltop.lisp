@@ -925,6 +925,12 @@ Used only if you are not generating a new Lisp machine system version."
                        (PROMPT-AND-READ :READ "List of names of additional systems to load:~%")
                      ADDITIONAL-SYSTEMS))
       (APPLY #'MAKE-SYSTEM SYSTEM LOAD-KEYWORDS)))
+  ;; the dates recorded as text while there was no time parser were made numbers
+  ;; when TIMPAR came in, by its initialization, which runs before TIMPAR's own
+  ;; loaded id is set: that one stayed text, never equal to the file's date, and
+  ;; MAKE-SYSTEM took SYS: IO1; TIMPAR for a new file ever after (:print-only
+  ;; listed it).  make it a number too.
+  (fs:canonicalize-cold-loaded-times)
 ; ;; Compactify property lists in the hopes of speeding up compilation
 ; (SETQ AREA-FOR-PROPERTY-LISTS PROPERTY-LIST-AREA)
   (MAPATOMS-ALL #'(LAMBDA (X) (SETF (PLIST X) (COPYLIST (PLIST X) PROPERTY-LIST-AREA))))

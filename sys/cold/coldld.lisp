@@ -111,14 +111,33 @@
 			   file-property-list
 			   (vread (+ cold-loaded-file-property-lists 1)))))
 
+;;; a file's date as the FILE server sends it, UTC as MM/DD/YY HH:MM:SS, less the
+;;; month's leading zero: the text QFILE records for a date while the cold load has
+;;; no time parser (network/chaos/qfile.lisp:495-500).  QLD's MAKE-SYSTEM compares
+;;; the date recorded here with that text to tell whether a cold-loaded file is
+;;; newer than the one loaded, and TIMPAR parses both later
+;;; (fs:canonicalize-cold-loaded-times).
+(defun cold-file-date-string (ut)
+  (multiple-value-bind (sec min hour day month year)
+      (time:decode-universal-time ut 0)
+    (format nil "~D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
+	    month day (\ year 100.) hour min sec)))
+
 ;This remembers where the file that we are building comes from
 (defun set-file-loaded-id (stream &aux qid)
   (setq qid  (vlist* 'sym::property-list-area
 		     (store-string 'sym::p-n-string
 				   (string (send stream ':truename)))
+		     ;; the date as the FILE server sends it (cold-file-date-string), not
+		     ;; the builder's local time.  FILE dates on the wire are UTC, so the
+		     ;; builder's local time differed from the server's text by its zone's
+		     ;; offset: QLD's MAKE-SYSTEM took every cold-loaded file for a new one
+		     ;; and loaded it again, and stopped at **MORE** on the cold-load stream.
 		     (store-string 'sym::p-n-string
-				   (time:print-universal-time (send stream ':creation-date)
-							      nil))))
+				   (cold-file-date-string (send stream ':creation-date)))))
+;		     (store-string 'sym::p-n-string
+;				   (time:print-universal-time (send stream ':creation-date)
+;							      nil))))
   ;; ((nil fileversionid "coldloaded"))
   (let ((id-prop (vlist 'sym::property-list-area
 			(vlist 'sym::property-list-area

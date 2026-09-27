@@ -462,6 +462,21 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 	(PUSH (CONS NAME TEM) PATHNAME-MAP-ALIST)
 	TEM))))
 
+;;; a date recorded before the time parser came in is the text the FILE server
+;;; sent, less the month's leading zero (network; chaos; qfile), and the cold
+;;; load records its files' dates so too (cold; coldld).  FILE dates on the wire
+;;; are UTC, and with its zero back the text is MM/DD/YY HH:MM:SS, which
+;;; PARSE-DIRECTORY-DATE-PROPERTY reads as UTC.  without it, a month before
+;;; october went to the full parser, which reads the site's local time: every
+;;; such file loaded before TIMPAR was recorded off by the site's offset from
+;;; greenwich, and MAKE-SYSTEM took it for a new one.
+(defun parse-cold-loaded-time (string)
+  (parse-directory-date-property
+    (if (and (> (string-length string) 1) (= (aref string 1) #//))
+	(string-append "0" string)
+      string)
+    0))
+
 ;;; Called when the time parser comes in, canonicalize times made before then
 (DEFUN CANONICALIZE-COLD-LOADED-TIMES ()
   (MAPHASH #'(LAMBDA (IGNORE VAL &AUX ALIST)
@@ -470,7 +485,8 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 		      (LET ((INFO (CADR ID)))
 			(AND (STRINGP (CDR INFO))
 			     (SETF (CDR INFO)
-				   (PARSE-DIRECTORY-DATE-PROPERTY (CDR INFO) 0)))))))
+				   (parse-cold-loaded-time (cdr info))))))))
+;				   (PARSE-DIRECTORY-DATE-PROPERTY (CDR INFO) 0)))))))
 	   *PATHNAME-HASH-TABLE*))
 
 

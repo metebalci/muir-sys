@@ -128,8 +128,8 @@
 		  ;; Before pathnames and time parsing is loaded, things are stored as strings.
 		  (SETQ MINI-FILE-ID (CONS (SUBSTRING MINI-PKT-STRING 0 CR)
 						;Discard zero at front of month, so the format
-						;matches that produced by PRINT-UNIVERSAL-TIME
-						;and by QFILE before TIMPAR is loaded.
+						;matches the dates cold; coldld records (not
+						;local time) and QFILE's before TIMPAR is loaded.
 					   (STRING-LEFT-TRIM
 					     #/0 (SUBSTRING MINI-PKT-STRING (1+ CR) LENGTH)))))
 		(MINI-SEND-STS)			;Acknowledge packet just received

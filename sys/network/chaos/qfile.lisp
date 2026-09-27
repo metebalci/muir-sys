@@ -495,7 +495,7 @@ he said /"log in/".  UNAME-HOST should be the host that the user actually logged
       (:LENGTH (PUSH (IF (NOT (FBOUNDP 'TIME:PARSE-UNIVERSAL-TIME))
 			 ;; When bootstrapping, dates are recorded as strings.
 			 ;; Discard zero at front of month, so the format
-			 ;; matches that produced by PRINT-UNIVERSAL-TIME.
+			 ;; matches the dates cold; coldld records (not local time).
 			 (STRING-LEFT-TRIM #/0 (SUBSTRING STRING DATE-START I))
 		       (FS:PARSE-DIRECTORY-DATE-PROPERTY STRING DATE-START I))
 		     PROPERTY-LIST)
