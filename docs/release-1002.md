@@ -199,6 +199,19 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   reproduced on the CADR. With the file compiled and loaded over the running
   network code on the 1001 band, the predicates are defined and a file
   probe over Chaos still answers.
+- **`SI:LOAD-MCR-FILE` writes a partial last block.** It copied a `.mcr`
+  file into a microcode partition a block at a time and, at the end of the
+  file, returned without writing the block it had started, so a file that is
+  not whole blocks lost its end without a word. That block is now written,
+  filled with zeros (`io/disk.lisp:1413`). The micro-assembler's files end
+  on a whole block (`sys/qwmcr.lisp:111` pads to a block before the symbol
+  area, which is four pages), and every `.mcr` measured here does, so this
+  system's own files never met it. On the 1001 band a file of 514 halfwords
+  loaded its first block and left the second zero; with the change the
+  second holds the last word, swapped as the first block's are, and zeros.
+  MIT's; taken from `main` (`b729b53`, only this part of its
+  `LOAD-MCR-FILE` change: the rest reads QUUX's partition order).
+
 
 ## The site
 

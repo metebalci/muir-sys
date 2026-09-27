@@ -1410,6 +1410,14 @@ or /"CC/" which refers to the machine being debugged by this one."
 		(SETQ LH (SEND FILE :TYI)
 		      RH (SEND FILE :TYI))
 		(WHEN (OR (NULL LH) (NULL RH))
+		  ;; a partial last block is written too, zero-filled.  this dropped
+		  ;; it, so a file that is not whole blocks lost its end without a
+		  ;; word.  the micro-assembler's files end on a whole block (sys;
+		  ;; qwmcr pads to a block before the symbol area, which is
+		  ;; micro-code-symbol-area-size, four pages), so its own never met it.
+		  (unless (zerop i)
+		    (array-initialize buf16 0 i #o1000)
+		    (disk-write rqb unit block))
 		  (UPDATE-PARTITION-COMMENT
 		    PART
 		    (LET ((PATHNAME (SEND FILE :TRUENAME)))
