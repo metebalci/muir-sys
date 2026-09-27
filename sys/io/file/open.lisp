@@ -1336,7 +1336,8 @@ The stream's operations are :ENTRY, to return the next element, and :CLOSE."
 	:LENGTH-IN-BYTES :DEFAULT-GENERATION-RETENTION-COUNT))
     ((PARSE-DIRECTORY-DATE-PROPERTY PRINT-DIRECTORY-DATE-PROPERTY :DATE)
      . (:CREATION-DATE :MODIFICATION-DATE))
-    ((PARSE-DIRECTORY-DATE-PROPERTY TV:PRINT-UNIVERSAL-TIME-OR-NEVER :DATE-OR-NEVER)
+    ;; printed with PRINT-DIRECTORY-DATE-OR-NEVER-PROPERTY, in UTC: see there.
+    ((parse-directory-date-property print-directory-date-or-never-property :date-or-never)
      . ( :REFERENCE-DATE :INCREMENTAL-DUMP-DATE :COMPLETE-DUMP-DATE :DATE-LAST-EXPUNGED
 	 :EXPIRATION-DATE))
     ((PARSE-SETTABLE-PROPERTIES PRINT-SETTABLE-PROPERTIES)
@@ -1421,24 +1422,33 @@ where alist's elements look like (propstring propsymbol parser printer cvv-type)
     (PRIN1 SEXP STREAM)))
 
 ;;; Fast date parser for simple case of MM/DD/YY HH:MM:SS
-(DEFUN PARSE-DIRECTORY-DATE-PROPERTY (STRING START &OPTIONAL END &AUX FLAG)
+;;; and of MM/DD/YYYY HH:MM:SS, as PRINT-DIRECTORY-DATE-PROPERTY prints it.
+(defun parse-directory-date-property (string start &optional end &aux flag (wide 0))
   (OR END (SETQ END (ARRAY-ACTIVE-LENGTH STRING)))
-  (IF (AND (OR (= END (+ START 8))
-	       (SETQ FLAG (= END (+ START 17.))))
+  ;; the year in four digits, MM/DD/YYYY or MM/DD/YYYY HH:MM:SS: WIDE is its two
+  ;; more characters.  PRINT-DIRECTORY-DATE-PROPERTY writes the year so, and it
+  ;; went to the full parser below, which reads the site's local time: a date
+  ;; this machine printed as UTC was read back moved by the site's offset.
+  (and (or (= end (+ start 10.)) (= end (+ start 19.)))
+       (setq wide 2))
+  (if (and (or (= end (+ start 8 wide))
+	       (setq flag (= end (+ start 17. wide))))
 	   (= (CHAR STRING (+ START 2)) #//)
 	   (= (CHAR STRING (+ START 5)) #//)
 	   (OR (NULL FLAG)
-	       (AND (= (CHAR STRING (+ START 8)) #/SPACE)
-		    (= (CHAR STRING (+ START 11.)) #/:)
-		    (= (CHAR STRING (+ START 14.)) #/:))))
+	       (and (= (char string (+ start 8 wide)) #/space)
+		    (= (char string (+ start 11. wide)) #/:)
+		    (= (char string (+ start 14. wide)) #/:))))
       (LET (DAY MONTH YEAR HOURS MINUTES SECONDS)
 	(SETQ MONTH (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING START)
 	      DAY (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING (+ START 3))
 	      YEAR (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING (+ START 6)))
+	(and (= wide 2)
+	     (setq year (+ (* year 100.) (parse-directory-date-property-1 string (+ start 8)))))
 	(IF FLAG
-	    (SETQ HOURS (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING (+ START 9))
-		  MINUTES (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING (+ START 12.))
-		  SECONDS (PARSE-DIRECTORY-DATE-PROPERTY-1 STRING (+ START 15.)))
+	    (setq hours (parse-directory-date-property-1 string (+ start 9 wide))
+		  minutes (parse-directory-date-property-1 string (+ start 12. wide))
+		  seconds (parse-directory-date-property-1 string (+ start 15. wide)))
 	    (SETQ HOURS 0 MINUTES 0 SECONDS 0))
 	;; The file job is wont to give dates of the form 00/00/00 for things made by
 	;; DSKDMP, e.g..  Avoid errors later.
@@ -1449,7 +1459,10 @@ where alist's elements look like (propstring propsymbol parser printer cvv-type)
 	(and (plusp month) (<= month 12.) (plusp day) (<= day 31.)
 	     (>= hours 0) (<= hours 23.) (>= minutes 0) (<= minutes 59.)
 	     (>= seconds 0) (<= seconds 59.)
-	     (time:encode-universal-time seconds minutes hours day month year)))
+	     ;; FILE dates on the wire are UTC, so the date is encoded at zone 0,
+	     ;; which also takes no daylight savings time.  read at the site's
+	     ;; zone, a file's date moved by the machine's offset from the server's.
+	     (time:encode-universal-time seconds minutes hours day month year 0)))
     ;;Not in simple format, escape to full parser
     (CONDITION-CASE ()
 	(TIME:PARSE-UNIVERSAL-TIME STRING START END)
@@ -1462,9 +1475,24 @@ where alist's elements look like (propstring propsymbol parser printer cvv-type)
 ;;; Printer which always prints MM/DD/YY HH:MM:SS
 (DEFUN PRINT-DIRECTORY-DATE-PROPERTY (UT STREAM)
   (MULTIPLE-VALUE-BIND (SEC MIN HR DAY MON YR)
-      (TIME:DECODE-UNIVERSAL-TIME UT)
+      ;; FILE dates on the wire are UTC: decoded at zone 0, with no daylight
+      ;; savings time, as PARSE-DIRECTORY-DATE-PROPERTY reads them.
+      (time:decode-universal-time ut 0)
     (FORMAT STREAM "~2,'0D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
 	    MON DAY YR HR MIN SEC)))
+
+;;; the printer of the :DATE-OR-NEVER properties in *KNOWN-DIRECTORY-PROPERTIES*,
+;;; which goes only on the wire: this system's CHANGE-PROPERTIES (qfile.lisp)
+;;; and its FILE server's directory listings.  FILE dates on the wire are UTC,
+;;; so it prints the date as PRINT-DIRECTORY-DATE-PROPERTY does, and "never"
+;;; for none.  TV:PRINT-UNIVERSAL-TIME-OR-NEVER, the printer before, gave the
+;;; site's local time with a one-digit month before october: a server reading
+;;; UTC set a date moved by the site's offset.  choose-variable-values keeps
+;;; TV:PRINT-UNIVERSAL-TIME-OR-NEVER for showing such a date.
+(defun print-directory-date-or-never-property (ut stream)
+  (if (null ut)
+      (princ "never" stream)
+    (print-directory-date-property ut stream)))
 
 (DEFUN PARSE-DIRECTORY-BOOLEAN-PROPERTY (STRING START)
   (LET ((TEM (READ-FROM-STRING STRING NIL START)))

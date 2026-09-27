@@ -39,6 +39,20 @@ Note that changing this may not take affect in existing servers.")
 
 (defun cv-time (x) (time:print-universal-time x nil nil ':mm//dd//yy))
 
+;; the date of a file in the OPEN and CLOSE replies.  FILE dates on the wire
+;; are UTC, so it is decoded at zone 0, with no daylight savings time, and
+;; printed MM/DD/YY HH:MM:SS with every field in two digits, the form that
+;; FS:PARSE-DIRECTORY-DATE-PROPERTY reads as UTC.  the replies printed the
+;; site's local time with CV-TIME, whose month has one digit before october,
+;; which the client's full parser then read as local time: a client at another
+;; zone, or one reading UTC, saw the date moved.  CV-TIME stays local, for the
+;; lossage log, which is read on this machine.
+(defun cv-wire-time (x)
+  (multiple-value-bind (sec min hr day mon yr)
+      (time:decode-universal-time x 0)
+    (format nil "~2,'0D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
+	    mon day (\ yr 100.) hr min sec)))
+
 (defun trace-server (&optional (onoff t))
   (setq trace-server-enabled onoff))
 
@@ -316,15 +330,14 @@ Note that changing this may not take affect in existing servers.")
 			   (format nil
 				   "~D ~A ~D ~S~%~A~%"
 				   (send (send opening ':truename) ':version)
-				   (cv-time (send opening ':creation-date))
+				   (cv-wire-time (send opening ':creation-date))	;utc
 				   (send opening ':length)
 				   (send opening ':send-if-handles ':qfaslp)
 				   (server-print-pathname (send opening ':truename))))
 			  (1
 			   (format nil
 				   "~A ~D ~S ~S~%~A~%"
-				   (time:print-universal-time
-				     (send opening ':creation-date) nil nil ':mm//dd//yy)
+				   (cv-wire-time (send opening ':creation-date))	;utc
 				   (send opening ':length)
 				   binp		;qfaslp, needed for compatibility
 				   (not binp)
@@ -456,8 +469,7 @@ Note that changing this may not take affect in existing servers.")
 		  (format conn-stream "~A ~A OPEN " tid (or fh ""))
 		  (format conn-stream
 			  "~A ~D ~S ~S ~S ~S~%~A~%"
-			  (time:print-universal-time
-			    (send opening ':creation-date) nil nil ':mm//dd//yy)
+			  (cv-wire-time (send opening ':creation-date))	;utc
 			  (send opening ':length)
 			  (send opening ':send-if-handles ':qfaslp)
 			  (send opening ':characters)
@@ -770,14 +782,15 @@ Note that changing this may not take affect in existing servers.")
 			   (format conn-stream "~A ~A CLOSE ~D ~A ~D~%~A~%"
 				   tid fh
 				   (send (send opening ':truename) ':version)
-				   (time:print-universal-time
-				     (send opening ':creation-date) nil nil ':mm//mm//yy)
+				   ;; utc.  the mode was :mm//mm//yy, which has no
+				   ;; date-format, so this reply signalled an error.
+				   (cv-wire-time (send opening ':creation-date))
 				   (send opening ':length)
 				   (send opening ':truename)))
 			  (1
 			   (format conn-stream "~A ~A CLOSE ~A ~D~%~A~%"
 				   tid fh
-				   (cv-time (send opening ':creation-date))
+				   (cv-wire-time (send opening ':creation-date))	;utc
 				   (send opening ':length)
 				   (send opening ':truename))))))
 		 (send conn-stream ':force-output)
@@ -922,7 +935,15 @@ Note that changing this may not take affect in existing servers.")
 	(or (dolist (spec fs:*known-directory-properties*)
 	      (if (memq ind (cdr spec))
 		  (progn
-		    (funcall (or (cadar spec) #'princ) prop conn-stream)
+		    ;; FILE dates on the wire are UTC: a :date-or-never property
+		    ;; (:reference-date and the rest) is printed as the open and
+		    ;; close replies print a date, or "never".  its printer there
+		    ;; gave local time with a one-digit month before october, so a
+		    ;; client read january to september at its own zone and october
+		    ;; to december as UTC, moved by this site's offset.
+		    (if (eq (caddar spec) ':date-or-never)
+			(princ (if prop (cv-wire-time prop) "never") conn-stream)
+		      (funcall (or (cadar spec) #'princ) prop conn-stream))
 		    (return t))))
 	    (princ prop conn-stream)))
     (format conn-stream "~%")))

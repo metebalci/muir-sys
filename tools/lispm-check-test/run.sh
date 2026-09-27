@@ -20,7 +20,10 @@
 #           served by quux's file device
 # Each band's ubin/ is the one beside it, as the tool's default.  Arguments are
 # passed on to every run after the mode's own (--quux and so on), so a --band
-# given here overrides both: give it with a single mode.
+# given here overrides both: give it with a single mode.  A band of Systems 100
+# to 1001 wants its FILE dates at its site's zone: pass --ozd-file-dates mit
+# --ozd-timezone <zone> (-1 for System 1001's release band); no case here reads
+# a date, but a check on such a band should serve it as it reads.
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
 tree=$(dirname "$(dirname "$here")")

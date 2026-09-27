@@ -683,6 +683,82 @@ a comment in that file saying why.
   wrong type"), measured on the dev11 band. A build on such a band loads
   the new `SYS: IO1; TZDATA` and `TIME` before the new site file, and
   `TZDATA` loads before `TIME` in the `TIME` system (`sys/sysdcl.lisp`).
+- **FILE dates on the wire are UTC** (Mete, 2026-09-27), as on the CADR's
+  System 1002; the machine still shows dates in its own local time. QUUX
+  takes its system through the file device, whose dates are binary Unix
+  seconds, so this is only for FILE over Chaosnet (`OZ:` and other hosts).
+  `PARSE-DIRECTORY-DATE-PROPERTY` encodes its `MM/DD/YY HH:MM:SS` at zone 0
+  (`io/file/open.lisp:1465`) and `PRINT-DIRECTORY-DATE-PROPERTY` decodes at
+  zone 0 (`io/file/open.lisp:1480`), which also takes no daylight savings
+  time. Every FILE date the client reads or sends goes through these two:
+  the OPEN and CLOSE replies (`network/chaos/qfile.lisp:500`), directory
+  listings and file properties (`READ-DIRECTORY-STREAM-ENTRY`,
+  `io/file/open.lisp:1372`), CHANGE-PROPERTIES
+  (`network/chaos/qfile.lisp:680-691`) and dates the cold load keeps as text
+  (`io/file/pathst.lisp:473`). A date in any other form still goes to
+  `TIME:PARSE-UNIVERSAL-TIME` at local time (`io/file/open.lisp:1468`).
+- **The "date or never" properties go on the wire in UTC too**
+  (`:REFERENCE-DATE` and the rest): their printer in
+  `*KNOWN-DIRECTORY-PROPERTIES*` is now `PRINT-DIRECTORY-DATE-OR-NEVER-PROPERTY`
+  (`io/file/open.lisp:1340`, `:1492`), "never" or the date as
+  `PRINT-DIRECTORY-DATE-PROPERTY` prints it. That printer is used only on
+  the wire, by CHANGE-PROPERTIES (`network/chaos/qfile.lisp:686`) and the
+  band's own FILE server; `TV:PRINT-UNIVERSAL-TIME-OR-NEVER`, which printed
+  local time, stays the choose-variable-values printer for showing such a
+  date (`window/choice.lisp:1066`), so the local display is unchanged. The
+  table is a `DEFVAR`: a band built from a new cold load has the new entry,
+  but loading the file into a running band keeps the old one.
+- **The fast parser also reads a four-digit year**, `MM/DD/YYYY HH:MM:SS` and
+  `MM/DD/YYYY` (`io/file/open.lisp:1426`). `PRINT-DIRECTORY-DATE-PROPERTY`
+  has always printed the year in full (MIT's `DECODE-UNIVERSAL-TIME` returns
+  it so), which went to the full parser at local time: with the printer at
+  UTC, a date this system printed read back moved by the site's offset. The
+  band's own FILE server reads CHANGE-PROPERTIES dates with it
+  (`file/server.lisp:990`).
+- **The band's own FILE server sends UTC.** Its OPEN and CLOSE replies print
+  the date with `CV-WIRE-TIME` (`file/server.lisp:50`): zone 0, and
+  `MM/DD/YY HH:MM:SS` with a two-digit month, the form the fast parser takes;
+  `:MM/DD/YY` printed the month in one digit before October, which a client
+  read with the full parser at local time (`file/server.lisp:333`, `:340`,
+  `:472`, `:787`, `:793`). The protocol-0 CLOSE reply named the date mode
+  `:MM/MM/YY`, which has no date format and signals an error (MIT's). Its
+  directory listings print creation and modification dates with
+  `PRINT-DIRECTORY-DATE-PROPERTY`, so they are UTC too, and the "date or
+  never" properties as the replies print a date, or "never"
+  (`file/server.lisp:944-946`): with `TV:PRINT-UNIVERSAL-TIME-OR-NEVER` a date
+  from January to September went to the client's full parser at local time
+  and one from October to December to its fast parser as UTC, moved by the
+  site's offset (measured at Europe/Berlin: 24 October 2026 23:30 GMT read
+  back 7200 s late). `CV-TIME` stays local, for the server's lossage log.
+- **A FILE server that sends its local time** (ozd's `--file-dates mit`, the
+  own servers of Systems 100 to 1001) has its dates read as UTC, off by its
+  zone's offset; ozd's default, `--file-dates utc`, agrees with this system.
+- Checked on the System 2000 development band (microcode 2000, muir
+  1a89ed0's `quux`) with `IO; FILE; OPEN` compiled and loaded, at
+  Europe/Berlin and at a fixed `-1`: `"07/15/26 12:00:00"` parses to
+  3993105600 (12:00 GMT) where the band gave 3993098400 (Berlin) and
+  3993102000 (`-1`); 3993105600 prints `"07/15/2026 12:00:00"` where it
+  printed 14:00 and 13:00; January the same; a printed date parses back to
+  itself, the four-digit forms parse (they gave local time before), and
+  `00/00/0000` is no date; `TIME:PRINT-UNIVERSAL-TIME` still shows
+  `7/15/26 14:00:00` at Berlin and 13:00 at `-1`. With `FILE; SERVER`
+  compiled and loaded too, `CV-WIRE-TIME` prints `07/15/26 12:00:00` at
+  Berlin, `-1` and `5` alike, and five dates (summer, winter, both sides of
+  the October change, 2001) read back through the fast parser as themselves;
+  the old reply's form gave `7/15/26 14:00:00`.
+  The "date or never" properties, at Berlin and `-1`: the server's listing
+  line for 15 July and for 24 October 2026 (23:30 GMT, 01:30 in Berlin)
+  reads back through `READ-DIRECTORY-STREAM-ENTRY` as the same second, and
+  so does CHANGE-PROPERTIES's text through the server's parser, and "never"
+  as NIL; before, 24 October came back 7200 s late at Berlin and 3600 s at
+  `-1`, and each half put back fails those cases. The server itself was
+  not run: the band has neither it nor the local file system it serves.
+- **`tools/lispm-check` passes ozd's date flags on**: `--ozd-file-dates
+  mit|utc` and `--ozd-timezone N` become ozd's `--file-dates` and
+  `--timezone` (`docs/lispm-check.md`), so that a band of Systems 100 to 1001,
+  which reads FILE dates at its site's zone, is served them so. Measured on
+  the 1001 band: a file's date is exact with `mit` and `-1`, and 3600 s early
+  in January and 7200 s early in July with ozd's default, `utc`.
 
 ## Faults fixed
 
