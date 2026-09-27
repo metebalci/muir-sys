@@ -101,7 +101,7 @@ This is the system. Three projects provide the machine:
 | | |
 |---|---|
 | **muir** | the software simulator, of the CADR and of QUUX |
-| **muir-fpga** | the hardware simulator |
+| **muir-fpga** | the CADR and QUUX on FPGA boards |
 | **ozd** | the Chaosnet services daemon: files, time, host table, TELNET |
 
 ## Layout
