@@ -1854,7 +1854,7 @@ The microcode sets it at boot from MACHINE-ID."
 	    ;; not "words/line": / escapes the next character in this readtable
   "What the words of QUUX's feature page hold, from word 0 on.")
 
-;; from system 1002 the system runs only on quux, whose feature page this
+;; from system 2000 the system runs only on quux, whose feature page this
 ;; reads; lisp-reinitialize stops on anything else.
 (defun print-feature-page (&optional (stream *standard-output*))
   "Print QUUX's feature page: the machine's ID and the sizes of its memories."

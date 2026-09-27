@@ -15,8 +15,10 @@ The aim is to evolve the system, not to change it radically. It moves on in
 steps, each a release built from this repository. **Backward compatibility is
 not an aim.**
 
-**System 1001 is the last release for the CADR,** which stays on it with MIT's
-microcode 323. From System 1002 the system runs only on QUUX.
+**The CADR's line continues on the `cadr` branch,** from System 1001, with
+numbers in the 1000s: its next system is 1002. `main` is QUUX's line, whose
+numbers are the 2000s: from System 2000 the system on `main` runs only on
+QUUX.
 
 ## QUUX
 
@@ -29,7 +31,7 @@ functional source, gives the revision, and its **feature page**, one read-only
 page of I/O space, gives its sizes. The system reads both at boot rather than
 assuming them.
 
-What System 1002 uses so far:
+What System 2000 uses so far:
 
 | | QUUX | the CADR |
 |---|---|---|
@@ -39,18 +41,19 @@ What System 1002 uses so far:
 | the 60-cycle clock (revision 4) | the processor's own tick | the display's vertical interrupt |
 | display | MONO TV, a 1-bit frame buffer, 1920 by 1080 by default, sized from the feature page | 768 by 963, with a sync program |
 
-The microcode is **microcode 1000**, the first change to the microcode itself,
+The microcode is **microcode 2000**, the first change to the microcode itself,
 which stayed 323 while it was MIT's, and the machine boots it with **boot
-PROM 1000**. Both are for QUUX alone and stop on anything else, as a System
-1002 band does. [`docs/release-1002.md`](docs/release-1002.md) records each
+PROM 2000**: QUUX's numbers are the 2000s, the CADR's the 1000s. Both are for
+QUUX alone and stop on anything else, as a System 2000 band does.
+[`docs/release-2000.md`](docs/release-2000.md) records each
 change as it is made; [`docs/booting.md`](docs/booting.md) follows a machine
 from power-on to Lisp.
 
-## System 1002
+## System 2000
 
-System 1002 is in progress on `main` and not yet released: the first system for
+System 2000 is in progress on `main` and not yet released: the first system for
 QUUX, as above, with the herald naming the site and the machine, and fixes
-taken from the System 2000 line.
+taken from lmz-sys, bishop's line.
 
 ## System 1001
 
@@ -115,7 +118,7 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
-- [`docs/release-1002.md`](docs/release-1002.md) --- every change System 1002
+- [`docs/release-2000.md`](docs/release-2000.md) --- every change System 2000
   makes to System 1001, recorded as it is made.
 - [`docs/booting.md`](docs/booting.md) --- how a machine boots, from power-on
   through the boot PROM and the microcode to the first macroinstruction.

@@ -126,7 +126,7 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; LOCATIONS RELATIVE TO 400 IN CADR
   ;; locations 400-437 are miscellaneous Qs declared below
   ;; locations 440-477 are the reverse first level map on a CADR (microcode
-  ;; 323); on QUUX (microcode 1000) it is at 640-737, for its 64 entries, and
+  ;; 323); on QUUX (microcode 2000) it is at 640-737, for its 64 entries, and
   ;; 440-457 hold the swap-out CCWs that the CADR has at 700-717
   ;; locations 500-511 are the keyboard buffer header (buffer is 200-377)
   ;; locations 600-637 are the disk-error log

@@ -30,9 +30,9 @@ sources.
 | Size of the finished world | 20614 blocks |
 | Saved band | LOD5, "Exp 1000.0", boots and answers |
 
-## Building a System 1002 band on QUUX
+## Building a System 2000 band on QUUX
 
-System 1002 is built on QUUX alone: a 1002 band compiles the next one, on
+System 2000 is built on QUUX alone: a 2000 band compiles the next one, on
 one machine, with no CADR (the user, 2026-09-25, as the CADR will never get
 a file device). The route through the CADR, below, stays documented as the
 fallback until it is retired. The stages are the ones described under "The
@@ -41,7 +41,7 @@ stages"; what differs is where each one runs and how the disk is handled.
 **The disk** is a GPT (docs/booting.md), made on the host with `sgdisk`:
 MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
 
-1. **The builder goes in LOD2.** Copy the previous 1002 band (its current
+1. **The builder goes in LOD2.** Copy the previous 2000 band (its current
    LOD partition) into LOD2 and its microcode's `ucadr.mcr` into MCR1, and
    set attribute bit 48 on MCR1 and LOD2. Nothing writes LOD2 after this:
    the cold load goes to LOD3 and the finished world to LOD4, so a failed
@@ -70,7 +70,7 @@ MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
    `(si:disk-save "LOD4" t)`. The save closes the TELNET connection, at
    once or when ozd gives up on the host, up to three minutes later.
 6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
-   only, LOD4 named (`sgdisk -c 7:"LOD4 System 1002 ..."`), and LOD2, LOD3
+   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2000 ..."`), and LOD2, LOD3
    and PAGE zeroed before the disk is handed over.
 
 **Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
@@ -92,8 +92,9 @@ On the CADR with MIT's 323 the same compile took 8 min 5 s and the cold
 load 5 min 48 s. The cold loads of A, B and the CADR route are byte for
 byte the same. B's five compiled files differ from the CADR route's in 4
 bytes each: the header's time and system version (1001 on the CADR's 1001
-builder, 1002 here). A's differ further in the order of the header's
-attribute list and in the numbers of generated symbols (`#:PKT2` against
+builder, 1002 here, this system's number until it became 2000). A's
+differ further in the order of the header's attribute list and in the
+numbers of generated symbols (`#:PKT2` against
 `#:PKT3`, in `CHSNCP`), which two compiles in one band also show. UNFASL
 listings with table indexes and generated-symbol numbers normalised differ
 only in the time and the version. LOD2 was unchanged at the end of both
@@ -111,7 +112,7 @@ into the builder first, after `SYSDCL` and before `MAKE-SYSTEM`:
 - **A new misc instruction.** The compiler compiles a call to it as a misc
   instruction only if it knows the opcode; otherwise it compiles a
   function call. Name it and give its opcode, as `cold/defmic.lisp` does;
-  for 761, which 1002 bands already know:
+  for 761, which 2000 bands already know:
 
   ```lisp
   (globalize "%MICROSECOND-CLOCK-LDB")
@@ -413,8 +414,8 @@ whitespace, and a continuation line that begins with one is read as part of
 the token above it: the form acquires an argument nobody wrote, and the error
 surfaces far from the file. This binds `site/sys.translations` and
 `site/coldrun.lisp`; the sources QLD reads later are full of tabs and page
-marks and are fine. The System 2000 line met this in practice (lmz-sys
-`2e684c2`); it has not been reproduced here, where the site files have never
+marks and are fine. lmz-sys, bishop's line, met this in practice
+(`2e684c2`); it has not been reproduced here, where the site files have never
 contained a tab.
 
 **Choose the destination explicitly.** The verified unattended build used
@@ -429,7 +430,7 @@ overwrite question automatically without first checking its destination.
 
 ## 5. Boot the cold load
 
-On QUUX's GPT disk, see "Building a System 1002 band on QUUX", step 4. On a LABL pack:
+On QUUX's GPT disk, see "Building a System 2000 band on QUUX", step 4. On a LABL pack:
 
 Make the cold load's partition the current band, then boot. With the machine stopped, muir's `diskpack` does it. The same stop is the moment to make room for the finished world, since both are label edits:
 

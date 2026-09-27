@@ -1,18 +1,35 @@
-# System 1002
+# System 2000
 
 What the next release changes from System 1001. It is in progress: each
 change is recorded here as it is made. Every change to a source file carries
 a comment in that file saying why.
 
-- **The system number is 1002** (`patch/system.patch-directory`,
-  `patch/system-1002.patch-directory`), set on main as soon as System 1001
-  was released, so that no band built from main calls itself 1001.
+- **The system number is 2000** (`patch/system.patch-directory`,
+  `patch/system-2000.patch-directory`): QUUX's numbers are the 2000s and
+  the CADR's the 1000s, for the system, the microcode and the PROM (Mete,
+  2026-09-27). This system was 1002 from System 1001's release until then,
+  so that no band built from main called itself 1001; the CADR's next
+  system, on the `cadr` branch, is 1002.
+- **Microcode 2000 and boot PROM 2000**, which were 1000 until then. The
+  version is not in the sources but given to the assembler
+  (`ua:version-number` and the output's version for `UCADR`, the version
+  asked for `PROMH`), so no source changed for it.
+  Assembled from the same sources, microcode 2000's `ucadr.mcr` differs
+  from the Q11 microcode's (assembled as 1000) in one word, A memory 40,
+  `A-VERSION` (`ucadr/uc-parameters.lisp:587-589`), which the Lisp
+  variable `%MICROCODE-VERSION-NUMBER` is (`cold/qcom.lisp:975-977`);
+  `ucadr.tbl` and `ucadr.sym` differ only in the version they record, and
+  `ucadr.locs` not at all. PROM 2000's `promh.mcr` is PROM 1000's byte for
+  byte, as the PROM neither prints nor checks a version; its `promh.tbl`
+  and `promh.sym` differ only in the version. A band saved on microcode
+  1000 boots on 2000 and loads its error table ("[Loading error table for
+  microcode version 2000]"; band M4a, System 1002, on muir 1a89ed0).
 
 ## QUUX only
 
-- **System 1002 runs only on QUUX; System 1001 is the last release for the
-  CADR** (the user, 2026-09-23). The CADR stays on System 100 and 1001 with
-  MIT's microcode 323. The system assumes QUUX: `SI:MACHINE-PDL-BUFFER-LENGTH`
+- **System 2000 runs only on QUUX** (the user, 2026-09-23, when this
+  system was numbered 1002). The CADR's systems are the 1000s, on the `cadr`
+  branch from System 1001 (Mete, 2026-09-27). The system assumes QUUX: `SI:MACHINE-PDL-BUFFER-LENGTH`
   reads the feature page with no CADR case, and `SI:PRINT-FEATURE-PAGE` no
   longer answers for a CADR.
 - **A band stops on anything else.** `LISP-REINITIALIZE` (`sys/ltop.lisp`)
@@ -20,26 +37,28 @@ a comment in that file saying why.
   QUUX's, it prints why on the cold-load stream and halts, as the
   microcode's `MACHINE-NOT-QUUX-6` does for the microcode. Loaded into System
   1001's band, it passes on QUUX and halts on a CADR running 323.
-- **So a 1002 band is built on QUUX.** Compiling and making the cold load
+- **So a 2000 band is built on QUUX.** Compiling and making the cold load
   can still run on a 1001 band on the CADR; booting the cold load, QLD and
-  the save run on QUUX with microcode 1000.
+  the save run on QUUX with QUUX's microcode.
 - **The whole build now runs on QUUX** (the user, 2026-09-25): the previous
-  1002 band, in LOD2, compiles the changed files and makes the cold load in
+  2000 band, in LOD2, compiles the changed files and makes the cold load in
   LOD3, which it boots with `(si:disk-restore "LOD3")`, or, for a new
   microcode, by a cold boot with bit 48 moved to LOD3; QLD and the save
   follow as before. Two builds of the same tree, one from a CADR-built band
   and one from its result, made cold loads byte for byte the CADR route's,
   and compiled files that differ from its only in their headers' time,
   system version and order, and in generated symbol numbers
-  (docs/building.md, "Building a System 1002 band on QUUX"). The CADR route
+  (docs/building.md, "Building a System 2000 band on QUUX"). The CADR route
   stays as the fallback until it is retired.
 
 ## QUUX
 
-- **Microcode 1000 is QUUX's; the CADR keeps MIT's 323.** QUUX is the CADR
+- **Microcode 2000 is QUUX's; the CADR keeps MIT's 323.** QUUX is the CADR
   evolved, and muir and muir-fpga run it with `--machine quux`. This is the
   first change to the microcode itself, which stayed 323 while it was MIT's;
-  it takes 1000 as the system took 1000 after System 100.   Microcode 1000 needs QUUX hardware revision 4:
+  it takes 2000, as QUUX's numbers are the 2000s (it was 1000 until
+  2026-09-27, as the system took 1000 after System 100). Microcode 2000
+  needs QUUX hardware revision 4:
   - **A six-bit level-1 map entry** (revision 1), using a bit the CADR
     leaves spare, so the level-2 map has 64 blocks of 32 pages instead of
     32: 63 usable blocks map 504K words at once instead of 248K.
@@ -223,7 +242,7 @@ a comment in that file saying why.
     `docs/quux.md` holds the contract. `INITIAL-MAP-A`
     (`ucadr/uc-cold-disk.lisp`) reads it at boot and halts at
     `MACHINE-NOT-QUUX-6` on anything but QUUX from revision 6, so microcode
-    1000 never runs with a map, a PDL buffer, an instruction or a clock the
+    2000 never runs with a map, a PDL buffer, an instruction or a clock the
     hardware lacks. It then
     sets every level-1 entry to 77, zeroes block 77, and halts at
     `MAP-WIDTH-MISMATCH` if block 0's entry does not read back as 77.
@@ -235,12 +254,12 @@ a comment in that file saying why.
     entries. The swap-in CCWs stay at 740-757, and the single-page CCW at
     777.
   - `A-PROCESSOR-TYPE-CODE`, which the Lisp variable `SI:PROCESSOR-TYPE-CODE`
-    shows, is 4 under microcode 1000, the new constant `SI:QUUX-TYPE-CODE`
+    shows, is 4 under microcode 2000, the new constant `SI:QUUX-TYPE-CODE`
     (`window/cold.lisp`, exported from `cold/system.lisp`), after the Lambda's
     2 and the Explorer's 3; 323 gives the CADR's 1, `SI:CADR-TYPE-CODE`.
   - `cold/qcom.lisp`: `SIZE-OF-HARDWARE-LEVEL-2-MAP` is 4000, QUUX's, and
     the system communication area's layout comment gives both machines'.
-- **The boot PROM, version 1000,** serves both machines. MIT's PROM (version
+- **The boot PROM, version 2000,** serves both machines. MIT's PROM (version
   9) copied A memory out of the PDL buffer until the index wrapped to 0,
   which a wider index never does in time: A memory was overwritten and the
   loaded microcode never started. It copies exactly 2000 words now, clears
@@ -538,8 +557,8 @@ a comment in that file saying why.
   pass with it, and fail with the old PROM.
 - **The microcode resets the devices and runs the tick on the register
   page** (muir's contract Q11 and its Q9 reset amendment, QUUX revision 10;
-  microcode 1000 still, as it is unreleased). It needs revision 10:
-  `RESET-MACHINE` first checks `MACHINE-ID` for the signature and a revision
+  assembled as microcode 1000, then renumbered 2000 with the system). It
+  needs revision 10: `RESET-MACHINE` first checks `MACHINE-ID` for the signature and a revision
   of 10 or more and otherwise halts at `MACHINE-NOT-QUUX-10`, before it
   writes the register page (`ucadr/uc-cold-disk.lisp:5-17`, the halt at
   :166-170); below revision 10 words 104 and 110-115 are reserved, so it
@@ -803,9 +822,9 @@ a comment in that file saying why.
   buffer, control store, A memory and dispatch memory. On a CADR, which has no
   such page and times out if it is read, it says so instead.
 
-## Taken from the System 2000 line
+## Taken from lmz-sys
 
-What lmz-sys, the System 2000 line for bishop, fixed after the two lines
+What lmz-sys, bishop's line, fixed after the two lines
 parted that holds for this line too. Each was checked against this tree
 before it was taken.
 
@@ -826,7 +845,7 @@ before it was taken.
 - **`docs/booting.md`, how a machine boots**, from power-on through the
   PROM and the microcode to the first macroinstruction, carried over (lmz-sys
   `fecd0a5`) with every citation re-checked against this tree, and the
-  PROM's and microcode 1000's QUUX handling added.
+  PROM's and microcode 2000's QUUX handling added.
 
 Not taken: that line's reader and naming changes for Common Lisp (`#T`, the
 comparison names in ASCII), bishop's stack-frame operations, and its

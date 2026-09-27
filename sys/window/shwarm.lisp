@@ -1926,7 +1926,7 @@ SHEET's cursor is not used or moved."
 ;; every boot, after the locks are cleared and before anything is exposed,
 ;; they are moved to the size it gives now.  this follows mit's set-tv-speed,
 ;; which changed the height, and the lambda's set-screen-width, which changed
-;; the words per line; system 1002 deleted both.  it goes in three steps, so
+;; the words per line; system 2000 deleted both.  it goes in three steps, so
 ;; that no window ever draws past the array it draws in (a window erases its
 ;; margins as its size changes): the screens shrink to the smaller of the two
 ;; sizes at the old pitch, every array moves to the new pitch and buffer,

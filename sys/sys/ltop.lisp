@@ -126,7 +126,7 @@ Will be NIL by the time YOU get to look at it")
 	#o17000000)))
 
 ;; quux: the band's safeguard, as the microcode's machine-not-quux-6 halt is
-;; the microcode's: a band of system 1002 on a cadr runs mit's microcode 323,
+;; the microcode's: a band of system 2000 on a cadr runs mit's microcode 323,
 ;; whose type code is 1, and would go on with a pdl buffer, a map, a clock and
 ;; a feature page it does not have.  print why on the cold-load stream, which
 ;; needs nothing set up, and halt; the halt cannot be continued past.
@@ -149,7 +149,7 @@ Will be NIL by the time YOU get to look at it")
   "Resets various global constants and initializes the error system.
 COLD-BOOT is T if this is for a cold boot."
   (SETQ INHIBIT-SCHEDULING-FLAG T)		;In case called by the user
-  ;; quux: from system 1002 the system runs only on quux; system 1001 is the
+  ;; quux: from system 2000 the system runs only on quux; system 1001 is the
   ;; last for the cadr.  stop at once, and say why, rather than misbehave.
   (check-machine-is-quux)
 

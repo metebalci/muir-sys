@@ -263,7 +263,7 @@ unwinding it."
 ;; quux: a stack group's saved pdl phase is masked with this length, so it
 ;; must be the machine's pdl buffer's, 16k words from quux revision 2, not the
 ;; cadr's 1k.  quux's feature page gives it (word 3), read at every boot.
-;; from system 1002 the system runs only on quux (lisp-reinitialize stops on
+;; from system 2000 the system runs only on quux (lisp-reinitialize stops on
 ;; anything else), so there is no cadr case.
 (defun machine-pdl-buffer-length ()
   "Return the length of this machine's pdl buffer, in words."

@@ -4,7 +4,7 @@ This is the path from power-on to the first macroinstruction: the boot PROM
 loads microcode, the microcode loads a world, and the microcode enters one Lisp
 function. It follows the tree's own code, and each claim cites a file and line.
 
-It was carried over from the System 2000 line (lmz-sys `fecd0a5`) and every
+It was carried over from lmz-sys, bishop's line (`fecd0a5`), and every
 citation re-checked against this tree. Line numbers in `promh.text`,
 `uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `07c7648`, before
 QUUX's disk became block-disk; the labels named with them are still there,
@@ -23,7 +23,7 @@ building; `docs/building.md` covers that.
 
 The PROM is `sys/ucadr/promh.text`, assembled to `sys/ubin/promh.mcr`. It runs
 from I-memory location 0 and knows nothing about bands, Lisp or virtual memory.
-This tree's PROM is version 1000, MIT's version 9 changed so that one PROM
+This tree's PROM is version 2000, MIT's version 9 changed so that one PROM
 serves the CADR and QUUX (commit `f7740f4`).
 
 It first tests the hardware a bit at a time --- every bit of a word of zeros,
@@ -172,7 +172,7 @@ The microcode only reads the GPT; the host writes it with sgdisk.
 
 Resetting the machine drops into `INITIAL-MAP` (`:5-31`), on a cold boot at
 `DISK-RESTORE-1` and on either kind at `BEG0000` (`:339`, `:709`). Its first
-act, in microcode 1000, is to ask which machine it is on. `INITIAL-MAP-A`
+act, in microcode 2000, is to ask which machine it is on. `INITIAL-MAP-A`
 reads `MACHINE-ID`, functional source 16 (`sys/cadsym.lisp:338-344`): on QUUX
 its bits 31:16 are the signature 0x5155, and a CADR does not drive the source
 and reads all ones (`:31-45`).
