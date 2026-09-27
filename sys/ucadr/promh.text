@@ -400,6 +400,12 @@ PAGE-0-PARITY-FIX			;so the disk doesn't barf out when we save it
 			;Next instruction mustn't be ((VMA-START-WRITE) VMA).
 	((WRITE-MEMORY-DATA-START-WRITE) READ-MEMORY-DATA)
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
+	;; known fault, mit's, left unfixed for now (2026-09-27): the test is made
+	;; after the write, so the loop reads and writes one word past page 0,
+	;; virtual 400, the first word of page 1, which set-up-four-pages maps to
+	;; i/o space below the disk registers; nothing needs that access (muir
+	;; traced it on quux at xbus 17377400, where main now stops at 377).  a
+	;; cadr boots regardless.  the comment below is mit's.
 	(JUMP-LESS-THAN VMA A-400 PAGE-0-PARITY-FIX) ;This does one extra location, too bad.
 
 ;;; Now turn on parity checking
