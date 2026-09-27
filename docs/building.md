@@ -656,13 +656,29 @@ written into it after the checks:
 | Sums | `SHA256SUMS` | `SHA256SUMS` | `SHA256SUMS` |
 
 The sources are `git archive --prefix=<tag>/ <sha>` plus `sys/ubin/`
-assembled from that commit's `sys/ucadr/`, with no COLDRUN, gzipped with no
-name and no date (`gzip -9 -n`); the disk or pack is gzipped the same way.
-Every member of the tarball is owned by root, as `git archive` writes them:
-a member added from the build tree carries its owner's user name in its tar
-header, as `release-1001-sys.tar.gz`'s eleven `sys/ubin/` members do, and
-the scan refuses it. The PROM is QUUX's alone; the CADR's is MIT's and its
-files stay in `sys/ubin/`.
+assembled from that commit's `sys/ucadr/`, with no COLDRUN. Every member of
+the tarball is owned by root, uid and gid 0 and user and group name root, as
+`git archive` writes them: a member added from the build tree carries its
+owner's uid and user name in its tar header, as the eleven `sys/ubin/`
+members of `release-1000`'s and `release-1001`'s sources tarballs did until
+both were replaced on 27 Sep 2026 with the same files owned by root, and the
+scan refuses it. Add `sys/ubin/` with its owner set to root (a `filter` in
+Python's `tarfile.add`, or GNU tar's `--owner=root:0 --group=root:0`). The
+PROM is QUUX's alone; the CADR's is MIT's and its files stay in `sys/ubin/`.
+
+The sources and the disk or pack are gzipped one way, with no name and no
+date, by Python's `gzip` module at its default level, 9:
+
+```
+python3 -c 'import gzip, shutil, sys
+with open(sys.argv[1], "rb") as s, open(sys.argv[2], "wb") as o, \
+     gzip.GzipFile(filename="", mode="wb", fileobj=o, mtime=0) as g:
+    shutil.copyfileobj(s, g)' <file> <file>.gz
+```
+
+`release-1000`'s and `release-1001`'s assets were made this way. `gzip -9
+-n` writes other bytes from the same tar (1001's sources: 4,343,401 bytes
+where this gives 4,344,017), so a digest is reproduced only by this route.
 
 **1. Build and check by SHA**, then write and check the sums and scan
 everything that will be public:
@@ -671,7 +687,13 @@ everything that will be public:
 tools/release-sums <dir>                       # writes <dir>/SHA256SUMS
 tools/release-sums --check <dir>
 tools/release-scan <dir> <body> <msg>
+tar -tvzf <dir>/release-2000-sys.tar.gz | awk '$2 != "root/root"'
+tar --numeric-owner -tvzf <dir>/release-2000-sys.tar.gz | awk '$2 != "0/0"'
 ```
+
+The two `tar` lines print nothing: every member is root's by name and by
+number. The scan refuses any other owner too; the lines say it without
+reading the scan's output.
 
 `tools/release-sums` writes one line per asset in byte order of the names,
 the README included, plus one for the disk or pack uncompressed under its
@@ -738,6 +760,8 @@ gh release download release-2000 -R metebalci/muir-sys -D <dl>
 gh release view release-2000 -R metebalci/muir-sys --json assets > <api.json>
 tools/release-sums --check <dl> --api <api.json>
 tools/release-scan <dl>
+tar -tvzf <dl>/release-2000-sys.tar.gz | awk '$2 != "root/root"'
+tar --numeric-owner -tvzf <dl>/release-2000-sys.tar.gz | awk '$2 != "0/0"'
 tar -tzf <dl>/release-2000-sys.tar.gz | cut -d/ -f1 | sort -u
 gzip -dc <dl>/release-2000-disk.vhd.gz | tail -c 512 | head -c 8; echo
 ```
@@ -745,7 +769,8 @@ gzip -dc <dl>/release-2000-disk.vhd.gz | tail -c 512 | head -c 8; echo
 `--api` compares the digests GitHub computed for the uploaded assets with
 the files: the release's assets must be exactly the directory's, each with
 its file's SHA-256 (it fails, saying so, if the JSON gives no digest). The
-`tar` line prints the tag alone (`release-1NNN` for the CADR's,
+two owner lines print nothing, as in step 1, and the third `tar` line prints
+the tag alone (`release-1NNN` for the CADR's,
 `dev-system-for-quux` for the rolling release), and the last line
 `conectix`, a VHD; the disk converted to raw with `qemu-img convert -O raw`
 has `EFI PART` at byte 512. A CADR pack begins with `LABL` instead: `gzip

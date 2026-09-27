@@ -22,8 +22,14 @@ section 1.5, planted faults (a)-(d), and section 1.3):
   (a)          the same with a home directory planted in a Lisp file: fails
   (d)          the same with a new address added to sys/man/bug-mail.txt:
                fails, while MIT's addresses there pass by rule (2)
-  owner        the same with every member owned by this user, as
-               release-1001-sys.tar.gz's sys/ubin/ is: fails
+  owner        the same with every member owned by this user, as the
+               eleven sys/ubin/ members of release-1001-sys.tar.gz were until
+               it was replaced on 2026-09-27: fails, on the names and on
+               the owner
+  owner (1.3)  one member, LICENSE, owned by another user (uid 1234, ada),
+               by uid 1234 under root's names, or by uid 0 with empty names:
+               each fails with the one FAIL line of that member's owner,
+               since every member must be root's
   pack         PACK decompressed and gzipped again (gzip -9 -n): passes
   (c) band     the home directory written by dd into the band's partition
                (the current LOD), gzipped: fails
@@ -93,8 +99,10 @@ def gz(src, dst):
     subprocess.run(['gzip', '-9', '-n', '-c', src], stdout=open(dst, 'wb'), check=True)
 
 
-def tree_tarball(dst, edit=None, owner=None):
-    """The tree as it would be committed, as release-test/..., tar.gz."""
+def tree_tarball(dst, edit=None, owner=None, owners=None):
+    """The tree as it would be committed, as release-test/..., tar.gz.  owner
+    names this user as the owner of every member; owners maps a path to the
+    (uid, gid, uname, gname) of that one member."""
     names = subprocess.run(['git', '-C', TREE, 'ls-files', '-z', '-co', '--exclude-standard'],
                            capture_output=True, check=True).stdout.split(b'\0')
     buf = io.BytesIO()
@@ -110,6 +118,8 @@ def tree_tarball(dst, edit=None, owner=None):
             ti.size, ti.mode, ti.mtime = len(data), 0o644, 0
             ti.uname = ti.gname = owner or 'root'
             ti.uid = ti.gid = 0 if owner is None else os.getuid()
+            if owners and n in owners:
+                ti.uid, ti.gid, ti.uname, ti.gname = owners[n]
             t.addfile(ti, io.BytesIO(data))
     with gzip.GzipFile(dst, 'wb', mtime=0) as g:
         g.write(buf.getvalue())
@@ -199,10 +209,21 @@ def main():
          passes=[('pass (2)', bug)])
     tree_tarball(W('owner.tar.gz'), owner=getpass.getuser())
     code, out = run([SCAN, W('owner.tar.gz')])
-    ok = code == 1 and 'this user' in out and '(tar header)' in out
+    ok = code == 1 and 'this user' in out and '(tar header)' in out \
+        and 'a tar member not owned by root' in out
     results.append(('owner: members owned by this user', ok))
     print('%s  owner: members owned by this user (exit %d, %d FAIL lines)'
           % ('PASS' if ok else 'WRONG', code, out.count('\nFAIL') + out.startswith('FAIL')))
+
+    # Section 1.3: every member is root's.  One member owned otherwise, by a
+    # name that is not this user's, fails on its owner alone.
+    for label, own, text in (('another user', (1234, 1234, 'ada', 'ada'), 'uid 1234 gid 1234'),
+                             ('uid 1234 under root\'s names', (1234, 0, 'root', 'root'),
+                              'uid 1234 gid 0 uname root'),
+                             ('uid 0 with empty names', (0, 0, '', ''), 'uname (empty)')):
+        tree_tarball(W('o.tar.gz'), owners={'LICENSE': own})
+        case('owner (1.3): LICENSE owned by %s' % label, [SCAN, W('o.tar.gz')], 1,
+             fails=[('LICENSE (tar header)', 'a tar member not owned by root', text)])
 
     # The CADR pack, fault (c).
     with open(W('pack.img'), 'wb') as o:

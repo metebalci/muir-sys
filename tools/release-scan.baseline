@@ -1,11 +1,12 @@
 # The baseline of tools/release-scan (Q12 contract, section 1.5), written by
 # tools/release-scan --make-baseline from the scan of these files:
-#   507d1fe89e8a8890a42c4a8630ef5eddb058fbebebc4c66df7e33ea708a42269  release-1001-sys.tar.gz
+#   74c6ed96d5dcebf6f01a8b5ba1ebebb160ffe345bbcebbd059253b9ca4695be9  release-1001-sys.tar.gz
 #   7ddf071b28a6e8b14fe0501683458ee8ae640291751e2c306e35316ee15ba713  release-1001-pack.img.gz
 # 44 findings in all, 25 distinct: rule (1).  A finding of this machine's or
-# user's name is never written here (22 left out).  "seen PATTERN DIGEST": the
-# matched text's SHA-256; "mit-address FILE DIGEST": one of MIT's addresses in
-# that file, rule (2); 23 of them.  The scan prints each finding's text.
+# user's name, or of a tar member not owned by root, is never written here
+# (0 left out).  "seen PATTERN DIGEST": the matched text's SHA-256;
+# "mit-address FILE DIGEST": one of MIT's addresses in that file, rule (2);
+# 23 of them.  The scan prints each finding's text.
 seen email 014f4f4047864fbac9be63e1d3439755efdc238b4c799e00d354decb6a4436f8  # 1
 seen email 0a29edad08f168a74e863c0172b866e8f078e7ec17eff1a76518a382a059bbac  # 3
 seen email 0a9f3bdbbbc0d8872771088d59d1bcfbe0dc0b76a850de43edbccd0c8ec5af93  # 4
