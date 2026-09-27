@@ -289,3 +289,6 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
 - **`cold/export.lisp` says where the sync functions live**: `SETUP-CPT`,
   `START-SYNC`, `STOP-SYNC` and `FILL-SYNC` are all defined in
   `WINDOW; COLD` (`cold/export.lisp:156-169`). From lmz-sys (`189eeea`).
+- **Three places call lmz-sys "bishop's line"**, as these notes do, where
+  they gave it the number that is now QUUX's system's: `docs/booting.md:8`,
+  `docs/building.md:302` and the comment at `io/file/pathst.lisp:362`.

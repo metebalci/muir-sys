@@ -299,8 +299,8 @@ whitespace, and a continuation line that begins with one is read as part of
 the token above it: the form acquires an argument nobody wrote, and the error
 surfaces far from the file. This binds `site/sys.translations` and
 `site/coldrun.lisp`; the sources QLD reads later are full of tabs and page
-marks and are fine. The System 2000 line met this in practice (lmz-sys
-`2e684c2`); it has not been reproduced here, where the site files have never
+marks and are fine. lmz-sys, bishop's line, met this in practice
+(`2e684c2`); it has not been reproduced here, where the site files have never
 contained a tab.
 
 **Choose the destination explicitly.** The verified unattended build used

@@ -5,7 +5,7 @@ boot PROM loads microcode, the microcode loads a world, and the microcode
 enters one Lisp function. It follows the tree's own code, and each claim cites
 a file and line.
 
-It was carried over from the System 2000 line (lmz-sys `fecd0a5`), and every
+It was carried over from lmz-sys, bishop's line (`fecd0a5`), and every
 citation was checked again against this tree, whose boot PROM (version 9) and
 microcode (323) are MIT's. Nothing here is about compiling or building;
 `docs/building.md` covers that.

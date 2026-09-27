@@ -359,7 +359,7 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 			;; defined; a machine that had never heard of the host
 			;; its files were compiled on reached it at once.  the
 			;; translated pathname's own host is the physical one.
-			;; (found and fixed in lmz-sys 6d1da93, System 2000.)
+			;; (found and fixed in lmz-sys 6d1da93, bishop's line.)
 			(setf (car val)
 			      (or (get-pathname-host (car val) t)
 				  (send phys-pathname :host)))
