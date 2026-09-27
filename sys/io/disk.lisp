@@ -1272,9 +1272,12 @@ This is obsolete -- You probably want PRINT-HERALD"
     (SETQ CURRENT-LOADED-BAND %LOADED-BAND))
   (UNLESS (BOUNDP 'CURRENT-LOADED-BAND)
     (SETQ CURRENT-LOADED-BAND 0))
-  (FORMAT STREAM "~&~A System, band ~C of ~A."
-	  (IF (OR (NOT (VARIABLE-BOUNDP SITE-NAME)) (EQ SITE-NAME ':MIT))
-	      "MIT" "LMI")			;>> commercial lossage. fmh.
+  ;; the site's own name, whatever it is: mit's code printed "MIT" for the
+  ;; site :mit and "LMI" for every other, so a site with any other name was
+  ;; told it ran lmi's system.  with no site loaded (unbound or nil),
+  ;; "UNKNOWN".
+  (format stream "~&~A System, band ~C of ~A."
+	  (or (and (variable-boundp site-name) site-name) "UNKNOWN")
 	  (LDB #o2010 CURRENT-LOADED-BAND)
 	  DISK-PACK-NAME)
   (AND (BOUNDP 'SYSTEM-ADDITIONAL-INFO)
@@ -1286,8 +1289,12 @@ This is obsolete -- You probably want PRINT-HERALD"
 	    (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE) #o2000)
 	    (TRUNCATE VIRTUAL-MEMORY-SIZE #o2000))
     (DESCRIBE-SYSTEM-VERSIONS STREAM)
-    (FORMAT STREAM "~%~A ~A, with associated machine ~A.~%"
-	    (OR (GET-SITE-OPTION :SITE-PRETTY-NAME) SITE-NAME)
+    ;; the same guard as the first line: with no site, "UNKNOWN" rather
+    ;; than a trap on the unbound site-name.
+    (format stream "~%~A ~A, with associated machine ~A.~%"
+	    (or (and (variable-boundp site-name) site-name
+		     (or (get-site-option :site-pretty-name) site-name))
+		"UNKNOWN")
 	    LOCAL-PRETTY-HOST-NAME
 	    (SEND ASSOCIATED-MACHINE :NAME-AS-FILE-COMPUTER))))
 
