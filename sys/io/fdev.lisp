@@ -346,7 +346,9 @@ waiters get an error.  Returns T, or NIL and a message if ERROR-P is NIL."
 	(t (values (first spec) (second spec)))))
 
 ;; the device may have been taken from the driver since its reset: a boot
-;; disables it (the machine's reset), and MINI (cold/mini.lisp) gives it its
+;; disables it (reset devices, register page word 104, which the prom and
+;; the microcode's reset-machine write from quux revision 10, contract q11;
+;; the unibus reset below it), and MINI (cold/mini.lisp) gives it its
 ;; own rings whenever it is used and finds them not there.  so the driver
 ;; checks, before each command, that the device is enabled on its rings, and
 ;; resets it if not; whichever of the two is used next takes the device.

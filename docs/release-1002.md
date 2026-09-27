@@ -74,7 +74,9 @@ a comment in that file saying why.
     and the sequence-break counter the scheduler runs on --- was the display
     board's vertical interrupt; the next display has none. QUUX's processor
     has a tick of its own, which the assembler names `TICK-CONTROL`,
-    `TICK-PERIOD` and `TICK-STATUS` (`sys/cadsym.lisp`). Boot starts it,
+    `TICK-PERIOD` and `TICK-STATUS` (`sys/cadsym.lisp`; revision 5 renamed
+    `TICK-PERIOD` `INTERVAL-PERIOD`, and revision 10 retired it and
+    `TICK-STATUS`, below). Boot starts it,
     with its reset period of 16,667 microseconds, where the Unibus
     interrupts are enabled (`ucadr/uc-cold-disk.lisp`); `INTR` runs the
     60-cycle handler when its flag is up, and clears it
@@ -534,6 +536,59 @@ a comment in that file saying why.
   `INTR-TICK` runs 600 times in 10 s of simulated time after each on both
   revisions (with the old PROM on revision 10: 0); muir's M9, M10 and M11
   pass with it, and fail with the old PROM.
+- **The microcode resets the devices and runs the tick on the register
+  page** (muir's contract Q11 and its Q9 reset amendment, QUUX revision 10;
+  microcode 1000 still, as it is unreleased). It needs revision 10:
+  `RESET-MACHINE` first checks `MACHINE-ID` for the signature and a revision
+  of 10 or more and otherwise halts at `MACHINE-NOT-QUUX-10`, before it
+  writes the register page (`ucadr/uc-cold-disk.lisp:5-17`, the halt at
+  :166-170); below revision 10 words 104 and 110-115 are reserved, so it
+  would reset nothing and never start the tick. `INITIAL-MAP-A`'s own check
+  stays at 6 (:85-91). In place of the 10-microsecond pulse of
+  `INTERRUPT-CONTROL<28>` (commented out, :25-29), which drives nothing on
+  revision 10, `RESET-MACHINE` writes word 104 with `<0>` set, reset
+  devices (:30-32), so that a `%DISK-RESTORE`, which does not pass through
+  the PROM, still leaves no file device enabled to complete queued commands
+  into the new band's memory, and resets block-disk and the network as the
+  pulse did; it then reads word 161 until the file device is quiet (`<1>`),
+  for at most 2 seconds, the driver's own bound until muir-fpga measures the
+  boards', and halts at `FILE-DEVICE-NOT-QUIET` past it (:33-47, the halt at
+  :172-177); then it writes timer 0's period, 16,667 us, to word 111, since
+  reset devices zeroes it (:51-55). `BEG06` turns the tick on by a write of
+  401 to word 110 (on, periodic, its interrupt enable) through the map, and
+  `INTR-TICK` clears it with 403, in place of their destination 3 writes,
+  which revision 10 keeps only as an alias for older microcode
+  (`ucadr/uc-cold-disk.lisp:884-896`, `ucadr/uc-interrupt.lisp:368-377`).
+  `INTR` turns timer 1 or 2 off when word 100 `<1>` or `<7>` interrupts,
+  since nothing uses them and a level nothing clears would interrupt for
+  ever (`ucadr/uc-interrupt.lisp:75-82`, `INTR-TIMER-1-STRAY` and
+  `INTR-TIMER-2-STRAY` at :350-361). The register page's new words are
+  named in `ucadr/uc-cadr.lisp:65-82`. The assembler no longer names
+  `INTERVAL-PERIOD` and `TICK-STATUS`, codes revision 10 does not have;
+  `TICK-CONTROL` stays for the alias (`sys/cadsym.lisp:453-466`).
+  `SI:PRINT-FEATURE-PAGE` names words 15 and 16, the RTC and file device and
+  the number of interval timers, and word 14 the microsecond clock alone
+  (`sys/genric.lisp:1839-1853`). Named A, M and D memory is where it was, so
+  bands saved on the previous microcode 1000 run on this one with its
+  `UCADR TBL` served. Tested with band M4a (System 1002, Q9's step M4) on
+  muir 947926e (revision 10) and b777f19 (revision 9), micro and rtl, each
+  check also run against dev11's microcode or against this microcode with
+  the one step taken out: on revision 9 it halts at `MACHINE-NOT-QUUX-10`
+  with no write of words 104 or 110-115, with either PROM, and reaches
+  them with the check's jumps removed; on revision 10 `INTR-TICK` runs 600
+  times in 10 s of simulated time after the listener, with ten clock
+  sequence breaks, and the mouse moves, also with dev11's PROM, which
+  writes no period (dev11's microcode with that PROM: 0); it writes
+  destination 3 not at all where dev11's microcode wrote it 363 times; a
+  stray timer 1 or 2 costs one interrupt where dev11's microcode took
+  18,000 in 50 ms; a `%DISK-RESTORE` and a warm boot through the PROM with
+  the file device busy and timers 1 and 2 on reach the listener as fast as
+  without, `RESET-MACHINE` reads word 161 once, no queued command runs
+  after the reset, the driver finds the device disabled at its boot reset
+  and a warm boot keeps the canary, where the same microcode without its
+  word 104 write and wait (and dev11's PROM, for the warm boot) runs the
+  queued commands and leaves the device enabled; a cold load's QLD through
+  MINI reads the same 40 files, 1,508,936 bytes.
 
 ## Time zones
 

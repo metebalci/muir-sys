@@ -4,13 +4,55 @@
 
 RESET-MACHINE
 	((A-DISK-BUSY) M-ZERO)			;Forget pending disk operation
-	((INTERRUPT-CONTROL) DPB (M-CONSTANT -1)	;Reset the bus interface and I/O devs
-		(BYTE-FIELD 1 28.) A-ZERO)
-	((M-1) (A-CONSTANT 40))				;Generate RESET for 10 microseconds
-RST	(JUMP-NOT-EQUAL-XCT-NEXT M-1 A-ZERO RST)
-       ((M-1) SUB M-1 (A-CONSTANT 1))
+	;; quux revision 10 (contract q11): this microcode resets the devices and
+	;; starts the tick on the register page, whose words 104 and 110-115 are
+	;; reserved below revision 10: there it would reset no device and its tick
+	;; would never start.  so check machine-id first, before any of the writes
+	;; below, as initial-map-a does for revision 6 (which comes after them):
+	;; the signature 50525 (0x5155) in <31:16> and a revision of 10 or more in
+	;; <15:4>.  a cadr reads all ones.  otherwise halt at machine-not-quux-10.
+	((m-tem) (byte-field 20 20) machine-id)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-10)
+	((m-tem) (byte-field 14 4) machine-id)
+	(jump-less-than m-tem (a-constant 10.) machine-not-quux-10)
+	;; quux revision 10: interrupt-control <28>, the unibus reset, drives nothing
+	;; on quux, so its 10-microsecond pulse is gone; the register page's reset
+	;; devices takes its place (contract q11, and the q9 amendment for the file
+	;; device).  it is written at every microcode start, so that a
+	;; %disk-restore, which does not pass through the prom, also leaves no file
+	;; device enabled to complete queued commands into memory the new band
+	;; holds, and resets block-disk and the network as the pulse did.
+;	((INTERRUPT-CONTROL) DPB (M-CONSTANT -1)	;Reset the bus interface and I/O devs
+;		(BYTE-FIELD 1 28.) A-ZERO)
+;	((M-1) (A-CONSTANT 40))				;Generate RESET for 10 microseconds
+;RST	(JUMP-NOT-EQUAL-XCT-NEXT M-1 A-ZERO RST)
+;       ((M-1) SUB M-1 (A-CONSTANT 1))
+	((md) (a-constant 1))
+	(call-xct-next phys-mem-write)		;word 104 <0>: reset devices
+       ((vma) (a-constant quux-reset-devices-physical-address))
+	;; then wait for the file device to be quiet (word 161 <1>) before anything
+	;; loads memory: on the boards a copy the reset overtook may still write
+	;; memory until the program drops its claim.  on muir it is quiet at once,
+	;; one read.  the bound is 2 seconds, the driver's own (sys: io; fdev), until
+	;; muir-fpga measures the longest a disable keeps quiet low; past it, halt at
+	;; file-device-not-quiet rather than load a band under a copy in flight.
+	((m-1) microsecond-clock)
+reset-machine-quiet
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-file-device-status-physical-address))
+	(jump-if-bit-set (byte-field 1 1) md reset-machine-quiet-done)
+	((m-tem) microsecond-clock)
+	((m-tem) sub m-tem a-1)
+	(jump-less-than m-tem (a-constant 2000000.) reset-machine-quiet)
+	(jump file-device-not-quiet)
+reset-machine-quiet-done
 	((INTERRUPT-CONTROL) DPB (M-CONSTANT -1)	;Clear RESET, set halfword-mode,
 		(BYTE-FIELD 1 27.) A-ZERO)		;and enable interrupts
+	;; timer 0's period, 16,667 microseconds, 60 hz: reset devices set it to 0,
+	;; and the prom's write does not reach a %disk-restore.  beg06 turns it on.
+	((md) (a-constant 16667.))
+	(call-xct-next phys-mem-write)		;word 111: timer 0's period
+       ((vma) (a-constant quux-timer-0-period-physical-address))
 	((MD) SETZ)
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)			;Reset bus interface status.
        ((VMA) (A-CONSTANT QUUX-ERROR-STATUS-PHYSICAL-ADDRESS)) ;quux: word 101, not 766044
@@ -40,6 +82,9 @@ INITIAL-MAP-A	;Enter here with number of words to map in M-A
 	;; revision is in bits 15:4, cumulative, and the processor type in 3:0.
 	;; on anything else, halt at machine-not-quux-6 rather than run with a map
 	;; and a pdl buffer the hardware does not have.
+	;; from revision 10 (contract q11) reset-machine, which drops in here,
+	;; checks for revision 10 first; this check stays at 6, as its other caller,
+	;; disk-save, runs only in a machine that booted through reset-machine.
 	((m-tem) (byte-field 20 20) machine-id)
 	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-6)
 	((m-tem) (byte-field 14 4) machine-id)
@@ -116,6 +161,19 @@ map-width-mismatch
 ;; initial-map-a comes here when machine-id is not quux's from revision 6 on,
 ;; a cadr's all ones included.  the halt shows this location.
 machine-not-quux-6
+	(call illop)
+
+;; reset-machine comes here when machine-id is not quux's from revision 10 on
+;; (contract q11), a cadr's all ones included, before it writes the register
+;; page.  the halt shows this location.
+machine-not-quux-10
+	(call illop)
+
+;; reset-machine comes here when the file device is not quiet 2 seconds after
+;; reset devices: a copy still in flight would write memory the band is about
+;; to hold.  on a board, the file device's program holding its claim (busy)
+;; does this; its restart lets the claim go.  the halt shows this location.
+file-device-not-quiet
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
@@ -823,11 +881,19 @@ BEG06	(CALL-NOT-EQUAL MICRO-STACK-PNTR-AND-DATA 	;CLEAR THE MICRO STACK PNTR (TO
 	;; quux (contract q5): no unibus; each device's interrupt is enabled on the
 	;; register page (the keyboard's 120 <8>, the chaosnet's csr), and mit's
 	;; write of 6000 to unibus 766040, which enabled unibus interrupts, is gone.
-	;; quux: start the tick, the 60-cycle clock, with its reset period of
-	;; 16,667 microseconds, as the unibus interrupts are enabled: the clock
-	;; handler runs only once the machine is set up, as it did when the band
-	;; enabled the display's interrupt.
-	((tick-control) (a-constant 1))
+	;; quux: start the tick, the 60-cycle clock, as the unibus interrupts are
+	;; enabled: the clock handler runs only once the machine is set up, as it
+	;; did when the band enabled the display's interrupt.
+	;; quux revision 10 (contract q11): the tick is timer 0 on the register
+	;; page, which has no reset period: reset-machine wrote its 16,667
+	;; microseconds to word 111 after reset devices.  word 110 gets 401: on,
+	;; periodic (<2> clear, taken at the turn-on), and its interrupt enable
+	;; <8>.  destination 3, which q1's tick control was, is only an alias of
+	;; timer 0 at revision 10, for older microcode, and is no longer written.
+;	((tick-control) (a-constant 1))
+	((md) (a-constant 401))
+	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))
+	(check-page-write-no-interrupt)
 	(JUMP-XCT-NEXT QLENX)			;CALL INITIAL FUNCTION, NEVER RETURNS
        ((M-ERROR-SUBSTATUS) M-ZERO)
 

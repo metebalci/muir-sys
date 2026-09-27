@@ -55,12 +55,31 @@
 (ASSIGN BEEP-HARDWARE-VIRTUAL-ADDRESS 77772044)	   ;Unibus 764110
 
 ;; quux's register page (contract q2), the feature page's 17377000: word 100
-;; says who interrupted (<0> tick, <1> interval timer, <2> block-disk), a
+;; says who interrupted (<0> tick, <1> interval timer until revision 10, then
+;; timer 1, <2> block-disk), a
 ;; write to word 101, the error status, clears it, and bit 0 of word 102, the
 ;; mode, is error stop.  they replace unibus 766040, 766044 and 766012.
 (ASSIGN QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS 77377100)
 (ASSIGN QUUX-ERROR-STATUS-PHYSICAL-ADDRESS 17377101)
 (ASSIGN QUUX-MODE-PHYSICAL-ADDRESS 17377102)
+;; quux revision 10 (contract q11): word 100's <0> is timer 0, the tick, and
+;; <1> and <7> are timers 1 and 2, each under its interrupt enable; q1's
+;; interval timer is gone.  word 104 <0>, reset devices: a write of 1 resets
+;; every device (the timers, the file device, block-disk and the network) in
+;; place of the unibus reset, interrupt-control <28>, which drives nothing on
+;; quux from revision 10.  timer k's control and status is word 110+2k (<0>
+;; on, a write with <1> set clears its flag, <2> one-shot, taken at turn-on,
+;; <8> its interrupt enable) and its period in microseconds word 111+2k.
+;; word 161 is the file device's status, <1> quiet.  reset-machine reaches
+;; them physically, intr and beg06 through the map.
+(ASSIGN QUUX-RESET-DEVICES-PHYSICAL-ADDRESS 17377104)
+(ASSIGN QUUX-TIMER-0-CONTROL-VIRTUAL-ADDRESS 77377110)
+(ASSIGN QUUX-TIMER-0-PERIOD-PHYSICAL-ADDRESS 17377111)
+(ASSIGN QUUX-TIMER-1-CONTROL-VIRTUAL-ADDRESS 77377112)
+(ASSIGN QUUX-TIMER-1-PERIOD-PHYSICAL-ADDRESS 17377113)
+(ASSIGN QUUX-TIMER-2-CONTROL-VIRTUAL-ADDRESS 77377114)
+(ASSIGN QUUX-TIMER-2-PERIOD-PHYSICAL-ADDRESS 17377115)
+(ASSIGN QUUX-FILE-DEVICE-STATUS-PHYSICAL-ADDRESS 17377161)
 (ASSIGN INTERRUPT-STATUS-HARDWARE-VIRTUAL-ADDRESS 77773020)
 		;Unibus address 766040 (interrupt status)
 (ASSIGN CLEAR-INTERRUPT-HARDWARE-VIRTUAL-ADDRESS  77773021) ;Unibus address 766042

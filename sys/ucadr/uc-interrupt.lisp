@@ -72,6 +72,14 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
 	(jump-if-bit-set (byte-field 1 3) md intr-kbd)	;keyboard (contract q3)
 	(jump-if-bit-set (byte-field 1 5) md chaos-intr-quux)	;chaosnet (contract q4)
+	;; quux revision 10 (contract q11): word 100 <1> and <7> are timers 1 and 2,
+	;; which nothing in this system uses; a reset turns them off with their
+	;; interrupt enables.  one turned on with its interrupt enable by mistake
+	;; would interrupt again at once for ever, its level never cleared, so turn
+	;; it off (a write of 0: off, flag down, interrupt enable 0) and dismiss it:
+	;; a stray enable costs one interrupt, not a storm.
+	(jump-if-bit-set (byte-field 1 1) md intr-timer-1-stray)
+	(jump-if-bit-set (byte-field 1 7) md intr-timer-2-stray)
 	;; quux (contract q5): word 100 covers every source quux has, and any unibus
 	;; address is an nxm, so an interrupt it does not explain is dismissed
 	;; (after the disk's own check) rather than looked up in unibus 766040.
@@ -339,13 +347,33 @@ intr-kbd
 	(jump-xct-next intr-2)
        ((md) a-intr-tem1)
 
+;; quux revision 10 (contract q11): timer 1 or 2 interrupted, though no one
+;; uses them: turn it off, and dismiss the interrupt (see intr).
+intr-timer-1-stray
+	((md) setz)
+	((vma-start-write) (a-constant quux-timer-1-control-virtual-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+intr-timer-2-stray
+	((md) setz)
+	((vma-start-write) (a-constant quux-timer-2-control-virtual-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
 ;;; XBUS interrupts
 
 ;; quux: mono tv, the display, has no interrupt, and the tick is the clock,
 ;; so the cadr tv's vertical flag is no longer read or cleared here.
 INTRX0	(jump intrx1)
 intr-tick
-	((tick-control) (a-constant 3))		;quux: keep the tick on, clear its flag
+;	((tick-control) (a-constant 3))		;quux: keep the tick on, clear its flag
+	;; quux revision 10 (contract q11): the tick is timer 0, word 110 of the
+	;; register page; 403 keeps it on with its interrupt enable <8> and clears
+	;; its flag (<1>), in place of the destination 3 alias.  md held word 100,
+	;; which nothing below reads; intr restores vma and md at its end.
+	((md) (a-constant 403))
+	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))
+	(check-page-write-no-interrupt)
 	;; Here is the roughly-60-cycle clock interrupt handler
 	(JUMP-LESS-OR-EQUAL M-ZERO A-CHAOS-TRANSMIT-ABORTED 60CYC-0)
 	;; Wake up Chaosnet after transmit abort

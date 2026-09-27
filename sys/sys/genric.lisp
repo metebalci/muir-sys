@@ -1837,13 +1837,20 @@ The microcode sets it at boot from MACHINE-ID."
 	    ;; instruction each.
 	    "Instruction features"
 	    ;; word 10, from revision 4: 1 if the processor has its own tick,
-	    ;; the 60-cycle clock the display's vertical interrupt used to give.
+	    ;; the 60-cycle clock the display's vertical interrupt used to give;
+	    ;; from revision 10 (contract q11) the tick is timer 0.
 	    "Processor tick"
 	    ;; words 11-13, mono tv, quux's display
 	    "Display width, height" "Display bits, words a line" "Display buffer"
 	    ;; word 14, from revision 5: 1 if the processor has the microsecond
-	    ;; clock and the interval timer (contract q1).
-	    "Processor clocks")
+	    ;; clock (and, until revision 10, q1's interval timer; contract q1).
+	    "Microsecond clock"
+	    ;; word 15, from revision 9 (contract q9): bit 0 the real-time clock,
+	    ;; bit 1 the file device.
+	    "RTC, file device"
+	    ;; word 16, from revision 10 (contract q11): the number of interval
+	    ;; timers, 3; 0 below revision 10.
+	    "Interval timers")
 	    ;; not "words/line": / escapes the next character in this readtable
   "What the words of QUUX's feature page hold, from word 0 on.")
 
