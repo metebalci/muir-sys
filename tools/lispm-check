@@ -57,7 +57,7 @@ Defaults, each overridden by its flag or an environment variable:
   --ubin  LISPM_CHECK_UBIN  ubin/ beside the band: the sys/ubin/ the band's
                             microcode was assembled into; the cold boot reads
                             its ucadr.tbl
-  --quux  LISPM_CHECK_QUUX  ../muir/target/release/quux beside the tree
+  --quux  LISPM_CHECK_QUUX  ../muir-sim/target/release/quux beside the tree
   --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
   --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
@@ -902,7 +902,7 @@ def main():
     up = os.path.dirname(a.tree)
     a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
     a.ubin = a.ubin or os.path.join(os.path.dirname(a.band), 'ubin')
-    a.quux = a.quux or os.path.join(up, 'muir', 'target', 'release', 'quux')
+    a.quux = a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux')
     a.ozd = a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd')
     # quux and ozd run in the run directory, so every path is made absolute
     a.band, a.ubin, a.quux, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.quux, a.ozd))

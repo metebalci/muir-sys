@@ -148,7 +148,7 @@ Each is overridden by its flag or an environment variable.
 |---|---|---|
 | `--band` | `LISPM_CHECK_BAND` | `run/check/band.img` in the tree |
 | `--ubin` | `LISPM_CHECK_UBIN` | `ubin/` beside the band: the `sys/ubin/` the band's microcode was assembled into, whose `ucadr.tbl` the cold boot reads |
-| `--quux` | `LISPM_CHECK_QUUX` | `../muir/target/release/quux` beside the tree |
+| `--quux` | `LISPM_CHECK_QUUX` | `../muir-sim/target/release/quux` beside the tree |
 | `--ozd` | `LISPM_CHECK_OZD` | `../ozd/target/release/ozd` beside the tree |
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
 | `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
