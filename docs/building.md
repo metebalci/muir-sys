@@ -307,6 +307,172 @@ passed.
 UTC, and the whole build runs with ozd at `utc`: there are no two halves, no
 `--timezone`, and no hole.
 
+## Publishing a release
+
+A release is built and checked by the SHA of one commit, never by a branch
+or a working tree, and published in the order below: the checks come before
+anything is public, and a draft is downloaded back and checked before it is
+published. The CADR's releases (`release-1NNN`) come from `cadr`; QUUX's
+(`release-2NNN`) and the rolling release `dev-system-for-quux` come from
+`main`, whose `docs/building.md` has their steps. The commands say
+`release-1002`. They are run from a checkout of `cadr`; `<sha>`, `<dir>`,
+`<dl>`, `<body>` and `<msg>` are placeholders, and `<remote>` is the
+repository's SSH URL (user `git`, host `github.com`, path
+`metebalci/muir-sys.git`; written out, it has the shape of an e-mail
+address, which the scan refuses in the sources).
+
+**The assets.** `<dir>` holds exactly what is uploaded, and nothing is
+written into it after the checks:
+
+| | |
+|---|---|
+| Pack | `release-1002-pack.img.gz` |
+| Sources | `release-1002-sys.tar.gz` |
+| Sums | `SHA256SUMS` |
+
+The pack is written as in "Writing a release pack" (above): a CADR pack,
+which begins with its label, `LABL`, and has no partition table of any
+other kind. There is no PROM asset and no README: the CADR's PROM is MIT's,
+and its files stay in `sys/ubin/`.
+
+The sources are `git archive --prefix=release-1002/ <sha>` plus `sys/ubin/`
+assembled from that commit's `sys/ucadr/`, with no COLDRUN. Every member of
+the tarball is owned by root, uid and gid 0 and user and group name root, as
+`git archive` writes them: a member added from the build tree carries its
+owner's uid and user name in its tar header, as the eleven `sys/ubin/`
+members of `release-1000`'s and `release-1001`'s sources tarballs did until
+both were replaced on 27 Sep 2026 with the same files owned by root, and the
+scan refuses it. Add `sys/ubin/` with its owner set to root (a `filter` in
+Python's `tarfile.add`, or GNU tar's `--owner=root:0 --group=root:0`).
+
+The sources and the pack are gzipped one way, with no name and no date, by
+Python's `gzip` module at its default level, 9:
+
+```
+python3 -c 'import gzip, shutil, sys
+with open(sys.argv[1], "rb") as s, open(sys.argv[2], "wb") as o, \
+     gzip.GzipFile(filename="", mode="wb", fileobj=o, mtime=0) as g:
+    shutil.copyfileobj(s, g)' <file> <file>.gz
+```
+
+`release-1000`'s and `release-1001`'s assets were made this way. `gzip -9
+-n` writes other bytes from the same tar (1001's sources: 4,343,401 bytes
+where this gives 4,344,017), so a digest is reproduced only by this route.
+
+**1. Build and check by SHA**, then write and check the sums and scan
+everything that will be public:
+
+```
+tools/release-sums <dir>                       # writes <dir>/SHA256SUMS
+tools/release-sums --check <dir>
+tools/release-scan <dir> <body> <msg>
+tar -tvzf <dir>/release-1002-sys.tar.gz | awk '$2 != "root/root"'
+tar --numeric-owner -tvzf <dir>/release-1002-sys.tar.gz | awk '$2 != "0/0"'
+```
+
+The two `tar` lines print nothing: every member is root's by name and by
+number. The scan refuses any other owner too; the lines say it without
+reading the scan's output.
+
+`tools/release-sums` writes one line per asset in byte order of the names,
+plus one for the pack uncompressed under its name without `.gz`,
+`release-1002-pack.img`, which is no asset (a fetch script checks the pack
+as it decompresses it). `--check` fails on a missing file, where `sha256sum
+-c --ignore-missing` would pass it, and on a file that no line names.
+`<body>` is the release body, written from `docs/release-1002.md`; `<msg>` a
+file holding the tag message of step 3. `tools/release-scan` reads every
+byte: each file in the sources tarball and its tar headers, and the pack
+whole, raw. It passes only what its four rules allow (MIT's addresses in
+`sys/man/bug-mail.txt`, what `release-1001`'s assets already hold, the
+system's own `/home/lispm`, and the cache default of `tools/lispm-check`);
+anything else fails the release. Its baseline,
+`tools/release-scan.baseline`, is written from `release-1001`'s two assets,
+checked against their published digests first: `tools/release-scan
+--make-baseline tools/release-scan.baseline release-1001-sys.tar.gz
+release-1001-pack.img.gz`. The tools are the same on both lines. Their
+self-test is `tools/release-test --pack <a CADR pack> --disk <a QUUX disk>`;
+the QUUX disk, a VHD with a GPT, comes from `main`'s line, since the test
+also holds the scan's reading of a VHD.
+
+**2. The SHA is on `cadr` and not on `main`.** This clone has no remote, so
+both tips are fetched by `<remote>`:
+
+```
+git fetch <remote> \
+    +refs/heads/main:refs/remotes/origin/main \
+    +refs/heads/cadr:refs/remotes/origin/cadr
+git merge-base --is-ancestor <sha> origin/cadr &&
+    ! git merge-base --is-ancestor <sha> origin/main && echo on cadr alone
+```
+
+`release-1001` (`d0d68de`) and older are on both lines.
+
+**3. An annotated tag at the SHA**, like `release-1000`'s and
+`release-1001`'s, with Mete's identity as the tagger, unsigned:
+
+```
+git tag -a release-1002 -F <msg> <sha>        # <msg>: "Release 1002: <one line>"
+tools/release-scan --tag release-1002
+git push <remote> refs/tags/release-1002
+git ls-remote <remote> 'refs/tags/release-1002^{}'
+```
+
+The last prints `<sha>`. From here the tag is public and never moves;
+everything before this step can still be done again.
+
+**4. A draft:**
+
+```
+gh release create release-1002 -R metebalci/muir-sys --draft --verify-tag \
+    --target <sha> --title "System 1002" --notes-file <body> <dir>/*
+```
+
+`--verify-tag` refuses a tag that is not on GitHub. The title is "System N".
+
+**5. Downloaded back and checked**, into an empty directory `<dl>`, with the
+API's JSON kept outside it:
+
+```
+gh release download release-1002 -R metebalci/muir-sys -D <dl>
+gh release view release-1002 -R metebalci/muir-sys --json assets > <api.json>
+tools/release-sums --check <dl> --api <api.json>
+tools/release-scan <dl>
+tar -tvzf <dl>/release-1002-sys.tar.gz | awk '$2 != "root/root"'
+tar --numeric-owner -tvzf <dl>/release-1002-sys.tar.gz | awk '$2 != "0/0"'
+tar -tzf <dl>/release-1002-sys.tar.gz | cut -d/ -f1 | sort -u
+gzip -dc <dl>/release-1002-pack.img.gz | head -c 4; echo
+```
+
+`--api` compares the digests GitHub computed for the uploaded assets with
+the files: the release's assets must be exactly the directory's, each with
+its file's SHA-256 (it fails, saying so, if the JSON gives no digest). The
+two owner lines print nothing, as in step 1, the third `tar` line prints
+the tag alone, `release-1002`, and the last line `LABL`, the pack's label.
+While it is a draft an asset's URL is not public, so `curl -fsI` of it
+fails. Whether `gh release download` reads a draft's assets is measured on
+the first draft; if it does not, the API's digests of the uploaded bytes
+and the scan of `<dir>` stand in. A failure is mended in the draft (`gh
+release delete-asset`, `gh release upload`, and step 5 again); the tag
+stays.
+
+**6. Published with Latest explicit:**
+
+```
+gh release edit release-1002 -R metebalci/muir-sys --draft=false --latest
+gh api repos/metebalci/muir-sys/releases/latest --jq .tag_name
+```
+
+While no QUUX release exists, the newest release is Latest, so a CADR
+release is published with `--latest` and the last line prints its tag. Once
+a QUUX release exists, the newest QUUX release is Latest, and a CADR release
+after it is published with `--latest=false`; the last line then prints that
+QUUX release's tag (Q12 §1.9). GitHub orders releases by their tag's date,
+so Latest is always set and read back. Last, a fresh download without
+credentials, by the path the fetch scripts use
+(`https://github.com/metebalci/muir-sys/releases/download/release-1002/<asset>`,
+each asset and `SHA256SUMS`, with `curl -fsSLO`), passes `tools/release-sums
+--check`.
+
 ## The stages
 
 A world cannot be built from nothing, so each stage runs on the one before.

@@ -366,6 +366,34 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   makes the cold load and at `utc` from the cold boot on, the builder kept
   on its own site and time code, the gates after QLD, and the one hour of
   QFASL dates it cannot take.
+- **The release tools, from `main`** (`1331881`, `f5a60d5`), tracked by
+  `.gitignore:39-42`. `tools/release-scan` reads every byte a release
+  publishes (a gzip and its header, a tar's members and headers, a pack raw,
+  a VHD through its block table) and fails on a local path, a private
+  address, an e-mail address, this machine's or user's name, or a tar member
+  not owned by root, unless one of its four rules passes it; its baseline,
+  `tools/release-scan.baseline`, holds the digests of what `release-1001`'s
+  two assets already hold. `tools/release-sums` writes and checks
+  `SHA256SUMS`, with a line for the pack uncompressed, and compares GitHub's
+  digests of the uploaded assets. `tools/release-test` holds both to planted
+  faults. Two changes from `main`'s: the self-test plants its home directory
+  in `sys/io/file/open.lisp` (`tools/release-test:209`), since
+  `sys/io/file/hostfs.lisp`, where `main`'s plants it, is QUUX's file device
+  and not on this line, so that case saw no fault; and it now refuses a fault
+  planted into a file the tree does not have (`tools/release-test:108-112`).
+  Measured: all 25 cases hold with `release-1001-pack.img` and a System 2000
+  disk; the scan of this line's `git archive` as a root-owned tarball and of
+  a System 1002 pack pass with nothing FAIL and nothing new to the baseline.
+- **`docs/building.md` says how a release is published**
+  (`docs/building.md:310`): the assets `release-1002-pack.img.gz`,
+  `release-1002-sys.tar.gz` and `SHA256SUMS`, every tarball member owned by
+  root, one gzip route (Python's `gzip`, no name, no date), then by the SHA
+  of one commit: the sums and the scan, the commit on `cadr` and not `main`,
+  the annotated tag, a draft, the draft downloaded back and checked (sums
+  against GitHub's digests, scan, owners, the pack's `LABL`), and publishing
+  with Latest set and read back: Latest while no QUUX release exists, and
+  `--latest=false` after one does (Q12 §1.9). From `main`'s section of the
+  same name, for the CADR's line.
 - **`cold/export.lisp` says where the sync functions live**: `SETUP-CPT`,
   `START-SYNC`, `STOP-SYNC` and `FILL-SYNC` are all defined in
   `WINDOW; COLD` (`cold/export.lisp:156-169`). From lmz-sys (`189eeea`).

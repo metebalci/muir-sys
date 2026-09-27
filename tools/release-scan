@@ -1,0 +1,529 @@
+#!/usr/bin/env python3
+"""release-scan: nothing of the machine a release was made on goes public.
+
+Usage:
+  tools/release-scan [-q] [--baseline FILE] [--word NAME]... [--tag NAME]
+                     [--repo DIR] PATH...
+  tools/release-scan --make-baseline OUT PATH...
+
+It reads every byte of what a release publishes and fails on what the site's
+own public-content check fails on (muir-website checks/public.py, the patterns
+copied into this tree's ref/ with the commit they came from): a home
+directory, a path under the home directory's projects or .cache, a Claude
+Code scratchpad, a file URL, a private or link-local IPv4 address, localhost or 0.0.0.0 with a
+port, a process ID written as one, an e-mail address other than Mete's, a
+Claude session, and the names of this machine and of the user running it,
+read at run time (and any --word).  Run it before every upload, the rolling
+release's included, on the files exactly as they will be uploaded, and again
+on the files downloaded back from the draft.
+
+PATH is a file or a directory; a directory is walked and each file in it is
+scanned.  A file is read by what it holds, not by its name:
+  gzip        decompressed, and the result read the same way; the gzip
+              header's own fields (a file name, a comment) are scanned too
+  tar         the whole stream: each member's contents, reported as
+              member:line, and each member's header (its name, its owner's
+              user and group names, pax records), reported as
+              "member (tar header)"; and each member's owner, which must be
+              root: uid and gid 0, user and group name root, as git archive
+              writes them (an empty name is not root)
+  VHD         the disk the VHD holds, as the machine reads it (fixed or
+              dynamic; a dynamic one through its block table), reported by
+              byte offset, and then every byte of the VHD file that is not a
+              sector of that disk (footer, header, block table, sector
+              bitmaps, slack), as "(VHD structures)"
+  anything else, raw: a CADR pack, a raw QUUX disk, the PROM, a README,
+              SHA256SUMS, the release body.
+--tag NAME scans the annotated tag's object (its message and tagger) in the
+repository at --repo (default: the current directory).  So one run covers a
+release: the sources tarball, the disk or pack, the PROM, the body or README
+(given as a file) and the tag.
+
+A finding passes only by one of these rules (Q12 contract, section 1.5); the
+output names the rule, trying (2), (3) and (4) before (1):
+  (1) the same pattern and matched text are in the scan of release-1001's
+      published assets, by value, since byte strings in a band move between
+      files and offsets from build to build;
+  (2) it is an e-mail address listed in the baseline as one of MIT's
+      addresses in sys/man/bug-mail.txt, and it is in that file: a new
+      address fails even there;
+  (3) it is /home/lispm, the system's own home directory on HOST:
+      (sys/io/file/hostfs.lisp:214-219 on main, QUUX's line; this line has
+      no HOST:, and tools/lispm-check and docs/lispm-check.md name it);
+  (4) it is the home directory's .cache, written with a tilde, in
+      tools/lispm-check or docs/lispm-check.md: that tool's documented
+      default for its cache.
+Anything else fails.  The names of this machine and user, and a tar member
+not owned by root, pass by no rule and are never written to a baseline (Q12
+contract, section 1.3): a member added to the sources from the build tree
+carries its owner's uid and names, as the eleven sys/ubin/ members of
+release-1000's and release-1001's sources tarballs did until they were
+replaced on 2026-09-27 with the same files owned by root.  A file's path for
+rules (2) and (4) is its path in the sources, so a tarball's top directory
+(release-N/) is dropped; under a directory PATH it is the path below that
+directory.
+
+The baseline, release-scan.baseline beside this tool, holds rules (1) and
+(2): SHA-256 digests of the matched texts, not the texts, so that it repeats
+no address and matches nothing itself.  --make-baseline OUT writes it from a
+scan of release-1001's two published assets (release-1001-sys.tar.gz and
+release-1001-pack.img.gz, SHA-256 74c6ed96... and 7ddf071b...; the sources
+tarball as replaced on 2026-09-27, owned by root).  The scan
+prints every finding with its matched text, so what a digest stands for is
+seen whenever it matches.
+
+Output: one line per finding, "pass (N)" or "FAIL", its place, the pattern
+and the matched text; -q prints only the failures.  Then a summary.
+Exit status: 0 if nothing fails, 1 if something does, 2 if an input could not
+be read (a missing file, a VHD this tool does not read, a tag that is not
+annotated).
+
+Some literals below are written with a one-character class (roo[t], for
+instance), since this file ships in every sources tarball and must not match
+itself.  The self-test is tools/release-test.
+"""
+
+import argparse, getpass, gzip, hashlib, ipaddress, os, re, socket, struct
+import bisect, io, subprocess, sys, tarfile
+
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_BASELINE = os.path.join(TOOL_DIR, 'release-scan.baseline')
+
+# The site check's patterns (muir-website checks/public.py, a252c2d), as
+# bytes: an id for the baseline, the words the site check prints, the
+# expression.  Each is applied with finditer, so a line with two findings
+# gives two.  Two are looser at their left edge than the site check's, since
+# in a binary the byte before a string is arbitrary: a home directory is found
+# whatever precedes it (the site check wants no word character or dot there),
+# and a name needs only no letter on either side (the site check wants \b,
+# which a tar header's "ustar" version field "00" defeats before its user
+# name; measured on release-1001-sys.tar.gz as first published, SHA-256
+# 507d1fe8..., whose eleven sys/ubin/ members carried the user's name: 11 of
+# 22 names found with \b).
+PATTERNS = [
+    ('home', 'a home directory',
+     re.compile(rb'/(?:home|Users)/[A-Za-z0-9_.-]+|/roo[t]/')),
+    ('local-path', 'a local path',
+     re.compile(rb'~/(?:projects|\.cache|\.claude)\b|\$HOME/(?:projects|\.cache)\b'
+                rb'|/tmp/clau[d]e')),
+    ('file-url', 'a file URL', re.compile(rb'fil[e]://')),
+    ('localhost-port', 'localhost with a port',
+     re.compile(rb'\b(?:localhost|0\.0\.0\.0):\d+')),
+    ('pid', 'a process ID', re.compile(rb'\bpid[=: ]+\d+|\bPID \d+', re.I)),
+    ('claude-session', 'a Claude session',
+     re.compile(rb'claude\.ai/(?:code|chat|artifact)|session[_-]?id', re.I)),
+]
+IPV4 = re.compile(rb'(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?![\d.])')
+DOC_NETS = [ipaddress.ip_network(n) for n in
+            ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '0.0.0.0/32')]
+EMAIL = re.compile(rb'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
+EMAILS_ALLOWED = {b'metebalci@gmail.com'}
+WHAT = dict((p[0], p[1]) for p in PATTERNS)
+WHAT.update({'private-address': 'a private address', 'email': 'an e-mail address',
+             'local-name': "this machine's or this user's name",
+             'owner': 'a tar member not owned by root'})
+
+# Rules (3) and (4).
+SYSTEM_HOME = b'/home/lispm'
+CACHE_DEFAULT = b'~/' b'.cache'           # split, so as not to match itself
+CACHE_FILES = ('tools/lispm-check', 'docs/lispm-check.md')
+BUG_MAIL = 'sys/man/bug-mail.txt'
+
+ZERO_BLOCK = 4096
+
+
+class Unreadable(Exception):
+    pass
+
+
+def local_words(extra):
+    """The machine's and the user's names, as the site check takes them: a
+    name shorter than four characters or a CI runner's common one is left."""
+    words = set()
+    for w in (socket.gethostname().split('.')[0], getpass.getuser()):
+        if w and len(w) >= 4 and w not in ('runner', 'root', 'localhost', 'user'):
+            words.add(w.lower())
+    words |= {w.lower() for w in extra if w}
+    if not words:
+        return None
+    return re.compile(rb'(?<![A-Za-z])(?:%s)(?![A-Za-z])' % b'|'.join(
+        re.escape(w.encode()) for w in sorted(words)), re.I)
+
+
+def segments(data):
+    """The runs of data between all-zero blocks.  A disk is mostly zeros, and
+    a match cannot lie in a zero block; each run is scanned whole, and since
+    it is bounded by zero bytes (or the ends) the look-behinds and \\b at its
+    edges see what they would see in the whole."""
+    n = len(data)
+    if n <= 4 * ZERO_BLOCK:
+        yield 0, n
+        return
+    zero = bytes(ZERO_BLOCK)
+    mv = memoryview(data)
+    start = None
+    for i in range(0, n, ZERO_BLOCK):
+        z = mv[i:i + ZERO_BLOCK] == zero[:min(ZERO_BLOCK, n - i)]
+        if z:
+            if start is not None:
+                yield start, i
+                start = None
+        elif start is None:
+            start = i
+    if start is not None:
+        yield start, n
+
+
+def matches(data, words):
+    """Every finding in data, as (offset, pattern id, matched bytes)."""
+    out = []
+    for s, e in segments(data):
+        seg = bytes(data[s:e])
+        for pid, _, rx in PATTERNS:
+            for m in rx.finditer(seg):
+                out.append((s + m.start(), pid, m.group(0)))
+        for m in IPV4.finditer(seg):
+            try:
+                ip = ipaddress.IPv4Address(m.group(1).decode())
+            except ValueError:
+                continue
+            if (ip.is_private or ip.is_link_local) and not ip.is_loopback \
+                    and not any(ip in n for n in DOC_NETS):
+                out.append((s + m.start(1), 'private-address', m.group(1)))
+        for m in EMAIL.finditer(seg):
+            if m.group(0).lower() not in EMAILS_ALLOWED:
+                out.append((s + m.start(), 'email', m.group(0)))
+        if words is not None:
+            for m in words.finditer(seg):
+                out.append((s + m.start(), 'local-name', m.group(0)))
+    out.sort()
+    return out
+
+
+class Finding:
+    def __init__(self, place, rule_path, pid, value):
+        self.place, self.rule_path, self.pid, self.value = place, rule_path, pid, value
+
+
+def line_of(data, start, pos):
+    return data.count(b'\n', start, pos) + 1
+
+
+def strip_top(name):
+    """A tarball member's path in the sources: its top directory dropped."""
+    parts = name.split('/', 1)
+    return parts[1] if len(parts) == 2 else name
+
+
+def scan_raw(data, place, rule_path, words, text_lines=True):
+    out = []
+    for off, pid, val in matches(data, words):
+        where = '%s:%d' % (place, line_of(data, 0, off)) if text_lines and len(data) < (64 << 20) \
+            else '%s @%d' % (place, off)
+        out.append(Finding(where, rule_path, pid, val))
+    return out
+
+
+def gzip_header_fields(raw):
+    """The bytes of a gzip header's optional fields: FEXTRA, FNAME, FCOMMENT."""
+    if len(raw) < 10:
+        return b''
+    flg, pos, fields = raw[3], 10, b''
+    if flg & 4:
+        xlen = struct.unpack('<H', raw[pos:pos + 2])[0]
+        fields += raw[pos + 2:pos + 2 + xlen] + b'\0'
+        pos += 2 + xlen
+    for bit in (8, 16):
+        if flg & bit:
+            end = raw.index(b'\0', pos)
+            fields += raw[pos:end] + b'\0'
+            pos = end + 1
+    return fields
+
+
+def is_tar(data):
+    return len(data) >= 512 and data[257:262] == b'ustar'
+
+
+def vhd_footer(data):
+    if len(data) >= 512 and data[-512:-504] == b'conectix':
+        return data[-512:]
+    return None
+
+
+def vhd_disk(data, footer):
+    """The disk a VHD holds, and the VHD's bytes with that disk's sectors
+    blanked (what is left is the VHD's own structures)."""
+    size = struct.unpack('>Q', footer[48:56])[0]
+    kind = struct.unpack('>I', footer[60:64])[0]
+    if kind == 2:                                    # fixed
+        return data[:-512], bytes(len(data) - 512) + footer
+    if kind != 3:
+        raise Unreadable('a VHD of type %d (only fixed, 2, and dynamic, 3, are read)' % kind)
+    hoff = struct.unpack('>Q', footer[16:24])[0]
+    hdr = data[hoff:hoff + 1024]
+    if hdr[:8] != b'cxsparse':
+        raise Unreadable('a dynamic VHD with no dynamic header')
+    table = struct.unpack('>Q', hdr[16:24])[0]
+    entries = struct.unpack('>I', hdr[28:32])[0]
+    block = struct.unpack('>I', hdr[32:36])[0]
+    spb = block // 512                               # sectors per block
+    bitmap = ((spb + 7) // 8 + 511) // 512 * 512
+    disk = bytearray(size)
+    rest = bytearray(data)
+    for i in range(entries):
+        sec = struct.unpack('>I', data[table + 4 * i:table + 4 * i + 4])[0]
+        if sec == 0xFFFFFFFF:
+            continue
+        b0 = sec * 512
+        bits = data[b0:b0 + bitmap]
+        d0 = b0 + bitmap
+        base = i * block
+        if base >= size:
+            raise Unreadable('a VHD block entry %d beyond the disk' % i)
+        if bits[:spb // 8] == b'\xff' * (spb // 8):   # every sector written
+            hi = min(base + block, size)
+            disk[base:hi] = data[d0:d0 + hi - base]
+            rest[d0:d0 + hi - base] = bytes(hi - base)
+            continue
+        for s in range(spb):
+            if not (bits[s // 8] >> (7 - s % 8)) & 1:
+                continue                             # an unwritten sector reads as zero
+            lo, hi = base + s * 512, min(base + (s + 1) * 512, size)
+            if lo >= size:
+                break
+            src = d0 + s * 512
+            disk[lo:hi] = data[src:src + (hi - lo)]
+            rest[src:src + (hi - lo)] = bytes(hi - lo)
+    return bytes(disk), bytes(rest)
+
+
+def owner(m):
+    """A tar member's owner as the scan reports it, or None if it is root's.
+    Every member must be root's, uid and gid 0 and both names root, as git
+    archive writes them: a member added from the build tree carries its
+    owner's uid and names, a local fact about the machine it was made on
+    (Q12 contract, section 1.3).  An empty name is not accepted as root."""
+    if (m.uid, m.gid, m.uname, m.gname) == (0, 0, 'root', 'root'):
+        return None
+    return ('uid %d gid %d uname %s gname %s' % (m.uid, m.gid, m.uname or '(empty)',
+                                                 m.gname or '(empty)')).encode()
+
+
+def scan_tar(data, place, words):
+    out = []
+    regions = []                                     # (start, end, member, is_header)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as t:
+            members = t.getmembers()
+    except tarfile.TarError as e:
+        raise Unreadable('%s: not a tar stream I can read (%s)' % (place, e))
+    for m in members:
+        o = owner(m)
+        if o is not None:
+            out.append(Finding('%s:%s (tar header)' % (place, m.name), None, 'owner', o))
+        regions.append((m.offset, m.offset_data, m, True))
+        if m.isfile():
+            regions.append((m.offset_data, m.offset_data + m.size, m, False))
+    regions.sort(key=lambda r: r[0])
+    starts = [r[0] for r in regions]
+    nested = []
+    for off, pid, val in matches(data, words):
+        k = bisect.bisect_right(starts, off) - 1
+        if k >= 0 and off < regions[k][1]:
+            s, e, m, header = regions[k]
+            if header:
+                out.append(Finding('%s:%s (tar header)' % (place, m.name), None, pid, val))
+            else:
+                out.append(Finding('%s:%s:%d' % (place, m.name, line_of(data, s, off)),
+                                   strip_top(m.name), pid, val))
+        else:
+            out.append(Finding('%s @%d (tar structure)' % (place, off), None, pid, val))
+    for s, e, m, header in regions:
+        if not header and data[s:s + 2] == b'\x1f\x8b':
+            nested.append((m, data[s:e]))
+    for m, blob in nested:                            # a compressed member: read inside too
+        out += scan_blob(blob, '%s:%s' % (place, m.name), strip_top(m.name), words)
+    return out
+
+
+def scan_blob(data, place, rule_path, words):
+    if data[:2] == b'\x1f\x8b':
+        out = []
+        fields = gzip_header_fields(data)
+        if fields:
+            out += scan_raw(fields, place + ' (gzip header)', None, words, False)
+        try:
+            inner = gzip.decompress(data)
+        except (OSError, EOFError) as e:
+            raise Unreadable('%s: a gzip stream I cannot read (%s)' % (place, e))
+        return out + scan_blob(inner, place, rule_path, words)
+    if is_tar(data):
+        return scan_tar(data, place, words)
+    footer = vhd_footer(data)
+    if footer is not None:
+        disk, rest = vhd_disk(data, footer)
+        return (scan_raw(disk, place + ' (disk)', None, words, False)
+                + scan_raw(rest, place + ' (VHD structures)', None, words, False))
+    return scan_raw(data, place, rule_path, words)
+
+
+def scan_path(path, words):
+    if os.path.isdir(path):
+        out = []
+        for dp, dns, fns in os.walk(path):
+            dns.sort()
+            for f in sorted(fns):
+                full = os.path.join(dp, f)
+                rel = os.path.relpath(full, path)
+                out += scan_blob(read(full), os.path.join(os.path.basename(os.path.normpath(path)), rel),
+                                 rel, words)
+        return out
+    return scan_blob(read(path), os.path.basename(path), os.path.basename(path), words)
+
+
+def read(path):
+    try:
+        with open(path, 'rb') as f:
+            return f.read()
+    except OSError as e:
+        raise Unreadable('%s: %s' % (path, e.strerror))
+
+
+def scan_tag(name, repo, words):
+    r = subprocess.run(['git', '-C', repo, 'cat-file', '-t', name], capture_output=True)
+    if r.returncode != 0 or r.stdout.strip() != b'tag':
+        raise Unreadable('%s is not an annotated tag in %s' % (name, repo))
+    obj = subprocess.run(['git', '-C', repo, 'cat-file', 'tag', name],
+                         capture_output=True, check=True).stdout
+    return scan_raw(obj, 'tag %s' % name, None, words)
+
+
+def digest(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def load_baseline(path):
+    seen, mit = set(), set()
+    try:
+        lines = open(path, encoding='ascii').read().splitlines()
+    except OSError as e:
+        raise Unreadable('the baseline %s: %s' % (path, e.strerror))
+    for n, line in enumerate(lines, 1):
+        f = line.split('#', 1)[0].split()
+        if not f:
+            continue
+        if f[0] == 'seen' and len(f) == 3:
+            seen.add((f[1], f[2]))
+        elif f[0] == 'mit-address' and len(f) == 3:
+            mit.add((f[1], f[2]))
+        else:
+            raise Unreadable('the baseline %s:%d: not a baseline line' % (path, n))
+    return seen, mit
+
+
+def rule(fd, seen, mit):
+    """The rule a finding passes by, or None."""
+    if fd.pid in ('local-name', 'owner'):          # these pass by no rule
+        return None
+    # The narrow rules first, so that the output says why a finding passes:
+    # MIT's addresses by (2), not by (1), which also holds for them.
+    h = digest(fd.value)
+    if fd.pid == 'email' and fd.rule_path == BUG_MAIL and (BUG_MAIL, h) in mit:
+        return 2
+    if fd.pid == 'home' and fd.value == SYSTEM_HOME:
+        return 3
+    if fd.pid == 'local-path' and fd.value == CACHE_DEFAULT and fd.rule_path in CACHE_FILES:
+        return 4
+    if (fd.pid, h) in seen:
+        return 1
+    return None
+
+
+def show(fd, verdict):
+    return '%-9s %s: %s: %s' % (verdict, fd.place, WHAT[fd.pid],
+                                fd.value.decode('latin-1').encode('unicode_escape').decode())
+
+
+def make_baseline(out_path, paths, findings):
+    seen = {}
+    mit = set()
+    refused = 0
+    for fd in findings:
+        if fd.pid in ('local-name', 'owner'):
+            refused += 1
+            continue
+        k = (fd.pid, digest(fd.value))
+        seen[k] = seen.get(k, 0) + 1
+        if fd.pid == 'email' and fd.rule_path == BUG_MAIL:
+            mit.add((BUG_MAIL, digest(fd.value)))
+    lines = [
+        '# The baseline of tools/release-scan (Q12 contract, section 1.5), written by',
+        '# tools/release-scan --make-baseline from the scan of these files:',
+    ]
+    for p in paths:
+        lines.append('#   %s  %s' % (digest(read(p)), os.path.basename(p)))
+    lines += [
+        '# %d findings in all, %d distinct: rule (1).  A finding of this machine\'s or' % (
+            sum(seen.values()), len(seen)),
+        '# user\'s name, or of a tar member not owned by root, is never written here',
+        '# (%d left out).  "seen PATTERN DIGEST": the matched text\'s SHA-256;' % refused,
+        '# "mit-address FILE DIGEST": one of MIT\'s addresses in that file, rule (2);',
+        '# %d of them.  The scan prints each finding\'s text.' % len(mit),
+    ]
+    for (pid, h), c in sorted(seen.items()):
+        lines.append('seen %s %s  # %d' % (pid, h, c))
+    for f, h in sorted(mit):
+        lines.append('mit-address %s %s' % (f, h))
+    with open(out_path, 'w', encoding='ascii') as o:
+        o.write('\n'.join(lines) + '\n')
+    print('release-scan: wrote %s: %d distinct findings, %d addresses, %d names left out'
+          % (out_path, len(seen), len(mit), refused))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('paths', nargs='*', metavar='PATH')
+    ap.add_argument('-q', '--quiet', action='store_true', help='print only the failures')
+    ap.add_argument('--baseline', default=DEFAULT_BASELINE)
+    ap.add_argument('--word', action='append', default=[], help='another name to refuse')
+    ap.add_argument('--tag', action='append', default=[], help='an annotated tag to scan')
+    ap.add_argument('--repo', default='.', help='the repository --tag is read from')
+    ap.add_argument('--make-baseline', metavar='OUT')
+    a = ap.parse_args()
+    if not a.paths and not a.tag:
+        ap.error('nothing to scan')
+    words = local_words(a.word)
+    try:
+        findings = []
+        for p in a.paths:
+            findings += scan_path(p, words)
+        for t in a.tag:
+            findings += scan_tag(t, a.repo, words)
+        if a.make_baseline:
+            make_baseline(a.make_baseline, a.paths, findings)
+            return 0
+        seen, mit = load_baseline(a.baseline)
+    except Unreadable as e:
+        print('release-scan: %s' % e, file=sys.stderr)
+        return 2
+    counts = {1: 0, 2: 0, 3: 0, 4: 0}
+    fails = 0
+    for fd in findings:
+        r = rule(fd, seen, mit)
+        if r is None:
+            fails += 1
+            print(show(fd, 'FAIL'))
+        else:
+            counts[r] += 1
+            if not a.quiet:
+                print(show(fd, 'pass (%d)' % r))
+    print('release-scan: %d findings: %d pass (rule 1: %d, 2: %d, 3: %d, 4: %d), %d FAIL'
+          % (len(findings), len(findings) - fails, counts[1], counts[2], counts[3], counts[4],
+             fails))
+    return 1 if fails else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
