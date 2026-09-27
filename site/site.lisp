@@ -13,7 +13,10 @@
   ;; Greenwich, and the rule for summer time (SYS: IO1; TIME and TZDATA).
   ;; a number here is a fixed offset in hours west, with no summer time.
   (:timezone "Europe//Berlin")
-  ;; OZ is the associated machine: files, time and host table
+  ;; OZ is this site's Chaos file, time and host-table server, used only
+  ;; when named: SYS: and the associated machine are HOST, the file device
+  ;; (SYS: SITE; SYS TRANSLATIONS, LMLOCS), and the time comes from QUUX's
+  ;; real-time clock.
   (:CHAOS-FILE-SERVER-HOSTS '("OZ"))
   (:CHAOS-TIME-SERVER-HOSTS '("OZ"))
   (:CHAOS-HOST-TABLE-SERVER-HOSTS '("OZ"))

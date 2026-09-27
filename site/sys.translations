@@ -1,7 +1,10 @@
 ;;;-*- Mode:LISP; Package:FS; Base:10 -*-
 
-;;; SYS: at the MIT site. OZ serves the sources at /sys and this site's own
-;;; files at /site. Targets are host-less: the physical host is OZ.
+;;; SYS: at the MIT site. HOST, QUUX's file device (SYS: IO; FILE; HOSTFS),
+;;; serves the sources at /sys and this site's own files at /site, from the
+;;; computer the machine runs on; targets are host-less. SYS: was on OZ over
+;;; Chaos until the file device came: now a boot, the cold load's QLD and a
+;;; build need no Chaos peer, and every QFASL compiled here records HOST.
 ;;;
 ;;; Every slash is doubled, and this file names no readtable, on purpose.
 ;;; A cold load reads it with MINI-READFILE (SYS: COLD; MINI), which does not
@@ -25,7 +28,7 @@
 ;;; streams. Only what the cold load reads over MINI is bound by this.
 
 (SET-LOGICAL-PATHNAME-HOST "SYS"
-  :PHYSICAL-HOST "OZ"
+  :physical-host "HOST"
   :TRANSLATIONS '(("SITE;" "//site//")
                   ("*; *; *;" "//sys//*//*//*//")
                   ("*; *;" "//sys//*//*//")

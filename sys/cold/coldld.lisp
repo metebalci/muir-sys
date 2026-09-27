@@ -116,9 +116,19 @@
   (setq qid  (vlist* 'sym::property-list-area
 		     (store-string 'sym::p-n-string
 				   (string (send stream ':truename)))
-		     (store-string 'sym::p-n-string
-				   (time:print-universal-time (send stream ':creation-date)
-							      nil))))
+		     ;; the date as the universal time itself, not printed.  printed, it
+		     ;; stayed a string until TIMPAR came in and parsed it
+		     ;; (fs:canonicalize-cold-loaded-times), so QLD's MAKE-SYSTEM, which
+		     ;; runs before that, compared a string with the number HOST gives
+		     ;; for a file's date and loaded the cold-loaded files again: with
+		     ;; SYS: on HOST, QLD stopped at the first redefinition it met
+		     ;; (*IOLST, by IO; QIO after SYS; QFCTNS) to ask OK?.  a string that
+		     ;; is parsed later also moves the date by any difference between
+		     ;; the zone it was printed in and the one it is read in.
+		     (make-q-list 'sym::working-storage-area (send stream ':creation-date))))
+;		     (store-string 'sym::p-n-string
+;				   (time:print-universal-time (send stream ':creation-date)
+;							      nil))))
   ;; ((nil fileversionid "coldloaded"))
   (let ((id-prop (vlist 'sym::property-list-area
 			(vlist 'sym::property-list-area

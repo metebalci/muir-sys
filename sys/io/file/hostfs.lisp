@@ -136,11 +136,19 @@
     (file-device-normalize string operation pathname)))
 
 (defun file-device-truename (pathname name)
-  "The truename of PATHNAME, whose device name is NAME: PATHNAME itself unless
-normalizing changed its name."
-  (if (string-equal name (send pathname :string-for-host))
-      pathname
-    (parse-pathname name (pathname-host pathname))))
+  "The truename of PATHNAME, whose device name is NAME: PATHNAME's physical
+pathname itself unless normalizing changed its name."
+  ;; a logical pathname's truename is its translation.  MAKE-SYSTEM asks for
+  ;; the properties of SYS: pathnames, which LOGICAL-PATHNAME passes on to this
+  ;; host untranslated, and the :TRUENAME was then the logical pathname: never
+  ;; EQUAL to a loaded file's id, whose truename is HOST's, so with SYS: on
+  ;; HOST, MAKE-SYSTEM loaded every file of a system again, and QLD reloaded
+  ;; the cold load's files and stopped at a redefinition query.  a physical
+  ;; pathname translates to itself.
+  (let ((pathname (send pathname :translated-pathname)))
+    (if (string-equal name (send pathname :string-for-host))
+        pathname
+      (parse-pathname name (pathname-host pathname)))))
 
 (defun file-device-universal-time (seconds)
   (+ seconds unix-epoch-universal-time))

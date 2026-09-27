@@ -489,6 +489,31 @@ a comment in that file saying why.
   MINI also read over Chaos in the earlier build match it. ozd saw no MINI
   connection. QLD passed
   with no keys typed, and the band passed the usual checks.
+- **`SYS:` is on `HOST`** (muir's contract Q9, revision 9; migration step
+  M4). `site/sys.translations:31` names `HOST` as `SYS:`'s physical host,
+  and the associated machine of LISPM-1 to LISPM-7 is `HOST`
+  (`site/lmlocs.lisp:13-22`), so a login and the home directory on `HOST`
+  need no Chaos peer; `site/site.lisp:16-19` says what OZ is still named
+  for. A boot reads its error table through the file device and reaches the
+  herald with no ozd and no Chaos peer at all, with the time from the
+  real-time clock, and QLD runs the same way. The band was built on QUUX
+  (muir b777f19, revision 9, micro engine) with dev11's microcode and PROM:
+  the builder moved `SYS:` to `HOST` in its running world, recompiled SITE
+  and SYSTEM (`:RECOMPILE`, 211 files, 1 h 52 min) through `HOST`, and made
+  the cold load, all with ozd serving no file; the cold load then booted
+  with no ozd and no Chaos peer, and COLDRUN ran QLD (16 min 22 s; MINI read
+  40 files, 0 refused) and saved the band in LOD4 (21,207 blocks). The same
+  cold load's QLD and save also ran on muir's rtl engine (53 min to the
+  save, 21,191 blocks). In the band, every file of SYSTEM was loaded from
+  `HOST`, 210 of SYSTEM's 215 QFASLs record a `HOST` source (the other 5
+  record none), `(make-system 'system :print-only)` lists nothing (before,
+  it listed `SYS: IO1; TIMPAR QFASL`), and the properties of all 430 of
+  SYSTEM's sources and QFASLs are the same after a warm boot, after a
+  restart of muir and on the rtl engine. The herald came 11.7 to 13.4 s
+  after muir started (micro, with other machines running), against 13.9 and
+  18.5 s for the previous band, whose `SYS:` is on OZ; reading the error
+  table takes 7.12 s of the machine's time either way, the reader's work,
+  not the transfer.
 - **The boot PROM resets the devices and gives timer 0 its period** (muir's
   contract Q11, QUUX revision 10; in progress: the Q11 microcode comes
   after M4). On revision 10 a rise of `INTERRUPT-CONTROL<28>` resets no
@@ -583,6 +608,27 @@ a comment in that file saying why.
 
 ## Faults fixed
 
+- **`HOST` gives a `SYS:` file's physical truename.** `MAKE-SYSTEM` asks
+  for the properties of `SYS:` pathnames, which the logical host passes on
+  to `HOST` untranslated, and the `:TRUENAME` it got back was the logical
+  pathname itself: never `EQUAL` to a loaded file's id, whose truename is
+  `HOST`'s. With `SYS:` on `HOST`, `MAKE-SYSTEM` therefore loaded every file
+  of a system again, and QLD reloaded the cold load's files and stopped at
+  the first redefinition query (`*IOLST`, defined by `SYS: SYS; QFCTNS` and
+  again by `SYS: IO; QIO`). A logical pathname's truename is now its
+  translation (`io/file/hostfs.lisp:138-151`); red and green in the
+  builder: `(eq truename (send p :translated-pathname))` was NIL, now T.
+- **The cold load records each file's date as a number.** The cold-load
+  builder printed the date into the file's loaded id
+  (`cold/coldld.lisp:115-131`, the old lines commented out), and it stayed a
+  string until the time parser came in and parsed it
+  (`FS:CANONICALIZE-COLD-LOADED-TIMES`), after QLD's `MAKE-SYSTEM` had
+  compared it with `HOST`'s date, a number: a string never equals it. A date
+  printed and parsed later also moves by any difference between the zones
+  of the two. It is now the universal time itself; in the cold load of the
+  M4 build the ids of `SYS: IO; QIO`, `SYS2; CHARACTER` and `SYS; LTOP` equal
+  `HOST`'s truename and date, and QLD no longer loads those files again and
+  runs to its end with no query.
 - **Dates in 1900, 2000 and from 2100 on are right.**
   `DECODE-UNIVERSAL-TIME-WITHOUT-DST` took every fourth year for a leap year,
   so it gave 29 February for 1 March 1900 and 2100, a day early for the rest
