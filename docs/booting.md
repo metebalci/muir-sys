@@ -21,10 +21,22 @@ building; `docs/building.md` covers that.
 
 ## Stage 1: the PROM loads microcode
 
-The PROM is `sys/ucadr/promh.text`, assembled to `sys/ubin/promh.mcr`. It runs
-from I-memory location 0 and knows nothing about bands, Lisp or virtual memory.
-This tree's PROM is version 2000, MIT's version 9 changed so that one PROM
-serves the CADR and QUUX (commit `f7740f4`).
+The PROM is `sys/ucadr/promh.text`, assembled to `sys/ubin/promh.mcr`. It knows
+nothing about bands, Lisp or virtual memory. This tree's PROM is version 2000,
+MIT's version 9 changed for QUUX, and it boots QUUX alone: it reads only
+block-disk, and it finds the microcode through the disk's GPT (below). The CADR
+keeps MIT's PROM, which the `cadr` branch has.
+
+The two PROMs sit in different places. MIT's is at control store location 0
+(`(IF PROM (LOC 0))`, `promh.text:77` on `cadr` at `c633992`): the board decodes
+the first 1K of the control store as PROM, in place of I-memory, until the mode
+register's `PROM-DISABLE` bit is set ("0 first 1K I memory is PROM", MIT's
+`cadr/ir.bits`, line 115 of muir-sim's `mit/cadr/ir.bits`), and it starts at 0
+with `(JUMP GO)` (`:77-79` there). QUUX's is 1K words of the control store at
+36000-37777, read-only and never disabled, where a reset sets the PC
+(`promh.text:88-99` at `381edfb`); the microcode it loads lives in 0-35777, and
+the PROM halts at `ERROR-MICROCODE-TOO-BIG` on one that reaches 36000
+(`:655-656` there).
 
 It first tests the hardware a bit at a time --- every bit of a word of zeros,
 the ALU's carries, the byte hardware, M-memory, A-memory and the PDL buffer
@@ -135,19 +147,23 @@ location 0.
 
 ### The handoff
 
-The PROM ends by writing 44 to Unibus 766012 --- `ERROR-STOP-ENABLE` plus
-`PROM-DISABLE` --- and jumping to I-memory location 6 (`JUMP-TO-6`,
-`:614-622`). Both programs keep a spin loop there that counts `Q-R` down
-(`promh.text:81-84`, `uc-cadr.lisp:64-66`), so the machine is looping at
-location 6 when the PROM switches off underneath it and the loaded microcode's
-location 6 continues the same loop. It works because the two agree on where
-the constant -1 lives: the PROM's `A-ONES` is A-memory location 3
-(`promh.text:33-36`), and the microcode's `A-MINUS-ONE` is annotated "MUST BE
-3" (`uc-parameters.lisp:528-531`). `FILL-M-LOOP` puts the microcode's -1
-there, since writing M memory also writes the A location that shadows it
-(`uc-parameters.lisp:521-526`), and it survives only because `FILL-A-LOOP`
-stops at 2000: on QUUX a fill that wrapped wrote 0 into location 3, and the
-loop at location 6 never ended.
+MIT's PROM ends by writing 44 to Unibus 766012 --- `ERROR-STOP-ENABLE` plus
+`PROM-DISABLE` --- and jumping to I-memory location 6 (`JUMP-TO-6`, `:614-622`).
+Both programs keep a spin loop there that counts `Q-R` down (`promh.text:81-84`,
+`uc-cadr.lisp:64-66`), so the machine is looping at location 6 when the PROM
+switches off underneath it and the loaded microcode's location 6 continues the
+same loop. QUUX's PROM is never switched off and writes nothing to 766012: it
+jumps to the microcode's location 6 (`JUMP-TO-6`, `promh.text:756-762` at
+`381edfb`), whose loop counts `Q-R` down the same way, and the microcode sets
+error stop itself, bit 0 of the register page's word 102 (`uc-cadr.lisp:108-129`
+at `c3a162a`). On the CADR the loop works because the two programs agree on
+where the constant -1 lives: the PROM's `A-ONES` is A-memory location 3
+(`promh.text:33-36`), and the microcode's `A-MINUS-ONE` is annotated "MUST BE 3"
+(`uc-parameters.lisp:528-531`). `FILL-M-LOOP` puts the microcode's -1 there,
+since writing M memory also writes the A location that shadows it
+(`uc-parameters.lisp:521-526`), and it survives only because `FILL-A-LOOP` stops
+at 2000: on QUUX a fill that wrapped wrote 0 into location 3, and the loop at
+location 6 never ended.
 
 ## Stage 2: the microcode loads a world
 
@@ -261,10 +277,10 @@ is why it keeps the world and loses the stack.
 
 ## What belongs to the machine and what belongs to the files
 
-Four things in this sequence are hardware: the PROM running from I-memory
-location 0, the location-6 handshake with `PROM-DISABLE`, the keyboard
-registers that choose cold or warm, and `MACHINE-ID`, which tells the
-microcode whether it runs on a CADR or on QUUX. Everything else is a file
-format --- the label, the partition table, the section types, the band formats
-and the scratch-pad init area --- and a machine that reads those formats boots
-the same way whatever its microcode looks like.
+Four things in this sequence are hardware: where the PROM runs from (control
+store location 0 on the CADR, 36000 on QUUX), the location-6 handshake (with
+`PROM-DISABLE` on the CADR), the keyboard registers that choose cold or warm,
+and `MACHINE-ID`, which tells the microcode whether it runs on a CADR or on
+QUUX. Everything else is a file format --- the label, the partition table, the
+section types, the band formats and the scratch-pad init area --- and a machine
+that reads those formats boots the same way whatever its microcode looks like.
