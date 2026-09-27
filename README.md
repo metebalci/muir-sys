@@ -3,6 +3,9 @@
 **The Lisp Machine system for muir and muir-fpga,** continuing where System
 100 left off and evolved step by step.
 
+This branch, `cadr`, is the CADR's system; `main` is QUUX's. Both are
+described at <https://muir.metebalci.com/system/>.
+
 The starting point is the MIT CADR and its system as MIT last left it. **System
 release 99.32** is the content of a backup of OZ recovered by the
 [Tapes of Tech Square](https://archivesspace.mit.edu/repositories/2/resources/1265)
@@ -77,6 +80,10 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
+- [`docs/booting.md`](docs/booting.md) --- how a CADR boots, from power-on
+  through the PROM and the microcode to the first macroinstruction.
+- [`docs/release-1002.md`](docs/release-1002.md) --- every change System 1002,
+  in progress on this branch, makes to System 1001.
 - [`docs/release-1001.md`](docs/release-1001.md) --- every change System 1001
   makes to System 1000.
 - [`docs/release-1000.md`](docs/release-1000.md) --- every change System 1000

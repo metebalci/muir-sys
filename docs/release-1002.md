@@ -1,0 +1,181 @@
+# System 1002
+
+What the CADR's next release changes from System 1001. It is in progress on
+the `cadr` branch: each change is recorded here as it is made. `main` is
+QUUX's system, numbered from 2000; what this branch takes from it is a bug fix,
+a change that needs no QUUX hardware, or a feature Mete chose for the CADR.
+Every change to a source file carries a comment in that file saying why.
+
+- **The system number is 1002** (`patch/system.patch-directory`,
+  `patch/system-1002.patch-directory`), so that no band built from this
+  branch calls itself 1001.
+
+Each fix below was checked with `tools/lispm-check` on System 1001's release
+band (`release-1001-pack.img`, microcode 323) under muir's `cadr`: its cases
+failed on the band as released and passed with the changed file compiled and
+loaded.
+
+## Time zones
+
+- **The site's `:TIMEZONE` takes a tzdata zone name** (Mete, 2026-09-27, for
+  the CADR), such as `"Europe/Berlin"` (written `"Europe//Berlin"` in a site
+  file, whose readtable escapes with a slash), and the example site now
+  names that zone (`site/site.lisp:15`). The name is looked up in
+  `SYS: IO1; TZDATA`, a table of every zone and link of tzdata 2026c (598
+  names) with the POSIX TZ string its compiled file ends with, today's rule;
+  `sys/io1/gen-tzdata.py` makes it from the host's tzdata. The string gives
+  the standard offset and the rule for daylight savings time
+  (`PARSE-TZ-STRING`, `io1/time.lisp:307`). `*TIMEZONE*` stays a number, the
+  hours west in standard time, which every reader of it expects; an offset
+  that is not whole hours makes it a ratio. The parsed string is in
+  `TIME:*TIMEZONE-RULE*` and the name in `TIME:*TIMEZONE-NAME*`;
+  `SET-TIMEZONE-FROM-SITE` (`io1/time.lisp:418`) sets all three at every
+  site initialization (`:876`). A name tzdata does not know, a malformed
+  string, and a zone whose daylight savings time is not one hour from
+  standard are errors that say which. `TZDATA` loads before `TIME`
+  (`sys/sysdcl.lisp:154`).
+- **A number in `:TIMEZONE` is a fixed offset with no daylight savings time.**
+  Before, whatever the number, the machine applied the United States' rule of
+  1967 to 1986, from the last Sunday of April to the last Sunday of October,
+  so the example site's `-1` was in summer time then, not from the last
+  Sunday of March.
+- **`*DAYLIGHT-SAVINGS-TIME-P-FUNCTION*`** now defaults to
+  `TIMEZONE-RULE-DAYLIGHT-SAVINGS-TIME-P` (`io1/time.lisp:371`), which follows
+  `*TIMEZONE-RULE*` and is never true without one. It is called with the year
+  in full, and with the seconds and minutes from `ENCODE-UNIVERSAL-TIME` too
+  (`io1/time.lisp:191`). `DAYLIGHT-SAVINGS-TIME-IN-NORTH-AMERICA-P`,
+  `LAST-SUNDAY-IN-APRIL` and `LAST-SUNDAY-IN-OCTOBER` are gone; nothing else
+  used them. `WEEKDAY-IN-MONTH` finds the n-th or last weekday of a month on
+  `GREGORIAN-DAY-COUNT` (`io1/time.lisp:166`), the day count
+  `ENCODE-UNIVERSAL-TIME` now shares.
+- Checked on the 1001 band with `SYS: IO1; TZDATA` and `TIME` compiled and
+  loaded: the band's own site, `-1`, gives a fixed offset with no
+  summer time; a site naming Europe/Berlin, through
+  `SET-TIMEZONE-FROM-SITE`, gives -1, the name and the rule `CET`; noon GMT on
+  15 January 2026 decodes to 13:00 standard time and on 15 July to 14:00
+  summer time, and both encode back to the same second; the changes of 29
+  March and 25 October 2026 fall at 01:00 GMT, the second before and the
+  second at each; a printed summer time parses back to itself; an unknown
+  zone name is an error naming it. A band loaded with the change keeps its
+  old `*DAYLIGHT-SAVINGS-TIME-P-FUNCTION*`, since the variable is a
+  `DEFVAR`; the check sets it as a band built with the change has it.
+- **A band from before this change cannot take a site that names a zone.**
+  Its site initialization puts the string in `*TIMEZONE*`, and every decoding
+  then fails (measured on main). A build on such a band loads the new
+  `SYS: IO1; TZDATA` and `TIME` before the new site file.
+
+## Faults fixed
+
+- **Dates in 1900, 2000 and from 2100 on are right.**
+  `DECODE-UNIVERSAL-TIME-WITHOUT-DST` took every fourth year for a leap year,
+  so it gave 29 February for 1 March 1900 and 2100, a day early for the rest
+  of 1900 and from 2100 on, and 6 February 2106 for 2^32-1 seconds after
+  1970 (the 7th); it now uses Howard Hinnant's `civil_from_days`
+  (`io1/time.lisp:125`). `ENCODE-UNIVERSAL-TIME` counted every fourth year too
+  (a day late from 2101), counted one leap day before 1900 (a day early all
+  through 1900), and asked `LEAP-YEAR-P` about the year less 1900, which
+  said 2000 was none (a day early from 1 March 2000); it now counts by the
+  Gregorian rule. Both were MIT's. On the 1001 band,
+  decoding 1 March 2100 and 1900, 31 December 1900 and 7 February 2106, and
+  encoding 1 March 2000 and 1900, were wrong; with the change all eight
+  dates are right.
+- **Encoding and parsing a date agree with decoding on summer time.**
+  `ENCODE-UNIVERSAL-TIME`, and `PARSE-UNIVERSAL-TIME` through it, asked the
+  rule about the year less 1900, and `LAST-SUNDAY-IN-APRIL` took 1900 off
+  again, so from 2000 on they put the change on other days than decoding
+  did. On the 1001 band noon GMT on 27 April 2026 decoded to 14:00 in summer
+  time and encoded back 3600 s off; the rule now gets the year in full
+  (`io1/time.lisp:191`), and the time comes back. MIT's.
+- **The directory date parser checks its fields.**
+  `FS:PARSE-DIRECTORY-DATE-PROPERTY` took any two digits, so on the 1001 band
+  a month of 13 stopped it with "The subscript 13 ... was out of range", and a
+  day of 99 or a time of 25:61 made another time silently. A date out of
+  range is now no date, as 00/00/00 already was (`io/file/open.lisp:1449`);
+  a valid date still parses. MIT's.
+- **The undefined-host fallback in `io/file/pathst.lisp` works.** Two places
+  canonicalise the pathnames a cold load recorded, and each carries MIT's
+  comment "Don't bomb out if host isn't defined" over an arm that bombs out:
+  it sends `:PHYSICAL-HOST`, a message to a host, to a pathname. Both now ask
+  the translated pathname for its host (`io/file/pathst.lisp:365`, `:436`).
+  On the 1001 band `PATHNAME-FROM-COLD-LOAD-PATHLIST` of a host named
+  `NOSUCHHOST` signalled that the logical pathname received an unclaimed
+  `:PHYSICAL-HOST`; with the change it gives a pathname on OZ. Taken from
+  lmz-sys, bishop's line (`6d1da93`).
+- **The herald names the site, whatever it is.** MIT's `PRINT-HERALD`
+  (`io/disk.lisp:1269`) printed "MIT System" for the site `:MIT` and "LMI
+  System" for every other site, and trapped on an unbound site name in the
+  line naming the machine. It prints the site's name now, and "UNKNOWN" when
+  no site is loaded (`:1280`, `:1297`). On the 1001 band a site `:FOO` and a
+  site of NIL both printed "LMI System"; with the change they print "FOO
+  System" and "UNKNOWN System", and `:MIT` still prints "MIT System".
+- **The error table is loaded at every boot.** A band caches its
+  microcode's error table under the microcode's version number, and every
+  unreleased build of a microcode keeps its number, so a band saved under
+  one build kept that build's table under a later one and reported ordinary
+  traps as "no error-table entry". `EH:INITIALIZE` (`eh/eh.lisp:2394`) now
+  forgets the cached table at boot. On the 1001 band a cached table survived
+  `EH:INITIALIZE`; with the change it is read again, and a trap (`(car 1)`)
+  still reports correctly.
+  - **So every boot reads `SYS: UBIN; UCADR TBL`.** Before, the table was
+    read only when the microcode's version differed from the one the band
+    last loaded; now the file server must serve the running microcode's
+    `ucadr.tbl` in `SYS: UBIN;` at every boot, cold or warm.
+- **QLD no longer stops at its second load of `CHSNCP QFASL`** with
+  "(:INTERNAL GET-NEXT-PKT 0) is an invalid function". That load replaces
+  the network code over the network, and fasload installs a function
+  before the `#'(LAMBDA ...)` inside it, so a wait that falls in the gap
+  calls the list `(:INTERNAL ... 0)`. Every wait in the file now uses a named
+  predicate defined above its user: those of `GET-NEXT-PKT`, `SEND-PKT`,
+  `ALLOCATE-INT-PKT`, `RECEIVE-ANY-FUNCTION` and `BACKGROUND`
+  (`network/chaos/chsncp.lisp:909`, `:1173`, `:1253`, `:1743`, `:1860`).
+  MIT's; it shows only when a wait falls in the gap, and it was not
+  reproduced on the CADR. With the file compiled and loaded over the running
+  network code on the 1001 band, the predicates are defined and a file
+  probe over Chaos still answers.
+
+## The site
+
+- **The site defines seven Lisp Machines, LISPM-1 to LISPM-7**, at Chaos
+  177201 to 177207 (`site/hosts.text:11-17`), each with its name and
+  location (`site/lmlocs.lisp:13-19`), so up to seven machines run at the
+  site with no site files to edit. Not checked on a machine: the host table
+  is generated from `hosts.text` by the SITE system.
+- **The site names the zone Europe/Berlin** (see Time zones).
+
+## Known faults found, not yet fixed
+
+- **Dividing by the most negative fixnum corrupts or halts.** On the 1001
+  band `(%div 5 -16777216)` gives `25\16777216`, and
+  `(floor 4294967295 -16777216)` halts the machine in `XMINUS`. MIT's, in
+  the microcode (`ucadr/uc-arith.lisp`); the fix waits for the CADR's first
+  changed microcode, 1000 (the CADR's numbers are in the 1000s, QUUX's in
+  the 2000s; MIT's 323 stays as it is).
+- **`%DRAW-RECTANGLE` reads one row below each rectangle it erases.** MIT's,
+  in the microcode (`ucadr/uc-tv.lisp:327`, `XTVERS1`): on the 1001 band a
+  read MAR on the word below a rectangle of four rows, drawn into a one-bit
+  array laid over a vector, went off. Nothing else is known to show it on
+  the CADR. The fix waits for the CADR's microcode 1000 too.
+- **The boot PROM's `PAGE-0-PARITY-FIX` touches one word past page 0,**
+  virtual 400, as MIT's own comment says. Left as it is for now (Mete,
+  2026-09-27), with a comment at it in `ucadr/promh.text:403` so that a
+  search finds it.
+- **A date printed MM/DD parses as DD/MM outside the United States.** The
+  default print mode is `:MM//DD//YY`, but `SET-MONTH-AND-DATE`
+  (`io1/timpar.lisp`) reads two numbers of 12 or less as month and day only
+  when `*TIMEZONE*` is 4 to 10. MIT's.
+
+## Around the system
+
+- **`tools/lispm-check`** checks a Lisp change on a saved band in seconds,
+  from a checkpoint of the band at its prompt (`docs/lispm-check.md`).
+- **`docs/booting.md`** follows a CADR from power-on to the first
+  macroinstruction, carried over from lmz-sys (`fecd0a5`) with every
+  citation checked against this tree.
+- **`docs/building.md`** says what the 2026-09-22 rebuild of Systems 1000
+  and 1001 added, why files the cold load reads over MINI use spaces only
+  (also in `site/sys.translations`), that a second assembly in one band
+  reuses the sources it read, and that the served `SYS: UBIN;` must hold the
+  running microcode's table.
+- **`cold/export.lisp` says where the sync functions live**: `SETUP-CPT`,
+  `START-SYNC`, `STOP-SYNC` and `FILL-SYNC` are all defined in
+  `WINDOW; COLD` (`cold/export.lisp:156-169`). From lmz-sys (`189eeea`).
