@@ -352,8 +352,12 @@ every file host (access.lisp), as LM-HOST-INITIALIZE is."
 
 ;; the wildcards of the last component, * and ?, matched here against the
 ;; names exactly, case and all, as ozd's DIRECTORY did: the device has no
-;; wildcards, and :pathname-match compares a unix pathname's raw components
-;; with another's case-converted ones.
+;; wildcards, and its names are exact in case, while :pathname-match
+;; compares in interchange case (pathnm's convert-solid-case), where a
+;; partial wildcard such as "foo*" and a mixed-case name need not compare
+;; as the names themselves do.  (the reason given here before, that
+;; :pathname-match compared a unix pathname's raw components with another's
+;; case-converted ones, no longer holds: it now converts both.)
 (defun file-device-wild-match (pattern name &optional (p 0) (n 0))
   (let ((plength (string-length pattern)) (nlength (string-length name)))
     (cond ((= p plength) (= n nlength))

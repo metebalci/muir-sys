@@ -135,40 +135,44 @@
 (defun mini-response-word (k)
   (dpb (aref mini-ring (+ mini-slot k k 1)) #o2020 (aref mini-ring (+ mini-slot k k))))
 
-;;; the file's date as the chaosnet server gave it, "MM/DD/YY HH:MM:SS" in
-;;; UTC, from the open's mtime: Unix seconds, in two 16-bit halves.  the days
-;;; become a date by the proleptic Gregorian calendar (the days-to-civil
-;;; algorithm of H. Hinnant, "chrono-Compatible Low-Level Date Algorithms").
-;;; everything stays a fixnum for any mtime before 2038.
-(defun mini-date-string (high low &aux days rest (s (make-string 17.)))
-  ;; mtime/128 = high*512 + low/128; 86400 = 675*128
-  (multiple-value-setq (days rest) (floor (+ (* high 512.) (lsh low -7)) 675.))
-  (let* ((seconds (+ (* rest 128.) (logand low 127.)))
-	 (z (+ days 719468.))				;days from 0000-03-01
-	 (era (floor z 146097.))
-	 (doe (- z (* era 146097.)))
-	 (yoe (floor (- (+ doe (floor doe 36524.)) (floor doe 1460.) (floor doe 146096.))
-		     365.))
-	 (doy (- doe (- (+ (* 365. yoe) (floor yoe 4)) (floor yoe 100.))))
-	 (mp (floor (+ (* 5 doy) 2) 153.))
-	 (month (if (< mp 10.) (+ mp 3) (- mp 9.)))
-	 (year (+ yoe (* era 400.) (if (<= month 2) 1 0))))
-    (mini-two-digits s 0 month)
-    (mini-two-digits s 3 (1+ (- doy (floor (+ (* 153. mp) 2) 5))))
-    (mini-two-digits s 6 (mod year 100.))
-    (mini-two-digits s 9. (floor seconds 3600.))
-    (mini-two-digits s 12. (mod (floor seconds 60.) 60.))
-    (mini-two-digits s 15. (mod seconds 60.))
-    (aset (int-char #o57) s 2)				;/
-    (aset (int-char #o57) s 5)
-    (aset (int-char #o40) s 8.)				;space
-    (aset (int-char #o72) s 11.)			;:
-    (aset (int-char #o72) s 14.)
-    s))
-
-(defun mini-two-digits (s i n)
-  (aset (int-char (+ (char-int #/0) (floor n 10.))) s i)
-  (aset (int-char (+ (char-int #/0) (mod n 10.))) s (1+ i)))
+;;; mini-date-string and mini-two-digits are commented out: MINI no longer
+;;; prints the date.  it records the open's mtime halves as they came, and
+;;; fs:canonicalize-cold-load-pathnames turns them into a universal time
+;;; (see mini-open-file).
+;;;; the file's date as the chaosnet server gave it, "MM/DD/YY HH:MM:SS" in
+;;;; UTC, from the open's mtime: Unix seconds, in two 16-bit halves.  the days
+;;;; become a date by the proleptic Gregorian calendar (the days-to-civil
+;;;; algorithm of H. Hinnant, "chrono-Compatible Low-Level Date Algorithms").
+;;;; everything stays a fixnum for any mtime before 2038.
+;(defun mini-date-string (high low &aux days rest (s (make-string 17.)))
+;  ;; mtime/128 = high*512 + low/128; 86400 = 675*128
+;  (multiple-value-setq (days rest) (floor (+ (* high 512.) (lsh low -7)) 675.))
+;  (let* ((seconds (+ (* rest 128.) (logand low 127.)))
+;	 (z (+ days 719468.))				;days from 0000-03-01
+;	 (era (floor z 146097.))
+;	 (doe (- z (* era 146097.)))
+;	 (yoe (floor (- (+ doe (floor doe 36524.)) (floor doe 1460.) (floor doe 146096.))
+;		     365.))
+;	 (doy (- doe (- (+ (* 365. yoe) (floor yoe 4)) (floor yoe 100.))))
+;	 (mp (floor (+ (* 5 doy) 2) 153.))
+;	 (month (if (< mp 10.) (+ mp 3) (- mp 9.)))
+;	 (year (+ yoe (* era 400.) (if (<= month 2) 1 0))))
+;    (mini-two-digits s 0 month)
+;    (mini-two-digits s 3 (1+ (- doy (floor (+ (* 153. mp) 2) 5))))
+;    (mini-two-digits s 6 (mod year 100.))
+;    (mini-two-digits s 9. (floor seconds 3600.))
+;    (mini-two-digits s 12. (mod (floor seconds 60.) 60.))
+;    (mini-two-digits s 15. (mod seconds 60.))
+;    (aset (int-char #o57) s 2)				;/
+;    (aset (int-char #o57) s 5)
+;    (aset (int-char #o40) s 8.)				;space
+;    (aset (int-char #o72) s 11.)			;:
+;    (aset (int-char #o72) s 14.)
+;    s))
+;
+;(defun mini-two-digits (s i n)
+;  (aset (int-char (+ (char-int #/0) (floor n 10.))) s i)
+;  (aset (int-char (+ (char-int #/0) (mod n 10.))) s (1+ i)))
 
 ;;; the next buffer's worth of the open file; nil at its end, where the file
 ;;; is closed.  a read names only the bytes left, since the device charges
@@ -238,13 +242,24 @@
 	       mini-length (mini-response-word 3))
 	 ;; Before pathnames and time parsing is loaded, things are stored as strings.
 	 ;; the device's truename is the name asked, as the server's was.
+;	 (setq mini-file-id (cons (string-append filename)
+;				  ;Discard zero at front of month, so the format
+;				  ;matches that produced by PRINT-UNIVERSAL-TIME
+;				  ;and by QFILE before TIMPAR is loaded.
+;				  (string-left-trim #/0 (mini-date-string
+;							  (aref mini-ring (+ mini-slot 9.))
+;							  (aref mini-ring (+ mini-slot 8.))))))
+	 ;; the date is the open's mtime as the device gave it, Unix seconds in
+	 ;; two 16-bit halves, (high . low); fs:canonicalize-cold-load-pathnames
+	 ;; makes it a universal time, as HOST's :creation-date does, before
+	 ;; QLD's make-system compares it.  as text, printed here in UTC, it was
+	 ;; still text when make-system compared it (TIMPAR, which parses it, is
+	 ;; loaded by that make-system), and text compares as newer, so QLD loaded
+	 ;; every file MINI had loaded again; parsed later it could also be off by
+	 ;; the zone.  MINI adds nothing: high*65536 is a bignum, which MINI avoids.
 	 (setq mini-file-id (cons (string-append filename)
-				  ;Discard zero at front of month, so the format
-				  ;matches that produced by PRINT-UNIVERSAL-TIME
-				  ;and by QFILE before TIMPAR is loaded.
-				  (string-left-trim #/0 (mini-date-string
-							  (aref mini-ring (+ mini-slot 9.))
-							  (aref mini-ring (+ mini-slot 8.))))))
+				  (cons (aref mini-ring (+ mini-slot 9.))
+					(aref mini-ring (+ mini-slot 8.)))))
 	 (if binary-p #'mini-binary-stream #'mini-ascii-stream))
 	(t (mini-log (string-append "mini: refused " filename " status " (mini-decimal status)))
 	   (if no-barf nil

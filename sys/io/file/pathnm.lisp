@@ -1945,25 +1945,50 @@ pathname sets the defaults."
 	   (SETQ P-CHAR (AREF PATTERN P-NEXT))
 	   (SETQ P-PTR (1+ P-NEXT))))))
 
+;;; both methods below compare the pattern (self) and the sample in
+;;; interchange case: the pattern's device, directory, name and type are
+;;; taken through the same accessors as the sample's, not from the instance
+;;; variables.  they took the pattern's raw components, which for a
+;;; pathname-normally-lowercase-mixin (unix-pathname, lmfs-pathname) are the
+;;; host's own case, ("sys" "*"), and the sample's through the accessors,
+;;; which convert solid case, ("SYS" "SYS2"); pathname-component-match
+;;; compares with case, so such a pattern matched no solid-case pathname,
+;;; not even itself.  back-translation into SYS: then failed for every
+;;; HOST: or OZ: pathname: the cold load's files kept their ids and source
+;;; file names on HOST: generic pathnames, so QLD's make-system found no id
+;;; on the SYS: ones and loaded every file MINI had loaded a second time.
+;;; the specs come out in interchange case, which is what the target's
+;;; :translation-case-converter expects (:target-translate-wild-pathname),
+;;; so both methods change together.  a logical pathname's raw components
+;;; are its interchange ones, so it matches as before.  the version is not
+;;; case-converted and stays as it was.
 (DEFMETHOD (PATHNAME :PATHNAME-MATCH) (PATHNAME &OPTIONAL (MATCH-HOST T))
   (MULTIPLE-VALUE-BIND (W* W1)
       (SEND SELF :INTERNAL-WILD-CHARACTERS)
     (AND (OR (NOT MATCH-HOST)
 	     (EQ HOST (PATHNAME-HOST PATHNAME)))
-	 (PATHNAME-COMPONENT-MATCH DEVICE (PATHNAME-DEVICE PATHNAME) W* W1)
-	 (PATHNAME-COMPONENT-MATCH DIRECTORY (PATHNAME-DIRECTORY PATHNAME) W* W1)
-	 (PATHNAME-COMPONENT-MATCH NAME (PATHNAME-NAME PATHNAME) W* W1)
-	 (PATHNAME-COMPONENT-MATCH TYPE (PATHNAME-TYPE PATHNAME) W* W1)
+;	 (PATHNAME-COMPONENT-MATCH DEVICE (PATHNAME-DEVICE PATHNAME) W* W1)
+;	 (PATHNAME-COMPONENT-MATCH DIRECTORY (PATHNAME-DIRECTORY PATHNAME) W* W1)
+;	 (PATHNAME-COMPONENT-MATCH NAME (PATHNAME-NAME PATHNAME) W* W1)
+;	 (PATHNAME-COMPONENT-MATCH TYPE (PATHNAME-TYPE PATHNAME) W* W1)
+	 (pathname-component-match (pathname-device self) (pathname-device pathname) w* w1)
+	 (pathname-component-match (pathname-directory self) (pathname-directory pathname) w* w1)
+	 (pathname-component-match (pathname-name self) (pathname-name pathname) w* w1)
+	 (pathname-component-match (pathname-type self) (pathname-type pathname) w* w1)
 	 (PATHNAME-COMPONENT-MATCH VERSION (PATHNAME-VERSION PATHNAME) W* W1))))
 
 (DEFMETHOD (PATHNAME :PATHNAME-MATCH-SPECS) (PATHNAME)
   (MULTIPLE-VALUE-BIND (W* W1)
       (SEND SELF :INTERNAL-WILD-CHARACTERS)
     (VALUES
-      (PATHNAME-COMPONENT-MATCH DEVICE (PATHNAME-DEVICE PATHNAME) W* W1 T)
-      (PATHNAME-COMPONENT-MATCH DIRECTORY (PATHNAME-DIRECTORY PATHNAME) W* W1 T)
-      (PATHNAME-COMPONENT-MATCH NAME (PATHNAME-NAME PATHNAME) W* W1 T)
-      (PATHNAME-COMPONENT-MATCH TYPE (PATHNAME-TYPE PATHNAME) W* W1 T))))
+;      (PATHNAME-COMPONENT-MATCH DEVICE (PATHNAME-DEVICE PATHNAME) W* W1 T)
+;      (PATHNAME-COMPONENT-MATCH DIRECTORY (PATHNAME-DIRECTORY PATHNAME) W* W1 T)
+;      (PATHNAME-COMPONENT-MATCH NAME (PATHNAME-NAME PATHNAME) W* W1 T)
+;      (PATHNAME-COMPONENT-MATCH TYPE (PATHNAME-TYPE PATHNAME) W* W1 T))))
+      (pathname-component-match (pathname-device self) (pathname-device pathname) w* w1 t)
+      (pathname-component-match (pathname-directory self) (pathname-directory pathname) w* w1 t)
+      (pathname-component-match (pathname-name self) (pathname-name pathname) w* w1 t)
+      (pathname-component-match (pathname-type self) (pathname-type pathname) w* w1 t))))
 
 ;;; Wildcard translation
 

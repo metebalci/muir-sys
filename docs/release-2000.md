@@ -872,6 +872,46 @@ a comment in that file saying why.
   time silently. A date out of range is now no date, as 00/00/00 already
   was (`io/file/open.lisp`); MIT's. Only dates over OZ go through it.
 
+- **A physical pathname matches its own pattern again, so QLD no longer
+  loads MINI's files twice.** `:PATHNAME-MATCH` and `:PATHNAME-MATCH-SPECS`
+  took the pattern's components raw and the sample's through the accessors,
+  which convert solid case, and compared them with case: a `HOST:` (or any
+  Unix or LMFS) pattern such as `HOST: /sys/*/*` matched no pathname, not
+  even itself. So nothing on `HOST` back-translated into `SYS:`: every file
+  MINI loaded kept its loaded id and its functions' source file on a `HOST:`
+  generic pathname, QLD's `MAKE-SYSTEM` found no id on the `SYS:` one and
+  loaded all 36 of MINI's `SYS:` QFASLs a second time. Both methods now
+  take the pattern's device, directory, name and type through the accessors
+  too, and compare in interchange case (`io/file/pathnm.lisp:1948-1991`, the
+  old lines commented out); a logical pattern matches as before, and case
+  stays significant. `FILE-DEVICE-WILD-MATCH`'s comment gives its reason
+  anew (`io/file/hostfs.lisp:353-360`). Red and green with `lispm-check` on
+  the System 2000 development band: a `HOST:` pathname matches itself, the
+  generic pathname of `HOST: /sys/sys2/flavor.qfasl`,
+  `/sys/io/file/pathst.qfasl` and `/site/site.qfasl` is the `SYS:` one,
+  back-translation gives `SYS: SYS2; FLAVOR QFASL`, `SYS: IO; FILE; PATHST
+  QFASL` and `SYS: SITE; SITE QFASL`, and dired's wildcard match of a `HOST:`
+  directory holds: all NIL or an error before, T after; translation and case
+  unchanged.
+- **MINI records a file's date as the device's number.** MINI printed each
+  file's date as text (`MINI-DATE-STRING`), and the text stayed text until
+  TIMPAR came in, which `MAKE-SYSTEM "System"` itself loads, after it has
+  compared every file's id; text never equals `HOST`'s number, so with the
+  fault above fixed QLD would still load MINI's files again. MINI now keeps
+  the open's mtime as it came, its two halves `(high . low)`
+  (`cold/mini.lisp:245-262`; `MINI-DATE-STRING` and `MINI-TWO-DIGITS`
+  commented out at `:138-175`), and `CANONICALIZE-COLD-LOAD-PATHNAMES`, which
+  QLD runs before `MAKE-SYSTEM`, makes it a universal time with
+  `FILE-DEVICE-UNIVERSAL-TIME`, as `HOST`'s `:CREATION-DATE` does
+  (`MINI-DATE-UNIVERSAL-TIME`, `io/file/pathst.lisp:331-339`, `:391-395`).
+  MINI stays free of bignums and prints no date. In a fresh cold load and
+  QLD with both changes: no `HOST:` generic pathname carries an id (the
+  development band had 40), every id is a number equal to the served
+  date (39 differed), 35 of MINI's 36 `SYS:` QFASLs keep MINI's id alone,
+  `(make-system 'system :print-only)` lists nothing, and the quux process
+  opened 1 of MINI's files again after MINI, where the ids show 36 before.
+  The one left is `SYS: SITE; HSTTBL QFASL` (Known faults).
+
 ## Known faults found, not yet fixed
 
 - **A date printed MM/DD parses as DD/MM outside the United States.** The
@@ -889,6 +929,22 @@ a comment in that file saying why.
 - **MONO TV sizes above 1920 by 1080 are not supported** (the user,
   2026-09-24). At 2560 by 1440, what boot draws in the Lisp listener stops
   at pixel 2^21, row 819, until its next refresh; the cause is not sought.
+- **QLD still loads `SYS: SITE; HSTTBL QFASL` a second time.** MINI's id for
+  a file names its truename by merging MINI's name into `SYS:`'s physical
+  pathname (`CANONICALIZE-COLD-LOAD-PATHNAMES`, `io/file/pathst.lisp:388-390`),
+  and for a file one directory deep, `/site/hsttbl.qfasl`, that pathname's
+  directory is the string `"site"`, while `SYS: SITE; HSTTBL QFASL`'s
+  translation, the truename `HOST` gives `MAKE-SYSTEM`
+  (`FILE-DEVICE-TRUENAME`, `io/file/hostfs.lisp:138-151`), has the list
+  `("site")`: two pathnames, never `EQUAL`, so the id never matches. Files
+  two or more deep give the same pathname both ways. The CADR's line does
+  not have it: QFILE's truename is parsed from the server's name, as MINI's
+  is, and its build with the pathname fix read `HSTTBL` once. Measured on the new
+  band: the merged pathname is not `EQ` to the translation, and with MINI's
+  id put back `FILE-NEWER-THAN-INSTALLED-P` is T with the merged truename and
+  NIL with the translation's. Of MINI's files only `HSTTBL` is in a system
+  (`SITE`, `LMLOCS` and `SYS TRANSLATIONS` are not), so it is the one reload
+  left; not fixed here.
 
 ## The herald
 

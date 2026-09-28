@@ -328,6 +328,16 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 ;;; logical pathnames moved to io;file;logical
 
 ;;;; Kludges for bootstrapping from a world without flavors loaded.
+
+;;; the universal time of a date MINI recorded: the file device's mtime for
+;;; the open, Unix seconds in two 16-bit halves, (high . low) (cold; mini).
+;;; MINI keeps the halves because it has no bignums and, as the device path
+;;; never does, neither prints nor parses a date.  file-device-universal-time
+;;; is what HOST's :creation-date uses, so a file MINI loaded has the date
+;;; HOST gives it, and QLD's make-system does not load it again.
+(defun mini-date-universal-time (date)
+  (file-device-universal-time (+ (* (car date) 65536.) (cdr date))))
+
 (DEFUN CANONICALIZE-COLD-LOAD-PATHNAMES (&AUX SYS-PATHNAME PHYS-PATHNAME)
   (DECLARE (SPECIAL SYS-PATHNAME PHYS-PATHNAME))
   ;; Get someone who can do the translations
@@ -377,7 +387,12 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 		 ;; And before there are truenames
 		 (LET ((INFO (CADAR VAL)))
 		   (AND (STRINGP (CAR INFO))
-			(SETF (CAR INFO) (MERGE-PATHNAMES (CAR INFO) PHYS-PATHNAME)))))
+			(SETF (CAR INFO) (MERGE-PATHNAMES (CAR INFO) PHYS-PATHNAME)))
+		   ;; and before there are bignums: MINI's date is the open's
+		   ;; mtime halves, made a universal time here, before QLD's
+		   ;; make-system compares it with HOST's date for the file.
+		   (when (consp (cdr info))
+		     (setf (cdr info) (mini-date-universal-time (cdr info))))))
 		((EQ PROP :DEFINITIONS)
 		 (COND ((OR (NULL VAL)
 			    (SYMBOLP (CAR VAL)))
