@@ -431,6 +431,23 @@ QIMOVE1	(DISPATCH M-INST-DEST QMDTBD)		;MAY EXECUTE NEXT INSTUCTION
        ((C-PDL-BUFFER-POINTER-PUSH) DPB M-T Q-ALL-BUT-CDR-CODE
 			(A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NEXT)))
 
+;; quux revision 12 (contract h8a section 4), a specialised handler: move d-pdl
+;; of a local or an argument, the most frequent macroinstruction (4.5 m of the
+;; profile's 16 m).  the generic handler, qimove, qadloc1 or qadarg1 and
+;; qimove1, takes 6 microcycles to the next handler; this takes 2.  only the
+;; macro dispatch memory names it (reset-machine, indexes 425 and 426, with the
+;; operand bit), so it runs only from a fused return with no fetch needed; the
+;; main loop's dispatch still runs qimove.  pdl-index then holds the operand's
+;; address, a-localp + delta or m-ap + 1 + delta, as qadloc1 and qadarg1 leave
+;; it.  it pushes the operand's typed pointer with cdr-next, as qimove1 does, and
+;; leaves the typed pointer in m-t, as qadloc1 does, since a branch after it
+;; tests m-t.  its first microinstruction reads the pdl only at pdl-index, and
+;; the one after its popj writes only m-t (contract h8a section 3.3).
+qimove-pdl-operand
+	(popj-after-next (c-pdl-buffer-pointer-push) dpb c-pdl-buffer-index q-typed-pointer
+		(a-constant (byte-value q-cdr-code cdr-next)))
+       ((m-t) q-typed-pointer c-pdl-buffer-index)
+
 ;ALL OF THESE WANT OPERAND FETCHED.
 QIND1	(DISPATCH-XCT-NEXT M-INST-SUB-OPCODE D-ND1)
        (DISPATCH-CALL M-INST-REGISTER QADCM5)

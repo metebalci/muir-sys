@@ -104,6 +104,19 @@ reset-machine-macro-dispatch-fill
 	;; holding whatever they held before this start.
 	((a-localp) a-localp)
 	((m-ap) m-ap)
+	;; the specialised handlers (contract h8a section 4) over the generic
+	;; entries of the halfwords they serve.  no main-loop return comes before
+	;; beg06, so writing them after the enable is the same as before it.  an
+	;; entry's <17> is the operand bit, 400000: a fused return into it with
+	;; register local (5) or arg (6) loads pdl-index with the operand's
+	;; address.  it is set only on those two registers' indexes.  the index is
+	;; the halfword's <15:6>: the destination <15:14>, the opcode <13:9>, the
+	;; register <8:6>.
+	;; move d-pdl (1) of a local or an argument: opcode 2, indexes 425 and 426.
+	((macro-dispatch-index) (a-constant 425))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimove-pdl-operand) 400000)))
+	((macro-dispatch-index) (a-constant 426))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimove-pdl-operand) 400000)))
 reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 

@@ -815,6 +815,42 @@ a comment in that file saying why.
     0.60% of 439,386,000 (0.05% to 1.55% by workload; sort the most),
     counted at the no-ops themselves; `QSTLOC` is 64% of it, the PDL page
     faults and `MKWRIT` 29%.
+- **Specialised handlers, first family: MOVE D-PDL of a local or an
+  argument** (muir's contract H8a section 4, plan slice S6; microcode 2000
+  keeps its number, and its files change again). The most frequent
+  macroinstruction gets a handler of its own, `QIMOVE-PDL-OPERAND`
+  (`ucadr/uc-macrocode.lisp:458-473`): one microinstruction that pushes the
+  operand's typed pointer with CDR-NEXT and returns, and in the
+  microinstruction after its `POPJ` the same typed pointer into M-T, as
+  `QADLOC1` leaves it, since a branch after the MOVE tests M-T. Only the
+  MACRO DISPATCH MEMORY names it: `RESET-MACHINE` writes it, with the
+  operand bit, at indexes 425 and 426 (destination D-PDL, opcode 2,
+  register LOCAL or ARG) after the generic fill and the register
+  (`ucadr/uc-cold-disk.lisp:107-119`). So it runs only from a fused return
+  with no fetch needed, with PDL-INDEX already holding the operand's
+  address; the main loop's dispatch still runs `QIMOVE`. It is new code
+  beside `OPDTB`'s; no generic handler changed. Its first microinstruction
+  reads the PDL only at PDL-INDEX, and the one after its `POPJ` writes only
+  M-T (section 3.3). I memory grows by 6 words and A memory by 3 constants;
+  named A, M and D memory stays where it was, and no band is rebuilt.
+  - Tested on muir-sim 3c4b4dc (a `git archive` copy with the profile's
+    checkers watching from the microcode's own fill), with ref/band-2000's
+    band and this microcode over its MCR1. The profile of 12 workloads on
+    rtl (sync K=4, 4K cache, the Arty's memory timing, the RTC counted from
+    a fixed second, `cons` after an untimed first `cons`): 1,636,318 MOVEs
+    ran it, each 2 microcycles from its handler's first microinstruction
+    to the next handler's instead of the generic 6, 6,545,272 microcycles
+    fewer; the workloads took 434,236,000 microcycles, 1.23% fewer than
+    439,636,000 before. Over the whole run, on rtl and on micro, the
+    checker counts no forbidden write after a fused return, no wrong
+    handler, no wrong operand address, no base copy differing from its
+    memory, and no read by a handler's first microinstruction of the PDL
+    word the microcycle before it writes (2,253,618 operand addresses loaded
+    on rtl). muir-sim's scan of every return whose next microinstruction
+    runs lists none, as before. 23 forms (arguments and locals of every
+    kind, many locals, a branch on a moved value, loops, recursion,
+    closures, `&optional`, errors) answer on both engines as on the
+    microcode before, but for one array's printed address.
 
 ## Time zones
 
