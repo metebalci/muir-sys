@@ -56,7 +56,10 @@
 	    :AREA WHO-LINE-AREA
 	    :DEFAULT-FONT FONTS:CPTFONT	;not *DEFAULT-FONT*
 	    :BUFFER MAIN-SCREEN-BUFFER-ADDRESS
-	    :CONTROL-ADDRESS #o377760
+;	    :CONTROL-ADDRESS #o377760
+	    ;; quux (contract q13): the video controller's mode is the register
+	    ;; page's word 210, #o777610, from revision 11; #o377760 before.
+	    :control-address #o777610
 	    :PROPERTY-LIST '(:VIDEO :BLACK-AND-WHITE
 				     :CONTROLLER :SIMPLE
 				     :WHO-LINE T)

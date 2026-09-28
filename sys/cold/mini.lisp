@@ -39,18 +39,28 @@
 ;;;   #o1200-#o1377  the buffer, 512. bytes: a file's name, a log line, or data
 ;;; one command is out at a time, so the one buffer serves as both A and B.
 ;;; the registers are words of the register page, feature-page-xbus-address
-;;; (#o377000) plus the word; each constant names the constant of SYS: IO;
-;;; FDEV that must agree with it.
-(defconst mini-feature-devices #o377015)	;feature word 15: <1>, si:%%file-device-feature
-(defconst mini-device-control #o377160)		;si:%file-device-control-register
-(defconst mini-device-status #o377161)		;si:%file-device-status-register
-(defconst mini-command-base #o377162)		;si:%file-device-command-base-register
-(defconst mini-command-size #o377163)		;si:%file-device-command-size-register
-(defconst mini-command-producer #o377164)	;si:%file-device-command-producer-register
-(defconst mini-response-base #o377166)		;si:%file-device-response-base-register
-(defconst mini-response-size #o377167)		;si:%file-device-response-size-register
-(defconst mini-response-producer #o377170)	;si:%file-device-response-producer-register
-(defconst mini-response-consumer #o377171)	;si:%file-device-response-consumer-register
+;;; (#o777400 from revision 11, contract q13; #o377000 before) plus the word;
+;;; each constant names the constant of SYS: IO; FDEV that must agree with it.
+;(defconst mini-feature-devices #o377015)	;feature word 15: <1>, si:%%file-device-feature
+;(defconst mini-device-control #o377160)		;si:%file-device-control-register
+;(defconst mini-device-status #o377161)		;si:%file-device-status-register
+;(defconst mini-command-base #o377162)		;si:%file-device-command-base-register
+;(defconst mini-command-size #o377163)		;si:%file-device-command-size-register
+;(defconst mini-command-producer #o377164)	;si:%file-device-command-producer-register
+;(defconst mini-response-base #o377166)		;si:%file-device-response-base-register
+;(defconst mini-response-size #o377167)		;si:%file-device-response-size-register
+;(defconst mini-response-producer #o377170)	;si:%file-device-response-producer-register
+;(defconst mini-response-consumer #o377171)	;si:%file-device-response-consumer-register
+(defconst mini-feature-devices #o777415)	;feature word 15: <1>, si:%%file-device-feature
+(defconst mini-device-control #o777560)		;si:%file-device-control-register
+(defconst mini-device-status #o777561)		;si:%file-device-status-register
+(defconst mini-command-base #o777562)		;si:%file-device-command-base-register
+(defconst mini-command-size #o777563)		;si:%file-device-command-size-register
+(defconst mini-command-producer #o777564)	;si:%file-device-command-producer-register
+(defconst mini-response-base #o777566)		;si:%file-device-response-base-register
+(defconst mini-response-size #o777567)		;si:%file-device-response-size-register
+(defconst mini-response-producer #o777570)	;si:%file-device-response-producer-register
+(defconst mini-response-consumer #o777571)	;si:%file-device-response-consumer-register
 (defconst mini-command-ring #o1100)
 (defconst mini-response-ring #o1120)
 (defconst mini-buffer #o1200)

@@ -79,6 +79,7 @@ a-gpt-count	(0)	;entries not yet looked at
 ;;; number of cylinders, heads and blocks a track), the recalibrate command,
 ;;; the drive-ready mask and the division's temporary are gone.
 A-DISK-REGS	(0)	;Virtual address of disk control registers
+			;quux (contract q13): 1200, block-disk's words 200-203
 A-MICR-ORIGIN	(0)	;Base disk address of microcode partition
 A-MICR-ADDRESS	(0)	;Address of next block of microcode partition
 A-MICR-N-BLOCKS	(0)	;Remaining blocks of microcode partition
@@ -437,23 +438,36 @@ SET-UP-THE-MAP
 ;;;  1 first and read it back at the end; on a disk with a gpt, block 1 is
 ;;;  the partition table.
 ;;;  Page 1: Mapped to the disk control registers.
+;;;  quux (contract q13, revision 11): page 1 is mapped no more.  block-disk's
+;;;  registers are words 200-203 of the register page, reached through page 2.
 ;;;  Page 2: Mapped to the debug (spy) interface registers at 766000 .
-;;;  quux: page 2 is the register page, 17377000 (contract q2), for its word
-;;;  102, the mode, in place of unibus 766012.
+;;;  quux: page 2 is the register page (contract q2), for its word 102, the
+;;;  mode, in place of unibus 766012; from revision 11 (contract q13) the
+;;;  page is physical page 37777, 17777400-17777777, the last of the physical
+;;;  space, where it was 36776, 17377000, before, and block-disk is its words
+;;;  200-203, virtual 1200-1203.
 ;;;  Page 3: Mapped to the second page of main memory. (system communication area)
 ;;; M-A holds the bits to write the level 1 map with r/w access, MD has zero initially.
+;;; quux (contract q13): the two no-ops take the places of the two writes that
+;;; went, so that every later prom address stays where it was; muir-sim's
+;;; tests and muir-fpga's goldens name them.
 SET-UP-FOUR-PAGES
 	((m-a) dpb m-ones (byte-field 4 22.) a-zero)	;Sets bit 24 which is ignored
 	((vma-write-map) add m-a a-3)			;quux: virtual page 0, physical 3
 
-	((M-B) DPB M-ONES (BYTE-FIELD 11 0) A-A)
+;	((M-B) DPB M-ONES (BYTE-FIELD 11 0) A-A)
+	((m-b) dpb m-ones (byte-field 1 7) a-zero)	;quux: 200, block-disk's first word
 	((MD) A-400)
-	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36777
-	((A-DISK-REGS) DPB M-ONES (BYTE-FIELD 7 2) A-ZERO)	;Virt Addr 774
+;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36777
+	(no-op)						;quux: page 1 is not mapped
+;	((A-DISK-REGS) DPB M-ONES (BYTE-FIELD 7 2) A-ZERO)	;Virt Addr 774
+	((a-disk-regs) dpb m-ones (byte-field 1 9.) a-b)	;quux: virt addr 1200
 
 	((MD) ADD MD A-400)
-	((M-B) DPB M-ONES (BYTE-FIELD 10 1) A-A)		;776
-	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36776
+;	((M-B) DPB M-ONES (BYTE-FIELD 10 1) A-A)		;776
+	(no-op)
+;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36776
+	((vma-write-map) dpb m-ones (byte-field 16 0) a-a)	;quux: M-A + 37777
 
 	((MD) ADD MD A-400)
 	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 0) A-A)	;M-A + 1

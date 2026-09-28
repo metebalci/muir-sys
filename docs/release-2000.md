@@ -118,7 +118,7 @@ a comment in that file saying why.
     Q4), words 140-147, word 140+k for Unibus 764140+2k: the same
     registers in the same order. The microcode's accesses are all made from
     `A-CHAOS-CSR-ADDRESS`, now word 140 (`ucadr/uc-cadr.lisp`); `INTR`
-    takes word 100 <5> into `CHAOS-INTR` through `CHAOS-INTR-QUUX`, which
+    takes word 100 <5> (<6> from revision 11, below) into `CHAOS-INTR` through `CHAOS-INTR-QUUX`, which
     returns without touching the Unibus (`ucadr/uc-chaos.lisp`,
     `uc-interrupt.lisp`). Lisp addresses the registers as Xbus words and
     uses `%XBUS-READ` and `%XBUS-WRITE` (`network/chaos/chsncp.lisp`). The
@@ -131,7 +131,7 @@ a comment in that file saying why.
     word Unibus 764100 and 764102 gave together; word 120 is the
     keyboard's status and bit 8 its interrupt enable; word 122 holds the
     mouse's X and Y counts and its buttons. `INTR` takes a keyboard
-    interrupt from word 100 <3> and puts the key word into the wired
+    interrupt from word 100 <3> (<4> from revision 11, below) and puts the key word into the wired
     keyboard buffer, the channel at sys-com 500, through the same code the
     Unibus keyboard used (`ucadr/uc-interrupt.lisp`); `TRACK-MOUSE` reads
     word 122 and takes it apart into the two registers it read before
@@ -153,9 +153,10 @@ a comment in that file saying why.
     now tests first (`XTVERS1`, `ucadr/uc-tv.lisp`). The CADR's TV memory
     ran on past its last line, which hid the last two.
   - **The register page, and the boot PROM at 36000** (revision 6, muir's
-    contract Q2). The feature page, 17377000, is QUUX's register page: word
+    contract Q2). The feature page, 17377000 (17777400 from revision 11,
+    below), is QUUX's register page: word
     100 says who interrupted (<0> the tick, <1> the interval timer, <2>
-    block-disk), a write to word 101, the error status, clears it, and bit
+    block-disk; revision 11's order below), a write to word 101, the error status, clears it, and bit
     0 of word 102, the mode, is error stop. They replace the Unibus's
     interrupt status (766040), error status (766044) and mode register
     (766012). `INTR` (`ucadr/uc-interrupt.lisp`) reads word 100 first and
@@ -187,22 +188,23 @@ a comment in that file saying why.
     (`io1/time.lisp`) read the high field on both sides of the low. Feature
     page word 14 is 1 when these clocks are present, and
     `SI:PRINT-FEATURE-PAGE` names it.
-  - **MONO TV is the display.** QUUX's display is a 1-bit frame buffer at
+  - **The video controller is the display** (MONO TV until muir's contract
+    Q13 renamed it, below). QUUX's display is a 1-bit frame buffer at
     physical 17000000, 1920 by 1080 at 60 words a line by default, with no
     sync program and no interrupt; muir can make it other sizes. The
     feature page gives its size, words 11-13, and the cold load reads them
-    (`SI:MONO-TV-WIDTH`, `-HEIGHT`, `-WORDS-PER-LINE`, `-BUFFER-ADDRESS`
+    (`SI:VIDEO-WIDTH`, `-HEIGHT`, `-WORDS-PER-LINE`, `-BUFFER-ADDRESS`
     and `-BUFFER-LENGTH` in `sys/ltop.lisp`, each field taken out of its
     word with `%P-LDB`, since the cold load cannot take a bignum apart).
     The main screen is made from them when the window system loads
     (`window/shwarm.lisp`), the cold boot clears the whole buffer, the run
     lights follow the screen's size, and `SET-TV-SPEED`, which loaded the
     CADR TV's sync program, says there is none. The microcode's first
-    run-light address is inside MONO TV's default buffer, and `INTRX0` no
+    run-light address is inside the video controller's default buffer, and `INTRX0` no
     longer reads the CADR TV's vertical flag.
-  - **One band runs at any MONO TV size.** The window system is made at
+  - **One band runs at any video controller size.** The window system is made at
     the size the feature page gave when the band was built, so at every
-    boot `TV:SET-SCREENS-TO-MONO-TV` (`window/shwarm.lisp`) moves the
+    boot `TV:SET-SCREENS-TO-VIDEO` (`window/shwarm.lisp`) moves the
     main screen, the who line and every window to the size it gives now:
     it shrinks the screens to the smaller of the two sizes, points every
     array at the new words per line and buffer, and grows them to the new
@@ -210,21 +212,22 @@ a comment in that file saying why.
     `SET-TV-SPEED` and the Lambda's `SET-SCREEN-WIDTH`, and resets the
     Chaosnet first, as a window's change of size can let the scheduler
     run before the Chaosnet's own reset. The cold-load stream, which was
-    the CADR's 768 by 896, takes MONO TV's size when it is made and at
-    every boot (`:SET-MONO-TV`, `window/cold.lisp`), and the run lights
+    the CADR's 768 by 896, takes the video controller's size when it is made and at
+    every boot (`:SET-VIDEO`, `window/cold.lisp`), and the run lights
     are placed from the feature page (`sys/ltop.lisp`), not from a main
     screen that may still have the old size. Tested with a band built at
     1280 by 1024 and booted at 1024 by 768, 1280 by 1024 and 1920 by
     1080, the largest size supported.
   - **The TV sync program is gone, and with it most of the TV registers.**
-    MONO TV has no sync program, and of the CADR TV's control registers
-    QUUX keeps only register 0's black-on-white bit and register 4, the
-    color map (the user). So the sync routines and tables go from
+    The video controller has no sync program, and of the CADR TV's control registers
+    QUUX kept only register 0's black-on-white bit and register 4, the
+    color map (the user); from revision 11 its one register is its mode,
+    the register page's word 210, and register 4 is gone (below). So the sync routines and tables go from
     `window/cold.lisp` (`READ-SYNC`, `WRITE-SYNC`, `START-SYNC`,
     `STOP-SYNC`, `FILL-SYNC`, `CHECK-SYNC`, `SETUP-CPT`, `PROM-SETUP`,
     `CPT-SYNC2`), `SYNC-RAM-CONTENTS` from `window/shwarm.lisp`, and the
     CADR debugger's TV sync code from `cc/dmon.lisp`. The color TV code
-    stays for a color display like MONO TV, without its sync programs or
+    stays for a color display like the video controller, without its sync programs or
     its waits for the retrace, which QUUX's registers no longer report:
     `WRITE-COLOR-MAP` writes register 4 directly, and
     `WRITE-COLOR-MAP-IMMEDIATE` is the same function
@@ -396,8 +399,8 @@ a comment in that file saying why.
 - **`%DISK-RESTORE` from a running band no longer hangs** (found and
   measured by muir). `DISK-RESTORE-1` gives the disk registers and the run
   light each a fake level-2 entry in the invalid block, in the slot their
-  VMA<12:8> picks, so the two must differ. Lisp moves the run light to MONO
-  TV's last line (`TV::INITIALIZE-RUN-LIGHT-LOCATIONS`, `sys/ltop.lisp`).
+  VMA<12:8> picks, so the two must differ. Lisp moves the run light to the
+  video controller's last line (`TV::INITIALIZE-RUN-LIGHT-LOCATIONS`, `sys/ltop.lisp`).
   When the buffer is a multiple of 8K words, as at 1280x1024 and 1024x768,
   that is slot 37, the registers' own. The second entry replaced the first,
   the disk commands went to the frame buffer, and `DISK-AWAIT-READY` waited
@@ -581,7 +584,8 @@ a comment in that file saying why.
   as destination 4 does (Q11 as amended on 27 Sep; muir 1a89ed0), so a band
   on the previous microcode 1000 has no tick on revision 10, and this
   system's bands move to this microcode.
-  `INTR` turns timer 1 or 2 off when word 100 `<1>` or `<7>` interrupts,
+  `INTR` turns timer 1 or 2 off when word 100 `<1>` or `<7>` (`<2>` from
+  revision 11, below) interrupts,
   since nothing uses them and a level nothing clears would interrupt for
   ever (`ucadr/uc-interrupt.lisp:75-82`, `INTR-TIMER-1-STRAY` and
   `INTR-TIMER-2-STRAY` at :350-361). The register page's new words are
@@ -612,6 +616,85 @@ a comment in that file saying why.
   word 104 write and wait (and dev11's PROM, for the warm boot) runs the
   queued commands and leaves the device enabled; a cold load's QLD through
   MINI reads the same 40 files, 1,508,936 bytes.
+- **The register page is at 17777400, with block-disk and the video
+  controller on it, and word 100 in its final order** (muir's contract
+  Q13, QUUX revision 11; PROM 2000, microcode 2000 and System 2000 keep
+  their numbers, being unreleased, and their files change). The page moves
+  from 17377000 to the last page of the physical space, 17777400-17777777,
+  fixed, so that the frame buffer may grow up to below it; block-disk's
+  registers move from 17377774-17377777 to its words 200-203, and the
+  video controller's mode from 17377760 to its word 210. Nothing answers
+  at the old addresses on revision 11.
+  - **The PROM** maps its virtual page 2 to physical page 37777, not 36776,
+    and reaches block-disk at virtual 1200, word 200 of that page, not 774
+    through page 1, which it no longer maps (`ucadr/promh.text:440-470`, the
+    old lines commented out); two no-ops keep every later PROM address where
+    it was, `GO` at 36043 and `DISK-AWAIT-PACK` at 36600 among them, and
+    `promh.sym`, `.tbl` and `.locs` are unchanged: five words of the
+    `.mcr` differ.
+  - **The microcode** makes every register-page address from one base,
+    `QUUX-REGISTER-PAGE-VIRTUAL-ADDRESS` 77777400 and its physical twin
+    17777400 (`ucadr/uc-cadr.lisp:19-36`, :55-73, :78-121, the old
+    `ASSIGN`s commented out). `INTR` reads word 100 in revision 11's order,
+    `<0>`-`<2>` timers 0-2, `<3>` block-disk, `<4>` the keyboard, `<5>` the
+    mouse, `<6>` the network, `<7>` the file device, keeping revision 10's
+    priority (`ucadr/uc-interrupt.lisp:60-100`), and every bit now has a
+    handler that clears its level or a stray that turns its enable off, so
+    a stray enable costs one interrupt, not a storm: `INTR-DISK` takes
+    block-disk's done to `DISK-COMPLETION` while a disk operation is
+    pending and otherwise writes the command register 0, clearing `<11>`;
+    `INTR-MOUSE-STRAY` writes word 123 0; `INTR-FILE-DEVICE-STRAY` writes
+    word 160 back with `<8>` clear and `<0>` kept (:376-413). `RESET-MACHINE`
+    asks for revision 11 and halts at `MACHINE-NOT-QUUX-11` below it
+    (`ucadr/uc-cold-disk.lisp:5-23`, the halt at :172-178).
+  - **Lisp** takes the page from `SI:FEATURE-PAGE-XBUS-ADDRESS`, now
+    `#o777400` (`sys/ltop.lisp:114`), which `io/fdev.lisp`, `io1/time.lisp`
+    and `sys2/proces.lisp` follow; the literals move with it: MINI's
+    registers (`cold/mini.lisp:54-63`), the Chaosnet interface's
+    (`network/chaos/chsncp.lisp:724`), the keyboard's interrupt enable
+    (`window/cold.lisp:583`), the mouse (`window/mouse.lisp:49`), the mode
+    and error status (`window/color.lisp:35-38`), block-disk's status
+    (`io/disk.lisp:136`), and the video controller's mode, `#o777610`, the
+    main screen's, the who line's and the cold-load stream's control
+    address (`window/shwarm.lisp:1905`, `window/wholin.lisp:62`,
+    `window/cold.lisp:1122`). `SI:PRINT-FEATURE-PAGE` prints the page's
+    address without "Xbus" (`sys/genric.lisp:1866`).
+  - **MONO TV is renamed the video controller**:
+    `SI:VIDEO-WIDTH`, `-HEIGHT`, `-WORDS-PER-LINE`, `-BUFFER-LENGTH` and
+    `-BUFFER-ADDRESS` (`sys/ltop.lisp:121-143`, the old definitions
+    commented out), `TV:SET-SCREENS-TO-VIDEO`, `SCREEN-SET-VIDEO` and
+    `SHEET-SET-VIDEO-PITCH` (`window/shwarm.lisp`), and the cold-load
+    stream's `:SET-VIDEO` (`window/cold.lisp:1100`). `tools/lispm-check`
+    passes muir-sim's `--video-size`, which replaces `--mono-tv-size`.
+  - The band is built from its cold load, since the cold load and the
+    screens saved in the band carry the old addresses. The builder (band
+    M4a, whose Lisp reads the old page) compiled and made the cold load on
+    muir-sim 4e0ca1b (revision 10) with the old microcode; the cold load
+    then booted on muir-sim bba9b3a (revision 11) with the new PROM and
+    microcode, and MINI read QLD's 40 files through the file device.
+  - Tested on muir-sim bba9b3a, micro and rtl, at 1024x768, 1280x1024 and
+    1920x1080: from power-on, after a `%DISK-RESTORE` and after a warm boot
+    through the PROM the band reaches the listener, word 110 reads 401 and
+    111 16,667, and `INTR-TICK` runs 600 times (599 twice) in 10 s of
+    simulated time; after each, typed forms log in and load a file from
+    `HOST:`, which writes one back holding `SI:PRINT-FEATURE-PAGE`'s "at
+    17777400" with revision 11, the main screen's, the who line's and the
+    cold-load stream's control address 777610, black-on-white toggled and
+    read back at word 210 (4, then 0), word 103 equal to
+    `GET-UNIVERSAL-TIME`, and a block written to LOD2 through block-disk
+    and read back whole, which the host finds on the disk. A stray enable of
+    the mouse, of timer 2, of block-disk's `<11>` with the disk idle and of
+    the file device with responses waiting each enters its handler once,
+    the file device staying enabled, where microcode 2000 before this
+    change took 2,504 interrupts in 50 ms for the mouse and 3,622 in a
+    second for the file device. On the `quux` executable (`--video-size
+    1280x1024`, ozd as the Chaosnet peer) the herald names System 2000 and
+    QUUX, TELNET reaches the listener over the Chaosnet, and `HOST-UP-P` of
+    OZ is T. Across revisions: the old microcode, loaded by the new PROM on
+    revision 11, halts at `FILE-DEVICE-NOT-QUIET`; the old PROM on revision
+    11 and the new PROM on revision 10 wait at `DISK-AWAIT-PACK` (36600);
+    the new microcode, loaded by the old PROM on revision 10, halts at
+    `MACHINE-NOT-QUUX-11`.
 
 ## Time zones
 
@@ -946,6 +1029,13 @@ a comment in that file saying why.
   form are unchanged. This line's cold load reads dates from the file
   device as numbers, so nothing else here prints a date for the wire.
 
+- **A band run on a CADR no longer says System 1001 is the CADR's last.**
+  `CHECK-MACHINE-IS-QUUX` printed "This band runs only on QUUX: System 1001
+  is the last for the CADR." before it halts, wrong since the CADR's line
+  went on with 1002; it prints "This band runs only on QUUX: the CADR's
+  systems are the 1000s." (`sys/ltop.lisp:155-158`, the old line commented
+  out).
+
 ## Known faults found, not yet fixed
 
 - **A date printed MM/DD parses as DD/MM outside the United States.** The
@@ -960,7 +1050,7 @@ a comment in that file saying why.
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
   returns 0 for a zero dividend before it looks at the divisor. MIT's.
-- **MONO TV sizes above 1920 by 1080 are not supported** (the user,
+- **Video controller sizes above 1920 by 1080 are not supported** (the user,
   2026-09-24). At 2560 by 1440, what boot draws in the Lisp listener stops
   at pixel 2^21, row 819, until its next refresh; the cause is not sought.
 
@@ -993,7 +1083,7 @@ a comment in that file saying why.
 - **`SI:MACHINE-TYPE-CODE`** returns 1 on a CADR and 4 on QUUX, the type code
   the microcode set at boot from `MACHINE-ID`; `MACHINE-TYPE` gives its name.
 - **`SI:PRINT-FEATURE-PAGE`** prints QUUX's feature page, read with
-  `%XBUS-READ` at Xbus 17377000: the machine ID with its signature, revision
+  `%XBUS-READ` at 17777400 (17377000 below revision 11): the machine ID with its signature, revision
   and type, and the sizes of the level-1 entry, the level-2 map, the PDL
   buffer, control store, A memory and dispatch memory. On a CADR, which has no
   such page and times out if it is read, it says so instead.

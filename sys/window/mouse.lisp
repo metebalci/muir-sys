@@ -43,7 +43,10 @@
 ;; quux (contract q3): the mouse is the register page's word 122, an xbus
 ;; address: x in <11:0>, y in <27:16>, the buttons in <14:12> as 764104 had
 ;; them.  the two unibus registers above are the cadr's.
-(defconst mouse-reg #o377122)
+;; quux (contract q13): the register page is at #o777400 from revision 11,
+;; where it was #o377000, so word 122 is #o777522.
+;(defconst mouse-reg #o377122)
+(defconst mouse-reg #o777522)
 
 
 ;;;; Low-level routines

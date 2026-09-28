@@ -328,7 +328,7 @@ XTVERS1	(CHECK-PAGE-READ-NO-INTERRUPT)			;DO FIRST COLUMN
 	;; quux: the column's count is tested after each row, before the next
 	;; row's read starts, not at the top: mit tested it here, after the read
 	;; of the row below the rectangle had already started, so every erase read
-	;; one row below its bottom.  below the who line that is past mono tv's
+	;; one row below its bottom.  below the who line that is past the video controller's
 	;; buffer, an xbus nxm (muir traced them at row 1024 of a 1280x1024
 	;; screen); the cadr's tv memory ran on past its last line.  m-b is the
 	;; height, never 0 here (xtvers5 returns for 0).

@@ -128,9 +128,12 @@ The function receives arguments :READ-COMPARE, the RQB, and the ADDRESS."
 ;;; Get STATUS of a unit.  Leaves the status in the rqb.
 ;; quux: block-disk has no command that only returns its status (mit's used
 ;; offset clear), so its status register is read directly.
+;; quux (contract q13): block-disk's registers are the register page's words
+;; 200-203 from revision 11, #o777600, where they were #o377774 before.
 (defun get-disk-status (rqb unit)
   (block-disk-check-unit unit)
-  (let ((status (%xbus-read #o377774)))
+;  (let ((status (%xbus-read #o377774)))
+  (let ((status (%xbus-read #o777600)))
     (setf (aref rqb %disk-rq-status-low) (ldb #o0020 status)
 	  (aref rqb %disk-rq-status-high) (ldb #o2020 status))
     rqb))

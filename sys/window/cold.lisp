@@ -578,7 +578,9 @@ not converted to upper case."
 ;; do the same.
 (DEFUN SET-MOUSE-MODE (MODE)
   (SELECTQ MODE
-    ((DIRECT VIA-KBD) (%xbus-write #o377120 #o400))	;Keyboard interrupt enable
+;    ((DIRECT VIA-KBD) (%xbus-write #o377120 #o400))	;Keyboard interrupt enable
+    ;; quux (contract q13): word 120 is #o777520 from revision 11.
+    ((direct via-kbd) (%xbus-write #o777520 #o400))	;Keyboard interrupt enable
     (OTHERWISE (FERROR NIL "UNKNOWN MOUSE MODE"))))
 
 ;; Translate from a Unibus address to a Lisp machine virtual address, returning a fixnum.
@@ -1054,7 +1056,9 @@ not converted to upper case."
 ;;; prom-setup) and its tables (cpt-sync2 and the commented-out older ones).
 ;;; mono tv, quux's display, has no sync program, and of the tv control
 ;;; registers keeps only register 0's black-on-white bit and register 4, the
-;;; color map (the user, 2026-09-23).
+;;; color map (the user, 2026-09-23).  from revision 11 (contract q13) it is
+;;; the video controller, whose one register is its mode, the register
+;;; page's word 210 with the black-on-white bit, and register 4 is gone.
 
 ;This is used for making an instance in the cold-load environment,
 ;so that we can display on the TV in the cold-load stream.
@@ -1084,17 +1088,19 @@ not converted to upper case."
   (SEND INSTANCE ':INIT (LOCF INIT-OPTIONS))
   INSTANCE)
 
-;; quux: one band must run at any mono tv size, so lisp-reinitialize sends
+;; quux: one band must run at any video controller size, so lisp-reinitialize sends
 ;; this at every boot, to take the size the feature page gives now, not the
 ;; one the stream was made at.  it is defined here, before
 ;; make-instance-immediate below, which builds the stream's operations from
 ;; the methods defined before it: defined after, it is not handled.  the
 ;; array is as wide as a raster line, as :init makes it; the microcode draws
 ;; by locations-per-line.
-(defmethod-immediate (cold-load-stream :set-mono-tv) ()
-  (let ((new-wpl (mono-tv-words-per-line))
-	(new-height (mono-tv-height))
-	(new-buffer (mono-tv-buffer-address)))
+;; quux (contract q13): :set-video and video-* were :set-mono-tv and
+;; mono-tv-* until mono tv was renamed the video controller.
+(defmethod-immediate (cold-load-stream :set-video) ()
+  (let ((new-wpl (video-words-per-line))
+	(new-height (video-height))
+	(new-buffer (video-buffer-address)))
     (unless (and (= locations-per-line new-wpl) (= height new-height) (= buffer new-buffer))
       (setq locations-per-line new-wpl
 	    width (* 32. new-wpl)
@@ -1105,12 +1111,15 @@ not converted to upper case."
 	    cursor-y 0))))
 
 (DEFUN COLD-LOAD-STREAM-INIT-PLIST-GENERATOR NIL
-  ;; quux: mono tv's size and buffer, from the feature page; the cadr's
-  ;; 768 by 896 at io-space-virtual-address drew garbage on it.
-  `(:width ,(* 32. (mono-tv-words-per-line))
-    :height ,(mono-tv-height)
-    :buffer ,(mono-tv-buffer-address)
-    :CONTROL-ADDRESS 377760))
+  ;; quux: the video controller's size and buffer, from the feature page; the cadr's
+  ;; 768 by 896 at io-space-virtual-address drew garbage on it.  its mode,
+  ;; the control address, is the register page's word 210, #o777610, from
+  ;; revision 11 (contract q13); 377760 before.
+  `(:width ,(* 32. (video-words-per-line))
+    :height ,(video-height)
+    :buffer ,(video-buffer-address)
+;    :CONTROL-ADDRESS 377760))
+    :control-address #o777610))
 
 (MAKE-INSTANCE-IMMEDIATE COLD-LOAD-STREAM COLD-LOAD-STREAM-INIT-PLIST-GENERATOR)
 

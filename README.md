@@ -27,8 +27,8 @@ muir-fpga builds. It keeps the CADR's architecture and improves on it in two
 directions: performance and capacity, and modern computing, such as the
 display's resolution, block storage and the network. Each improvement is a
 hardware revision, and the machine says which it has: `MACHINE-ID`, a
-functional source, gives the revision, and its **feature page**, one read-only
-page of I/O space, gives its sizes. The system reads both at boot rather than
+functional source, gives the revision, and its **feature page**, the read-only
+first 64 words of its register page, gives its sizes. The system reads both at boot rather than
 assuming them.
 
 What System 2000 uses so far:
@@ -39,7 +39,7 @@ What System 2000 uses so far:
 | PDL buffer (revision 2) | 16K words | 1K words |
 | multiply and divide (revision 3) | one instruction each | 32 steps |
 | the 60-cycle clock (revision 4) | the processor's own tick | the display's vertical interrupt |
-| display | MONO TV, a 1-bit frame buffer, 1920 by 1080 by default, sized from the feature page | 768 by 963, with a sync program |
+| display | the video controller, a 1-bit frame buffer, 1920 by 1080 by default, sized from the feature page | 768 by 963, with a sync program |
 
 The microcode is **microcode 2000**, the first change to the microcode itself,
 which stayed 323 while it was MIT's, and the machine boots it with **boot

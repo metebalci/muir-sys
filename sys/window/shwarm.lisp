@@ -1886,25 +1886,31 @@ SHEET's cursor is not used or moved."
 
 ;;; This height may get hacked by the who-line making code if the wholine ends up
 ;;; at the bottom of the main screen (which it usually does!)
-;;; quux: mono tv's size, from the feature page, not the cadr tv's 768 by
-;;; 963 at 24 words a line: 1920 by 1080 at 60 by default, and muir can make
+;;; quux: the video controller's size, from the feature page, not the cadr tv's 768 by
+;;; 963 at 24 words a line: 1920 by 1080 at 60 by default, and muir-sim can make
 ;;; it other sizes.  the window system is built from these when it loads.
-(DEFVAR MAIN-SCREEN-WIDTH (si:mono-tv-width))
+;;; quux (contract q13): mono tv is renamed the video controller, and
+;;; si:mono-tv-width and the rest si:video-width and the rest, here and below
+;;; (set-screens-to-video, screen-set-video, sheet-set-video-pitch).  its
+;;; mode is the register page's word 210, #o777610, from revision 11, where
+;;; it was #o377760.
+(defvar main-screen-width (si:video-width))
 
-(DEFVAR MAIN-SCREEN-HEIGHT (si:mono-tv-height))
+(defvar main-screen-height (si:video-height))
 
-(DEFVAR MAIN-SCREEN-LOCATIONS-PER-LINE (si:mono-tv-words-per-line))
+(defvar main-screen-locations-per-line (si:video-words-per-line))
 
-(DEFCONST MAIN-SCREEN-BUFFER-ADDRESS (si:mono-tv-buffer-address))
-(DEFCONST MAIN-SCREEN-CONTROL-ADDRESS #o377760)
-(DEFCONST MAIN-SCREEN-BUFFER-LENGTH (si:mono-tv-buffer-length))
+(defconst main-screen-buffer-address (si:video-buffer-address))
+;(DEFCONST MAIN-SCREEN-CONTROL-ADDRESS #o377760)
+(defconst main-screen-control-address #o777610)
+(defconst main-screen-buffer-length (si:video-buffer-length))
 
 ;;;Set things up
 (DEFUN INITIALIZE ()
   (SHEET-CLEAR-LOCKS)
   (WHO-LINE-SETUP)
-  ;; quux: a band saved at one mono tv size may boot at another.
-  (set-screens-to-mono-tv)
+  ;; quux: a band saved at one video controller size may boot at another.
+  (set-screens-to-video)
   ;; Set up screen and sheet for the main monitor (CPT typically)
   (OR MAIN-SCREEN
       (SETQ MAIN-SCREEN
@@ -1921,7 +1927,7 @@ SHEET's cursor is not used or moved."
 	SCREEN-MANAGER-TOP-LEVEL T
 	SCREEN-MANAGER-QUEUE NIL))
 
-;; quux: one band runs at any mono tv size.  the screens are made at the
+;; quux: one band runs at any video controller size.  the screens are made at the
 ;; size the feature page gave when the window system loaded, at qld, so at
 ;; every boot, after the locks are cleared and before anything is exposed,
 ;; they are moved to the size it gives now.  this follows mit's set-tv-speed,
@@ -1932,12 +1938,12 @@ SHEET's cursor is not used or moved."
 ;; sizes at the old pitch, every array moves to the new pitch and buffer,
 ;; screens first, and the screens grow to the new size.  a change of the main
 ;; screen's size scales its inferiors.
-(defun set-screens-to-mono-tv ()
-  "Size the main screen and the who line to MONO TV's size, from the feature page."
-  (let ((new-width (si:mono-tv-width))
-	(new-height (si:mono-tv-height))
-	(new-wpl (si:mono-tv-words-per-line))
-	(new-buffer (si:mono-tv-buffer-address)))
+(defun set-screens-to-video ()
+  "Size the main screen and the who line to the video controller's size, from the feature page."
+  (let ((new-width (si:video-width))
+	(new-height (si:video-height))
+	(new-wpl (si:video-words-per-line))
+	(new-buffer (si:video-buffer-address)))
     (unless (or (null main-screen) (null who-line-screen)
 		(and (= new-width main-screen-width)
 		     (= new-height main-screen-height)
@@ -1968,14 +1974,14 @@ SHEET's cursor is not used or moved."
 		  main-screen-buffer-address new-buffer
 		  main-screen-buffer-length (* new-height new-wpl))
 	    (send main-screen :eval-inside-yourself
-		  `(screen-set-mono-tv ,new-buffer ,new-wpl 0 ,(- new-height who-height)))
+		  `(screen-set-video ,new-buffer ,new-wpl 0 ,(- new-height who-height)))
 	    (send who-line-screen :eval-inside-yourself
-		  `(screen-set-mono-tv ,new-buffer ,new-wpl ,(- new-height who-height) ,who-height))
+		  `(screen-set-video ,new-buffer ,new-wpl ,(- new-height who-height) ,who-height))
 	    (dolist (screen (list main-screen who-line-screen))
 	      (map-over-all-windows-of-sheet
 		#'(lambda (window)
 		    (unless (eq window screen)
-		      (send window :eval-inside-yourself `(sheet-set-mono-tv-pitch ,new-wpl))))
+		      (send window :eval-inside-yourself `(sheet-set-video-pitch ,new-wpl))))
 		screen))
 	    (set-screen-sizes new-width new-height who-height)
 	    (and main-screen-and-who-line (main-screen-and-who-line))
@@ -2005,10 +2011,10 @@ SHEET's cursor is not used or moved."
        (send who-line-documentation-window :change-of-size-or-margins
 	     :left 0 :right width)))
 
-;; point a screen's own array at mono tv's buffer, with the new pitch, from
+;; point a screen's own array at the video controller's buffer, with the new pitch, from
 ;; line y for height lines, as (screen :before :expose) does from the
 ;; screen's own size, which is not changed yet.
-(defun screen-set-mono-tv (new-buffer wpl y h)
+(defun screen-set-video (new-buffer wpl y h)
   (declare (:self-flavor screen))
   (let ((array (or screen-array old-screen-array))
 	(pitch (truncate (* wpl 32.) bits-per-pixel)))
@@ -2021,7 +2027,7 @@ SHEET's cursor is not used or moved."
 
 ;; a window's locations per line, which the microcode draws by, and its
 ;; arrays at the new pitch, as (sheet :change-of-size-or-margins) points them.
-(defun sheet-set-mono-tv-pitch (wpl)
+(defun sheet-set-video-pitch (wpl)
   (declare (:self-flavor sheet))
   (let ((pitch (truncate (* wpl 32.) (screen-bits-per-pixel (sheet-get-screen self))))
 	(array (or screen-array old-screen-array)))
@@ -2108,13 +2114,13 @@ SHEET's cursor is not used or moved."
   (PUSHNEW 'TV:BLINKER-CLOCK SI:CLOCK-FUNCTION-LIST :TEST #'EQ))
 
 
-;; quux: mono tv has no sync program and no refresh rate to set, and its
+;; quux: the video controller (mono tv until contract q13) has no sync program and no refresh rate to set, and its
 ;; size comes from the feature page; the cadr tv's version of this, which
 ;; loaded a sync program and changed the screen's height, is gone.
 (defun set-tv-speed (&optional arg (wasted-lines 0))
-  "On the CADR this set the TV's refresh rate.  QUUX's MONO TV has none to set."
+  "On the CADR this set the TV's refresh rate.  QUUX's video controller has none to set."
   (declare (ignore arg wasted-lines))
-  (ferror nil "MONO TV has no refresh rate or sync program to set."))
+  (ferror nil "The video controller has no refresh rate or sync program to set."))
 
 ;(DEFF SET-TV-HEIGHT 'SET-TV-SPEED)
 

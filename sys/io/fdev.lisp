@@ -14,7 +14,9 @@
 ;;; file is loaded: mini may be reading this very file through it.
 ;;;
 ;;; the driver polls.  the device's interrupt enable, register 160 <8>,
-;;; stays off, since the microcode has no handler for word 100 <6>.  a
+;;; stays off: the device's interrupt is word 100 <7> from revision 11
+;;; (contract q13; <6> before), and microcode 2000 takes it as a stray,
+;;; turning <8> off and dismissing it, so the driver never sets it.  a
 ;;; waiting process is woken by its wait predicate, which the scheduler runs
 ;;; on every pass, and which reads one register and conses nothing.
 ;;;

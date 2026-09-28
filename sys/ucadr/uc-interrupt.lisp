@@ -58,28 +58,41 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	((A-INTR-MD) MD)			; nor the MD
 	((M-INTERRUPT-FLAG) DPB (M-CONSTANT -1) A-FLAGS) ;No page faults allowed here
 	;; quux (contract q2): the register page's word 100 says who interrupted,
-	;; each bit under its source's enable: <0> the tick, the 60-cycle clock;
-	;; <2> block-disk, done.  the keyboard and the chaosnet interrupt on the
-	;; unibus until q3 and q4 move them, so otherwise its status is read as
-	;; before.  any other interrupt still pending comes back when this one is
-	;; dismissed.
+	;; each bit under its source's enable.  any other interrupt still pending
+	;; comes back when this one is dismissed.
+	;; quux revision 11 (contract q13): the bits are <0>-<2> timers 0-2,
+	;; <3> block-disk, <4> the keyboard, <5> the mouse, <6> the network and
+	;; <7> the file device (the stale list here named q2's bits, with the
+	;; keyboard and the chaosnet still on the unibus).  the tests keep
+	;; revision 10's priority, the tick, the disk, the keyboard, the network,
+	;; then the strays.  every bit has a handler that clears its level or a
+	;; stray that turns its enable off, so that a stray enable costs one
+	;; interrupt, never a storm.
 	((VMA-START-READ) (A-CONSTANT QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-INTR-A) M-A)			;I need a couple M registers
 	((A-INTR-B) M-B)
 	((A-INTR-T) M-T)			;Convenient to be able to clobber this
 	(jump-if-bit-set (byte-field 1 0) md intr-tick)
-	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
-	(jump-if-bit-set (byte-field 1 3) md intr-kbd)	;keyboard (contract q3)
-	(jump-if-bit-set (byte-field 1 5) md chaos-intr-quux)	;chaosnet (contract q4)
+;	(jump-if-bit-set (byte-field 1 2) md intrx1)	;block-disk: disk-completion
+;	(jump-if-bit-set (byte-field 1 3) md intr-kbd)	;keyboard (contract q3)
+;	(jump-if-bit-set (byte-field 1 5) md chaos-intr-quux)	;chaosnet (contract q4)
+	(jump-if-bit-set (byte-field 1 3) md intr-disk)	;block-disk (contract q13)
+	(jump-if-bit-set (byte-field 1 4) md intr-kbd)	;keyboard (contract q3, q13)
+	(jump-if-bit-set (byte-field 1 6) md chaos-intr-quux)	;chaosnet (contract q4, q13)
 	;; quux revision 10 (contract q11): word 100 <1> and <7> are timers 1 and 2,
 	;; which nothing in this system uses; a reset turns them off with their
 	;; interrupt enables.  one turned on with its interrupt enable by mistake
 	;; would interrupt again at once for ever, its level never cleared, so turn
 	;; it off (a write of 0: off, flag down, interrupt enable 0) and dismiss it:
 	;; a stray enable costs one interrupt, not a storm.
+	;; quux revision 11 (contract q13): timer 2 is <2>, and the mouse, <5>,
+	;; and the file device, <7>, which the system polls, have strays too.
 	(jump-if-bit-set (byte-field 1 1) md intr-timer-1-stray)
-	(jump-if-bit-set (byte-field 1 7) md intr-timer-2-stray)
+;	(jump-if-bit-set (byte-field 1 7) md intr-timer-2-stray)
+	(jump-if-bit-set (byte-field 1 2) md intr-timer-2-stray)
+	(jump-if-bit-set (byte-field 1 5) md intr-mouse-stray)
+	(jump-if-bit-set (byte-field 1 7) md intr-file-device-stray)
 	;; quux (contract q5): word 100 covers every source quux has, and any unibus
 	;; address is an nxm, so an interrupt it does not explain is dismissed
 	;; (after the disk's own check) rather than looked up in unibus 766040.
@@ -360,9 +373,48 @@ intr-timer-2-stray
 	(check-page-write-no-interrupt)
 	(jump intrx1)
 
+;; quux revision 11 (contract q13): block-disk, word 100 <3>, is up while it
+;; is not active with command <11>, its done interrupt enable, set.  with a
+;; disk operation pending, intrx1's disk-completion takes it, as before, and
+;; clears <11>.  with none pending, nothing would clear it, and it would
+;; interrupt for ever: write the command register 0, which clears <11>, and
+;; dismiss it.  no path is known that sets <11> outside start-disk-op, which
+;; sets a-disk-busy first, so this is a guard.
+intr-disk
+	(jump-not-equal a-disk-busy m-zero intrx1)	;pending: disk-completion
+	((md) setz)
+	((vma-start-write) a-disk-regs-base)		;command 0: <11> off
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
+;; quux revision 11 (contract q13): the mouse, word 100 <5>, is up while word
+;; 123's <0>, moved, and <8>, its interrupt enable, are both set.  the system
+;; polls the mouse (track-mouse, on the tick) and never sets <8>, and nothing
+;; here reads word 122, which clears <0>: turn the interrupt enable off (a
+;; write of 0) and dismiss it.
+intr-mouse-stray
+	((md) setz)
+	((vma-start-write) (a-constant quux-mouse-status-virtual-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
+;; quux revision 11 (contract q13): the file device, word 100 <7>, is up while
+;; a response waits and word 160's <8>, its interrupt enable, is set.  the
+;; driver (sys: io; fdev) and mini poll and never set <8>: write 160 back with
+;; <8> clear and <0>, enable, as it was, so that the device keeps running.
+;; the write also clears 161's <2> and <3>, as any write of 160 does; the
+;; driver's own reset path does the same.
+intr-file-device-stray
+	((vma-start-read) (a-constant quux-file-device-control-virtual-address))
+	(check-page-read-no-interrupt)
+	((md) (byte-field 1 0) read-memory-data)	;<0> kept, <8> and the rest 0
+	((vma-start-write) (a-constant quux-file-device-control-virtual-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
 ;;; XBUS interrupts
 
-;; quux: mono tv, the display, has no interrupt, and the tick is the clock,
+;; quux: the video controller (mono tv until contract q13), the display, has no interrupt, and the tick is the clock,
 ;; so the cadr tv's vertical flag is no longer read or cleared here.
 INTRX0	(jump intrx1)
 intr-tick

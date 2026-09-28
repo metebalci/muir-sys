@@ -83,14 +83,15 @@ Will be NIL by the time YOU get to look at it")
 ;;; (WINDOW; SHWARM) calls it on a CADR.
 (DEFUN TV::INITIALIZE-RUN-LIGHT-LOCATIONS ()
   (WHEN (BOUNDP 'TV:DEFAULT-SCREEN)
-    ;; quux: mono tv has no sync program, so there is none to set up.  the
-    ;; run lights are on mono tv's last line, from the feature page and not
+    ;; quux: the video controller (mono tv until contract q13) has no sync
+    ;; program, so there is none to set up.  the
+    ;; run lights are on its last line, from the feature page and not
     ;; from the main screen, which at boot still has the size the band was
-    ;; saved at, until tv:set-screens-to-mono-tv moves it; a band saved at a
+    ;; saved at, until tv:set-screens-to-video moves it; a band saved at a
     ;; bigger size would put them past the end of the buffer.
     (setq %disk-run-light
-	  (+ (- (mono-tv-buffer-length) #o15)
-	     (mono-tv-buffer-address)))
+	  (+ (- (video-buffer-length) #o15)
+	     (video-buffer-address)))
     (SETQ TV::WHO-LINE-RUN-LIGHT-LOC (+ 2 (LOGAND %DISK-RUN-LIGHT #o777777)))))
 
 (ADD-INITIALIZATION "Put run lights at the bottom of the screen"
@@ -99,28 +100,44 @@ Will be NIL by the time YOU get to look at it")
 
 ;;; Function to reset various things, do initialization that's inconvenient in cold load, etc.
 ;;; COLD-BOOT is T if this is for a cold boot.
-;; quux: the feature page, one read-only xbus i/o page at physical 17377000,
-;; which gives the machine's sizes (muir's docs/quux.md holds the contract).
+;; quux: the feature page, the read-only words 0-77 of the register page,
+;; which give the machine's sizes (muir-sim's docs/quux.md holds the contract).
+;; from revision 11 (contract q13) the register page is the last page of the
+;; physical space, 17777400-17777777, the offset #o777400 from 17000000, where
+;; it was 17377000, #o377000, before; everything that reads the page or a
+;; register on it takes its address from here.
 ;; the display's are here, in the cold load, because the cold boot clears
 ;; the screen before anything else is loaded.  a field is read straight out
 ;; of its word with %p-ldb: the words are 32 bits, and %xbus-read would box a
 ;; big one as a bignum, which the cold load cannot take apart.
-(defconst feature-page-xbus-address #o377000
+;(defconst feature-page-xbus-address #o377000
+(defconst feature-page-xbus-address #o777400
   "Where QUUX's feature page is, as an argument to %XBUS-READ.")
 
 (defun feature-page-field (word ppss)
   "Return the PPSS byte of word WORD (octal, as the page is numbered) of the feature page."
   (%p-ldb ppss (+ io-space-virtual-address feature-page-xbus-address word)))
 
-;; mono tv, quux's display: a 1-bit frame buffer.  word 11 is its width in
+;; the video controller, quux's display: a 1-bit frame buffer.  word 11 is its width in
 ;; bits 31:16 and its height in 15:0, word 12 its bits per pixel and words
 ;; per line, word 13 its buffer's physical address.
-(defun mono-tv-width () (feature-page-field #o11 #o2020))
-(defun mono-tv-height () (feature-page-field #o11 #o0020))
-(defun mono-tv-words-per-line () (feature-page-field #o12 #o0020))
-(defun mono-tv-buffer-length () (* (mono-tv-height) (mono-tv-words-per-line)))
-(defun mono-tv-buffer-address ()
-  "The virtual address of MONO TV's frame buffer."
+;; quux (contract q13): mono tv is renamed the video controller, and these
+;; functions, mono-tv-width and the rest until then, video-width and the rest.
+;(defun mono-tv-width () (feature-page-field #o11 #o2020))
+;(defun mono-tv-height () (feature-page-field #o11 #o0020))
+;(defun mono-tv-words-per-line () (feature-page-field #o12 #o0020))
+;(defun mono-tv-buffer-length () (* (mono-tv-height) (mono-tv-words-per-line)))
+;(defun mono-tv-buffer-address ()
+;  "The virtual address of MONO TV's frame buffer."
+;  (+ io-space-virtual-address
+;     (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
+;	#o17000000)))
+(defun video-width () (feature-page-field #o11 #o2020))
+(defun video-height () (feature-page-field #o11 #o0020))
+(defun video-words-per-line () (feature-page-field #o12 #o0020))
+(defun video-buffer-length () (* (video-height) (video-words-per-line)))
+(defun video-buffer-address ()
+  "The virtual address of the video controller's frame buffer."
   (+ io-space-virtual-address
      (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
 	#o17000000)))
@@ -135,7 +152,10 @@ Will be NIL by the time YOU get to look at it")
     ;; only what the cold load has: princ, as its own greeting uses, not
     ;; format, which is loaded later.
     (send cold-load-stream :fresh-line)
-    (princ "This band runs only on QUUX: System 1001 is the last for the CADR." cold-load-stream)
+    ;; the cadr's systems are the 1000s, on their own line (1002 and on after
+    ;; 1001), so 1001 is not the last for it, as this line said.
+;    (princ "This band runs only on QUUX: System 1001 is the last for the CADR." cold-load-stream)
+    (princ "This band runs only on QUUX: the CADR's systems are the 1000s." cold-load-stream)
     (terpri cold-load-stream)
     (princ "This machine's processor type is " cold-load-stream)
     (princ processor-type-code cold-load-stream)
@@ -149,8 +169,8 @@ Will be NIL by the time YOU get to look at it")
   "Resets various global constants and initializes the error system.
 COLD-BOOT is T if this is for a cold boot."
   (SETQ INHIBIT-SCHEDULING-FLAG T)		;In case called by the user
-  ;; quux: from system 2000 the system runs only on quux; system 1001 is the
-  ;; last for the cadr.  stop at once, and say why, rather than misbehave.
+  ;; quux: from system 2000 the system runs only on quux; the cadr's systems
+  ;; are the 1000s.  stop at once, and say why, rather than misbehave.
   (check-machine-is-quux)
 
   (SETQ ALPHABETIC-CASE-AFFECTS-STRING-COMPARISON NIL)
@@ -183,14 +203,15 @@ COLD-BOOT is T if this is for a cold boot."
      ;; Set up the TV sync program as soon as possible; until it is set up
      ;; read references to the TV buffer can get NXM errors which cause a
      ;; main-memory parity error halt.  Who-line updating can do this.
-     ;; quux: the cold-load stream takes mono tv's size, which may differ
+     ;; quux: the cold-load stream takes the video controller's size, which may differ
      ;; from the size the band was saved at, before anything prints on it.
      ;; on the cold load's first boot the stream is not made yet; it is
-     ;; made at mono tv's size then.
-     (if (boundp 'cold-load-stream) (send cold-load-stream :set-mono-tv))
+     ;; made at the video controller's size then.  (:set-video was
+     ;; :set-mono-tv until contract q13.)
+     (if (boundp 'cold-load-stream) (send cold-load-stream :set-video))
      (TV::INITIALIZE-RUN-LIGHT-LOCATIONS)
      ;; Clear all the bits of the main screen after a cold boot.
-     (AND COLD-BOOT (CLEAR-SCREEN-BUFFER (mono-tv-buffer-address))))	;quux: mono tv's
+     (and cold-boot (clear-screen-buffer (video-buffer-address))))	;quux: the video controller's
 
   ;; Do something at least if errors occur during loading
   (OR (FBOUNDP 'FERROR) (FSET 'FERROR #'FERROR-COLD-LOAD))
@@ -461,9 +482,9 @@ This does not need to be done on A-memory variables."
       (IF (= (%P-DATA-TYPE LOC) DTP-EXTERNAL-VALUE-CELL-POINTER)
 	  (%BLT-TYPED (FOLLOW-CELL-FORWARDING LOC T) LOC 1 1)))))
 
-;; quux: the whole of mono tv's buffer, from the feature page, not the cadr
+;; quux: the whole of the video controller's buffer, from the feature page, not the cadr
 ;; tv's #o100000 words: 1920x1080 is 64,800.
-(DEFUN CLEAR-SCREEN-BUFFER (BUFFER-ADDRESS &optional (length (mono-tv-buffer-length)))
+(defun clear-screen-buffer (buffer-address &optional (length (video-buffer-length)))
   (%P-DPB 0 %%Q-LOW-HALF BUFFER-ADDRESS)
   (%P-DPB 0 %%Q-HIGH-HALF BUFFER-ADDRESS)
   (%BLT BUFFER-ADDRESS (1+ BUFFER-ADDRESS)

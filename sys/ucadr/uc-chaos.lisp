@@ -3,8 +3,8 @@
 
 (ASSIGN CHAOS-NUMBER-TRANSMIT-RETRIES 3)	;Send once and retry twice if aborted
 
-;; quux (contract q4): the register page's word 100 <5> says the chaosnet
-;; interface interrupted.  it is handled as the unibus interrupt was, but
+;; quux (contract q4): the register page's word 100 <5> (<6> from revision
+;; 11, contract q13) says the chaosnet interface interrupted.  it is handled as the unibus interrupt was, but
 ;; returns through xb-intr-ret: there is no unibus interrupt to clear.
 chaos-intr-quux
 	((micro-stack-data-push) (a-constant (i-mem-loc xb-intr-ret)))

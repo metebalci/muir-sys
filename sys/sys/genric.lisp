@@ -1827,7 +1827,8 @@ It is /"CADR/" or /"QUUX/"."
 The microcode sets it at boot from MACHINE-ID."
   processor-type-code)
 
-;;; quux's feature page: one read-only xbus i/o page at physical 17377000
+;;; quux's feature page: the read-only words 0-77 of the register page, at
+;;; physical 17777400 from revision 11 (contract q13; 17377000 before)
 ;;; (feature-page-xbus-address, defined in sys; ltop, which reads the
 ;;; display's geometry from it in the cold load).
 (defconst feature-page-words
@@ -1840,7 +1841,7 @@ The microcode sets it at boot from MACHINE-ID."
 	    ;; the 60-cycle clock the display's vertical interrupt used to give;
 	    ;; from revision 10 (contract q11) the tick is timer 0.
 	    "Processor tick"
-	    ;; words 11-13, mono tv, quux's display
+	    ;; words 11-13, the video controller, quux's display
 	    "Display width, height" "Display bits, words a line" "Display buffer"
 	    ;; word 14, from revision 5: 1 if the processor has the microsecond
 	    ;; clock (and, until revision 10, q1's interval timer; contract q1).
@@ -1859,7 +1860,10 @@ The microcode sets it at boot from MACHINE-ID."
 (defun print-feature-page (&optional (stream *standard-output*))
   "Print QUUX's feature page: the machine's ID and the sizes of its memories."
   (progn
-    (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
+    ;; quux (contract q13): quux has no xbus, so the address is printed
+    ;; without the word "Xbus".
+;    (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
+    (format stream "~&Feature page, at ~O:" (+ #o17000000 feature-page-xbus-address))
     (loop for name in feature-page-words
 	  for i from 0
 	  as word = (%xbus-read (+ feature-page-xbus-address i))
@@ -1868,10 +1872,10 @@ The microcode sets it at boot from MACHINE-ID."
 			 name word (ldb (byte 16. 16.) word) (ldb (byte 12. 4) word)
 			 (ldb (byte 4 0) word))
 	       (cond ((= i #o11)
-		      (format stream "~% ~22A ~D x ~D" name (mono-tv-width) (mono-tv-height)))
+		      (format stream "~% ~22A ~D x ~D" name (video-width) (video-height)))
 		     ((= i #o12)
 		      (format stream "~% ~22A ~D, ~D" name (feature-page-field #o12 #o2020)
-			      (mono-tv-words-per-line)))
+			      (video-words-per-line)))
 		     ((= i #o13)
 		      (format stream "~% ~22A ~O" name word))
 		     (t

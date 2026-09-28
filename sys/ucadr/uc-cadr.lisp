@@ -16,11 +16,24 @@
 (ASSIGN INTERNAL-LOWEST-IO-SPACE-VIRTUAL-ADDRESS 77000000) ;BEGINING OF X-BUS IO SPACE
 (ASSIGN INTERNAL-LOWEST-UNIBUS-VIRTUAL-ADDRESS 77400000)   ;END OF X-BUS, BEGINNING OF UNIBUS
 
+;; quux (contract q13, revision 11): the register page is the last page of
+;; the physical space, 17777400-17777777, fixed, where it was 17377000-
+;; 17377377 before; its word w is physical 17777400+w and virtual 77777400+w
+;; (the i/o region's direct map, pgf-mm0).  every register-page address below
+;; is made from these two, so that the page moves in one place; the old
+;; addresses are nothing there on revision 11.
+(assign quux-register-page-virtual-address 77777400)
+(assign quux-register-page-physical-address 17777400)
+
 ;; quux (contract q4): the chaosnet interface is the register page's words
 ;; 140-147, word 140+k for unibus 764140+2k, the same registers in the same
 ;; order, so every access made relative to a-chaos-csr-address moves with it.
-(ASSIGN CHAOS-CSR-ADDRESS 77377140)		;register page word 140, not UNIBUS 764140
-(ASSIGN DISK-REGS-ADDRESS-BASE 77377774)	;XBUS ADDRESS 17377774
+;(ASSIGN CHAOS-CSR-ADDRESS 77377140)		;register page word 140, not UNIBUS 764140
+(assign chaos-csr-address (plus quux-register-page-virtual-address 140))	;word 140
+;; quux (contract q13): block-disk's registers are the register page's words
+;; 200-203 from revision 11, where they were 17377774-17377777 beside it.
+;(ASSIGN DISK-REGS-ADDRESS-BASE 77377774)	;XBUS ADDRESS 17377774
+(assign disk-regs-address-base (plus quux-register-page-virtual-address 200))	;word 200
 
 (ASSIGN DISK-READ-COMMAND 0)
 (ASSIGN DISK-WRITE-COMMAND 11)
@@ -28,8 +41,9 @@
 ;; and recalibrate, 10001005, are gone.
 
 ;; quux: tv-regs-address-base and a-tv-regs-base are gone: the tv's vertical
-;; interrupt was the only thing the microcode read there, and mono tv has none.
-;; quux: on mono tv's first line, words 34-40, which every mono tv size has (the
+;; interrupt was the only thing the microcode read there, and the video
+;; controller (mono tv until contract q13) has none.
+;; quux: on the video controller's first line, words 34-40, which every size has (the
 ;; narrowest, 1024 wide, is 32 words); it serves only until lisp sets
 ;; %disk-run-light from the screen's real size (tv::initialize-run-light-
 ;; locations, sys; ltop).  it was the bottom right of a 1920x1080 buffer,
@@ -43,27 +57,41 @@
 ;; quux (contract q3): the mouse is the register page's word 122, x in <11:0>,
 ;; y in <27:16> and the buttons in <14:12>; mit's were unibus 764104 (y and
 ;; buttons) and 764106 (x).
-(ASSIGN MOUSE-HARDWARE-VIRTUAL-ADDRESS 77377122)
+;(ASSIGN MOUSE-HARDWARE-VIRTUAL-ADDRESS 77377122)
+(assign mouse-hardware-virtual-address (plus quux-register-page-virtual-address 122))
+;; quux (contract q13): word 123, the mouse's status, <0> moved and <8> its
+;; interrupt enable; intr-mouse-stray writes it 0.
+(assign quux-mouse-status-virtual-address (plus quux-register-page-virtual-address 123))
 ;; quux (contract q3): the keyboard is the register page's words 120, its
 ;; status (<0> a key word waiting), and 121, whose read takes the oldest key
 ;; word, the 32-bit word unibus 764100 and 764102 gave together.
-(ASSIGN QUUX-KBD-DATA-VIRTUAL-ADDRESS 77377121)
-(ASSIGN QUUX-KBD-STATUS-PHYSICAL-ADDRESS 17377120)
-(ASSIGN QUUX-KBD-DATA-PHYSICAL-ADDRESS 17377121)
+;(ASSIGN QUUX-KBD-DATA-VIRTUAL-ADDRESS 77377121)
+;(ASSIGN QUUX-KBD-STATUS-PHYSICAL-ADDRESS 17377120)
+;(ASSIGN QUUX-KBD-DATA-PHYSICAL-ADDRESS 17377121)
+(assign quux-kbd-data-virtual-address (plus quux-register-page-virtual-address 121))
+(assign quux-kbd-status-physical-address (plus quux-register-page-physical-address 120))
+(assign quux-kbd-data-physical-address (plus quux-register-page-physical-address 121))
 
 ;; quux (contract q3): no beeper; %beep no longer writes unibus 764110.
 (ASSIGN BEEP-HARDWARE-VIRTUAL-ADDRESS 77772044)	   ;Unibus 764110
 
-;; quux's register page (contract q2), the feature page's 17377000: word 100
-;; says who interrupted (<0> tick, <1> interval timer until revision 10, then
-;; timer 1, <2> block-disk), a
+;; quux's register page (contract q2), the feature page's page: word 100
+;; says who interrupted, a
 ;; write to word 101, the error status, clears it, and bit 0 of word 102, the
 ;; mode, is error stop.  they replace unibus 766040, 766044 and 766012.
-(ASSIGN QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS 77377100)
-(ASSIGN QUUX-ERROR-STATUS-PHYSICAL-ADDRESS 17377101)
-(ASSIGN QUUX-MODE-PHYSICAL-ADDRESS 17377102)
+;; quux revision 11 (contract q13): word 100's bits are <0>-<2> timers 0-2,
+;; <3> block-disk, <4> the keyboard, <5> the mouse, <6> the network and <7>
+;; the file device; before, <0> was the tick, <1> timer 1, <2> block-disk,
+;; <3> the keyboard, <5> the network and <7> timer 2 (intr, sys: ucadr;
+;; uc-interrupt).
+;(ASSIGN QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS 77377100)
+;(ASSIGN QUUX-ERROR-STATUS-PHYSICAL-ADDRESS 17377101)
+;(ASSIGN QUUX-MODE-PHYSICAL-ADDRESS 17377102)
+(assign quux-interrupt-status-virtual-address (plus quux-register-page-virtual-address 100))
+(assign quux-error-status-physical-address (plus quux-register-page-physical-address 101))
+(assign quux-mode-physical-address (plus quux-register-page-physical-address 102))
 ;; quux revision 10 (contract q11): word 100's <0> is timer 0, the tick, and
-;; <1> and <7> are timers 1 and 2, each under its interrupt enable; q1's
+;; <1> and <7> (<2> from revision 11) are timers 1 and 2, each under its interrupt enable; q1's
 ;; interval timer is gone.  word 104 <0>, reset devices: a write of 1 resets
 ;; every device (the timers, the file device, block-disk and the network) in
 ;; place of the unibus reset, interrupt-control <28>, which drives nothing on
@@ -72,14 +100,25 @@
 ;; <8> its interrupt enable) and its period in microseconds word 111+2k.
 ;; word 161 is the file device's status, <1> quiet.  reset-machine reaches
 ;; them physically, intr and beg06 through the map.
-(ASSIGN QUUX-RESET-DEVICES-PHYSICAL-ADDRESS 17377104)
-(ASSIGN QUUX-TIMER-0-CONTROL-VIRTUAL-ADDRESS 77377110)
-(ASSIGN QUUX-TIMER-0-PERIOD-PHYSICAL-ADDRESS 17377111)
-(ASSIGN QUUX-TIMER-1-CONTROL-VIRTUAL-ADDRESS 77377112)
-(ASSIGN QUUX-TIMER-1-PERIOD-PHYSICAL-ADDRESS 17377113)
-(ASSIGN QUUX-TIMER-2-CONTROL-VIRTUAL-ADDRESS 77377114)
-(ASSIGN QUUX-TIMER-2-PERIOD-PHYSICAL-ADDRESS 17377115)
-(ASSIGN QUUX-FILE-DEVICE-STATUS-PHYSICAL-ADDRESS 17377161)
+;(ASSIGN QUUX-RESET-DEVICES-PHYSICAL-ADDRESS 17377104)
+;(ASSIGN QUUX-TIMER-0-CONTROL-VIRTUAL-ADDRESS 77377110)
+;(ASSIGN QUUX-TIMER-0-PERIOD-PHYSICAL-ADDRESS 17377111)
+;(ASSIGN QUUX-TIMER-1-CONTROL-VIRTUAL-ADDRESS 77377112)
+;(ASSIGN QUUX-TIMER-1-PERIOD-PHYSICAL-ADDRESS 17377113)
+;(ASSIGN QUUX-TIMER-2-CONTROL-VIRTUAL-ADDRESS 77377114)
+;(ASSIGN QUUX-TIMER-2-PERIOD-PHYSICAL-ADDRESS 17377115)
+;(ASSIGN QUUX-FILE-DEVICE-STATUS-PHYSICAL-ADDRESS 17377161)
+(assign quux-reset-devices-physical-address (plus quux-register-page-physical-address 104))
+(assign quux-timer-0-control-virtual-address (plus quux-register-page-virtual-address 110))
+(assign quux-timer-0-period-physical-address (plus quux-register-page-physical-address 111))
+(assign quux-timer-1-control-virtual-address (plus quux-register-page-virtual-address 112))
+(assign quux-timer-1-period-physical-address (plus quux-register-page-physical-address 113))
+(assign quux-timer-2-control-virtual-address (plus quux-register-page-virtual-address 114))
+(assign quux-timer-2-period-physical-address (plus quux-register-page-physical-address 115))
+(assign quux-file-device-status-physical-address (plus quux-register-page-physical-address 161))
+;; quux (contract q13): word 160, the file device's control, <0> enable and
+;; <8> interrupt enable; intr-file-device-stray clears <8>.
+(assign quux-file-device-control-virtual-address (plus quux-register-page-virtual-address 160))
 (ASSIGN INTERRUPT-STATUS-HARDWARE-VIRTUAL-ADDRESS 77773020)
 		;Unibus address 766040 (interrupt status)
 (ASSIGN CLEAR-INTERRUPT-HARDWARE-VIRTUAL-ADDRESS  77773021) ;Unibus address 766042

@@ -435,7 +435,9 @@ class Machine:
         self.rfb, self.server, self.proc = rfb_port, server, None
 
     def start(self, checkpoint_out=None, resume=None):
-        cmd = [self.quux, '-c', '/dev/null', '--micro', '--mono-tv-size', TV_SIZE,
+        # muir-sim's --video-size, --mono-tv-size until contract Q13 renamed
+        # MONO TV the video controller; quux refuses the old flag.
+        cmd = [self.quux, '-c', '/dev/null', '--micro', '--video-size', TV_SIZE,
                '--disk-pack', self.band + ',ro', '--terminal', '127.0.0.1:%d' % self.rfb]
         cmd += self.server.quux_flags()
         if checkpoint_out:

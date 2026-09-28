@@ -11,10 +11,16 @@ RESET-MACHINE
 	;; below, as initial-map-a does for revision 6 (which comes after them):
 	;; the signature 50525 (0x5155) in <31:16> and a revision of 10 or more in
 	;; <15:4>.  a cadr reads all ones.  otherwise halt at machine-not-quux-10.
+	;; quux revision 11 (contract q13): the register page is at 17777400 from
+	;; revision 11, and word 100's bits are in a new order, so this microcode
+	;; asks for 11 or more and halts at machine-not-quux-11 below it: on
+	;; revision 10 every register it writes would be nothing there.
 	((m-tem) (byte-field 20 20) machine-id)
-	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-10)
+;	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-10)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-11)
 	((m-tem) (byte-field 14 4) machine-id)
-	(jump-less-than m-tem (a-constant 10.) machine-not-quux-10)
+;	(jump-less-than m-tem (a-constant 10.) machine-not-quux-10)
+	(jump-less-than m-tem (a-constant 11.) machine-not-quux-11)
 	;; quux revision 10: interrupt-control <28>, the unibus reset, drives nothing
 	;; on quux, so its 10-microsecond pulse is gone; the register page's reset
 	;; devices takes its place (contract q11, and the q9 amendment for the file
@@ -166,7 +172,9 @@ machine-not-quux-6
 ;; reset-machine comes here when machine-id is not quux's from revision 10 on
 ;; (contract q11), a cadr's all ones included, before it writes the register
 ;; page.  the halt shows this location.
-machine-not-quux-10
+;; quux (contract q13): from revision 11 on, and so named machine-not-quux-11.
+;machine-not-quux-10
+machine-not-quux-11
 	(call illop)
 
 ;; reset-machine comes here when the file device is not quiet 2 seconds after
@@ -411,12 +419,15 @@ DISK-RESTORE-1
 	;; quux: the run light back at its boot address, as a cold boot has it,
 	;; before the two fake level-2 entries below, which must fall in different
 	;; slots (vma<12:8>) of the invalid block.  lisp moves the run light to
-	;; mono tv's last line (tv::initialize-run-light-locations, sys; ltop),
-	;; and when the buffer is a multiple of 8k words long, 1280x1024 and
-	;; 1024x768 among them, that is slot 37, the disk registers' own: the
+	;; the video controller's last line (tv::initialize-run-light-locations,
+	;; sys; ltop), and when the buffer is a multiple of 8k words long,
+	;; 1280x1024 and 1024x768 among them, that is slot 37, the disk
+	;; registers' own: the
 	;; second entry overwrote the first, %disk-restore's disk commands went to
 	;; the frame buffer, and disk-await-ready waited for ever.  lisp sets it
-	;; again after the restore.
+	;; again after the restore.  (from revision 11, contract q13, the disk
+	;; registers are the register page's words 200-203, virtual 77777600,
+	;; still slot 37.)
 	((a-disk-run-light) (a-constant (plus (byte-value q-data-type dtp-fix)
 					      disk-run-light-virtual-address)))
 	(CALL-XCT-NEXT COLD-FAKE-L2-MAP)	;set up L2 map to avoid getting to

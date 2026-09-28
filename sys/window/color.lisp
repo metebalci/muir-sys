@@ -9,9 +9,11 @@
 (DEFVAR COLOR-SCREEN)
 
 ;; quux: the color tv's sync programs are gone: a quux color display, if one
-;; comes, will be like mono tv, with no sync program.  of the tv control
+;; comes, will be like the video controller (mono tv until contract q13),
+;; with no sync program.  of the tv control
 ;; registers only register 4, the color map, is kept for it (the user,
-;; 2026-09-23).
+;; 2026-09-23); the video controller itself has no register 4 from revision
+;; 11 (contract q13), where a named word that did nothing became reserved.
 
 ;Function which reads an XBUS location with parity checking disabled.
 ;This is useful if it might be NXM.  Unfortunately the CADR machine
@@ -23,11 +25,17 @@
 ;; quux (contract q2): the mode is the register page's word 102, whose bit 0
 ;; is error stop, and a write to word 101, the error status, clears it; they
 ;; replace unibus 766012 and 766044.  the prom is never disabled on quux.
+;; quux (contract q13): the register page is at #o777400 from revision 11,
+;; where it was #o377000, so words 102 and 101 are #o777502 and #o777501.
 (DEFUN XBUS-READ-NO-PARITY (XBUS-ADDR)
-  (PROG2 (%xbus-write #o377102 0)	;Turn off error-stop-enable
+;  (PROG2 (%xbus-write #o377102 0)	;Turn off error-stop-enable
+;	 (%XBUS-READ XBUS-ADDR)
+;	 (%xbus-write #o377102 1)	;Turn on error-stop-enable
+;	 (%xbus-write #o377101 0)))	;Clear xbus nxm and parity indicators
+  (prog2 (%xbus-write #o777502 0)	;Turn off error-stop-enable
 	 (%XBUS-READ XBUS-ADDR)
-	 (%xbus-write #o377102 1)	;Turn on error-stop-enable
-	 (%xbus-write #o377101 0)))	;Clear xbus nxm and parity indicators
+	 (%xbus-write #o777502 1)	;Turn on error-stop-enable
+	 (%xbus-write #o777501 0)))	;Clear xbus nxm and parity indicators
 
 (DEFUN XBUS-LOCATION-EXISTS-P (XBUS-ADDR BITS)
   "T if it is possible to turn on bits BITS in address XBUS-ADDR."
