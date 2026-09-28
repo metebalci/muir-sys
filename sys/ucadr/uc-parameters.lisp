@@ -1252,6 +1252,50 @@ a-gpt-block
 a-gpt-count
 	(0)
 
+;; quux revision 12 (contract h8a): opdtb's 32 entries (uc-macrocode), as
+;; d-mem holds them, for reset-machine to fill the macro dispatch memory
+;; with: the microcode cannot read d-mem, so the generic handlers are kept
+;; here too.  kept equal to opdtb, entry for entry: an entry here that
+;; differs would run another handler than the main loop's dispatch for that
+;; opcode.  a d-mem word is <13:0> the address, <14> n
+;; (inhibit-xct-next-bit), <15> p and <16> r; the assembler's p-bit and
+;; inhibit-xct-next-bit are the jump instruction's bits, so the unused
+;; opcodes' (p-bit inhibit-xct-next-bit trap) is written 140000 plus trap.
+;; last, so that no earlier location moves.
+a-macro-dispatch-generic
+	((i-mem-loc qicall))		;0 call
+	((i-mem-loc qical0))		;1 call0
+	((i-mem-loc qimove))		;2 move
+	((i-mem-loc qicar))		;3 car
+	((i-mem-loc qicdr))		;4 cdr
+	((i-mem-loc qicadr))		;5 cadr
+	((i-mem-loc qicddr))		;6 cddr
+	((i-mem-loc qicdar))		;7 cdar
+	((i-mem-loc qicaar))		;10 caar
+	((i-mem-loc qind1))		;11 nd1
+	((i-mem-loc qind2))		;12 nd2
+	((i-mem-loc qind3))		;13 nd3
+	((i-mem-loc qibrn))		;14 branch
+	((i-mem-loc misc))		;15 misc
+	((i-mem-loc qind4))		;16 nd4
+	((plus 140000 (i-mem-loc trap)))	;17 unused
+	((i-mem-loc arefi-new))		;20 aref, array leader or instance slot
+	((plus 140000 (i-mem-loc trap)))	;21 unused
+	((plus 140000 (i-mem-loc trap)))	;22 unused
+	((plus 140000 (i-mem-loc trap)))	;23 unused
+	((plus 140000 (i-mem-loc trap)))	;24 unused
+	((plus 140000 (i-mem-loc trap)))	;25 unused
+	((plus 140000 (i-mem-loc trap)))	;26 unused
+	((plus 140000 (i-mem-loc trap)))	;27 unused
+	((plus 140000 (i-mem-loc trap)))	;30 unused
+	((i-mem-loc qind1))		;31 nd1
+	((i-mem-loc qind2))		;32 nd2
+	((i-mem-loc qind3))		;33 nd3
+	((i-mem-loc qibrn))		;34 branch
+	((i-mem-loc misc1))		;35 misc1
+	((i-mem-loc qind4))		;36 nd4
+	((plus 140000 (i-mem-loc trap)))	;37 unused
+
 ;Arrays at fixed locations in A memory, used for the mouse
 (ASSIGN MOUSE-CURSOR-PATTERN-AMEM-LOC 1600)	;32x32 BIT ARRAY
 (ASSIGN MOUSE-BUTTONS-BUFFER-AMEM-LOC 1640)	;8 4-WORD ART-Q ENTRIES

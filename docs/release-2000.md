@@ -695,6 +695,60 @@ a comment in that file saying why.
     11 and the new PROM on revision 10 wait at `DISK-AWAIT-PACK` (36600);
     the new microcode, loaded by the old PROM on revision 10, halts at
     `MACHINE-NOT-QUUX-11`.
+- **The microcode fills the MACRO DISPATCH MEMORY and turns the fused
+  return on** (muir's contract H8a, QUUX revision 12, plan slice S5;
+  microcode 2000 keeps its number, being unreleased, and its files change).
+  On revision 12 a return to the main loop that needs no instruction fetch
+  runs the next macroinstruction's handler straight from the MACRO
+  DISPATCH MEMORY, two microcycles sooner, once the MACRO-DISPATCH register
+  is enabled; the enable is off after -RESET and cleared by every
+  control-store write. So at every start of the microcode, before its first
+  main-loop return (a cold or warm boot through the PROM, and a
+  `%DISK-RESTORE`, which runs the microcode already loaded),
+  `RESET-MACHINE` reads the feature page's word 17 and, when it is not 0,
+  writes each of the 1,024 entries with `OPDTB`'s entry for its opcode,
+  operand bit clear, then the register with `QMLP`, `A-LOCALP`'s and
+  `M-AP`'s addresses and the enable (`ucadr/uc-cold-disk.lisp:65-99`).
+  These are the generic handlers only, so the machine does what it did,
+  sooner; specialised handlers are the next slice. The microcode cannot
+  read D-MEM, so `OPDTB`'s 32 entries are kept a second time in A memory,
+  `A-MACRO-DISPATCH-GENERIC`, after every earlier location
+  (`ucadr/uc-parameters.lisp:1255-1297`; the unused opcodes' P and N are
+  written as D-MEM's bits, 140000, since the assembler's `P-BIT` and
+  `INHIBIT-XCT-NEXT-BIT` are the jump instruction's). The assembler names
+  destinations 5 to 7 `MACRO-DISPATCH-REGISTER`, `MACRO-DISPATCH-INDEX`
+  and `MACRO-DISPATCH-ENTRY` (`sys/cadsym.lisp:470-485`), and word 17's
+  address is `QUUX-MACRO-DISPATCH-ENTRIES-PHYSICAL-ADDRESS`
+  (`ucadr/uc-cadr.lisp:119-123`). No revision check: word 17 reads 0 below
+  revision 12, where the fill is skipped, and destinations 5 to 7 would
+  write only M there anyway. I memory grows by 15 words, all at or after
+  `RESET-MACHINE`'s fill (every address before 26437 stays), and A memory
+  by the 32-word table, which moves the A constants; named A, M and D
+  memory stays where it was, so band 2000 runs on this microcode with its
+  `UCADR TBL` served, and no band is rebuilt.
+  - Tested on muir-sim cd072dc (S2), micro and rtl, with ref/band-2000's
+    band and this microcode written over its MCR1, the RTC counted: on
+    revision 12 `RESET-MACHINE` takes 8,275 microcycles, 67 before (the
+    fill 8,193, the check 15), twice in a cold boot; at `BEG06` the
+    register reads 22121500124 (octal: the enable, `M-AP` 21, `A-LOCALP`
+    432, `QMLP` 124) and every entry equals D-MEM's `OPDTB` entry for its
+    opcode; the band reaches the listener with 2,346,606 returns fused on
+    micro and 2,330,433 on rtl, where muir-sim's own fill of the memory at
+    the first `QMLP` gave 2,346,612 and 2,330,619. After a
+    `%DISK-RESTORE` whose entry found every entry poisoned to `ILLOP` with
+    the register left enabled, and after a warm boot through the PROM with
+    the entries poisoned at 36000, every entry and the register are as a
+    fill leaves them at `BEG06`, the listener comes back, and returns fuse
+    again (2.33 million to the listener after the warm boot). Destinations
+    5 to 7 are written only at the fill's three sites. On revision 11 the
+    check costs 15 microcycles a start: `BEG06` comes 316 microcycles later
+    on micro and 342 on rtl than with the microcode before this change,
+    and the listener at the same step. muir-sim's profile on rtl (sync
+    K=4, 4K cache, the Arty's memory timing): over its 12 workloads
+    revision 11 runs 442,484,000 microcycles, as with the microcode before
+    this change, and revision 12 fuses 6,629,269 returns and runs 2.98%
+    fewer microcycles. `(car 5)` and twelve other forms answer the same
+    on revision 12 with this microcode as with the one before.
 
 ## Time zones
 

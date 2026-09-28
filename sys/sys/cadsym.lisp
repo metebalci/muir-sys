@@ -467,6 +467,23 @@
 (defprop microsecond-clock (or (source-p (field function-source 15))
 			       (error)) cons-lap-sym)
 
+;; quux revision 12 (contract h8a), the fused return: destination 5 writes the
+;; macro-dispatch register (<13:0> the main loop's address, <23:14> the a
+;; memory address of a-localp, <28:24> the m memory address of m-ap, <31> the
+;; enable); destination 6 the macro dispatch memory's index, <9:0>, which is
+;; the halfword's <15:6>; destination 7 the entry at that index, d-mem's word
+;; (<13:0> the handler, <14> n, <15> p, <16> r) and <17>, the operand bit.
+;; like every functional destination they write m too (m-garbage when none is
+;; named).  below revision 12, and on the cadr, 5 to 7 write only m, so
+;; microcode that writes them runs there unchanged.  muir-sim's docs/quux.md,
+;; "the fused return", holds the contract.
+(defprop macro-dispatch-register (or (source-p (error))
+				     (field function-destination 5)) cons-lap-sym)
+(defprop macro-dispatch-index (or (source-p (error))
+				  (field function-destination 6)) cons-lap-sym)
+(defprop macro-dispatch-entry (or (source-p (error))
+				  (field function-destination 7)) cons-lap-sym)
+
 (DEFPROP OA-REG-HIGH (OR (SOURCE-P (ERROR))
 			 (FIELD FUNCTION-DESTINATION 17)) CONS-LAP-SYM)
 (DEFPROP OA-REG-HI (OR (SOURCE-P (ERROR))

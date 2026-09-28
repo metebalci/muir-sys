@@ -62,6 +62,41 @@ reset-machine-quiet-done
 	((MD) SETZ)
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)			;Reset bus interface status.
        ((VMA) (A-CONSTANT QUUX-ERROR-STATUS-PHYSICAL-ADDRESS)) ;quux: word 101, not 766044
+	;; quux revision 12 (contract h8a), the fused return: fill the macro
+	;; dispatch memory with the generic handlers and enable the
+	;; macro-dispatch register, at every start of this microcode, before its
+	;; first main-loop return (beg06).  the enable is off after -reset and is
+	;; cleared by every control-store write, so a microcode the prom loaded, or
+	;; the one a %disk-restore runs, never returns through entries another
+	;; microcode left; the entries themselves are kept, so they are written
+	;; again here.  every index (the halfword's <15:6>) gets opdtb's entry for
+	;; its opcode, <13:9>, which is the index's <7:3>, from
+	;; a-macro-dispatch-generic, with the operand bit clear: then a fused
+	;; return runs the handler the main loop's dispatch would, and the machine
+	;; does what it does without the fused return, two microcycles sooner.
+	;; the feature page's word 17 reads 0 below revision 12, where
+	;; destinations 5 to 7 write only m: skip it all there.
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-macro-dispatch-entries-physical-address))
+	(jump-equal md a-zero reset-machine-macro-dispatch-done)
+	((m-c) a-zero)				;the index
+reset-machine-macro-dispatch-fill
+	((m-tem) (byte-field 5 3) m-c)		;the opcode
+	((m-tem) add m-tem (a-constant (a-mem-loc a-macro-dispatch-generic)))
+	((oa-reg-high) dpb m-tem oah-a-src a-zero)	;a source of the next
+	((m-1) a-garbage)				;opdtb's entry
+	((macro-dispatch-index) m-c)
+	((m-c) add m-c (a-constant 1))
+	(jump-less-than-xct-next m-c (a-constant 2000) reset-machine-macro-dispatch-fill)
+       ((macro-dispatch-entry) m-1)
+	;; the main loop, qmlp, whose word a return pops (a-main-dispatch); and
+	;; a-localp's and m-ap's addresses, for the operand address (contract h8a
+	;; section 3.4); with the enable, <31>.
+	((macro-dispatch-register) dpb (m-constant -1) (byte-field 1 31.)
+		(a-constant (plus (i-mem-loc qmlp)
+				  (byte-value (byte-field 10. 14.) (a-mem-loc a-localp))
+				  (byte-value (byte-field 5 24.) (m-mem-loc m-ap)))))
+reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 
 ;LOADING THE INITIAL MAP.

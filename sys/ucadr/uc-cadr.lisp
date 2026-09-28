@@ -116,6 +116,11 @@
 (assign quux-timer-2-control-virtual-address (plus quux-register-page-virtual-address 114))
 (assign quux-timer-2-period-physical-address (plus quux-register-page-physical-address 115))
 (assign quux-file-device-status-physical-address (plus quux-register-page-physical-address 161))
+;; quux revision 12 (contract h8a): the feature page's word 17 is the number of
+;; the macro dispatch memory's entries, 1,024, and reads 0 below revision 12;
+;; reset-machine fills the memory only when it is there.
+(assign quux-macro-dispatch-entries-physical-address
+	(plus quux-register-page-physical-address 17))
 ;; quux (contract q13): word 160, the file device's control, <0> enable and
 ;; <8> interrupt enable; intr-file-device-stray clears <8>.
 (assign quux-file-device-control-virtual-address (plus quux-register-page-virtual-address 160))
