@@ -903,14 +903,48 @@ a comment in that file saying why.
   commented out at `:138-175`), and `CANONICALIZE-COLD-LOAD-PATHNAMES`, which
   QLD runs before `MAKE-SYSTEM`, makes it a universal time with
   `FILE-DEVICE-UNIVERSAL-TIME`, as `HOST`'s `:CREATION-DATE` does
-  (`MINI-DATE-UNIVERSAL-TIME`, `io/file/pathst.lisp:331-339`, `:391-395`).
+  (`MINI-DATE-UNIVERSAL-TIME`, `io/file/pathst.lisp:331-339`, `:405-409`).
   MINI stays free of bignums and prints no date. In a fresh cold load and
   QLD with both changes: no `HOST:` generic pathname carries an id (the
   development band had 40), every id is a number equal to the served
   date (39 differed), 35 of MINI's 36 `SYS:` QFASLs keep MINI's id alone,
   `(make-system 'system :print-only)` lists nothing, and the quux process
-  opened 1 of MINI's files again after MINI, where the ids show 36 before.
-  The one left is `SYS: SITE; HSTTBL QFASL` (Known faults).
+  opened 1 of MINI's files again after MINI, where the ids show 36 before;
+  the next bullet fixes that one.
+- **`SYS: SITE; HSTTBL QFASL` is loaded once.** `CANONICALIZE-COLD-LOAD-PATHNAMES`
+  gave MINI's id the name MINI opened merged into `SYS:`'s physical
+  pathname as its truename. For a file one directory deep,
+  `/site/hsttbl.qfasl`, that pathname's directory is the string `"site"`,
+  while the truename `HOST` gives `MAKE-SYSTEM` is the translation of
+  `SYS: SITE; HSTTBL QFASL` (`FILE-DEVICE-TRUENAME`,
+  `io/file/hostfs.lisp:138-151`), whose directory is the list `("site")`:
+  two pathnames, never `EQUAL`, so QLD loaded the host table a second time.
+  Files two or more deep give the same pathname both ways. The truename is
+  now the translation of the name's `SYS:` back-translation, and the merged
+  pathname only for a name with none (`io/file/pathst.lisp:387-404`, the old
+  lines commented out). Red and green on the new band, with MINI's id for
+  `HSTTBL` put back as MINI leaves it and canonicalized again: its truename
+  `EQ` to `HOST`'s and `FILE-NEWER-THAN-INSTALLED-P` were NIL and T, now T
+  and NIL; `FLAVOR` and `PATHST` give T and NIL both times. In a fresh cold
+  load and QLD: the quux process opened none of MINI's files after MINI
+  (strace), all 36 of MINI's `SYS:` QFASLs keep MINI's id alone, no `HOST:`
+  generic carries an id, every id equals its served date, and
+  `:print-only` lists nothing. The CADR's line never had it: QFILE's
+  truename is parsed from the server's name, as MINI's is.
+- **The band's own FILE server prints the year in four digits.**
+  `CV-WIRE-TIME` printed `MM/DD/YY HH:MM:SS`, and a client's parser takes a
+  two-digit year within fifty years of the present, so a file of 1970 read
+  as 2070 and one of 2099 as 1999. It now prints `MM/DD/YYYY HH:MM:SS`
+  (`file/server.lisp:42-60`, the old lines commented out), which the fast
+  parser reads as UTC, as ozd's `--file-dates utc` prints its FILE and MINI
+  dates from ozd `52eb6b0`. `PRINT-DIRECTORY-DATE-PROPERTY` already printed
+  four digits, and the parser reads both forms. Red and green on the System
+  2000 development band with `FILE; SERVER` compiled and loaded: 1970-01-01
+  and 2099-12-31 printed `01/01/70` and `12/31/99` and read back
+  3155760000 s off, and now print `01/01/1970 00:00:00` and
+  `12/31/2099 23:59:59` and read back exactly; 2026 and the 17-character
+  form are unchanged. This line's cold load reads dates from the file
+  device as numbers, so nothing else here prints a date for the wire.
 
 ## Known faults found, not yet fixed
 
@@ -929,22 +963,6 @@ a comment in that file saying why.
 - **MONO TV sizes above 1920 by 1080 are not supported** (the user,
   2026-09-24). At 2560 by 1440, what boot draws in the Lisp listener stops
   at pixel 2^21, row 819, until its next refresh; the cause is not sought.
-- **QLD still loads `SYS: SITE; HSTTBL QFASL` a second time.** MINI's id for
-  a file names its truename by merging MINI's name into `SYS:`'s physical
-  pathname (`CANONICALIZE-COLD-LOAD-PATHNAMES`, `io/file/pathst.lisp:388-390`),
-  and for a file one directory deep, `/site/hsttbl.qfasl`, that pathname's
-  directory is the string `"site"`, while `SYS: SITE; HSTTBL QFASL`'s
-  translation, the truename `HOST` gives `MAKE-SYSTEM`
-  (`FILE-DEVICE-TRUENAME`, `io/file/hostfs.lisp:138-151`), has the list
-  `("site")`: two pathnames, never `EQUAL`, so the id never matches. Files
-  two or more deep give the same pathname both ways. The CADR's line does
-  not have it: QFILE's truename is parsed from the server's name, as MINI's
-  is, and its build with the pathname fix read `HSTTBL` once. Measured on the new
-  band: the merged pathname is not `EQ` to the translation, and with MINI's
-  id put back `FILE-NEWER-THAN-INSTALLED-P` is T with the merged truename and
-  NIL with the translation's. Of MINI's files only `HSTTBL` is in a system
-  (`SITE`, `LMLOCS` and `SYS TRANSLATIONS` are not), so it is the one reload
-  left; not fixed here.
 
 ## The herald
 

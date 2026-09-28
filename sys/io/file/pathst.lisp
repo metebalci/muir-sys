@@ -386,8 +386,22 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 					SI::PKG-SYSTEM-INTERNALS-PACKAGE)))
 		 ;; And before there are truenames
 		 (LET ((INFO (CADAR VAL)))
-		   (AND (STRINGP (CAR INFO))
-			(SETF (CAR INFO) (MERGE-PATHNAMES (CAR INFO) PHYS-PATHNAME)))
+;		   (AND (STRINGP (CAR INFO))
+;			(SETF (CAR INFO) (MERGE-PATHNAMES (CAR INFO) PHYS-PATHNAME)))
+		   ;; the truename is the translation of the file's SYS: name, the
+		   ;; pathname HOST gives as the truename when MAKE-SYSTEM asks.  the
+		   ;; name merged into SYS:'s physical pathname is that same pathname
+		   ;; only for a file two or more directories deep: for one directory
+		   ;; deep, /site/hsttbl.qfasl, the merge's directory is the string
+		   ;; "site" and the translation's the list ("site"), two pathnames
+		   ;; never EQUAL, so QLD's make-system found MINI's id not matching
+		   ;; and loaded SYS: SITE; HSTTBL a second time.  a name with no SYS:
+		   ;; name keeps the merged pathname, as before.
+		   (when (stringp (car info))
+		     (let* ((recorded (merge-pathnames (car info) phys-pathname))
+			    (logical (send sys-pathname :back-translated-pathname recorded)))
+		       (setf (car info)
+			     (if logical (send logical :translated-pathname) recorded))))
 		   ;; and before there are bignums: MINI's date is the open's
 		   ;; mtime halves, made a universal time here, before QLD's
 		   ;; make-system compares it with HOST's date for the file.

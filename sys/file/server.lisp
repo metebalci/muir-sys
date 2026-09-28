@@ -41,17 +41,23 @@ Note that changing this may not take affect in existing servers.")
 
 ;; the date of a file in the OPEN and CLOSE replies.  FILE dates on the wire
 ;; are UTC, so it is decoded at zone 0, with no daylight savings time, and
-;; printed MM/DD/YY HH:MM:SS with every field in two digits, the form that
-;; FS:PARSE-DIRECTORY-DATE-PROPERTY reads as UTC.  the replies printed the
+;; printed MM/DD/YYYY HH:MM:SS, every field but the year in two digits, a form
+;; that FS:PARSE-DIRECTORY-DATE-PROPERTY reads as UTC.  the replies printed the
 ;; site's local time with CV-TIME, whose month has one digit before october,
 ;; which the client's full parser then read as local time: a client at another
 ;; zone, or one reading UTC, saw the date moved.  CV-TIME stays local, for the
 ;; lossage log, which is read on this machine.
+;; the year is printed in four digits, MM/DD/YYYY HH:MM:SS, which the parser
+;; also reads as UTC: with two, it takes the year within fifty years of now,
+;; so a client read a file of 1970 as 2070 and one of 2099 as 1999.  ozd's
+;; --file-dates utc prints the year so too.
 (defun cv-wire-time (x)
   (multiple-value-bind (sec min hr day mon yr)
       (time:decode-universal-time x 0)
-    (format nil "~2,'0D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
-	    mon day (\ yr 100.) hr min sec)))
+;    (format nil "~2,'0D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
+;	    mon day (\ yr 100.) hr min sec)))
+    (format nil "~2,'0D//~2,'0D//~4,'0D ~2,'0D:~2,'0D:~2,'0D"
+	    mon day yr hr min sec)))
 
 (defun trace-server (&optional (onoff t))
   (setq trace-server-enabled onoff))
