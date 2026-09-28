@@ -457,8 +457,16 @@ BIND-LEXICAL-ENVIRONMENT-1
 		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)
 				  LOWEST-A-MEM-VIRTUAL-ADDRESS
 				  (A-MEM-LOC A-LEXICAL-ENVIRONMENT))))
-	(POPJ-AFTER-NEXT (VMA-START-WRITE) A-QLBNDP)
-       (CHECK-PAGE-WRITE)
+;	(POPJ-AFTER-NEXT (VMA-START-WRITE) A-QLBNDP)
+;       (CHECK-PAGE-WRITE)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns): check-page-write, a call on a
+	;; page fault or an interrupt, now follows the write before the return.
+	;; two microcycles more.
+	((vma-start-write) a-qlbndp)
+	(check-page-write)
+	(popj)
 
 ;; Must not sequence break in this code!
 ;; Because we have already done MLLV or QLLV on the active frame
@@ -1096,8 +1104,16 @@ MKWRIT	((M-TEM) Q-DATA-TYPE MD)
 	(popj-after-next (pdl-index-indirect) md)
        (no-op)
 
-MKWRIT1	(POPJ-AFTER-NEXT (VMA-START-WRITE) M-K)
-       (CHECK-PAGE-WRITE)
+;MKWRIT1	(POPJ-AFTER-NEXT (VMA-START-WRITE) M-K)
+;       (CHECK-PAGE-WRITE)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns): check-page-write, a call on a
+	;; page fault or an interrupt, now follows the write before the return.
+	;; two microcycles more.
+mkwrit1	((vma-start-write) m-k)
+	(check-page-write)
+	(popj)
 
 ;Stack closure, copy it if necessary.
 MKWRIT2	((VMA-START-WRITE) M-K)
@@ -1728,10 +1744,20 @@ XPUSH (MISC-INST-ENTRY %PUSH)
 XAPDLR (MISC-INST-ENTRY %ASSURE-PDL-ROOM)
 	((M-1) Q-POINTER PDL-POP)	;NUMBER OF PUSHES PLANNING TO DO
 	((PDL-INDEX) M-A-1 PDL-POINTER A-AP)	;CURRENT FRAME SIZE
-	(POPJ-AFTER-NEXT (M-2) ADD PDL-INDEX A-1)	;PROPOSED NEW FRAME SIZE
-       (CALL-GREATER-THAN M-2 (A-CONSTANT 370) XAPDLR1)	;NOTE FUDGE FACTOR OF 10 SINCE WE DON'T
-						;CURRENTLY KNOW HOW MANY COMPILER-GENERATED
-						;PUSHES MIGHT BE GOING TO HAPPEN
+;	(POPJ-AFTER-NEXT (M-2) ADD PDL-INDEX A-1)	;PROPOSED NEW FRAME SIZE
+;       (CALL-GREATER-THAN M-2 (A-CONSTANT 370) XAPDLR1)	;NOTE FUDGE FACTOR OF 10 SINCE WE DON'T
+;						;CURRENTLY KNOW HOW MANY COMPILER-GENERATED
+;						;PUSHES MIGHT BE GOING TO HAPPEN
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns).  the size is tested before the
+	;; return, and a frame too large jumps to xapdlr1, whose trap then finds
+	;; the return still on the micro stack: one microcycle more.
+	((m-2) add pdl-index a-1)			;proposed new frame size
+	(popj-less-or-equal m-2 (a-constant 370))	;note fudge factor of 10 since we don't
+							;currently know how many compiler-generated
+							;pushes might be going to happen
+	(jump xapdlr1)
 XAPDLR1	(CALL TRAP)
     (ERROR-TABLE STACK-FRAME-TOO-LARGE)
     (ERROR-TABLE ARG-POPPED 0 M-1)

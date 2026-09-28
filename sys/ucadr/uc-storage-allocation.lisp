@@ -901,10 +901,19 @@ XAAI (MISC-INST-ENTRY %ALLOCATE-AND-INITIALIZE)
 	((A-TEM1) C-PDL-BUFFER-POINTER-POP)	;HEADER Q (POINTER PART)
 	((WRITE-MEMORY-DATA) DPB C-PDL-BUFFER-POINTER-POP	;SET DATA TYPE, ETC.
 		Q-ALL-BUT-POINTER A-TEM1)
-	(POPJ-AFTER-NEXT			;WRITE THE HEADER, AND
-	 (VMA-START-WRITE M-T) DPB C-PDL-BUFFER-POINTER-POP	; RETURN POINTER TO BLOCK,
-		Q-ALL-BUT-POINTER A-T)		; WITH CORRECT TYPE
-       (CHECK-PAGE-WRITE)
+;	(POPJ-AFTER-NEXT			;WRITE THE HEADER, AND
+;	 (VMA-START-WRITE M-T) DPB C-PDL-BUFFER-POINTER-POP	; RETURN POINTER TO BLOCK,
+;		Q-ALL-BUT-POINTER A-T)		; WITH CORRECT TYPE
+;       (CHECK-PAGE-WRITE)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns): check-page-write, a call on a
+	;; page fault or an interrupt, now follows the write before the return.
+	;; two microcycles more.
+	((vma-start-write m-t) dpb c-pdl-buffer-pointer-pop	;write the header, and
+		q-all-but-pointer a-t)		; return pointer to block, with correct type
+	(check-page-write)
+	(popj)
 
 ;(%ALLOCATE-AND-INITIALIZE-ARRAY <header as fixnum> <index length> <leader length> 
 ;					<area> <nqs>)
@@ -956,10 +965,19 @@ XAAIA2	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	(JUMP-LESS-THAN VMA A-E XAAIA2)
 XAAIA3	(POPJ-IF-BIT-CLEAR (LISP-BYTE %%ARRAY-LONG-LENGTH-FLAG) M-2)
 	((VMA) ADD M-T (A-CONSTANT 1))
-	(POPJ-AFTER-NEXT
-	 (WRITE-MEMORY-DATA-START-WRITE) DPB M-B Q-POINTER 
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-       (CHECK-PAGE-WRITE)
+;	(POPJ-AFTER-NEXT
+;	 (WRITE-MEMORY-DATA-START-WRITE) DPB M-B Q-POINTER 
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;       (CHECK-PAGE-WRITE)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns): check-page-write, a call on a
+	;; page fault or an interrupt, now follows the write before the return.
+	;; two microcycles more.
+	((write-memory-data-start-write) dpb m-b q-pointer
+		(a-constant (byte-value q-data-type dtp-fix)))
+	(check-page-write)
+	(popj)
 	
 ;SUBROUTINE TO THE ABOVE.  TAKES AREA AND #QS ON PDL, CALLS SCONS.
 ;FILLS THE THING WITH NILS

@@ -1131,8 +1131,19 @@ XFXFLP	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTENDED-NUMBER)) XFALSE)
 	(CHECK-PAGE-READ)
 	((M-T) A-V-TRUE)
 	(DISPATCH TRANSPORT-HEADER MD)
-	(POPJ-AFTER-NEXT (M-TEM) (LISP-BYTE %%HEADER-TYPE-FIELD) MD)
-       (CALL-NOT-EQUAL M-TEM A-4 XFALSE)
+;	(POPJ-AFTER-NEXT (M-TEM) (LISP-BYTE %%HEADER-TYPE-FIELD) MD)
+;       (CALL-NOT-EQUAL M-TEM A-4 XFALSE)
+	;; quux revision 12 (contract h8a section 3.3): the microinstruction after
+	;; a return may not call or jump, since a fused return has chosen the next
+	;; handler by then; here the call of xfalse in it moved the micro stack and
+	;; ran xfalse instead of that handler (bignum, integerp of a bignum).  the
+	;; header type is tested before the return, and xfalse's two
+	;; microinstructions are copied in: the same m-t and m-tem as before, one
+	;; microcycle more when the type matches, one less when it does not.
+	((m-tem) (lisp-byte %%header-type-field) md)
+	(popj-equal m-tem a-4)				;m-t is t
+	(popj-after-next (m-t) a-v-nil)			;as xfalse
+       (no-op)
 
 XFLTP (MISC-INST-ENTRY FLOATP)
 	((M-T) Q-TYPED-POINTER PDL-POP)
@@ -1677,9 +1688,17 @@ XPCAL (MISC-INST-ENTRY %P-CONTENTS-AS-LOCATIVE)
 	(CHECK-PAGE-READ)
 XPCAL1	(CALL-XCT-NEXT TRANS-OLD0)			;TRANSPORT OLDSPACE POINTER, BUT
        ((M-1) MD)					; DON'T CHASE INVISIBLE POINTERS
-	(POPJ-AFTER-NEXT (M-T) Q-POINTER MD 
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)))
-       (CALL-NOT-EQUAL MD A-1 XPCAL1)			;REPEAT IF E.G. SNAPPED OUT HDR-FWD
+;	(POPJ-AFTER-NEXT (M-T) Q-POINTER MD 
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)))
+;       (CALL-NOT-EQUAL MD A-1 XPCAL1)			;REPEAT IF E.G. SNAPPED OUT HDR-FWD
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp).  the return is conditional instead, with the
+	;; m-t write in its xct-next, and the repeat a jump: the same microcycles
+	;; when md equals m-1, the same result either way.
+	(popj-equal-xct-next md a-1)
+       ((m-t) q-pointer md (a-constant (byte-value q-data-type dtp-locative)))
+	(jump xpcal1)					;repeat if e.g. snapped out hdr-fwd
 
 XPCALO (MISC-INST-ENTRY %P-CONTENTS-AS-LOCATIVE-OFFSET)
 	(JUMP-XCT-NEXT XPCAL1)

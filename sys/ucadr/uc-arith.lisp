@@ -763,9 +763,21 @@ SFLPCK1	((M-1) DPB M-ZERO FLONUM-SMALL-USELESS-BITS A-1) ;clear low-order bits s
 				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
 	((M-I) SUB M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
 	(JUMP-LESS-OR-EQUAL M-I A-ZERO SFL-E-UND)	;Underflow.  ZUNDERFLOW?
-	(POPJ-AFTER-NEXT
-	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
-       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
+;	(POPJ-AFTER-NEXT
+;	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
+;       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns).  the return is conditional on
+	;; the exponent instead, with the store in its xct-next, and an overflow
+	;; jumps to sfl-e-ov: the same microcycles and results with no overflow.
+	;; on an overflow the trap now finds the return not yet made, as at any
+	;; other trap, so the error names the instruction that overflowed rather
+	;; than the next one, and proceeding with a new value works (it stopped
+	;; the machine before).
+	(popj-less-or-equal-xct-next m-i (a-constant small-flonum-max-exponent))
+       ((m-t c-pdl-buffer-pointer) dpb m-i small-flonum-exponent a-t)
+	(jump sfl-e-ov)					;overflow
 
 SFL-E-UND
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-ZUNDERFLOW)
@@ -1317,12 +1329,23 @@ MAKE-RATIONAL
 ;Write the header word.
 	((VMA M-T) Q-POINTER M-T
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
-	(POPJ-AFTER-NEXT
-	 (MD-START-WRITE)
-	 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
-			   (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-RATIONAL)
+;	(POPJ-AFTER-NEXT
+;	 (MD-START-WRITE)
+;	 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;			   (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-RATIONAL)
+;			   0)))
+;       (CHECK-PAGE-WRITE)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns): check-page-write, a call on a
+	;; page fault or an interrupt, now follows the write before the return.
+	;; two microcycles more.
+	((md-start-write)
+	 (a-constant (plus (byte-value q-data-type dtp-header)
+			   (byte-value header-type-field %header-type-rational)
 			   0)))
-       (CHECK-PAGE-WRITE)
+	(check-page-write)
+	(popj)
 
 ;EQL is EQ, except = for numbers of matching type.
 XEQL (MISC-INST-ENTRY EQL)

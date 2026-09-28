@@ -922,6 +922,72 @@ a comment in that file saying why.
     entries poisoned and after a warm boot through the PROM, and on
     revision 12 `BEG06` finds each time the 36 specialised entries and
     every other entry `OPDTB`'s.
+- **No call in the microcycle after a return that can reach the main
+  loop** (muir's contract H8a section 3.3; microcode 2000 keeps its number,
+  and its files change again). A fused return has chosen the next
+  macroinstruction's handler before the microinstruction an XCT-NEXT runs
+  after the return, so that microinstruction must not transfer control or
+  move the micro stack either. At `XFXFLP` (`INTEGERP` and its fellows of an
+  extended number) the `CALL-NOT-EQUAL ... XFALSE` after a `POPJ-AFTER-NEXT`
+  did both: muir-sim's checker, with its prefetch, counted 20 moves of the
+  micro stack and 20 wrong handlers in its bignum workload, though the
+  answer was right (`XFALSE` returned to the handler). muir-sim's scan of
+  every return whose next microinstruction runs, extended to a JUMP or
+  DISPATCH there, a second `POPJ`, a push or pop of the micro stack and a
+  write of the OA registers, and to the returns of a `DISPATCH` with the
+  `POPJ` bit, lists 56 such returns on the microcode before, each a call.
+  10 of them can pop the main loop's return, by a reading of the control
+  flow from every handler and misc entry that holds every return the
+  profile below saw fused; each now makes or tests its call before the
+  return:
+  - `XFXFLP` tests the header type with a conditional `POPJ` and then runs
+    `XFALSE`'s two microinstructions (`ucadr/uc-fctns.lisp:1134-1146`):
+    one microcycle more for a bignum, one fewer for anything else;
+  - `XPCAL1` (`%P-CONTENTS-AS-LOCATIVE`, `ucadr/uc-fctns.lisp:1691-1701`),
+    `GAHD1` (an array's header, `ucadr/uc-array.lisp:810-831`) and
+    `SFLPCK1` (packing a small flonum, `ucadr/uc-arith.lisp:766-780`)
+    return by a conditional `POPJ` with the write in its XCT-NEXT and jump
+    for the rest, in the same microcycles; `GAHD1` falls into `GAHD3` for
+    a long array, one microcycle fewer, and `GAHD-RANK-0` moves after it;
+  - `XAPDLR` (`%ASSURE-PDL-ROOM`, `ucadr/uc-call-return.lisp:1747-1760`)
+    tests the frame size before a conditional `POPJ`, one microcycle more;
+  - `BIND-LEXICAL-ENVIRONMENT-1` and `MKWRIT1`
+    (`ucadr/uc-call-return.lisp:460-467`, `:1107-1114`), `XAAI` and
+    `XAAIA3` (`ucadr/uc-storage-allocation.lisp:904-916`, `:968-980`) and
+    `MAKE-RATIONAL` (`ucadr/uc-arith.lisp:1332-1348`) make the write, then
+    `CHECK-PAGE-WRITE`, then a `POPJ`: two microcycles more.
+
+  The answers are the same, but where the call trapped: the traps of
+  `SFLPCK1` and `XAPDLR` now find the return not yet made, as every other
+  trap does, so a small-flonum exponent overflow names the instruction that
+  overflowed (`*`) rather than the next one (`POP`), and proceeding from it
+  with a new value works where it stopped the machine (`si:%halt`) before.
+  The other 46 are in routines reached only by a call (the page-fault
+  handlers, the transporter, consing, the array decoders, bignums, the
+  disk, Chaosnet, `BITBLT`), whose returns go back into microcode. I memory
+  grows by 10 words; named A, M and D memory stays where it was, and no band
+  is rebuilt; `UCADR TBL` changes, since error-table entries move.
+  - Tested on muir-sim 24583a1 (a `git archive` copy), with the band and
+    PROM of ref/band-2000-h8a-s6 and this microcode over its MCR1. The
+    profile of 12 workloads on rtl with the prefetch (`MUIR_PREFETCH=a-line`,
+    the microcode's own fill, sync K=4, 4K cache, the Arty's memory timing,
+    the RTC counted from a fixed second, `cons` after an untimed first
+    `cons`): the checker counts no problem in any workload, where the
+    microcode before had 40 in bignum, over 17,756,061 fused returns. The
+    extended scan lists 46 returns, none of them able to pop the main
+    loop's return; the ten sites' own cost, counted at their
+    microinstructions, is 82,417 microcycles fewer over the 12 workloads
+    (92,537 long arrays one fewer each, 9,873 more at the others), and the
+    workloads took 394,590,000 microcycles against 394,437,000 before, a
+    difference within the run-to-run spread of the macroinstructions the
+    workloads execute. 33 forms (`INTEGERP`, `FLOATP`, `RATIONALP` and
+    `COMPLEXP` of bignums, flonums, ratios and complex numbers, compiled and
+    not, locatives, short, long and rank 0 to 2 arrays, small flonums,
+    `%ASSURE-PDL-ROOM`, closures, multiple values, allocation, ratios,
+    bignums) answer on micro and rtl as on the microcode before, but for
+    the overflow's message above; and proceeding from a small-flonum
+    overflow with a new value answers `(A 2.0s0 B)` where the microcode
+    before stopped the machine, on both engines.
 
 ## Time zones
 

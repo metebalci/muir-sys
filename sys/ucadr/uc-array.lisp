@@ -807,19 +807,28 @@ GAHD1	((VMA-START-READ) M-A)		;GET ARRAY HEADER
 	((M-D) (LISP-BYTE %%ARRAY-NUMBER-DIMENSIONS) M-B)
 	((M-E) ADD M-E A-D)		;ADDR OF FIRST DATA ELEMENT OF ARRAY (TYPELESS)
 	(CALL-EQUAL M-D A-ZERO GAHD-RANK-0)
-	(POPJ-AFTER-NEXT
-	 (M-S) (LISP-BYTE %%ARRAY-INDEX-LENGTH-IF-SHORT) M-B)	;INDEX LENGTH
-       (CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-LONG-LENGTH-FLAG) M-B GAHD3)
-
-;A rank-0 array has the same number of multipliers as a rank-1 array (none).
-GAHD-RANK-0
-	(POPJ-AFTER-NEXT NO-OP)
-       ((M-E) ADD M-E (A-CONSTANT 1))
+;	(POPJ-AFTER-NEXT
+;	 (M-S) (LISP-BYTE %%ARRAY-INDEX-LENGTH-IF-SHORT) M-B)	;INDEX LENGTH
+;       (CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-LONG-LENGTH-FLAG) M-B GAHD3)
+	;; quux revision 12 (contract h8a section 3.3): no call in the
+	;; microinstruction after a return, where a fused return has chosen the
+	;; next handler (see xfxflp in uc-fctns).  the return is conditional on the
+	;; short length instead, with the m-s write in its xct-next, and a long
+	;; array falls into gahd3, which returns itself; gahd-rank-0, which stood
+	;; between, now follows gahd3.  the same results, the same microcycles for
+	;; a short array and one fewer for a long one.
+	(popj-if-bit-clear-xct-next (lisp-byte %%array-long-length-flag) m-b)
+       ((m-s) (lisp-byte %%array-index-length-if-short) m-b)	;index length
 
 GAHD3	((VMA-START-READ) ADD M-A (A-CONSTANT 1))	;LONG ARRAY, GET INDEX LENGTH Q
 	(CHECK-PAGE-READ)		;NO TRANSP SINCE JUST TOUCHED HEADER
 	(POPJ-AFTER-NEXT (M-E) ADD M-E (A-CONSTANT 1))	;SPACE OVER INDEX Q
        ((M-S) Q-POINTER READ-MEMORY-DATA)
+
+;A rank-0 array has the same number of multipliers as a rank-1 array (none).
+GAHD-RANK-0
+	(POPJ-AFTER-NEXT NO-OP)
+       ((M-E) ADD M-E (A-CONSTANT 1))
 
 XAIXL (MISC-INST-ENTRY ARRAY-LENGTH)
 	(CALL GAHDRA)
