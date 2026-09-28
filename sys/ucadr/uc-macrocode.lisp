@@ -663,6 +663,69 @@ QBRNNP	((M-K) Q-TYPED-POINTER M-T)		;BR NOT NIL, POP IF
 	(JUMP-NOT-EQUAL M-K A-V-NIL QBRALW)
 	(JUMP-XCT-NEXT QBRNOT)
        ((M-GARBAGE) C-PDL-BUFFER-POINTER-POP)
+
+;; quux revision 12 (contract h8a section 4), specialised handlers: br, br-nil
+;; and br-not-nil.  the generic path, qibrn's dispatch on brdtab, then qbrnl,
+;; qbrnnl or qbralw, qbrnot and qbrlz1 or qbrlz2, takes to the next handler 6
+;; microcycles for br-nil or br-not-nil not taken, 8 taken forward and 11
+;; backward, and 5 and 8 for br; these take 3, 5, 7, 3 and 5.
+;; only the macro dispatch memory names them (reset-machine: indexes 140-147,
+;; 340-347 and 540-547, the operand bit clear), so they run only from a fused
+;; return with no fetch needed; the main loop's dispatch still runs qibrn.  a
+;; branch's <8:0> is its offset in halfwords, so the index's register field,
+;; <8:6>, is the offset's top three bits: the -pos handlers serve 0-3, a forward
+;; offset, and the -neg ones 4-7, a backward one, which is sign-extended as
+;; qbrlz1 extends it.  offset 777 is the long branch, whose offset is in the next
+;; halfword: a -neg handler finds it by m-b, as qbrnot and qbrlz1 do, and leaves
+;; it to qibrn, which then does all it does today.  br-nil and br-not-nil test
+;; m-t's typed pointer against nil, as qbrnl and qbrnnl do.  a branch taken
+;; writes the location counter in its popj's own microinstruction, as qbrlz2
+;; does, and the next macroinstruction is fetched; a branch not taken returns by
+;; a conditional popj whose next microinstruction is not executed (contract h8a
+;; section 3.3).  none reads the pdl.
+qibrn-br-pos
+	((m-b) m-inst-adr-*2+x)			;the offset in bytes, as qibrn has it
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
+
+qibrn-br-neg
+	((m-b) m-inst-adr-*2+x)
+	(jump-greater-or-equal m-b (a-constant 1776) qibrn)	;long branch
+	((m-b) selective-deposit (m-constant -1) (byte-field 22. 10.) a-b)	;extend sign
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
+
+qibrn-br-nil-pos
+	((m-k) q-typed-pointer m-t)
+	(popj-not-equal m-k a-v-nil)		;not nil: not taken
+	((m-b) m-inst-adr-*2+x)
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
+
+qibrn-br-nil-neg
+	((m-k) q-typed-pointer m-t)
+	((m-b) m-inst-adr-*2+x)
+	(jump-greater-or-equal m-b (a-constant 1776) qibrn)	;long branch
+	(popj-not-equal m-k a-v-nil)		;not nil: not taken
+	((m-b) selective-deposit (m-constant -1) (byte-field 22. 10.) a-b)	;extend sign
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
+
+qibrn-br-not-nil-pos
+	((m-k) q-typed-pointer m-t)
+	(popj-equal m-k a-v-nil)		;nil: not taken
+	((m-b) m-inst-adr-*2+x)
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
+
+qibrn-br-not-nil-neg
+	((m-k) q-typed-pointer m-t)
+	((m-b) m-inst-adr-*2+x)
+	(jump-greater-or-equal m-b (a-constant 1776) qibrn)	;long branch
+	(popj-equal m-k a-v-nil)		;nil: not taken
+	((m-b) selective-deposit (m-constant -1) (byte-field 22. 10.) a-b)	;extend sign
+	(popj-after-next (location-counter) add location-counter a-b)
+       (no-op)
 
 ;;; NON-DESTINATION-GROUP-2
 ;   E IN VMA, C(E) IN M-T

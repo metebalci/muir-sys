@@ -128,6 +128,30 @@ reset-machine-macro-dispatch-fill
 	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimvm-operand) 400000)))
 	((macro-dispatch-index) (a-constant 1536))
 	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimvm-operand) 400000)))
+	;; br, br-nil and br-not-nil: opcode 14 (br, destination 0; br-not-nil,
+	;; destination 1) and 34 (br-nil, destination 0), sub-opcodes 0, 2 and 1;
+	;; indexes 140, 540 and 340 plus the register field, which for a branch is
+	;; the top of its offset: 0-3 forward, the -pos handlers, and 4-7 backward,
+	;; the -neg ones.  the operand bit clear: a branch has no operand.
+	((m-c) a-zero)				;the register field
+reset-machine-macro-dispatch-branch-pos
+	((macro-dispatch-index) add m-c (a-constant 140))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-pos)))
+	((macro-dispatch-index) add m-c (a-constant 340))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-nil-pos)))
+	((macro-dispatch-index) add m-c (a-constant 540))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-not-nil-pos)))
+	((m-c) add m-c (a-constant 1))
+	(jump-less-than m-c (a-constant 4) reset-machine-macro-dispatch-branch-pos)
+reset-machine-macro-dispatch-branch-neg
+	((macro-dispatch-index) add m-c (a-constant 140))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-neg)))
+	((macro-dispatch-index) add m-c (a-constant 340))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-nil-neg)))
+	((macro-dispatch-index) add m-c (a-constant 540))
+	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-not-nil-neg)))
+	((m-c) add m-c (a-constant 1))
+	(jump-less-than m-c (a-constant 10) reset-machine-macro-dispatch-branch-neg)
 reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 

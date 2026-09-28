@@ -867,6 +867,27 @@ a comment in that file saying why.
     429,987,000 microcycles, 2.19% fewer than before the first family; the
     checker and the scan find nothing on either engine; 34 forms answer as
     on the microcode before.
+- **Specialised handlers, third family: BR, BR-NIL and BR-NOT-NIL** (H8a
+  section 4, S6). Six handlers (`ucadr/uc-macrocode.lisp:667-729`): a
+  branch's offset is its `<8:0>`, so the index's register field is the
+  offset's top three bits, and `RESET-MACHINE` names the `-POS` handlers at
+  register fields 0-3 and the `-NEG` ones, which extend the sign as
+  `QBRLZ1` does, at 4-7, for BR at 140-147, BR-NIL at 340-347 and
+  BR-NOT-NIL at 540-547, the operand bit clear
+  (`ucadr/uc-cold-disk.lisp:131-154`). BR-NIL and BR-NOT-NIL test M-T's
+  typed pointer against NIL as `QBRNL` and `QBRNNL` do; a branch not taken
+  returns by a conditional `POPJ` whose next microinstruction is not
+  executed, and one taken writes the location counter in its `POPJ`'s own
+  microinstruction, as `QBRLZ2` does. Offset 777, the long branch whose
+  offset is in the next halfword, jumps to `QIBRN`, which does all it does
+  today. I memory grows by 49 words and A memory by 9 constants.
+  - Tested as the first family: 920,338 branches ran them, BR-NIL and
+    BR-NOT-NIL in 3 microcycles not taken instead of 6, and 5 taken
+    forward and 7 backward instead of 8 and 11, BR in 3 and 5 instead of 5
+    and 8: 2,832,845 fewer; the workloads took 427,937,000 microcycles,
+    2.66% fewer than before the first family; the checker and the scan
+    find nothing; 48 forms, forward, backward and long branches of each
+    kind among them, answer as on the microcode before.
 
 ## Time zones
 
