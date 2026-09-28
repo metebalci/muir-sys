@@ -103,10 +103,13 @@ FINISH-ENTERED-FRAME
        ((M-AP) M-S)
 	((M-TEM) DPB M-R (LISP-BYTE %%LP-ENS-NUM-ARGS-SUPPLIED)
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-       ((PDL-INDEX-INDIRECT) SELECTIVE-DEPOSIT PDL-INDEX-INDIRECT
-	  (LISP-BYTE %%LP-ENS-LCTYP) A-TEM)
+	;; quux revision 12 (contract h8a, see qstloc in uc-macrocode): the
+	;; store at pdl-index before the popj, not in the microcycle after it,
+	;; where a fused return may load pdl-index; a no-op after it.
+	((pdl-index) add m-ap (a-constant (eval %lp-entry-state)))
+	(popj-after-next (pdl-index-indirect) selective-deposit pdl-index-indirect
+	  (lisp-byte %%lp-ens-lctyp) a-tem)
+       (no-op)
 
 ;CALLING NUMBER AS FUNCTION
 NUMBER-CALLED-AS-FUNCTION
@@ -670,15 +673,20 @@ QLLV-TAIL-REC-COPY
 QLLV-TAIL-REC-ADI
 	((M-K) DPB M-ZERO (LISP-BYTE %%LP-CLS-ADI-PRESENT) A-K)	;Don't set ADI-PRESENT in calling frame.
 	((PDL-INDEX) ADD M-S (A-CONSTANT (EVAL (1- %LP-CALL-STATE))))
-	(POPJ-AFTER-NEXT
-	 (M-TEM) SELECTIVE-DEPOSIT (LISP-BYTE %%ADI-TYPE) PDL-INDEX-INDIRECT A-TEM)
-       ((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-CALL-STATE)))
+	;; quux revision 12 (contract h8a, see qstloc in uc-macrocode):
+	;; pdl-index is set before the popj, not in the microcycle after it,
+	;; where a fused return may load it; a no-op after it.
+	((m-tem) selective-deposit (lisp-byte %%adi-type) pdl-index-indirect a-tem)
+	(popj-after-next (pdl-index) add m-ap (a-constant (eval %lp-call-state)))
+       (no-op)
 
 XPERMIT-TAIL-RECURSION (MISC-INST-ENTRY %PERMIT-TAIL-RECURSION)
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-	(POPJ-AFTER-NEXT
-	 (M-A) PDL-INDEX-INDIRECT)
-       ((PDL-INDEX-INDIRECT) DPB M-ZERO (LISP-BYTE %%LP-ENS-UNSAFE-REST-ARG) A-A)
+	;; quux (contract h8a, see qstloc): the store at pdl-index before the
+	;; popj, a no-op after it.
+	((m-a) pdl-index-indirect)
+	(popj-after-next (pdl-index-indirect) dpb m-zero (lisp-byte %%lp-ens-unsafe-rest-arg) a-a)
+       (no-op)
 
 ;Get here when resuming a stack group whose active frame is a FEF.
 ;Restore M-INST-BUFFER and A-LOCALP.
@@ -700,9 +708,13 @@ QLLENT	((M-A) DPB PDL-INDEX-INDIRECT (BYTE-FIELD Q-POINTER-WIDTH 2)
 			;RE-ADVANCE IT.
 	(DISPATCH ADVANCE-INSTRUCTION-STREAM)
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-	(POPJ-AFTER-NEXT			;START INSTRUCTION FETCH, GET LOCAL BLOCK
-	 (M-TEM) (LISP-BYTE %%LP-ENS-MACRO-LOCAL-BLOCK-ORIGIN) PDL-INDEX-INDIRECT)
-       ((A-LOCALP) ADD M-AP A-TEM)
+	;; quux revision 12 (contract h8a, see qstloc in uc-macrocode):
+	;; a-localp is set before the popj, not in the microcycle after it, when
+	;; a fused return may already be making an operand address from it; a
+	;; no-op after it.
+	((m-tem) (lisp-byte %%lp-ens-macro-local-block-origin) pdl-index-indirect)
+	(popj-after-next (a-localp) add m-ap a-tem)	;start instruction fetch
+       (no-op)
 
 ;DTP-U-ENTRY turned out not to be microcoded.  Snap it out, and try again.
 QME2	((PDL-INDEX) M-S)
@@ -1078,8 +1090,11 @@ MKWRIT	((M-TEM) Q-DATA-TYPE MD)
 	(JUMP-EQUAL M-TEM (A-CONSTANT (EVAL DTP-STACK-CLOSURE)) MKWRIT2)
 	(JUMP-LESS-THAN M-K A-PDL-BUFFER-VIRTUAL-ADDRESS MKWRIT1)
 	((M-TEM) SUB M-K A-PDL-BUFFER-VIRTUAL-ADDRESS)
-	(POPJ-AFTER-NEXT (PDL-INDEX) ADD M-TEM A-PDL-BUFFER-HEAD)
-       ((PDL-INDEX-INDIRECT) MD)
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-tem a-pdl-buffer-head)
+	(popj-after-next (pdl-index-indirect) md)
+       (no-op)
 
 MKWRIT1	(POPJ-AFTER-NEXT (VMA-START-WRITE) M-K)
        (CHECK-PAGE-WRITE)
@@ -1685,10 +1700,13 @@ XOCB3	((PDL-INDEX) SUB PDL-INDEX (A-CONSTANT 1))
 		ANDCA PDL-INDEX-INDIRECT (A-CONSTANT (BYTE-MASK %%ADI-PREVIOUS-ADI-FLAG)))
 	((PDL-INDEX) ADD PDL-POINTER (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
 	((PDL-INDEX-INDIRECT) IOR PDL-INDEX-INDIRECT A-3)
-	(POPJ-AFTER-NEXT		;Fix the ADI-present flag
-	 (PDL-INDEX) ADD PDL-POINTER (A-CONSTANT (EVAL %LP-CALL-STATE)))
-       ((PDL-INDEX-INDIRECT) IOR PDL-INDEX-INDIRECT
-		(A-CONSTANT (BYTE-MASK %%LP-CLS-ADI-PRESENT)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add pdl-pointer (a-constant (eval %lp-call-state)))
+	(popj-after-next		;fix the adi-present flag
+	 (pdl-index-indirect) ior pdl-index-indirect
+		(a-constant (byte-mask %%lp-cls-adi-present)))
+       (no-op)
 	
 XAOCB (MISC-INST-ENTRY %ACTIVATE-OPEN-CALL-BLOCK)
 	;;*** this code is temporary to get around compiler bug
@@ -1768,10 +1786,13 @@ XMESL* (MISC-INST-ENTRY %MAKE-EXPLICIT-STACK-LIST*)
 	;; After first making an ordinary list, fix up the last to cdr codes.
 	((PDL-INDEX-INDIRECT) Q-TYPED-POINTER PDL-INDEX-INDIRECT
 			      (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-ERROR)))
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) SUB PDL-INDEX (A-CONSTANT 1))
-       ((PDL-INDEX-INDIRECT) Q-TYPED-POINTER PDL-INDEX-INDIRECT
-			     (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NORMAL)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) sub pdl-index (a-constant 1))
+	(popj-after-next
+	 (pdl-index-indirect) q-typed-pointer pdl-index-indirect
+			     (a-constant (byte-value q-cdr-code cdr-normal)))
+       (no-op)
 
 ;(%SPREAD-N list number) pushes the first <number> elements of <list>
 ;onto the stack.  If the destination is D-LAST, we then activate the call block.
@@ -1906,21 +1927,27 @@ XFEC (MISC-INST-ENTRY %FEXPR-CALL)
 	(CALL-XCT-NEXT FLUSH-DESTINATION-RETURN-PC)
        ((M-T) PDL-POP)	;FUNCTION TO CALL
 	(CALL CBM)
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-ZR (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-       ((PDL-INDEX-INDIRECT) (A-CONSTANT (BYTE-VALUE %%LP-ENS-LCTYP 1)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-zr (a-constant (eval %lp-entry-state)))
+	(popj-after-next (pdl-index-indirect) (a-constant (byte-value %%lp-ens-lctyp 1)))
+       (no-op)
 
 XFECM (MISC-INST-ENTRY %FEXPR-CALL-MV)
 	(CALL XCMV)
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-ZR (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-       ((PDL-INDEX-INDIRECT) (A-CONSTANT (BYTE-VALUE %%LP-ENS-LCTYP 1)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-zr (a-constant (eval %lp-entry-state)))
+	(popj-after-next (pdl-index-indirect) (a-constant (byte-value %%lp-ens-lctyp 1)))
+       (no-op)
 
 XFECMVL (MISC-INST-ENTRY %FEXPR-CALL-MV-LIST)
 	(CALL XCMVL)
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-ZR (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
-       ((PDL-INDEX-INDIRECT) (A-CONSTANT (BYTE-VALUE %%LP-ENS-LCTYP 1)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-zr (a-constant (eval %lp-entry-state)))
+	(popj-after-next (pdl-index-indirect) (a-constant (byte-value %%lp-ens-lctyp 1)))
+       (no-op)
 
 XC0MVL (MISC-INST-ENTRY %CALL0-MULT-VALUE-LIST)
 	((M-TEM) MICRO-STACK-POINTER)		;Insert continuation to QMRCL in pdl
@@ -1959,10 +1986,12 @@ XCMV (MISC-INST-ENTRY %CALL-MULT-VALUE)
 XCTOM1	((PDL-PUSH) M-K)	;RETURN VALUES BLOCK POINTER
 	((PDL-PUSH) M-D)
 XCTO1	(CALL CBM)				;STORE CALL BLOCK
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-ZR (A-CONSTANT (EVAL %LP-CALL-STATE)))
-       ((PDL-INDEX-INDIRECT) IOR PDL-INDEX-INDIRECT
-		(A-CONSTANT (BYTE-MASK %%LP-CLS-ADI-PRESENT)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-zr (a-constant (eval %lp-call-state)))
+	(popj-after-next (pdl-index-indirect) ior pdl-index-indirect
+		(a-constant (byte-mask %%lp-cls-adi-present)))
+       (no-op)
 
 ;; Push slots for multiple values to go in.
 ;; M-D should be a fixnum saying how many slots.
@@ -2366,10 +2395,12 @@ XSET-SELF-MAPPING-TABLE-1
 	((M-1) Q-DATA-TYPE PDL-INDEX-INDIRECT)
 	(POPJ-EQUAL M-1 (A-CONSTANT (EVAL DTP-SYMBOL)))
 ;Otherwise, set the bit saying that the function's mapping table is provided.
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD PDL-INDEX (A-CONSTANT (EVAL %LP-CALL-STATE)))
-	((PDL-INDEX-INDIRECT) IOR PDL-INDEX-INDIRECT
-	 (A-CONSTANT (BYTE-VALUE %%LP-CLS-SELF-MAP-PROVIDED 1)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add pdl-index (a-constant (eval %lp-call-state)))
+	(popj-after-next (pdl-index-indirect) ior pdl-index-indirect
+	 (a-constant (byte-value %%lp-cls-self-map-provided 1)))
+	(no-op)
 
 ;LINEAR ENTER WITHOUT FAST OPTION
 ; M-A FEF			M-R number of args called with
@@ -2494,10 +2525,14 @@ QBD2A	(DISPATCH-XCT-NEXT (LISP-BYTE %%FEF-ARG-SYNTAX) READ-MEMORY-DATA QBDT2)
 
 ;LOCATE LOCAL BLOCK TO WHERE M-D POINTS
 ;AFTER THIS HAS BEEN CALLED, USE PDL-PUSH TO STORE LOCALS
-QLLOCB	(POPJ-AFTER-NEXT		;PDL-BUFFER-PTR SHOULD BE SET ALREADY?
+;; quux revision 12 (contract h8a, see qstloc in uc-macrocode): a-localp
+;; is written by the popj itself and pdl-pointer after it, not the other
+;; way round: a fused return may make an operand address from a-localp in
+;; the microcycle after it.  the same two microcycles.
+QLLOCB	(popj-after-next (a-localp) m-d)	;pdl index of locals
+       ((pdl-pointer) sub m-d (a-constant 1))	;first push will store @ m-d
+					;PDL-BUFFER-PTR SHOULD BE SET ALREADY?
 					;  --NOT IF TOO FEW ARGS FOR ONE--.
-	 (PDL-POINTER) SUB M-D (A-CONSTANT 1))	;FIRST PUSH WILL STORE @ M-D
-       ((A-LOCALP) M-D)			;PDL INDEX OF LOCALS
 
 ;GOT ARG DESCRIPTOR WHEN OUT OF ARGS
 QBTFA1	(JUMP-XCT-NEXT QBOPT2)			;SUPPLY ARG OF NIL
@@ -3068,10 +3103,12 @@ GET-PDL-BUFFER-INDEX
 	 (M-K) ADD M-K A-PDL-BUFFER-HEAD)
        ((M-K) PDL-BUFFER-ADDRESS-MASK M-K)
 
+;; quux (contract h8a, see qstloc in uc-macrocode): pdl-index is final
+;; before the popj, a no-op after it.
 LOAD-PDL-BUFFER-INDEX
-	(POPJ-AFTER-NEXT 
-	 (PDL-INDEX) SUB M-K A-PDL-BUFFER-VIRTUAL-ADDRESS)
-       ((PDL-INDEX) ADD PDL-INDEX A-PDL-BUFFER-HEAD)
+	((pdl-index) sub m-k a-pdl-buffer-virtual-address)
+	(popj-after-next (pdl-index) add pdl-index a-pdl-buffer-head)
+       (no-op)
 
 ))
 

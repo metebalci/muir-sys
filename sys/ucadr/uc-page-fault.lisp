@@ -261,8 +261,12 @@ PGF-R-PDL
 		A-PDL-BUFFER-VIRTUAL-ADDRESS)  ;GET RELATIVE PDL LOC REFERENCED
 	((A-PGF-A) PDL-BUFFER-INDEX)	;DON'T CLOBBER PDL-BUFFER-INDEX
 	((PDL-BUFFER-INDEX) ADD M-PGF-TEM A-PDL-BUFFER-HEAD)	;TRUNCATES TO 10 BITS
-	(POPJ-AFTER-NEXT (MD) C-PDL-BUFFER-INDEX)
-       ((PDL-BUFFER-INDEX) A-PGF-A)
+	;; quux (contract h8a, see qstloc in uc-macrocode): pdl-index is
+	;; restored by the popj, not in the microcycle after it, where a fused
+	;; return may load it; a no-op after it.
+	((md) c-pdl-buffer-index)
+	(popj-after-next (pdl-buffer-index) a-pgf-a)
+       (no-op)
 
 ;READ REFERENCE TO LOCATION NOT IN THE PDL BUFFER, BUT IT MIGHT HAVE BEEN.
 PGF-R-NOT-REALLY-IN-PDL-BUFFER	
@@ -303,9 +307,12 @@ PGF-W-PDL
 	((A-PGF-A) PDL-BUFFER-INDEX)	;DON'T CLOBBER PDL-BUFFER-INDEX
 	((PDL-BUFFER-INDEX) ADD M-PGF-TEM A-PDL-BUFFER-HEAD)	;TRUNCATES TO 10 BITS
 	((MD) A-PGF-WMD)
-	(POPJ-AFTER-NEXT
-	 (C-PDL-BUFFER-INDEX) MD)	;DO THE WRITE
-       ((PDL-BUFFER-INDEX) A-PGF-A)	;RESTORE REGS AND RETURN FROM FAULT
+	;; quux (contract h8a, see qstloc in uc-macrocode): pdl-index is
+	;; restored by the popj, not in the microcycle after it, where a fused
+	;; return may load it; a no-op after it.
+	((c-pdl-buffer-index) md)	;do the write
+	(popj-after-next (pdl-buffer-index) a-pgf-a)	;restore regs and return from fault
+       (no-op)
 
 ;WRITE REFERENCE TO LOCATION NOT IN THE PDL BUFFER, BUT IT MIGHT HAVE BEEN
 PGF-W-NOT-REALLY-IN-PDL-BUFFER	
@@ -1507,18 +1514,21 @@ P-B-X1	((VMA) A-V-NIL)				;Don't leave VMA nil.
 					;(named, not 2000: quux's buffer can be bigger)
 						; of the end of the regular-pdl in virt mem
 	(JUMP-LESS-THAN M-2 A-ZERO P-B-SL-1)
-	(POPJ-AFTER-NEXT			;Enough room, allow P.B. to fill
-	 (A-PDL-BUFFER-HIGH-WARNING) (A-CONSTANT PDL-BUFFER-HIGH-LIMIT))
-       ((PDL-BUFFER-INDEX) A-PDLB-TEM)		;Restore
+	;; quux revision 12 (contract h8a, see qstloc in uc-macrocode): pdl-index
+	;; is restored by the popj itself, the other write after it, not the
+	;; other way round: a fused return may load pdl-index in the microcycle
+	;; after it.  the same two microcycles.
+	(popj-after-next (pdl-buffer-index) a-pdlb-tem)	;restore
+       ((a-pdl-buffer-high-warning) (a-constant pdl-buffer-high-limit)) ;enough room, allow p.b. to fill
 
 ;Getting near the end of the stack.  Set A-PDL-BUFFER-HIGH-WARNING
 ;so that we will trap to PDL-BUFFER-DUMP before getting more stuff
 ;into the pdl buffer than there is room to store into virtual memory.
 ;Note that this result can actually be negative if we are currently
 ;in the process of taking a pdl-overflow trap.
-P-B-SL-1(POPJ-AFTER-NEXT
-	 (A-PDL-BUFFER-HIGH-WARNING) ADD M-2 (A-CONSTANT PDL-BUFFER-HIGH-LIMIT))
-       ((PDL-BUFFER-INDEX) A-PDLB-TEM)		;Restore
+;; quux (contract h8a): pdl-index restored by the popj, as at p-b-x1.
+P-B-SL-1(popj-after-next (pdl-buffer-index) a-pdlb-tem)	;restore
+       ((a-pdl-buffer-high-warning) add m-2 (a-constant pdl-buffer-high-limit))
 
 ;Attempt to refill pdl-buffer from virtual memory such that
 ;M-PDL-BUFFER-ACTIVE-QS is at least PDL-BUFFER-LOW-WARNING.

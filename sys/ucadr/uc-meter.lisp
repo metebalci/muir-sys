@@ -272,8 +272,11 @@ PAGE-TRACE-0					;clobbers M-1, M-2.
 PAGE-TRACE-1
 	(CALL-XCT-NEXT DISK-PGF-RESTORE)	;Restore and return
        ((A-PAGE-TRACE-PTR) VMA)
-	(POPJ-AFTER-NEXT
-	  (M-FLAGS) A-DISK-SAVE-FLAGS)
-       ((PDL-BUFFER-INDEX) A-DISK-SAVE-PI)
+	;; quux revision 12 (contract h8a, see qstloc in uc-macrocode): pdl-index
+	;; is restored by the popj itself, the other write after it, not the
+	;; other way round: a fused return may load pdl-index in the microcycle
+	;; after it.  the same two microcycles.
+	(popj-after-next (pdl-buffer-index) a-disk-save-pi)
+       ((m-flags) a-disk-save-flags)
 
 ))

@@ -74,8 +74,12 @@ STEP-BREAK-1
 
 INSTRUCTION-STREAM-FETCHER   ;DO FETCHES ASSOCIATED WITH MULTI-UNIT INSTUCTIONS.
 	(CHECK-PAGE-READ)
-	(POPJ-AFTER-NEXT NO-OP)
-       ((M-INST-BUFFER) READ-MEMORY-DATA)
+	;; quux revision 12 (contract h8a, see qstloc): m-inst-buffer, m 31, is
+	;; written by the popj itself, not in the microcycle after it, where a
+	;; fused return has already taken the next halfword from m 31.  the same
+	;; two microcycles.
+	(popj-after-next (m-inst-buffer) read-memory-data)
+       (no-op)
 
 ;;; THIS IS THE MISC ENTRY SMASHED IN FOR BREAKPOINTS IN FEF'S
 BREAKPOINT (MISC-INST-ENTRY BPT)
@@ -323,15 +327,30 @@ XSET2							;Entry from SET
 	(POPJ-AFTER-NEXT GC-WRITE-TEST)
        ((M-T) Q-TYPED-POINTER M-T)
 
+;; quux revision 12 (contract h8a section 3.3): a popj that pops the main
+;; loop's word may be a fused return.  it has chosen the next
+;; macroinstruction's handler by then, and when that handler's entry has
+;; the operand bit, pdl-index is loaded with the operand's address at the
+;; end of the microcycle after the return.  so the microinstruction an
+;; xct-next runs after such a popj must not store in the pdl at pdl-index
+;; (the word would land at the operand's address), nor write pdl-index,
+;; a-localp, m-ap, the location counter, m 31, interrupt-control or
+;; destinations 5 to 7.  here and at every other popj-after-next whose next
+;; microinstruction did, that write is now made before the popj: by the
+;; popj's own microinstruction when the two are independent (the same
+;; microcycles), otherwise by the one before it, with a no-op after the
+;; popj (one microcycle more).  the machine's state after the return is
+;; what it was.
 ;STORE IN LOCAL BLOCK
-QSTLOC	(POPJ-AFTER-NEXT
-	 (PDL-BUFFER-INDEX) ADD M-1 A-LOCALP)
-       ((C-PDL-BUFFER-INDEX) M-T)
+QSTLOC	((pdl-buffer-index) add m-1 a-localp)
+	(popj-after-next (c-pdl-buffer-index) m-t)
+       (no-op)
 
 ;STORE IN ARGUMENT BLOCK
-QSTARG	(POPJ-AFTER-NEXT
-	 (PDL-BUFFER-INDEX) ADD M-AP A-1 ALU-CARRY-IN-ONE)
-       ((C-PDL-BUFFER-INDEX) M-T)
+;; quux (contract h8a, see qstloc): the store before the popj.
+QSTARG	((pdl-buffer-index) add m-ap a-1 alu-carry-in-one)
+	(popj-after-next (c-pdl-buffer-index) m-t)
+       (no-op)
 
 ;PUSH LOCATIVE POINTER TO ADDRESS OF LOCAL VARIABLE ONTO THE PDL
 QVMALCL (CALL-XCT-NEXT CONVERT-PDL-BUFFER-ADDRESS)
@@ -340,13 +359,17 @@ QVMALCL (CALL-XCT-NEXT CONVERT-PDL-BUFFER-ADDRESS)
 	;; so we should not flush it.
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
 	((M-2) C-PDL-BUFFER-INDEX)
+	;; quux (contract h8a, see qstloc): the store at pdl-index before the
+	;; popj, and a no-op after it, so that the push is still not the last
+	;; insn, as the note below asks.
+	((c-pdl-buffer-index) dpb m-minus-one (lisp-byte %%lp-ens-unsafe-rest-arg) a-2)
 	(POPJ-AFTER-NEXT
 	 (C-PDL-BUFFER-POINTER-PUSH) DPB M-K Q-POINTER
 		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)
 				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
 	;; Note: the previous insn must not be the last one
 	;; because the pdl buffer has no pass around path.
-       ((C-PDL-BUFFER-INDEX) DPB M-MINUS-ONE (LISP-BYTE %%LP-ENS-UNSAFE-REST-ARG) A-2)
+       (no-op)
 
 ;PUSH LOCATIVE POINTER TO ADDRESS OF ARGUMENT VARIABLE ONTO THE PDL
 QVMAARG (CALL-XCT-NEXT CONVERT-PDL-BUFFER-ADDRESS)
@@ -355,13 +378,16 @@ QVMAARG (CALL-XCT-NEXT CONVERT-PDL-BUFFER-ADDRESS)
 	;; so we should not flush it.
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-ENTRY-STATE)))
 	((M-2) C-PDL-BUFFER-INDEX)
+	;; quux (contract h8a, see qstloc): as at qvmalcl, the store before the
+	;; popj and a no-op after it.
+	((c-pdl-buffer-index) dpb m-minus-one (lisp-byte %%lp-ens-unsafe-rest-arg) a-2)
 	(POPJ-AFTER-NEXT
 	 (C-PDL-BUFFER-POINTER-PUSH) DPB M-K Q-POINTER
 		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)
 				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
 	;; Note: the previous insn must not be the last one
 	;; because the pdl buffer has no pass around path.
-       ((C-PDL-BUFFER-INDEX) DPB M-MINUS-ONE (LISP-BYTE %%LP-ENS-UNSAFE-REST-ARG) A-2)
+       (no-op)
 
 ;;; BASIC INSTRUCTIONS
 ;   OPERAND IS NOT FETCHED YET, SO FETCH IT INTO M-T, THEN

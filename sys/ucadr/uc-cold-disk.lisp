@@ -96,6 +96,14 @@ reset-machine-macro-dispatch-fill
 		(a-constant (plus (i-mem-loc qmlp)
 				  (byte-value (byte-field 10. 14.) (a-mem-loc a-localp))
 				  (byte-value (byte-field 5 24.) (m-mem-loc m-ap)))))
+	;; the hardware keeps copies of a-localp and m-ap for the operand
+	;; address, taken from every write of the addresses the register names
+	;; and never read back from a and m memory (contract h8a section 3.4).
+	;; write both once, with their own values, now that the register names
+	;; them, so that the copies start equal to the memories instead of
+	;; holding whatever they held before this start.
+	((a-localp) a-localp)
+	((m-ap) m-ap)
 reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 

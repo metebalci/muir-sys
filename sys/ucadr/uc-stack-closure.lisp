@@ -365,14 +365,19 @@ STACK-CLOSURE-CLEAR-3
 	(JUMP-NOT-EQUAL-XCT-NEXT PDL-POINTER A-AP STACK-CLOSURE-CLEAR-3)
 	(CALL-EQUAL M-1 A-B STACK-CLOSURE-CLEAR-FOUND)
 	((PDL-POINTER) M-C)
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) ADD M-A A-LOCALP)
-       ((C-PDL-BUFFER-INDEX) A-V-NIL)
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) add m-a a-localp)
+	(popj-after-next (c-pdl-buffer-index) a-v-nil)
+       (no-op)
 
 STACK-CLOSURE-CLEAR-FOUND
 	((PDL-INDEX) ADD PDL-POINTER (A-CONSTANT 1))
-	(POPJ-AFTER-NEXT (M-1) C-PDL-BUFFER-INDEX)
-       ((C-PDL-BUFFER-INDEX) DPB M-E Q-TYPED-POINTER A-1)
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((m-1) c-pdl-buffer-index)
+	(popj-after-next (c-pdl-buffer-index) dpb m-e q-typed-pointer a-1)
+       (no-op)
 
 ;; Unshare a local variable
 ;; in all copies (made by STACK-CLOSURE-DISCONNECT) of this frame's stack closure vector.
@@ -562,20 +567,24 @@ MAKE-STACK-CLOSURE-VECTOR-ARG
 ;M-C is pdl index of start of stack closure vector.  Convert it to memory address.
 	((PDL-INDEX) SUB M-C A-AP)
 	((M-C) ADD PDL-INDEX A-K)
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) M-D)
-       ((C-PDL-BUFFER-INDEX M-C) DPB M-C Q-POINTER
-				 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LIST)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((pdl-index) m-d)
+	(popj-after-next (c-pdl-buffer-index m-c) dpb m-c q-pointer
+				 (a-constant (byte-value q-data-type dtp-list)))
+       (no-op)
 
 ;; Here when this frame's stack closure vector can be empty.
 ;; This happens when this function makes lexical closures
 ;; that refer to outer lexical levels but never refer to any arg or local of this function.
 ;; T is used for an empty stack closure vector,
 ;; since NIL is used to mean that the vector has not been set up.
+;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+;; pdl-index before the popj, a no-op after it.
 MAKE-STACK-CLOSURE-VECTOR-EMPTY
-	(POPJ-AFTER-NEXT
-	 (PDL-INDEX) M-D)
-       ((C-PDL-BUFFER-INDEX M-C) A-V-TRUE)
+	((pdl-index) m-d)
+	(popj-after-next (c-pdl-buffer-index m-c) a-v-true)
+       (no-op)
 
 ;A lexical closure is a pointer with type DTP-CLOSURE or DTP-STACK-CLOSURE
 ;to a couple of lists on the stack which look like
@@ -638,10 +647,12 @@ MAKE-STACK-CLOSURE
 			      (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NORMAL)))
 ;Set up the fourth slot; it's the lexical environment of entry to this frame.
 	((PDL-BUFFER-INDEX) M+1 PDL-BUFFER-INDEX)
-	(POPJ-AFTER-NEXT
-	 (M-K) A-LEXICAL-ENVIRONMENT)
-       ((C-PDL-BUFFER-INDEX) DPB M-K Q-TYPED-POINTER 
-			     (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-ERROR)))
+	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
+	;; pdl-index before the popj, a no-op after it.
+	((m-k) a-lexical-environment)
+	(popj-after-next (c-pdl-buffer-index) dpb m-k q-typed-pointer
+			     (a-constant (byte-value q-cdr-code cdr-error)))
+       (no-op)
 
 ;Get and set lexical variables inherited from outer contexts.
 XSTORE-IN-HIGHER-CONTEXT

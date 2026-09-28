@@ -749,6 +749,72 @@ a comment in that file saying why.
     this change, and revision 12 fuses 6,629,269 returns and runs 2.98%
     fewer microcycles. `(car 5)` and twelve other forms answer the same
     on revision 12 with this microcode as with the one before.
+- **No write the fused return forbids in the microcycle after a return**
+  (muir's contract H8a section 3.3, as amended after its S3 review;
+  microcode 2000 keeps its number, and its files change again). A fused
+  return has chosen the next macroinstruction's handler before the
+  microinstruction an XCT-NEXT runs after the return, and, when the
+  handler's entry has the operand bit, loads PDL-INDEX with the operand's
+  address at the end of it; so that microinstruction must not store in the
+  PDL at PDL-INDEX (the word would land at the operand's address), nor
+  write PDL-INDEX, `A-LOCALP`, `M-AP`, the location counter or M 31. 29
+  `POPJ-AFTER-NEXT`s did. At each, the write is now made before the
+  return, and the machine's state after it is what it was:
+  - where the write and the `POPJ`'s own microinstruction are independent,
+    they trade places, in the same two microcycles:
+    `INSTRUCTION-STREAM-FETCHER` (M 31, `ucadr/uc-macrocode.lisp:75-82`),
+    `QLLOCB` (`A-LOCALP`, `ucadr/uc-call-return.lisp:2528-2535`),
+    `PAGE-TRACE-1` (`ucadr/uc-meter.lisp:275-281`), `P-B-X1` and
+    `P-B-SL-1` (`ucadr/uc-page-fault.lisp:1510-1531`);
+  - elsewhere the write moves to the microinstruction before the `POPJ`
+    and a no-op follows it, one microcycle more: `QSTLOC` and `QSTARG`,
+    the stores into a local or an argument, where the reason is explained
+    (`ucadr/uc-macrocode.lisp:330-354`); `QVMALCL` and `QVMAARG`, where
+    MIT's note that the push must not be the last microinstruction (the
+    PDL has no pass-around) is kept by the no-op after it
+    (`ucadr/uc-macrocode.lisp:356-390`); `FINISH-ENTERED-FRAME`,
+    `QLLV-TAIL-REC-ADI`, `XPERMIT-TAIL-RECURSION`, `QLLENT` (`A-LOCALP`),
+    `MKWRIT`, `XOCB3`, `XMESL*`, `XFEC`, `XFECM`, `XFECMVL`, `XCTO1`,
+    `XSET-SELF-MAPPING-TABLE-1` and `LOAD-PDL-BUFFER-INDEX`
+    (`ucadr/uc-call-return.lisp`, at each label);
+    `STACK-CLOSURE-CLEAR-3`, `STACK-CLOSURE-CLEAR-FOUND`,
+    `MAKE-STACK-CLOSURE-VECTOR-ARG`, `MAKE-STACK-CLOSURE-VECTOR-EMPTY` and
+    `MAKE-STACK-CLOSURE` (`ucadr/uc-stack-closure.lisp`); `PGF-R-PDL` and
+    `PGF-W-PDL` (`ucadr/uc-page-fault.lisp:248-315`).
+
+  And `RESET-MACHINE`, where the MACRO DISPATCH MEMORY exists, writes
+  `A-LOCALP` and `M-AP` with their own values right after the
+  MACRO-DISPATCH register (`ucadr/uc-cold-disk.lisp:99-106`): the
+  hardware's copies of the two, from which it makes the operand address,
+  are taken only from writes of the addresses the register names, never
+  read back from A and M memory, so without these writes they would start
+  a warm boot or a `%DISK-RESTORE` with whatever they held. I memory grows
+  by 26 words (24 no-ops and the two writes); named A, M and D memory
+  stays where it was, and no band is rebuilt; `UCADR TBL` changes, since
+  error-table entries move.
+  - Tested on muir-sim 5c31525, with ref/band-2000's band and this
+    microcode written over its MCR1. muir-sim's scan of every return whose
+    next microinstruction runs lists 29 sites on the microcode before and
+    none on this one. With the operand bit on every entry whose operand
+    is a register and delta (`MUIR_H8A=operand`), the band never reached
+    its listener on the microcode before, on micro or rtl; on this one it
+    runs muir-sim's profile of 12 workloads on both, and the checker
+    counts no forbidden write, no wrong handler, no wrong operand address
+    and no base copy differing from its memory over the whole run (on rtl
+    10,453,776 fused returns, 4,339,445 of them loading an operand
+    address). With muir-sim's register write changed to load no copy, as
+    the amended contract has it, the copies differ from `A-LOCALP` at
+    `BEG06` after a cold boot and after a `%DISK-RESTORE` on the microcode
+    before, and equal them on this one. On revisions 11 and 12, micro and
+    rtl, the band cold boots to its listener, survives a `%DISK-RESTORE`
+    and a warm boot through the PROM with the MACRO DISPATCH MEMORY
+    poisoned; on revision 12, 21 forms, stores into locals and arguments,
+    locatives to them, closures and multiple values among them, answer
+    the same as on the microcode before, `(car 5)`'s error message too. The no-ops cost 2,638,886
+    microcycles over the profile's 12 workloads on rtl at revision 12,
+    0.60% of 439,386,000 (0.05% to 1.55% by workload; sort the most),
+    counted at the no-ops themselves; `QSTLOC` is 64% of it, the PDL page
+    faults and `MKWRIT` 29%.
 
 ## Time zones
 
