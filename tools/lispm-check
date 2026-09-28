@@ -4,7 +4,8 @@
 Usage:
   tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                     [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                    [--file-server auto|device|ozd] [--timeout S] [--keep]
+                    [--file-server auto|device|ozd] [--engine micro|rtl]
+                    [--timeout S] [--keep]
                     [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 
 It resumes a checkpoint of the band booted to its TELNET prompt, lays the
@@ -61,14 +62,17 @@ Defaults, each overridden by its flag or an environment variable:
   --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
   --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
+  --engine  LISPM_CHECK_ENGINE  micro: quux's engine, passed to it as --micro
+                            or --rtl; any other value is refused
   --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
   --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
-on one band.  A checkpoint is keyed by the band's and quux's sha256 and the
-file server, and made again when one changes.  Every run takes four free
+on one band.  A checkpoint is keyed by the band's and quux's sha256, the
+file server and the engine, and made again when one changes: quux resumes a
+checkpoint only on the engine that wrote it.  Every run takes four free
 ports of its own (ozd's UDP, quux's UDP, TELNET and quux's RFB) under a lock,
 so parallel runs never meet, and it stops everything it started before it
 exits.
@@ -430,12 +434,15 @@ FILE_SERVERS = {c.mode: c for c in (OzdFileServer, DeviceFileServer)}
 # The machine: quux, cold with --checkpoint or resumed from one.
 
 class Machine:
-    def __init__(self, quux, band, run_dir, rfb_port, server):
+    def __init__(self, quux, band, run_dir, rfb_port, server, engine):
         self.quux, self.band, self.run_dir = quux, band, run_dir
         self.rfb, self.server, self.proc = rfb_port, server, None
+        self.engine = engine
 
     def start(self, checkpoint_out=None, resume=None):
-        cmd = [self.quux, '-c', '/dev/null', '--micro', '--mono-tv-size', TV_SIZE,
+        # The engine is --engine's, micro or rtl: it was always --micro, so a
+        # check never ran on rtl.
+        cmd = [self.quux, '-c', '/dev/null', '--' + self.engine, '--mono-tv-size', TV_SIZE,
                '--disk-pack', self.band + ',ro', '--terminal', '127.0.0.1:%d' % self.rfb]
         cmd += self.server.quux_flags()
         if checkpoint_out:
@@ -443,6 +450,10 @@ class Machine:
         if resume:
             cmd += ['--resume', resume]
         self.logfile = open(os.path.join(self.run_dir, 'quux.log'), 'wb')
+        # The command line heads the log, so a kept run shows which engine
+        # and flags quux ran with.
+        self.logfile.write(('# %s\n' % ' '.join(cmd)).encode())
+        self.logfile.flush()
         self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.PIPE,
                                      stdout=self.logfile, stderr=self.logfile,
                                      start_new_session=True)
@@ -632,13 +643,13 @@ def ensure_checkpoint(a, key):
         if not os.path.isfile(os.path.join(a.ubin, 'ucadr.tbl')):
             raise RunFailed('no ucadr.tbl in %s (--ubin): the cold boot reads it' % a.ubin)
         t0 = now()
-        print('lispm-check: setting up a checkpoint for this band and quux, files served by %s'
-              ' (cold boot)' % a.file_server, flush=True)
+        print('lispm-check: setting up a checkpoint for this band and quux, files served by %s,'
+              ' engine %s (cold boot)' % (a.file_server, a.engine), flush=True)
         run_dir = run_dir_new('setup')
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
         server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
-        machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+        machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
             server.lay_out(a.tree, a.ubin)
@@ -680,6 +691,7 @@ def ensure_checkpoint(a, key):
                 json.dump({'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
                            'quux': os.path.abspath(a.quux), 'quux_sha256': a.quux_sha,
                            'quux_version': a.quux_version, 'file_server': a.file_server,
+                           'engine': a.engine,
                            'sys_host': sys_host, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
                           f, indent=1)
         finally:
@@ -704,7 +716,7 @@ def check(a, chk, cases):
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
     server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
-    machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+    machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
     results, t0 = [], now()
     ok_run = False
     try:
@@ -791,7 +803,7 @@ def probe_sys_host(a):
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
     server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
-    machine = Machine(a.quux, a.band, run_dir, ports[3], server)
+    machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
     ok = False
     try:
         server.lay_out(a.tree, a.ubin)
@@ -884,6 +896,11 @@ def main():
     p.add_argument('--file-server', choices=('auto', 'device', 'ozd'),
                    default=os.environ.get('LISPM_CHECK_FILE_SERVER', 'auto'),
                    help="how the tree is served: quux's file device, ozd, or auto")
+    # Checked below rather than by choices=, since argparse does not check a
+    # default, and the default may come from LISPM_CHECK_ENGINE.
+    p.add_argument('--engine', metavar='{micro,rtl}',
+                   default=os.environ.get('LISPM_CHECK_ENGINE') or 'micro',
+                   help="quux's engine, micro (the default) or rtl, passed as --micro or --rtl")
     p.add_argument('--compile', action='store_true')
     p.add_argument('--timeout', type=float, default=120, help='seconds a case may take')
     p.add_argument('--file-timeout', type=float, default=900,
@@ -898,6 +915,8 @@ def main():
                    help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
                         " hours west of Greenwich")
     a = p.parse_args()
+    if a.engine not in ('micro', 'rtl'):
+        p.error("--engine (or LISPM_CHECK_ENGINE): %r is neither micro nor rtl" % a.engine)
     a.tree = os.path.abspath(a.tree)
     up = os.path.dirname(a.tree)
     a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
@@ -938,9 +957,11 @@ def main():
         # The key names the file server, since the setup logs in to that
         # server's host.  The device's folders are not in it: a checkpoint
         # carries none, quux mounting each check's own copy from its flags.
-        # ozd's keeps the key it had before there was a choice, so its
-        # checkpoints stay valid.
-        key = '%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION)
+        # ozd's has no server suffix, as before there was a choice.  The
+        # engine is in it too, since quux resumes a checkpoint only on the
+        # engine that wrote it: one made on micro must not be taken for a
+        # check on rtl (so the checkpoints made before it are made again).
+        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION, a.engine)
         chk, t_setup = ensure_checkpoint(a, key if a.file_server == 'ozd' else key + '-' + a.file_server)
         if t_setup is not None:
             print('lispm-check: checkpoint made in %.1f s' % t_setup)
