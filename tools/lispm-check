@@ -2,21 +2,27 @@
 """lispm-check: check a Lisp change on a band in seconds.
 
 Usage:
-  tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
-                    [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                    [--file-server auto|device|ozd] [--engine micro|rtl]
-                    [--timeout S] [--keep]
+  tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
+                    [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
+                    [--compile] [--file-server auto|device|ozd]
+                    [--engine micro|rtl] [--timeout S] [--keep]
                     [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
+
+The band runs on the simulator's executable for this line's system, MACHINE
+below: quux on main, QUUX's system (--quux), and cadr on the cadr branch, the
+CADR's (--cadr; --quux is taken there too, as the same flag, so that one
+command line serves both lines).  MACHINE is the one line of this file that
+differs between the two lines; "the machine" below is that executable.
 
 It resumes a checkpoint of the band booted to its TELNET prompt, lays the
 changed files over a private copy of the tree, loads them (or compiles them
 with qc-file and loads the QFASLs, with --compile), runs every case of CASES in
-one session and prints one line per case.  The first run for a band and a quux
-build boots the band cold and writes the checkpoint (about 15 s); later runs
-resume it: about 0.6 s with no files, 0.13 s a case, about 0.8 s to load a
-small file and 1.7 s to compile and load it, and as long as qc-file takes for
-a large one (half a minute for sys/io1/time.lisp), the same with either file
-server.
+one session and prints one line per case.  The first run for a band and a
+build of the machine boots the band cold and writes the checkpoint (about
+15 s); later runs resume it: about 0.6 s with no files, 0.13 s a case, about
+0.8 s to load a small file and 1.7 s to compile and load it, and as long as
+qc-file takes for a large one (half a minute for sys/io1/time.lisp), the same
+with either file server.
 
 CASES holds one case per form; a form may run over several lines.  Blank lines
 and lines starting with ; are skipped.  After the form, on its last line:
@@ -40,8 +46,8 @@ Exit status: 0 if every case passes, 1 if any fails or errors, 2 if the run
 itself failed (bad arguments, a boot, a file that would not load or compile,
 where a compiler heading "<< Error ..." counts as not compiling, or a case
 that did not answer within --timeout).  A failed run keeps its run directory
-(TELNET, quux and ozd logs) under the cache and says where; --keep keeps it
-always.
+(TELNET, the machine's and ozd's logs) under the cache and says where; --keep
+keeps it always.
 
 --files takes paths, comma separated.  A file inside the tree's sys/ is served
 at its own place and loaded by its logical name (sys/io1/time.lisp as
@@ -54,42 +60,48 @@ files do not load as source, since they use functions only the compiler opens
 --compile.
 
 Defaults, each overridden by its flag or an environment variable:
-  --band  LISPM_CHECK_BAND  run/check/band.img in the tree
+  --band  LISPM_CHECK_BAND  run/check/band.img in the tree: a band of this
+                            line's system (docs/lispm-check.md says which)
   --ubin  LISPM_CHECK_UBIN  ubin/ beside the band: the sys/ubin/ the band's
                             microcode was assembled into; the cold boot reads
                             its ucadr.tbl
-  --quux  LISPM_CHECK_QUUX  ../muir-sim/target/release/quux beside the tree
+  --quux  LISPM_CHECK_QUUX  on main: ../muir-sim/target/release/quux beside
+                            the tree
+  --cadr  LISPM_CHECK_CADR  on cadr: ../muir-sim/target/release/cadr beside
+                            the tree
   --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
   --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
-  --engine  LISPM_CHECK_ENGINE  micro: quux's engine, passed to it as --micro
-                            or --rtl; any other value is refused
+  --engine  LISPM_CHECK_ENGINE  micro: the machine's engine, passed to it as
+                            --micro or --rtl; any other value is refused
   --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
   --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
-on one band.  A checkpoint is keyed by the band's and quux's sha256, the
-file server and the engine, and made again when one changes: quux resumes a
-checkpoint only on the engine that wrote it.  Every run takes four free
-ports of its own (ozd's UDP, quux's UDP, TELNET and quux's RFB) under a lock,
-so parallel runs never meet, and it stops everything it started before it
-exits.
+on one band.  A checkpoint is keyed by the band's and the machine's sha256,
+the file server and the engine, and made again when one changes: the machine
+resumes a checkpoint only on the engine that wrote it.  Every run takes four
+free ports of its own (ozd's UDP, the machine's UDP, TELNET and the machine's
+RFB) under a lock, so parallel runs never meet, and it stops everything it
+started before it exits.
 
 The copy is served the way the band reads its SYS: files.  With
 --file-server ozd, by ozd (the class OzdFileServer), for a band whose SYS: is
 on OZ; the setup logs in to OZ.  With --file-server device, by quux's own file
 device (DeviceFileServer), for a band whose SYS: is on HOST: quux mounts the
 copy as HOST's / (--file-root), ozd serves no file and is only the TELNET
-gateway, and the setup logs in to HOST.  A band boots to its prompt only with
-its SYS: host served.  auto, the default, takes the host the band's SYS: is on
-from a checkpoint of this band and quux (its setup asked the band), else from
-the answers remembered under the cache, else from a probe (a cold boot with
-the copy served both ways, about 15 s, once for each band and quux); a quux
-without a file device means ozd.  Every run says which it chose and why.  A
-setup checks that the band's SYS: is on the chosen server's host.
-Everything that knows how the tree is served is in these classes.
+gateway, and the setup logs in to HOST.  The file device is QUUX's: cadr has
+none, so on the cadr line the files are always served by ozd.  A band boots to
+its prompt only with its SYS: host served.  auto, the default, takes the host
+the band's SYS: is on from a checkpoint of this band and machine (its setup
+asked the band), else from the answers remembered under the cache, else from a
+probe (a cold boot with the copy served both ways, about 15 s, once for each
+band and machine); a machine without a file device means ozd.  Every run says
+which it chose and why.  A setup checks that the band's SYS: is on the chosen
+server's host.  Everything that knows how the tree is served is in these
+classes.
 
 --ozd-file-dates mit|utc and --ozd-timezone N are passed to ozd as its
 --file-dates and --timezone: how FILE writes and reads its dates.  ozd's
@@ -109,8 +121,13 @@ import argparse, fcntl, glob, hashlib, json, os, random, re, shutil, signal, soc
 import subprocess, sys, time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+# The simulator's executable this line's system runs on, which also names
+# its flag and variable (--quux, LISPM_CHECK_QUUX): quux on main, QUUX's
+# system, and cadr on the cadr branch, the CADR's.  The one line in which the
+# two lines' copies of this tool differ.
+MACHINE = 'cadr'
 CHAOS_HOST, CHAOS_LISPM = '177200', '177201'   # ozd's and the band's addresses
-TV_SIZE = '1280x1024'
+TV_SIZE = '1280x1024'   # QUUX's video controller (--video-size); cadr has none
 # The host SYS: translates to in the band: HOST when the band reads its
 # sources through quux's file device, OZ when through ozd.  Asked before the
 # login, since a translation opens no file.
@@ -193,7 +210,7 @@ def port_free(port, kind):
 
 def take_ports():
     """Four ports in a block of four within LISPM_CHECK_PORTS, every one free
-    and the block locked: (ozd UDP, quux UDP, TELNET TCP, RFB TCP)."""
+    and the block locked: (ozd UDP, the machine's UDP, TELNET TCP, RFB TCP)."""
     lo, hi = (int(x) for x in os.environ.get('LISPM_CHECK_PORTS', '44000-44999').split('-'))
     bases = list(range(lo - lo % 4 + (4 if lo % 4 else 0), hi - 2, 4))
     random.shuffle(bases)
@@ -267,7 +284,7 @@ def stop_process(p, stdin_command=None, wait=10):
 # The file servers.  Everything that knows how the tree is served is here:
 # ozd's flags, the copy of the tree and its layout, the pathnames the band uses
 # for served files, the TELNET listener ozd carries to the band in either
-# mode, and the quux flags that plug the band into them.  OzdFileServer serves
+# mode, and the machine's flags that plug the band into them.  OzdFileServer serves
 # the copy by ozd, DeviceFileServer by quux's file device; a third way is a
 # class with the same methods, named in FILE_SERVERS.
 
@@ -281,7 +298,7 @@ class OzdFileServer:
         # --file-dates and --timezone for ozd, as --ozd-file-dates and
         # --ozd-timezone give them; none, ozd's defaults
         self.ozd_flags = list(ozd_flags)
-        self.udp, self.quux_udp, self.telnet = ports[0], ports[1], ports[2]
+        self.udp, self.machine_udp, self.telnet = ports[0], ports[1], ports[2]
         self.root = os.path.join(run_dir, 'served')
         self.proc = None
 
@@ -326,7 +343,7 @@ class OzdFileServer:
         cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
                '--listen', '127.0.0.1:%d' % self.udp] + self.ozd_roots() + [
                '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
-               '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.quux_udp),
+               '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.machine_udp),
                '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
                '--log-file', '--log-simple'] + self.ozd_flags
         self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.DEVNULL,
@@ -334,8 +351,8 @@ class OzdFileServer:
                                      start_new_session=True)
         return self.proc.pid
 
-    def quux_flags(self):
-        return ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.quux_udp,
+    def machine_flags(self):
+        return ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
                 '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
                 '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
 
@@ -344,7 +361,7 @@ class OzdFileServer:
         socket and the text read up to its banner."""
         while now() < deadline:
             if not machine_alive():
-                raise RunFailed('quux exited before the TELNET banner')
+                raise RunFailed('%s exited before the TELNET banner' % MACHINE)
             if self.proc.poll() is not None:
                 raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
             if not listener_owned_by(self.telnet, self.proc.pid):
@@ -409,8 +426,8 @@ class DeviceFileServer(OzdFileServer):
     def ozd_roots(self):
         return ['--root', '%s/no-files,ro' % self.run_dir]
 
-    def quux_flags(self):
-        return super().quux_flags() + ['--file-root', self.root]
+    def machine_flags(self):
+        return super().machine_flags() + ['--file-root', self.root]
 
 
 class ProbeFileServer(DeviceFileServer):
@@ -431,27 +448,37 @@ FILE_SERVERS = {c.mode: c for c in (OzdFileServer, DeviceFileServer)}
 
 
 # --------------------------------------------------------------------------
-# The machine: quux, cold with --checkpoint or resumed from one.
+# The machine: MACHINE's executable, cold with --checkpoint or resumed from one.
 
 class Machine:
-    def __init__(self, quux, band, run_dir, rfb_port, server, engine):
-        self.quux, self.band, self.run_dir = quux, band, run_dir
+    def __init__(self, exe, band, run_dir, rfb_port, server, engine):
+        self.exe, self.band, self.run_dir = exe, band, run_dir
         self.rfb, self.server, self.proc = rfb_port, server, None
         self.engine = engine
 
     def start(self, checkpoint_out=None, resume=None):
         # The engine is --engine's, micro or rtl: it was always --micro, so a
         # check never ran on rtl.
-        cmd = [self.quux, '-c', '/dev/null', '--' + self.engine, '--mono-tv-size', TV_SIZE,
-               '--disk-pack', self.band + ',ro', '--terminal', '127.0.0.1:%d' % self.rfb]
-        cmd += self.server.quux_flags()
+        cmd = [self.exe, '-c', '/dev/null', '--' + self.engine]
+        if MACHINE == 'quux':
+            # muir-sim's --video-size, --mono-tv-size until contract Q13
+            # renamed MONO TV the video controller; quux refuses the old flag.
+            cmd += ['--video-size', TV_SIZE]
+        else:
+            # cadr has no video controller and refuses --video-size, as it
+            # refuses --mono-tv-size, which this tool gave it; and on rtl it
+            # listens for a debugger's cable on a TCP port (7661, or the next
+            # free one), which a check never wants.
+            cmd += ['--no-debug-cable-listen']
+        cmd += ['--disk-pack', self.band + ',ro', '--terminal', '127.0.0.1:%d' % self.rfb]
+        cmd += self.server.machine_flags()
         if checkpoint_out:
             cmd += ['--checkpoint', checkpoint_out]
         if resume:
             cmd += ['--resume', resume]
-        self.logfile = open(os.path.join(self.run_dir, 'quux.log'), 'wb')
+        self.logfile = open(os.path.join(self.run_dir, MACHINE + '.log'), 'wb')
         # The command line heads the log, so a kept run shows which engine
-        # and flags quux ran with.
+        # and flags the machine ran with.
         self.logfile.write(('# %s\n' % ' '.join(cmd)).encode())
         self.logfile.flush()
         self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.PIPE,
@@ -643,13 +670,13 @@ def ensure_checkpoint(a, key):
         if not os.path.isfile(os.path.join(a.ubin, 'ucadr.tbl')):
             raise RunFailed('no ucadr.tbl in %s (--ubin): the cold boot reads it' % a.ubin)
         t0 = now()
-        print('lispm-check: setting up a checkpoint for this band and quux, files served by %s,'
-              ' engine %s (cold boot)' % (a.file_server, a.engine), flush=True)
+        print('lispm-check: setting up a checkpoint for this band and %s, files served by %s,'
+              ' engine %s (cold boot)' % (MACHINE, a.file_server, a.engine), flush=True)
         run_dir = run_dir_new('setup')
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
         server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
-        machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
+        machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
             server.lay_out(a.tree, a.ubin)
@@ -660,9 +687,15 @@ def ensure_checkpoint(a, key):
             except RunFailed as e:
                 # A band whose SYS: is on HOST waits at boot, with no TELNET
                 # server, when its files are not on quux's file device.
+                # Or the band is not one this machine runs: a System 1002 band
+                # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
+                # on quux revision 11 and later, which moved block-disk off
+                # 17377774, and so gives no sign but this.
                 raise RunFailed('%s: the band did not reach its TELNET prompt with its files served'
-                                ' by %s; is its SYS: on %s? (--file-server)'
-                                % (e, a.file_server, server.login_host))
+                                ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s'
+                                % (e, a.file_server, server.login_host, MACHINE,
+                                   ' (a System 1002 band does not run on quux revision 11 and later)'
+                                   if MACHINE == 'quux' else ''))
             sock.settimeout(0.2)
             sess = Session(sock, log, helper=False)
             # The server must be the one the band reads SYS: from: a band
@@ -685,12 +718,12 @@ def ensure_checkpoint(a, key):
             sock.close()
             machine.stop(wait=120)
             if machine.proc.returncode != 0 or not os.path.exists(tmp):
-                raise RunFailed('quux wrote no checkpoint (see %s/quux.log)' % run_dir)
+                raise RunFailed('%s wrote no checkpoint (see %s/%s.log)' % (MACHINE, run_dir, MACHINE))
             os.replace(tmp, chk)
             with open(chk[:-4] + '.json', 'w') as f:
                 json.dump({'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
-                           'quux': os.path.abspath(a.quux), 'quux_sha256': a.quux_sha,
-                           'quux_version': a.quux_version, 'file_server': a.file_server,
+                           MACHINE: a.exe, MACHINE + '_sha256': a.exe_sha,
+                           MACHINE + '_version': a.exe_version, 'file_server': a.file_server,
                            'engine': a.engine,
                            'sys_host': sys_host, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
                           f, indent=1)
@@ -716,7 +749,7 @@ def check(a, chk, cases):
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
     server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
-    machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
+    machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
     results, t0 = [], now()
     ok_run = False
     try:
@@ -781,7 +814,7 @@ def check(a, chk, cases):
     finally:
         log.write('\n=== %.2f stop\n' % now())
         machine.stop()
-        log.write('\n=== %.2f quux stopped (rc %s)\n' % (now(), machine.proc and machine.proc.returncode))
+        log.write('\n=== %.2f %s stopped (rc %s)\n' % (now(), MACHINE, machine.proc and machine.proc.returncode))
         server.stop()
         log.write('\n=== %.2f ozd stopped\n' % now())
         ports_lock.release()
@@ -792,8 +825,9 @@ def check(a, chk, cases):
     return results, t_banner, now() - t0
 
 
-def quux_has_file_device(quux):
-    return '--file-root' in subprocess.run([quux, '--help'], capture_output=True, text=True).stdout
+def has_file_device(exe):
+    # quux's file device; cadr has none
+    return '--file-root' in subprocess.run([exe, '--help'], capture_output=True, text=True).stdout
 
 
 def probe_sys_host(a):
@@ -803,7 +837,7 @@ def probe_sys_host(a):
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
     server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
-    machine = Machine(a.quux, a.band, run_dir, ports[3], server, a.engine)
+    machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
     ok = False
     try:
         server.lay_out(a.tree, a.ubin)
@@ -829,20 +863,20 @@ def probe_sys_host(a):
 
 def choose_file_server(a):
     """--file-server auto: device when the band's SYS: is on HOST, ozd when it
-    is on OZ, and ozd with a quux that has no file device.  The band's answer
-    is taken from a checkpoint of this band and quux already made (its setup
+    is on OZ, and ozd with a machine that has no file device (cadr).  The band's answer
+    is taken from a checkpoint of this band and machine already made (its setup
     asked the band), else from the answers remembered under the cache, else
-    from a probe: a cold boot that asks the band, once for each band and quux.
+    from a probe: a cold boot that asks the band, once for each band and machine.
     Every run says which server it chose and why."""
-    has_device = quux_has_file_device(a.quux)
+    has_device = has_file_device(a.exe)
     if a.file_server == 'device' and not has_device:
-        raise RunFailed('--file-server device: %s has no file device (no --file-root)' % a.quux)
+        raise RunFailed('--file-server device: %s has no file device (no --file-root)' % a.exe)
     if a.file_server != 'auto':
         return a.file_server
     if not has_device:
-        print('lispm-check: files served by ozd: quux has no file device (auto)')
+        print('lispm-check: files served by ozd: %s has no file device (auto)' % MACHINE)
         return 'ozd'
-    pair = '%s-%s' % (a.band_sha[:16], a.quux_sha[:16])
+    pair = '%s-%s' % (a.band_sha[:16], a.exe_sha[:16])
     sys_host, source = None, None
     for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
         try:
@@ -866,7 +900,7 @@ def choose_file_server(a):
                 print("lispm-check: asking the band where its SYS: is (auto; a cold boot, once)", flush=True)
                 t0 = now()
                 sys_host, source = probe_sys_host(a), 'the probe, %.1f s' % (now() - t0)
-                known[pair] = {'band': os.path.abspath(a.band), 'quux': os.path.abspath(a.quux),
+                known[pair] = {'band': os.path.abspath(a.band), MACHINE: a.exe,
                                'sys_host': sys_host, 'asked': time.strftime('%Y-%m-%d %H:%M:%S')}
                 tmp = '%s.%d' % (db, os.getpid())
                 with open(tmp, 'w') as f:
@@ -890,7 +924,12 @@ def main():
     p.add_argument('--tree', default=tree_default)
     p.add_argument('--band', default=os.environ.get('LISPM_CHECK_BAND'))
     p.add_argument('--ubin', default=os.environ.get('LISPM_CHECK_UBIN'))
-    p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
+    # --quux on main, --cadr on the cadr line; there --quux is taken as well,
+    # as the same flag, so that a command line written for main still runs
+    names = ['--' + MACHINE] + (['--quux'] if MACHINE != 'quux' else [])
+    p.add_argument(*names, dest='exe', metavar='PATH',
+                   default=os.environ.get('LISPM_CHECK_' + MACHINE.upper()),
+                   help="the simulator's %s executable" % MACHINE)
     p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
     p.add_argument('--files', default='')
     p.add_argument('--file-server', choices=('auto', 'device', 'ozd'),
@@ -900,7 +939,7 @@ def main():
     # default, and the default may come from LISPM_CHECK_ENGINE.
     p.add_argument('--engine', metavar='{micro,rtl}',
                    default=os.environ.get('LISPM_CHECK_ENGINE') or 'micro',
-                   help="quux's engine, micro (the default) or rtl, passed as --micro or --rtl")
+                   help="the machine's engine, micro (the default) or rtl, passed as --micro or --rtl")
     p.add_argument('--compile', action='store_true')
     p.add_argument('--timeout', type=float, default=120, help='seconds a case may take')
     p.add_argument('--file-timeout', type=float, default=900,
@@ -921,10 +960,10 @@ def main():
     up = os.path.dirname(a.tree)
     a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
     a.ubin = a.ubin or os.path.join(os.path.dirname(a.band), 'ubin')
-    a.quux = a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux')
+    a.exe = a.exe or os.path.join(up, 'muir-sim', 'target', 'release', MACHINE)
     a.ozd = a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd')
-    # quux and ozd run in the run directory, so every path is made absolute
-    a.band, a.ubin, a.quux, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.quux, a.ozd))
+    # the machine and ozd run in the run directory, so every path is made absolute
+    a.band, a.ubin, a.exe, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.exe, a.ozd))
     a.files = [os.path.abspath(f) for f in a.files.split(',') if f]
     a.ozd_flags = []
     if a.ozd_file_dates:
@@ -938,7 +977,7 @@ def main():
         signal.signal(sig, on_signal)
 
     try:
-        for what, path in (('band', a.band), ('quux', a.quux), ('ozd', a.ozd), ('cases', a.cases)):
+        for what, path in (('band', a.band), (MACHINE, a.exe), ('ozd', a.ozd), ('cases', a.cases)):
             if not os.path.isfile(path):
                 raise RunFailed('no %s at %s' % (what, path))
         for f in a.files:
@@ -951,17 +990,17 @@ def main():
                             ' under utc, its default')
         cases = parse_cases(a.cases)
         a.band_sha = sha256_cached(a.band)
-        a.quux_sha = sha256_cached(a.quux)
-        a.quux_version = subprocess.run([a.quux, '-V'], capture_output=True, text=True).stdout.strip()
+        a.exe_sha = sha256_cached(a.exe)
+        a.exe_version = subprocess.run([a.exe, '-V'], capture_output=True, text=True).stdout.strip()
         a.file_server = choose_file_server(a)
         # The key names the file server, since the setup logs in to that
         # server's host.  The device's folders are not in it: a checkpoint
         # carries none, quux mounting each check's own copy from its flags.
         # ozd's has no server suffix, as before there was a choice.  The
-        # engine is in it too, since quux resumes a checkpoint only on the
+        # engine is in it too, since the machine resumes a checkpoint only on the
         # engine that wrote it: one made on micro must not be taken for a
         # check on rtl (so the checkpoints made before it are made again).
-        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.quux_sha[:16], SETUP_VERSION, a.engine)
+        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION, a.engine)
         chk, t_setup = ensure_checkpoint(a, key if a.file_server == 'ozd' else key + '-' + a.file_server)
         if t_setup is not None:
             print('lispm-check: checkpoint made in %.1f s' % t_setup)

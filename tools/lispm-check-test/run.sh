@@ -12,12 +12,14 @@
 # (for the two with exit 2, the tool's message must name broken.lisp and the
 # step that failed), and then pass.cases once more with no --file-server,
 # where the default, auto, must choose the mode's server for the mode's band.
-# The seven run in each mode of LISPM_CHECK_TEST_MODES, "ozd device" by default:
+# The seven run in each mode of LISPM_CHECK_TEST_MODES, "ozd" by default:
 #   ozd     --file-server ozd on LISPM_CHECK_BAND, or run/check/band.img: a band
 #           whose SYS: is on OZ, its files served by ozd
 #   device  --file-server device on LISPM_CHECK_DEVICE_BAND, or
 #           run/check/device/band.img: a band whose SYS: is on HOST, its files
 #           served by quux's file device
+# On this line the band runs on cadr, which has no file device (that is
+# QUUX's), so only ozd runs here; device is main's.
 # Each band's ubin/ is the one beside it, as the tool's default.  Arguments are
 # passed on to every run after the mode's own (--quux and so on), so a --band
 # given here overrides both: give it with a single mode.  A band of Systems 100
@@ -60,7 +62,7 @@ check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-AR
     echo "ok   $name (exit $got)"
 }
 
-for mode in ${LISPM_CHECK_TEST_MODES:-ozd device}; do
+for mode in ${LISPM_CHECK_TEST_MODES:-ozd}; do
     case $mode in
         ozd) band=${LISPM_CHECK_BAND:-$tree/run/check/band.img} ;;
         device) band=${LISPM_CHECK_DEVICE_BAND:-$tree/run/check/device/band.img} ;;
