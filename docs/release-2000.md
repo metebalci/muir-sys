@@ -888,6 +888,40 @@ a comment in that file saying why.
     2.66% fewer than before the first family; the checker and the scan
     find nothing; 48 forms, forward, backward and long branches of each
     kind among them, answer as on the microcode before.
+- **Specialised handlers, fourth family: SETE-1+, + and < of a local or an
+  argument, on fixnums** (H8a section 4, S6). `QISP1-OPERAND`,
+  `QIADD-OPERAND` and `QILSP-OPERAND` (`ucadr/uc-macrocode.lisp:763-827`)
+  judge by the typed pointers alone: SETE-1+ takes a fixnum from 0 to
+  2^24-2, + and < two from 0 to 2^23-1, where the typed pointers' order is
+  the numbers' and a sum cannot overflow. Anything else (a negative fixnum,
+  a character, a flonum, a bignum, no number) jumps to the generic handler
+  of the opcode, `QIND2` or `QIND1`, which does all it does today, its
+  errors included; `<`, which pops the top in its second microinstruction,
+  puts it back first. The results are the generic ones: SETE-1+ stores the
+  fixnum one bigger and leaves it in M-T, + replaces the top with the sum
+  (CDR-NEXT) and leaves it in M-T, < pops the top and leaves T or NIL in
+  M-T. Their first microinstruction reads the PDL only at PDL-INDEX. The
+  entries, with the operand bit, are at 1525 and 1526 (SETE-1+), 315 and
+  316 (+) and 525 and 526 (<) (`ucadr/uc-cold-disk.lisp:155-170`). I memory
+  grows by 37 words and A memory by 11 constants.
+  - Tested as the first family: 195,775 SETE-1+ ran in 5 microcycles
+    instead of 24, 23,158 + in 9 (or more, falling back) instead of 19, and
+    9,937 < in 9 instead of 18: 4,039,599 fewer; the workloads took
+    424,436,000 microcycles, 3.46% fewer than before the first family; the
+    checker and the scan find nothing. 72 forms answer as on the microcode
+    before on both engines. In the 7 of them whose instruction a fused
+    return dispatches, the counts of executed microinstructions show the
+    fallback taken exactly as often as the operands ask for it (7 of 10
+    calls of <, 2 of 4 with a local, 3 of 4 of SETE-1+: a negative, a
+    flonum, a bignum, 2^23 or more), and each error through it names the
+    instruction and the argument as before ("The second argument to <, QUX,
+    was of the wrong type"). With all four families, `RESET-MACHINE` takes
+    8,372 microcycles on revision 12 (8,277 before them) and 82 on revision
+    11, as before; on micro and rtl, revisions 11 and 12, the band reaches
+    its listener from power-on, after a `%DISK-RESTORE` that found the
+    entries poisoned and after a warm boot through the PROM, and on
+    revision 12 `BEG06` finds each time the 36 specialised entries and
+    every other entry `OPDTB`'s.
 
 ## Time zones
 

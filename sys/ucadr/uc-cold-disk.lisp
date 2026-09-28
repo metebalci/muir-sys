@@ -152,6 +152,22 @@ reset-machine-macro-dispatch-branch-neg
 	((macro-dispatch-entry) (a-constant (i-mem-loc qibrn-br-not-nil-neg)))
 	((m-c) add m-c (a-constant 1))
 	(jump-less-than m-c (a-constant 10) reset-machine-macro-dispatch-branch-neg)
+	;; sete-1+, + and < of a local or an argument: sete-1+ is opcode 12 (nd2),
+	;; sub-opcode 6, destination 3, indexes 1525 and 1526; + is opcode 31 (nd1),
+	;; sub-opcode 1, destination 0, indexes 315 and 316; < is opcode 12,
+	;; sub-opcode 2, destination 1, indexes 525 and 526.
+	((macro-dispatch-index) (a-constant 1525))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qisp1-operand) 400000)))
+	((macro-dispatch-index) (a-constant 1526))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qisp1-operand) 400000)))
+	((macro-dispatch-index) (a-constant 315))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qiadd-operand) 400000)))
+	((macro-dispatch-index) (a-constant 316))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qiadd-operand) 400000)))
+	((macro-dispatch-index) (a-constant 525))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qilsp-operand) 400000)))
+	((macro-dispatch-index) (a-constant 526))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qilsp-operand) 400000)))
 reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 

@@ -759,6 +759,71 @@ QISM1	((C-PDL-BUFFER-POINTER-PUSH) M-T)	;NO PASS-AROUND PATH ON PDL BUFFER
 QISP1	((C-PDL-BUFFER-POINTER-PUSH) M-T)	;NO PASS-AROUND PATH ON PDL BUFFER
 	(JUMP-XCT-NEXT STOCYC)			;STORES BACK WITH NO ASSUMPTIONS ABOUT VMA
        (CALL X1PLS)				;M-T GETS (1+ PDL)
+
+;; quux revision 12 (contract h8a section 4), specialised handlers: sete-1+ of a
+;; local or an argument, and + and < of the top of the stack and a local or an
+;; argument, on fixnums.  only the macro dispatch memory names them
+;; (reset-machine, with the operand bit: sete-1+ at indexes 1525 and 1526, + at
+;; 315 and 316, < at 525 and 526), so they run only from a fused return with no
+;; fetch needed, with pdl-index holding the operand's address.  each takes a
+;; fast path only for fixnums whose sum cannot overflow, judged by the typed
+;; pointer, whose data type is <29:25> and whose pointer, <24:0>, is the
+;; fixnum's two's complement: sete-1+ for an operand from 0 to 2^24-2, + and <
+;; for both from 0 to 2^23-1, where the typed pointer's order is the numbers'
+;; order and a sum stays in the field.  anything else, a negative fixnum, a
+;; character, a flonum, a bignum or no number at all, jumps to the generic
+;; handler of the instruction's opcode (qind2, qind1), which then does all it
+;; does today, the error table included: its first microinstruction finds the
+;; state the main loop's dispatch leaves, as these write only m-1 and m-2
+;; before they jump, and < puts back the top it popped.  the results are the
+;; generic ones: sete-1+ stores the fixnum one bigger, which it leaves in m-t
+;; with cdr code 0, as x1pls and qstloc do (generic: 24 microcycles to the next
+;; handler, this 5); + replaces the top with the sum, with cdr-next, and leaves
+;; the same word in m-t, as qiadd's fixpack-p does (generic 19, this 9); < pops
+;; the top and leaves t in m-t when it is less than the operand, else nil, as
+;; qilsp does (generic 18, this 9).  their first microinstruction reads the pdl
+;; only at pdl-index; the top is read in the second (contract h8a section 3.3).
+;; a store goes in the popj's own microinstruction, and the one after the popj
+;; writes only m-t.
+qisp1-operand
+	((m-1) q-typed-pointer c-pdl-buffer-index)
+	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind2)
+	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 77777777))
+		qind2)
+	(popj-after-next (m-t c-pdl-buffer-index) add m-1 (a-constant 1))
+       (no-op)
+
+qiadd-operand
+	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
+	((m-1) q-typed-pointer c-pdl-buffer-pointer)	;the top, the first
+	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qind1)
+	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+		qind1)
+	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind1)
+	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+		qind1)
+	((m-1) add m-1 a-2)			;twice the data type, and the sum below it
+	(popj-after-next (m-t c-pdl-buffer-pointer) dpb m-1 q-pointer
+		(a-constant (plus (byte-value q-data-type dtp-fix)
+				  (byte-value q-cdr-code cdr-next))))
+       (no-op)
+
+qilsp-operand
+	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
+	((m-1) q-typed-pointer c-pdl-buffer-pointer-pop)	;the top, the first
+	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
+	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+		qilsp-operand-generic)
+	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
+	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+		qilsp-operand-generic)
+	((m-t) a-v-nil)
+	(popj-after-next popj-greater-or-equal m-1 a-2)
+       ((m-t) a-v-true)
+
+qilsp-operand-generic
+	(jump-xct-next qind2)
+       ((pdl-pointer) add pdl-pointer (a-constant 1))	;undo the pop, as qadpdlt does
 
 ;;; NON-DESTINATION-GROUP-3
 ;   EFFECTIVE ADDRESS NOT YET COMPUTED, M-T NOT VALID.
