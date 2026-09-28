@@ -117,6 +117,17 @@ reset-machine-macro-dispatch-fill
 	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimove-pdl-operand) 400000)))
 	((macro-dispatch-index) (a-constant 426))
 	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimove-pdl-operand) 400000)))
+	;; pop and movem into a local or an argument: destination 3, opcode 33 (pop,
+	;; nd3's sub-opcode 7) and 13 (movem, sub-opcode 6); indexes 1735, 1736,
+	;; 1535 and 1536.
+	((macro-dispatch-index) (a-constant 1735))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qipop-operand) 400000)))
+	((macro-dispatch-index) (a-constant 1736))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qipop-operand) 400000)))
+	((macro-dispatch-index) (a-constant 1535))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimvm-operand) 400000)))
+	((macro-dispatch-index) (a-constant 1536))
+	((macro-dispatch-entry) (a-constant (plus (i-mem-loc qimvm-operand) 400000)))
 reset-machine-macro-dispatch-done
 	;Drop into INITIAL-MAP
 

@@ -311,6 +311,30 @@ QIMVM	((M-T) C-PDL-BUFFER-POINTER)			;MOVEM INSTRUCTION
 STOCYC	(DISPATCH-XCT-NEXT M-INST-REGISTER QADCM2)	;DISPATCH ON ADDRESS TYPE
        ((M-1) M-INST-DELTA)				;WITH DELTA IN M-1
 
+;; quux revision 12 (contract h8a section 4), specialised handlers: pop and movem
+;; into a local or an argument.  the generic handlers, qind3's dispatch, qipop or
+;; qimvm, and qstloc or qstarg, take 8 microcycles to the next handler; these
+;; take 3.  only the macro dispatch memory names them (reset-machine: pop at
+;; indexes 1735 and 1736, movem at 1535 and 1536, with the operand bit), so they
+;; run only from a fused return with no fetch needed, with pdl-index already
+;; holding the operand's address, a-localp + delta or m-ap + 1 + delta, where
+;; qstloc and qstarg put it.  each stores the whole top word, as qstloc does,
+;; and leaves it in m-t, as qipop and qimvm do; pop pops it.  the store is made
+;; by the popj's own microinstruction, never by the one after it (contract h8a
+;; section 3.3).  the first microinstruction is a no-op because it must not read
+;; the pdl at the pointer: the push that the microcycle after a return may make
+;; (qmdtbd's d-pdl entry) lands there only after that read, as the pdl buffer
+;; has no pass-around.
+qipop-operand
+	(no-op)
+	(popj-after-next (m-t c-pdl-buffer-index) c-pdl-buffer-pointer-pop)
+       (no-op)
+
+qimvm-operand
+	(no-op)
+	(popj-after-next (m-t c-pdl-buffer-index) c-pdl-buffer-pointer)
+       (no-op)
+
 ;STOCYC ENDS UP HERE IF USING FEF ADDRESSING.
 ;STORE IN FEF, NO READ CYCLE TOOK PLACE, SO MUST COMPUTE VMA AND CHECK FOR INVZ
 QSTFE	((M-1) M-INST-ADR)				;FULL DELTA

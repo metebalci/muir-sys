@@ -851,6 +851,22 @@ a comment in that file saying why.
     kind, many locals, a branch on a moved value, loops, recursion,
     closures, `&optional`, errors) answer on both engines as on the
     microcode before, but for one array's printed address.
+- **Specialised handlers, second family: POP and MOVEM into a local or an
+  argument** (H8a section 4, S6). `QIPOP-OPERAND` and `QIMVM-OPERAND`
+  (`ucadr/uc-macrocode.lisp:314-337`) store the top of the stack, popped or
+  not, at PDL-INDEX and leave it in M-T, as `QIPOP` or `QIMVM` and `QSTLOC`
+  do, in the `POPJ`'s own microinstruction; their first microinstruction is
+  a no-op, since it must not read the PDL at the pointer, where the push the
+  microcycle after a return may make lands only after it (section 3.3).
+  `RESET-MACHINE` names them, with the operand bit, at indexes 1735 and 1736
+  (POP, opcode 33) and 1535 and 1536 (MOVEM, opcode 13)
+  (`ucadr/uc-cold-disk.lisp:120-130`). I memory grows by 14 words and A
+  memory by 5 constants.
+  - Tested as the first family: 462,731 POPs and MOVEMs ran them, 3
+    microcycles each instead of 8, 2,313,655 fewer; the workloads took
+    429,987,000 microcycles, 2.19% fewer than before the first family; the
+    checker and the scan find nothing on either engine; 34 forms answer as
+    on the microcode before.
 
 ## Time zones
 
