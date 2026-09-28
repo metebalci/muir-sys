@@ -68,7 +68,9 @@ MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
      four files in `SYS: UBIN;`, and start the machine: a cold boot.
 5. **QLD and save.** COLDRUN runs QLD as in steps 5 and 6; then
    `(si:disk-save "LOD4" t)`. The save closes the TELNET connection, at
-   once or when ozd gives up on the host, up to three minutes later.
+   once or when ozd gives up on the host, up to three minutes later: ozd
+   carries the TELNET listener here too, though it serves no file
+   (`docs/lispm-check.md`, "The file server").
 6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
    only, LOD4 named (`sgdisk -c 7:"LOD4 System 2000 ..."`), and LOD2, LOD3
    and PAGE zeroed before the disk is handed over.
@@ -323,7 +325,7 @@ A world cannot be built from nothing, so each stage runs on the one before.
 ## What is needed
 
 - **A running band** to compile with, such as a 1000 band, **whose site is the site being built** (see "What the 2026-09-22 rebuild added" below).
-- **A file server for `SYS:`** that serves both FILE and MINI. ozd does.
+- **A file server for `SYS:`** that serves both FILE and MINI. For System 2000 it is quux's file device: `SYS:` is on `HOST` (`site/sys.translations:30-35`), MINI reads through the device (`cold/mini.lisp`), and quux's `--file-root` names the host folder that is `HOST`'s `/`, holding `sys/`, `site/` and `home/lispm/`. On the CADR's line, where `SYS:` is on OZ, ozd does.
 - **A site.** The repository includes an example `site/` directory. The build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
 - **The translations file must survive the traditional readtable.** A cold load reads it with `MINI-READFILE` (`cold/mini.lisp:319`), which ignores the file's attribute list, so it is read in traditional syntax whatever the file says. There a slash escapes the next character. A file whose targets are Unix paths must therefore double every slash and name no readtable, or the cold load stops with "End of file ... in the middle of the list". MIT's own site file never met this: its targets are TOPS-20 paths with no slashes. This is metebalci/muir-sys issue 9.
 - **A free partition for the cold load,** and a larger one for the saved world (step 7).
@@ -389,9 +391,9 @@ resuming with `:COMPILE` and `:NO-INCREMENT-PATCH`.
 
 The `COLD` system (`cold/coldpk.lisp:57-64`) compiles and loads `COLD; COLDUT` and `COLDLD`, and loads the cold-load parameters from `COLD; QCOM` and `QDEFS`. It keeps the new world's symbols in its own package, so the new world may differ incompatibly from the old one (`cold/coldpk.lisp:9-24`).
 
-**MINI's server address is fixed when `COLD; MINI` is compiled.** It is the Chaos address of the host that `SYS:` translates to at that moment (`cold/mini.lisp:26-34`). So step 2 must run with `SYS:` on the file server that the cold load will read from.
+**On the CADR's line, MINI's server address is fixed when `COLD; MINI` is compiled.** It is the Chaos address of the host that `SYS:` translates to at that moment (`cold/mini.lisp:26-34` on the `cadr` branch). So step 2 must run with `SYS:` on the file server that the cold load will read from. System 2000's MINI reads through quux's file device and has no server address compiled into it (`cold/mini.lisp:3-9`), so neither this nor the check below applies to it.
 
-A quick check before making the cold load: the server's Chaos address appears in `cold/mini.qfasl` as a 16-bit word, low byte first. For a server at octal 177201, the bytes are `81 fe` at an even offset. The first build found it there, and found neither System 304's server address, octal 4403, nor System 100's, octal 3060. The machine's own address also appears; MINI replaces that routing address with the server's when both are on one subnet (`cold/mini.lisp:69-70`). A byte search suggests the address rather than proving it.
+A quick check before making the cold load on the CADR's line: the server's Chaos address appears in `cold/mini.qfasl` as a 16-bit word, low byte first. For a server at octal 177201, the bytes are `81 fe` at an even offset. The first build found it there, and found neither System 304's server address, octal 4403, nor System 100's, octal 3060. The machine's own address also appears; MINI replaces that routing address with the server's when both are on one subnet (`cold/mini.lisp:69-70` on the `cadr` branch). A byte search suggests the address rather than proving it.
 
 ## 4. Make the cold load
 
@@ -476,15 +478,18 @@ The cold load reads and runs this script before entering its listener.
 The script is local build input, ignored by Git and outside the SITE
 compilation list. The runner stays in `sys/cold/mini.lisp`. It resolves the
 script's logical pathname while compiling, because MINI has no pathname
-translator at cold boot. With the supplied site translations, ozd sees
-`/site/coldrun.lisp`. Changing that translation requires recompiling MINI
-and rebuilding the cold band.
+translator at cold boot. With the supplied site translations, the file
+server is asked for `/site/coldrun.lisp`: the file device under `HOST`'s
+`/` for System 2000, ozd on the CADR's line. Changing that translation
+requires recompiling MINI and rebuilding the cold band.
 
 The second argument to QLD suppresses the additional-systems question.
 Use forms supported by the cold environment before QLD has loaded the rest
-of the system. With ozd's `--log-mini`, a successful run reports
-`qld-complete` followed by `script-ends`. Saving the finished band is a
-separate step.
+of the system. A successful run reports `qld-complete` followed by
+`script-ends`: for System 2000 as `log: report: ...` lines on quux's
+standard error, sent with the file device's LOG command and needing no
+option (`cold/mini.lisp:434-445`); on the CADR's line with ozd's
+`--log-mini`. Saving the finished band is a separate step.
 
 If the script is absent, the cold load enters its ordinary listener. To
 load interactively, use the cold load's console:
@@ -501,9 +506,9 @@ load interactively, use the cold load's console:
 4. asks for a list of further systems to load, such as `(zwei)`;
 5. prints the partition size the world will need, from `ESTIMATE-DUMP-SIZE` (`sys/qmisc.lisp:1279`), and the disk label, and says "OK, now do a DISK-SAVE".
 
-**MINI trouble.** Run ozd with `--log-mini`: it logs each file MINI reads, and each it refuses with the reason. A refusal is where the cold load stops. Every name MINI asks for must exist at that exact path, case included, under the file server's roots.
+**MINI trouble.** For System 2000, MINI logs through the file device on quux's standard error a `log: mini: read NAME BYTES` line for each file it reads (`cold/mini.lisp:216`) and a `log: mini: refused NAME status N` line for each open the device refuses (`cold/mini.lisp:264`). On the CADR's line, run ozd with `--log-mini`: it logs each file MINI reads, and each it refuses with the reason. A refusal is where the cold load stops. Every name MINI asks for must exist at that exact path, case included, under the file server's roots (quux's `--file-root` folders, or ozd's roots).
 
-**A reboot within three minutes fails once.** After every boot, the cold load's first MINI connection uses index 1, and MINI never closes it. If the cold load is booted again within three minutes of its last MINI connection, ozd still holds that connection and discards the new request as a duplicate. The first `(si:qld)` then fails with "RFC fail" after about 20 seconds. Trying again works, because it uses the next index.
+**A reboot within three minutes fails once** on the CADR's line, where MINI reads over Chaos from ozd; System 2000's MINI uses the file device and no Chaos connection. After every boot, the cold load's first MINI connection uses index 1, and MINI never closes it. If the cold load is booted again within three minutes of its last MINI connection, ozd still holds that connection and discards the new request as a duplicate. The first `(si:qld)` then fails with "RFC fail" after about 20 seconds. Trying again works, because it uses the next index.
 
 ## The halt this build met, in QLD
 
@@ -523,7 +528,7 @@ It stops the halt, because a `DEFVAR` with no value does not overwrite a bound v
 
 **With that fixed, a cold load gets much further and stops again.** It loads the inner system, the pathname and file code and the site files, runs `LISP-REINITIALIZE` as far as "Turning off INHIBIT-SCHEDULING-FLAG", and then breaks with "Unknown stream operation", which is MINI's own message (`cold/mini.lisp:232`, `:268`) for an operation its streams do not implement. The reader is in the file-system package at that point. The message does not name the operation, which is metebalci/muir-sys issue 7.
 
-**Reading the failure from the file server's log.** When the world stops receipting, the server keeps retransmitting its unreceipted packet every half second, and a crippled world answers with a lost-packet message, which the server logs as the connection closing. So the last file read before that line names the file the band died in, which is a second witness to what the console says.
+**Reading the failure from the file server's log.** On the CADR's line, where MINI reads over Chaos from ozd: when the world stops receipting, the server keeps retransmitting its unreceipted packet every half second, and a crippled world answers with a lost-packet message, which the server logs as the connection closing. So the last file read before that line names the file the band died in, which is a second witness to what the console says. System 2000's MINI has no Chaos connection to retransmit on; its equivalent witness is quux's standard error, where MINI logs a `log: mini: read NAME BYTES` line as each file ends (`cold/mini.lisp:208-216`) and a `log: mini: refused NAME status N` line for each refused open (`cold/mini.lisp:264`), so a band that dies while MINI reads dies in a file whose `read` line never came.
 
 ## What had to be changed in the sources
 
@@ -606,9 +611,10 @@ byte the same as the first, and its log had no "Read-in time" line. Boot the
 band afresh for every assembly of changed sources.
 
 **Serve the table of the microcode that runs.** A band whose microcode is not
-the one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, and ozd serves
-files without versions, so the served `sys/ubin/` must hold the running
-microcode's `ucadr.tbl`. With System 1001's band on microcode 1000 and 323's
+the one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, and the file
+server serves files without versions (ozd, and the file device, whose `HOST`
+is a Unix host, `io/file/hostfs.lisp:158`), so the served `sys/ubin/` must
+hold the running microcode's `ucadr.tbl`. With System 1001's band on microcode 1000 and 323's
 table served, the machine never reached its TELNET server.
 
 **PROMH, the boot PROM.** `(ua:assemble "SYS: UCADR; PROMH TEXT")`, with
