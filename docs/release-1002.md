@@ -274,6 +274,29 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   second holds the last word, swapped as the first block's are, and zeros.
   MIT's; taken from `main` (`b729b53`, only this part of its
   `LOAD-MCR-FILE` change: the rest reads QUUX's partition order).
+- **A physical pathname matches its own pattern again, so QLD no longer
+  loads MINI's files twice.** `:PATHNAME-MATCH` and `:PATHNAME-MATCH-SPECS`
+  took the pattern's components raw and the sample's through the accessors,
+  which convert solid case, and compared them with case: an `OZ:` (or any
+  Unix or LMFS) pattern such as `OZ: /sys/*/*` matched no pathname, not even
+  itself. So nothing on OZ back-translated into `SYS:`: every file MINI
+  loaded kept its loaded id and its functions' source file on an `OZ:`
+  generic pathname, and QLD's `MAKE-SYSTEM`, finding no id on the `SYS:`
+  one, read 34 of MINI's 38 files again over FILE in the build of the
+  System 1002 band C2. Both methods now take the pattern's device,
+  directory, name and type through the accessors too, and compare in
+  interchange case (`io/file/pathnm.lisp:1948-1991`, the old lines commented
+  out); a logical pattern matches as before, and case stays significant.
+  Red and green with `lispm-check` on band C2: an `OZ:` pathname matches
+  itself, the generic pathname of `OZ: /sys/sys2/flavor.qfasl`,
+  `/sys/io/file/pathst.qfasl` and `/site/site.qfasl` is the `SYS:` one,
+  back-translation gives the `SYS:` names, and dired's wildcard match of an
+  `OZ:` directory holds; translation and case unchanged. A build like C2's
+  with the change: FILE read none of MINI's files again from the cold boot
+  on (C2: 34), MINI's files keep MINI's id on their `SYS:` generic, every
+  loaded id is a number equal to the served date, and `(make-system 'system
+  :print-only)` lists nothing. Taken from `main`, where it comes with a
+  change to MINI's dates that this line does not need.
 
 ## The site
 
