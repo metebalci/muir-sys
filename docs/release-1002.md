@@ -168,10 +168,9 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   On the 1001 band with `TIME` and `OPEN` loaded, a recorded text of
   15 January or 15 July 2026 12:00 came back 3600 and 7200 s off, and exact
   with `PARSE-COLD-LOADED-TIME`. `COLD-FILE-DATE-STRING` gives the text
-  `date -u` does, the month's zero dropped, from 1970 to 2099, and the text
-  parses back to the instant from 2000 to 2026; a two-digit year means the
-  year within 50 years of the present (`io1/time.lisp:177-184`), as in every
-  FILE date of that form, so 1970 came back as 2070 and 2099 as 1999.
+  `date -u` does, the month's zero dropped, and the text parses back to the
+  instant from 1970 to 2099: it prints the year in four digits, as the FILE
+  server does (under Faults fixed).
 - **The date check** (Q12, 1.11): a band built from this branch (the last
   of the incremental builds above), System 1002 on microcode 1000 under
   muir-sim's `cadr`, with ozd at its default
@@ -183,10 +182,40 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   a file lists back as itself and is the file's mtime, to the second, in
   both runs. The control, ozd's `--file-dates mit --timezone -1`, is off by
   an hour in winter and two in summer; 1 March 2000 a day more, and
-  31 December 2000 reads as no date at all.
+  31 December 2000 reads as no date at all. With the four-digit year (under
+  Faults fixed) and ozd `52eb6b0`, 1970-01-01 00:00:00 and 2099-12-31
+  23:59:59 UTC pass the same way in both runs.
 
 ## Faults fixed
 
+- **FILE dates carry the year in four digits.** The cold-load builder's
+  date text and the band's own FILE server printed `MM/DD/YY`, and the
+  parser takes a two-digit year within fifty years of the present
+  (`io1/time.lisp:177-184`), so a file of 1970 read as 2070 and one of 2099
+  as 1999. ozd's `--file-dates utc` prints its FILE and MINI dates as
+  `MM/DD/YYYY HH:MM:SS` from ozd `52eb6b0` on, and this line now prints the
+  same: `COLD-FILE-DATE-STRING` (`cold/coldld.lisp:114-129`), whose text
+  must equal QFILE's from the server so that QLD does not load the cold
+  load's files again, and `CV-WIRE-TIME` (`file/server.lisp:42-60`), the
+  old lines commented out in both. The parsers needed nothing:
+  `PARSE-DIRECTORY-DATE-PROPERTY` reads the 19-character form and still
+  the 17-character one, `PARSE-COLD-LOADED-TIME` puts the month's zero back
+  in either, and `PRINT-DIRECTORY-DATE-PROPERTY` always printed four digits.
+  Built with ozd `52eb6b0` only; an ozd before it sends two digits and
+  every file MINI and QFILE read looks new to `MAKE-SYSTEM`.
+  Red and green with `lispm-check` on System 1002 bands, the COLD system and
+  `FILE; SERVER` compiled and loaded: for 1970-01-01 and 2099-12-31 both
+  texts printed `70` and `99` and read back 3155760000 s off, and now print
+  `1/01/1970 00:00:00` and `12/31/2099 23:59:59` (the builder's, month's zero
+  dropped) and `01/01/1970 00:00:00` (the server's), and read back exactly;
+  2000 and 2026 as before. A build like the ones above, with ozd `52eb6b0`
+  at `mit -1` for the compile and the cold load and at `utc` from the cold
+  boot: QLD read none of the cold load's files again (G1) and none of
+  MINI's 38, ran unattended (G2), all 260 loaded ids equal their served
+  dates (G3), `:print-only` lists nothing (G4), and the date check (G5,
+  under Time zones) with a file of 1970-01-01 00:00:00 and one of 2099-12-31 23:59:59
+  added lists and sets both exactly at Europe/Berlin and at `-1`, where
+  ozd before `52eb6b0` gave them 3155760000 s off.
 - **TIMPAR's own date is a number too.** Its initialization parses the
   recorded texts before TIMPAR's own loaded id is set, so that one stayed
   text, never equal to the file's date, and `MAKE-SYSTEM` took

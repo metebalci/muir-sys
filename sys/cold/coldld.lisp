@@ -111,17 +111,22 @@
 			   file-property-list
 			   (vread (+ cold-loaded-file-property-lists 1)))))
 
-;;; a file's date as the FILE server sends it, UTC as MM/DD/YY HH:MM:SS, less the
+;;; a file's date as the FILE server sends it, UTC as MM/DD/YYYY HH:MM:SS, less the
 ;;; month's leading zero: the text QFILE records for a date while the cold load has
 ;;; no time parser (network/chaos/qfile.lisp:495-500).  QLD's MAKE-SYSTEM compares
 ;;; the date recorded here with that text to tell whether a cold-loaded file is
 ;;; newer than the one loaded, and TIMPAR parses both later
 ;;; (fs:canonicalize-cold-loaded-times).
+;;; the year has four digits, as the server's has (ozd's --file-dates utc): with
+;;; two, the parser takes the year within fifty years of now, so 1970 came back
+;;; as 2070 and 2099 as 1999, and the text no longer equals QFILE's.
 (defun cold-file-date-string (ut)
   (multiple-value-bind (sec min hour day month year)
       (time:decode-universal-time ut 0)
-    (format nil "~D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
-	    month day (\ year 100.) hour min sec)))
+;    (format nil "~D//~2,'0D//~2,'0D ~2,'0D:~2,'0D:~2,'0D"
+;	    month day (\ year 100.) hour min sec)))
+    (format nil "~D//~2,'0D//~4,'0D ~2,'0D:~2,'0D:~2,'0D"
+	    month day year hour min sec)))
 
 ;This remembers where the file that we are building comes from
 (defun set-file-loaded-id (stream &aux qid)
