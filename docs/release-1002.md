@@ -340,16 +340,21 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
 
 - **The CADR's first changed microcode is 1000** (Mete, 2026-09-27: the
   CADR's numbers are in the 1000s and QUUX's in the 2000s; MIT's 323 stays
-  as it is). It is 323 with the two fixes below and the PDL buffer's width
+  as it is). It is 323 with the three fixes below and the PDL buffer's width
   named, assembled from `sys/ucadr/` with `ua:version-number` 1000 as
   `docs/building.md` describes; a band takes it from the MCR partition the
   label names, and reads its `ucadr.tbl` from `SYS: UBIN;`. It uses one more
-  A-memory word (1177 against 323's 1176) and five more I-memory locations.
-  The outputs as assembled on 2026-09-27 (sha256):
-  - `ucadr.mcr` `6b94aab756b4e3c1882c6f2b0715b8122137c59e163e6f4abb3240f57f056e19`
-  - `ucadr.tbl` `0545fbc2e9e5a2980ec322802b5b0ca5da75aeb1b8cf632e015ac4931e360762`
-  - `ucadr.locs` `77f365af6009161e2b8e0bca20d4833bc0ee3d517b3e61fb3c9b2561aaf5267c`
-  - `ucadr.sym` `7c750b55835484b4f01d5cd98454e14436f4e43981e1fae68efeae43cbbc24d6`
+  A-memory word (1177 against 323's 1176) and seven more I-memory locations.
+  The outputs as assembled on 2026-09-28, twice, byte for byte (sha256):
+  - `ucadr.mcr` `e16827c8a597f960bd5971df38565ce97415a17605b4953f7903aba0c700ab72`
+  - `ucadr.tbl` `db5d83608fe3c7c63ec4e7ddc5cabff1bf86c221ddaa9bf450a8fcd9871f2737`
+  - `ucadr.locs` `990536a35390c058b6ada50f0d9ca66094f3413489e75f8bd886e21a569914bb`
+  - `ucadr.sym` `0f8645b3ef09312b4c9eb8d3581e9cb947c3c5575adf04d7424fa6378fb64d67`
+
+  The number stays 1000, since it is unreleased; the assembly of 2026-09-27,
+  before the trap fix below, gave `ucadr.mcr` `6b94aab7...`, `.tbl`
+  `0545fbc2...`, `.locs` `77f365af...` and `.sym` `7c750b55...`, and the
+  same sources assembled again on 2026-09-28 gave those four byte for byte.
 - **The PDL buffer's width by name** (`ucadr/uc-macrocode.lisp`,
   `uc-page-fault.lisp`, `uc-stack-groups.lisp`): five masks written as
   `(BYTE-FIELD 10. 0)` and one comparison with the literal 2000 use
@@ -381,6 +386,32 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   rectangle of four rows, drawn into a one-bit array laid over a vector,
   the MAR went off on 323 and does not on 1000; a MAR on the rectangle's
   last row goes off on both, and the words are left as they were.
+- **A small-flonum overflow traps before its return, so proceeding from it
+  works.** At `SFLPCK1` (packing a small flonum) and `XAPDLR`
+  (`%ASSURE-PDL-ROOM`) the call to the trap sat in the microinstruction
+  after a `POPJ-AFTER-NEXT`, so the trap ran with the return already made
+  and the next macroinstruction fetched: the erring frame's PC was one
+  instruction late. A small-flonum exponent overflow then named the next
+  instruction ("POP produced a result too large", or
+  `EH::MOVE-INSTRUCTION`) rather than `*`, and proceeding with a new value
+  misplaced it: `(list 'a (* x x) 'b)` gave `(A NIL B)` or read a
+  `DTP-FREE` word from the constants area, and `(* x x x x x)` of `1s10`
+  gave `1.0s30` for `4.0s10`. `%ASSURE-PDL-ROOM`'s error, which cannot be
+  proceeded from, left the PC one late too. Each now tests before it
+  returns: `SFLPCK1` returns by a conditional `POPJ` with the store in its
+  XCT-NEXT and jumps to `SFL-E-OV` on an overflow
+  (`ucadr/uc-arith.lisp:760-773`), the same microcycles with no overflow;
+  `XAPDLR` tests the frame size before a conditional `POPJ` and jumps to
+  `XAPDLR1` (`ucadr/uc-call-return.lisp:1713-1727`), one microcycle more.
+  MIT's, found on QUUX's line. On System 1001's band on microcode 1000,
+  micro and rtl engines alike, 14 cases (proceeding with a new value three
+  ways, the two messages, `%ASSURE-PDL-ROOM` within and over its limit, and
+  the erring frame's PC at `CAR`'s trap, the overflow's and
+  `%ASSURE-PDL-ROOM`'s) give 6 failures and 1 error before and pass after;
+  microcode 323 gives the same answers as microcode 1000 before.
+  Microcode 1000's earlier checks pass again: the smoke and
+  `%DRAW-RECTANGLE` cases, and the 2304 division cases, whose output is
+  byte for byte the earlier assembly's.
 
 ## Known faults found, not yet fixed
 

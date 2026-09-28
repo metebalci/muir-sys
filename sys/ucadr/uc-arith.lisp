@@ -757,9 +757,20 @@ SFLPCK1	((M-1) DPB M-ZERO FLONUM-SMALL-USELESS-BITS A-1) ;clear low-order bits s
 				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
 	((M-I) SUB M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
 	(JUMP-LESS-OR-EQUAL M-I A-ZERO SFL-E-UND)	;Underflow.  ZUNDERFLOW?
-	(POPJ-AFTER-NEXT
-	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
-       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
+;	(POPJ-AFTER-NEXT
+;	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
+;       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
+	;; the overflow's call sat in the microinstruction after the return, so
+	;; the trap ran with the return already made: the macroinstruction after
+	;; the one that overflowed had been fetched, the error named it ("pop
+	;; produced a result too large") and proceeding with a new value lost or
+	;; misplaced the value, (a nil b) for (list 'a (* x x) 'b).  the return
+	;; is now conditional on the exponent, with the store in its xct-next,
+	;; and an overflow jumps to sfl-e-ov, whose trap finds the return not yet
+	;; made, as every other trap does.  the same microcycles with no overflow.
+	(popj-less-or-equal-xct-next m-i (a-constant small-flonum-max-exponent))
+       ((m-t c-pdl-buffer-pointer) dpb m-i small-flonum-exponent a-t)
+	(jump sfl-e-ov)					;overflow
 
 SFL-E-UND
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-ZUNDERFLOW)

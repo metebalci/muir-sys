@@ -1710,10 +1710,21 @@ XPUSH (MISC-INST-ENTRY %PUSH)
 XAPDLR (MISC-INST-ENTRY %ASSURE-PDL-ROOM)
 	((M-1) Q-POINTER PDL-POP)	;NUMBER OF PUSHES PLANNING TO DO
 	((PDL-INDEX) M-A-1 PDL-POINTER A-AP)	;CURRENT FRAME SIZE
-	(POPJ-AFTER-NEXT (M-2) ADD PDL-INDEX A-1)	;PROPOSED NEW FRAME SIZE
-       (CALL-GREATER-THAN M-2 (A-CONSTANT 370) XAPDLR1)	;NOTE FUDGE FACTOR OF 10 SINCE WE DON'T
-						;CURRENTLY KNOW HOW MANY COMPILER-GENERATED
-						;PUSHES MIGHT BE GOING TO HAPPEN
+;	(POPJ-AFTER-NEXT (M-2) ADD PDL-INDEX A-1)	;PROPOSED NEW FRAME SIZE
+;       (CALL-GREATER-THAN M-2 (A-CONSTANT 370) XAPDLR1)	;NOTE FUDGE FACTOR OF 10 SINCE WE DON'T
+;						;CURRENTLY KNOW HOW MANY COMPILER-GENERATED
+;						;PUSHES MIGHT BE GOING TO HAPPEN
+	;; the trap's call sat in the microinstruction after the return, so the
+	;; trap ran with the return already made and the next macroinstruction
+	;; fetched: the erring frame's pc named the instruction after
+	;; %assure-pdl-room.  the size is now tested before the return, and a
+	;; frame too large jumps to xapdlr1, whose trap finds the return not yet
+	;; made, as every other trap does.  one microcycle more.
+	((m-2) add pdl-index a-1)			;proposed new frame size
+	(popj-less-or-equal m-2 (a-constant 370))	;note fudge factor of 10 since we don't
+							;currently know how many compiler-generated
+							;pushes might be going to happen
+	(jump xapdlr1)
 XAPDLR1	(CALL TRAP)
     (ERROR-TABLE STACK-FRAME-TOO-LARGE)
     (ERROR-TABLE ARG-POPPED 0 M-1)
