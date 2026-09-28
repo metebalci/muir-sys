@@ -8,15 +8,17 @@ cases in one listener session, printing one line per case.
 ```
 tools/lispm-check [--band PACK] [--quux PATH] [--ozd PATH] [--ubin DIR]
                   [--tree DIR] [--files a.lisp,b.lisp] [--compile]
-                  [--file-server auto|device|ozd] [--timeout S] [--keep]
+                  [--file-server auto|device|ozd] [--engine micro|rtl]
+                  [--timeout S] [--keep]
                   [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 ```
 
 ## What it does
 
-1. **Setup, once per band, quux build and file server.** A checkpoint resumes
-   only on the quux build that wrote it, so the tool keys it by the sha256 of
-   the band and of quux, and by the [file server](#the-file-server). When
+1. **Setup, once per band, quux build, file server and engine.** A
+   checkpoint resumes only on the quux build and the engine that wrote it, so
+   the tool keys it by the sha256 of the band and of quux, by the
+   [file server](#the-file-server) and by the [engine](#the-engine). When
    there is none, it boots the band cold with the tree served, asks the band
    which host its `SYS:` is on and stops unless that is the server's, logs in
    to that host, compiles a small helper that runs each case, and has quux
@@ -71,6 +73,20 @@ quux). A quux without a file device (no `--file-root` in its `--help`) means
 
 ```
 lispm-check: files served by device: the band's SYS: is on HOST (auto, from its checkpoint)
+```
+
+## The engine
+
+`--engine micro|rtl` (or `LISPM_CHECK_ENGINE`) is the engine quux runs, passed
+to it as `--micro` or `--rtl`; any other value is refused before anything
+starts. `micro`, the default, is the microinstruction engine; `rtl` is the
+register transfer engine, which quux paces at the machine's own speed, so its
+setup and checks take longer. A checkpoint is made on one engine and resumes only on it, so each
+engine has its own. The command quux ran with heads its log, `quux.log` in
+the run directory (kept with `--keep`):
+
+```
+tools/lispm-check --engine rtl --keep ... CASES
 ```
 
 ## ozd's dates
@@ -152,6 +168,7 @@ Each is overridden by its flag or an environment variable.
 | `--ozd` | `LISPM_CHECK_OZD` | `../ozd/target/release/ozd` beside the tree |
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
 | `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
+| `--engine` | `LISPM_CHECK_ENGINE` | `micro` ([the engine](#the-engine)) |
 | `--ozd-file-dates` | `LISPM_CHECK_OZD_FILE_DATES` | none: ozd's own, `utc` ([ozd's dates](#ozds-dates)) |
 | `--ozd-timezone` | `LISPM_CHECK_OZD_TIMEZONE` | none: ozd's own |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
