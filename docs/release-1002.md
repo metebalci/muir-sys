@@ -143,7 +143,7 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   an hour or two from the server's text, so QLD loaded every cold-loaded file
   again and stopped at `**MORE**` on the cold-load stream: measured in two
   builds from this branch, one as it was and one with `main`'s change, which
-  records the date as a number (`8c2f00e`) and so never equals QFILE's text
+  records the date as a number (`59377f4`) and so never equals QFILE's text
   either. And a month before October, its zero gone, went to the full parser
   at the site's local time. Now the builder records the date as the server
   sends it, UTC with the month's zero dropped (`COLD-FILE-DATE-STRING`,
@@ -153,7 +153,7 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   device, whose dates are numbers too. QFILE's comment, and MINI's, which
   records the same text, say whom their text matches now
   (`network/chaos/qfile.lisp:498`, `cold/mini.lisp:131`). This is
-  `main`'s cold-load date fix (`8c2f00e`, Q12's backport inventory) taken in
+  `main`'s cold-load date fix (`59377f4`, Q12's backport inventory) taken in
   this branch's own form. Checked in builds from this branch on muir-sim's
   `cadr` (System 1001's band compiling and making the cold load, microcode
   1000), each incremental over System 1001's build tree; step 8 of Q12
@@ -301,7 +301,7 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   system's own files never met it. On the 1001 band a file of 514 halfwords
   loaded its first block and left the second zero; with the change the
   second holds the last word, swapped as the first block's are, and zeros.
-  MIT's; taken from `main` (`b729b53`, only this part of its
+  MIT's; taken from `main` (`860ba3d`, only this part of its
   `LOAD-MCR-FILE` change: the rest reads QUUX's partition order).
 - **A physical pathname matches its own pattern again, so QLD no longer
   loads MINI's files twice.** `:PATHNAME-MATCH` and `:PATHNAME-MATCH-SPECS`
@@ -449,7 +449,7 @@ loaded. That band reads FILE dates at its site's zone, so a check on it passes
   makes the cold load and at `utc` from the cold boot on, the builder kept
   on its own site and time code, the gates after QLD, and the one hour of
   QFASL dates it cannot take.
-- **The release tools, from `main`** (`1331881`, `f5a60d5`), tracked by
+- **The release tools, from `main`** (`62d296d`, `0ade1dc`), tracked by
   `.gitignore:39-42`. `tools/release-scan` reads every byte a release
   publishes (a gzip and its header, a tar's members and headers, a pack raw,
   a VHD through its block table) and fails on a local path, a private

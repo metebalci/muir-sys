@@ -405,7 +405,7 @@ git merge-base --is-ancestor <sha> origin/cadr &&
     ! git merge-base --is-ancestor <sha> origin/main && echo on cadr alone
 ```
 
-`release-1001` (`d0d68de`) and older are on both lines.
+`release-1001` (`3d26e6d`) and older are on both lines.
 
 **3. An annotated tag at the SHA**, like `release-1000`'s and
 `release-1001`'s, with Mete's identity as the tagger, unsigned:
