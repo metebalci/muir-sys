@@ -1,4 +1,4 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
-;;; System 1002, in progress since System 1001 was released.
+;;; System 1003, in progress since System 1002 was released.
 
-("System" 1002)
+("System" 1003)

@@ -82,8 +82,10 @@ This is the system. Three projects provide the machine:
   writing a release pack.
 - [`docs/booting.md`](docs/booting.md) --- how a CADR boots, from power-on
   through the PROM and the microcode to the first macroinstruction.
-- [`docs/release-1002.md`](docs/release-1002.md) --- every change System 1002,
-  in progress on this branch, makes to System 1001.
+- [`docs/release-1003.md`](docs/release-1003.md) --- every change System 1003,
+  in progress on this branch, makes to System 1002.
+- [`docs/release-1002.md`](docs/release-1002.md) --- every change System 1002
+  makes to System 1001.
 - [`docs/release-1001.md`](docs/release-1001.md) --- every change System 1001
   makes to System 1000.
 - [`docs/release-1000.md`](docs/release-1000.md) --- every change System 1000

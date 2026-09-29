@@ -1,0 +1,13 @@
+# System 1003
+
+What the CADR's next release changes from System 1002. It is in progress on
+the `cadr` branch: each change is recorded here as it is made. `main` is
+QUUX's system, numbered from 2000; what this branch takes from it is a bug fix,
+a change that needs no QUUX hardware, or a feature Mete chose for the CADR.
+Every change to a source file carries a comment in that file saying why.
+
+- **The system number is 1003** (`patch/system.patch-directory`,
+  `patch/system-1003.patch-directory`), now that System 1002 is released,
+  so that no band built from this branch calls itself 1002. The microcode
+  stays 1000 and moves to 1001 only when a changed microcode is next
+  released.
