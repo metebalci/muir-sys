@@ -1,8 +1,7 @@
 # System 2000
 
-What the next release changes from System 1001. It is in progress: each
-change is recorded here as it is made. Every change to a source file carries
-a comment in that file saying why.
+What System 2000, the first release for QUUX, changes from System 1001.
+Every change to a source file carries a comment in that file saying why.
 
 - **The system number is 2000** (`patch/system.patch-directory`,
   `patch/system-2000.patch-directory`): QUUX's numbers are the 2000s and
@@ -53,8 +52,9 @@ a comment in that file saying why.
 
 ## QUUX
 
-- **Microcode 2000 is QUUX's; the CADR keeps MIT's 323.** QUUX is the CADR
-  evolved, and muir and muir-fpga run it with `--machine quux`. This is the
+- **Microcode 2000 is QUUX's; the CADR runs MIT's 323, or its own
+  microcode 1000 from System 1002 on.** QUUX is the CADR
+  evolved: muir-sim runs it as `quux`, and muir-fpga builds it. This is the
   first change to the microcode itself, which stayed 323 while it was MIT's;
   it takes 2000, as QUUX's numbers are the 2000s (it was 1000 until
   2026-09-27, as the system took 1000 after System 100). Microcode 2000
@@ -1153,14 +1153,26 @@ a comment in that file saying why.
   (`tools/release-test:209`), and it refuses a fault planted into a file the
   tree does not have (`tools/release-test:108-112`).
 - **`docs/building.md` says how a release is published**
-  (`docs/building.md:633`): the assets of each kind of release, every
+  (`docs/building.md:676`): the assets of each kind of release, every
   tarball member owned by root, one gzip route (Python's `gzip`, no name, no
-  date; `docs/building.md:669-681`), then by the SHA of one commit: the sums,
+  date; `docs/building.md:712-720`), then by the SHA of one commit: the sums,
   the scan and the owners, the commit on its own line and not the other's,
   the annotated tag, a draft, the draft downloaded back and checked (sums
   against GitHub's digests, scan, owners, the VHD's `conectix` or the pack's
   `LABL`), and publishing with Latest set and read back
-  (`docs/building.md:784-794`).
+  (`docs/building.md:827-841`).
+- **`docs/building.md` says how QUUX's release disk is written**
+  (`docs/building.md:315-350`): a new GPT disk in the build disk's layout
+  with only the microcode in MCR1 and the band in LOD1, both with bit 48 and
+  named "MCR1 UCADR 2000" and "LOD1 System 2000", the rest zero; the
+  `sgdisk`, `dd` and `qemu-img` commands, the check that the VHD converts
+  back to the raw disk, and the raw disk's SHA-256 as the build's identity.
+  release-2000's disk was written by exactly these commands.
+- **The README and these notes speak of the release as made**: the
+  README's System 2000 section, its releases paragraph (a QUUX release
+  carries a VHD disk, the sources and the boot PROM, and `SHA256SUMS`),
+  muir-sim as `quux` rather than `--machine quux`, and the heading "How it
+  was written"; here, the opening and the microcode bullet under QUUX.
 
 ## Faults fixed
 
@@ -1343,6 +1355,18 @@ a comment in that file saying why.
 
 - **`(%div 0 0)` returns 0** rather than signalling division by zero: `QDIV`
   returns 0 for a zero dividend before it looks at the divisor. MIT's.
+- **The inspector traps on a symbol that has a function but no value.**
+  `(inspect 'car)` stops with "The variable CAR is unbound" in
+  `(:METHOD TV:BASIC-INSPECT :OBJECT-SYMBOL)`: its "Function is" line
+  takes `SYMBOL-VALUE` where it means the function
+  (`window/inspct.lisp:383`). Found on System 2000 while checking its
+  release; the line is as System 100 has it.
+- **`LISTF` over TELNET traps after the listing.** `(listf "SYS: SITE;")`
+  typed at the TELNET listener prints the directory, then stops with
+  "Some argument to ARRAY-ACTIVE-LENGTH, NIL, was of the wrong type" in
+  `:STRING-OUT` of the TELNET stream, under `STREAM-COPY-UNTIL-EOF`. The
+  same on microcode 2000 before and after contract H8a; not tried at the
+  console, and the cause is not sought yet.
 - **Video controller sizes above 1920 by 1080 are not supported** (the user,
   2026-09-24). At 2560 by 1440, what boot draws in the Lisp listener stops
   at pixel 2^21, row 819, until its next refresh; the cause is not sought.

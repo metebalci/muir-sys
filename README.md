@@ -22,8 +22,8 @@ QUUX.
 
 ## QUUX
 
-QUUX is the CADR evolved, the machine muir runs with `--machine quux` and
-muir-fpga builds. It keeps the CADR's architecture and improves on it in two
+QUUX is the CADR evolved, the machine muir-sim runs as `quux` and muir-fpga
+builds. It keeps the CADR's architecture and improves on it in two
 directions: performance and capacity, and modern computing, such as the
 display's resolution, block storage and the network. Each improvement is a
 hardware revision, and the machine says which it has: `MACHINE-ID`, a
@@ -51,7 +51,7 @@ from power-on to Lisp.
 
 ## System 2000
 
-System 2000 is in progress on `main` and not yet released: the first system for
+System 2000 is the first release for QUUX, from `main`: the first system for
 QUUX, as above, with the herald naming the site and the machine, and fixes
 taken from lmz-sys, bishop's line.
 
@@ -89,10 +89,11 @@ it is replaced by the next release's band. The Lisp Machine's patch system
 remains in the tree, because it keeps track of the release number, but no patch
 files are written or loaded.
 
-Each release is published on this repository's Releases page with two files: a
-disk pack ready to boot, and the system's sources with their assembled
-microcode and an example site. Its README gives their checksums and how to run
-them.
+Each release is published on this repository's Releases page: a disk ready to
+boot (for QUUX a VHD with a GPT, for the CADR a disk pack), and the system's
+sources with their assembled microcode and an example site; a QUUX release
+also carries its boot PROM. From 1002 and 2000 on, `SHA256SUMS` gives the
+files' checksums. The release's own text says how to run them.
 
 ## The machine it runs on
 
@@ -100,7 +101,7 @@ This is the system. Three projects provide the machine:
 
 | | |
 |---|---|
-| **muir** | the software simulator, of the CADR and of QUUX |
+| **muir-sim** | the simulator, of the CADR (`cadr`) and of QUUX (`quux`) |
 | **muir-fpga** | the CADR and QUUX on FPGA boards |
 | **ozd** | the Chaosnet services daemon: files, time, host table, TELNET |
 
@@ -135,7 +136,7 @@ This is the system. Three projects provide the machine:
 
 Faults found along the way are logged as issues in this repository.
 
-## How it is developed
+## How it was written
 
 The system sources are MIT's, by way of LM-3. The changes here, the builds and
 the documents here are made by [Claude Code](https://claude.com/claude-code),
