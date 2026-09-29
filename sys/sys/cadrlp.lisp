@@ -224,6 +224,38 @@
 
 (DEFVAR FILE-TRUENAMES-LISTIFIED NIL)
 
+;; quux: the width of the machine word the assembly is for, 32. or 40.
+;; (contract g2, its appendix a1).  at 32. every output is what it was, byte
+;; for byte: the cadr's microcode and quux's to microcode 2000 assemble as
+;; before.  at 40. the fields change as a1 fixes them:
+;;  - a byte instruction's rotate is ir<5:0> and its length - 1 ir<11:6>, so
+;;    a byte may be 40. bits long; lc byte mode is ir<24>, on ldb only, since
+;;    a byte word's ir<11:10> are length bits and its misc functions are gone;
+;;  - a jump's or dispatch's rotate is 6 bits, bit 5 in ir<47>, and the
+;;    rotate of an ldb, a jump or a dispatch is reflected mod 40.;
+;;  - the dispatch memory has 10000 entries, its address ir<23:12>;
+;;  - a constant, and an initial value of an a or m location, is its value
+;;    zero-extended from 32 bits: -1 is 37777777777 (a1.5, q-a1e), and a value
+;;    that fits neither 40 bits nor 32 signed bits is refused;
+;;  - the .mcr file holds a memory as section 5, two words a location.
+;; set it before assembling, (setq ua:*word-width* 40.).
+(defvar *word-width* 32.
+  "The machine word the assembly is for: 32. (the cadr, and quux to microcode 2000) or 40. (contract g2).")
+
+(defun d-mem-size ()
+  "The dispatch memory's number of entries for *word-width*: 4000 at 32. bits, 10000 at 40."
+  (if (= *word-width* 40.) 10000 4000))
+
+(defun cons-lap-word-value (v exp)
+  "V, the value of a constant or of an a or m location's initial value, as the word that holds it.
+At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is a negative
+32-bit number (zero-extended, a1.5), and anything else refused.  EXP is what V came from."
+  (cond ((not (= *word-width* 40.)) v)
+	((and (>= v 0) (< v (expt 2 40.))) v)
+	((and (< v 0) (>= v (- (expt 2 31.)))) (+ v (expt 2 32.)))
+	(t (cons-lap-barf (list v exp) 'constant-fits-neither-40-bits-nor-32-signed 'data)
+	   v)))
+
 (DEFVAR CONS-LAP-INSIDE-COMMENT NIL
   "T in microassembly means we have seen a (BEGIN-COMMENT)
  and are ignoring thru next (END-COMMENT).")
@@ -249,10 +281,19 @@
   (PROG (TEM) 
 	(CONS-LAP-INIT-LOCS-FROM-STATE INIT-STATE)
 	(SETQ BASE-VERSION-NUMBER (GETF INIT-STATE 'VERSION-NUMBER))
+	;; quux: a word width other than g2's two would assemble fields that
+	;; fit no machine.
+	(unless (memq *word-width* '(32. 40.))
+	  (ferror nil "~D is not a word width the micro-assembler knows: 32. or 40." *word-width*))
 	(SETQ A-MEM-CREVICE-LIST NIL)
-	(SETQ D-MEM-FREE-BLOCKS 
-	      (COPYTREE (GETF INIT-STATE 'D-MEM-FREE-BLOCKS
-			      '(NIL (4000 . 0)))))	;A BLOCK OF 4000 STARTING AT 0
+;	(SETQ D-MEM-FREE-BLOCKS
+;	      (COPYTREE (GETF INIT-STATE 'D-MEM-FREE-BLOCKS
+;			      '(NIL (4000 . 0)))))	;A BLOCK OF 4000 STARTING AT 0
+	;; quux: the whole dispatch memory, 4000 entries at 32. bits and 10000
+	;; at 40. (a1.4), is one free block starting at 0.
+	(setq d-mem-free-blocks
+	      (copytree (getf init-state 'd-mem-free-blocks
+			      (list nil (cons (d-mem-size) 0)))))
 	(ALLREMPROP 'CONS-LAP-USER-SYMBOL)
 	(SETQ M-CONSTANT-LIST			;DUMMY UP SLOTS FOR USAGE COUNT AND LAST
 	      (COND ((SETQ TEM (GETF INIT-STATE 'M-CONSTANT-LIST))  ;USE
@@ -315,7 +356,9 @@
 (DEFUN CONS-LAP-ALLOCATE-ARRAYS NIL 
   (SETQ I-MEM (MAKE-ARRAY SI:SIZE-OF-HARDWARE-CONTROL-MEMORY)
 	A-MEM (MAKE-ARRAY 2000)
-	D-MEM (MAKE-ARRAY 4000))
+;	D-MEM (MAKE-ARRAY 4000))
+	;; quux: 10000 entries at 40. bits (a1.4).
+	d-mem (make-array (d-mem-size)))
   (SETQ MICRO-CODE-SYMBOL-IMAGE (MAKE-ARRAY MICRO-CODE-SYMBOL-AREA-SIZE)))
 
 (DEFUN CONS-LAP-INIT-LOCS-FROM-STATE (INIT-STATE) 
@@ -695,8 +738,11 @@
       (PRINT (LIST 'A-MEM (MAX A-MEM-LOC A-CONSTANT-LOC)) OUTPUT-FILE)
       (PRINT (LIST 'M-MEM (MAX M-MEM-LOC M-CONSTANT-LOC)) OUTPUT-FILE)
       (PRINT (LIST 'I-MEM I-MEM-LOC) OUTPUT-FILE)
-      (PRINT (LIST 'D-MEM (- 4000 (GET-D-MEM-FREE-LOCS (CDR D-MEM-FREE-BLOCKS))))
-	     OUTPUT-FILE)
+;      (PRINT (LIST 'D-MEM (- 4000 (GET-D-MEM-FREE-LOCS (CDR D-MEM-FREE-BLOCKS))))
+;	     OUTPUT-FILE)
+      ;; quux: the entries used of the whole dispatch memory, 10000 at 40. bits.
+      (print (list 'd-mem (- (d-mem-size) (get-d-mem-free-locs (cdr d-mem-free-blocks))))
+	     output-file)
       (TERPRI OUTPUT-FILE)))
   FN)
 
@@ -911,6 +957,7 @@
 
 ;SPLIT UP INTO POWER OF 2 BLOCKS
 ;******* KNOWS THAT D MEM IS 4000 LOCATIONS *******
+;; quux: or 10000 at 40. bits, (d-mem-size).
 (DEFUN CONS-LAP-D-MEM-LOC-SPLITUP (BL LOW HIGH)
   (DECLARE (FIXNUM LOW HIGH))
   (PROG (BLOCKSIZE)
@@ -918,7 +965,8 @@
      RCR
 	(COND ((= LOW HIGH) (RETURN NIL)))
 	;; Compute largest power of 2 block starting at LOW
-	(SETQ BLOCKSIZE (BOOLE 1 (+ 4000 LOW) (- 4000 LOW)))
+;	(SETQ BLOCKSIZE (BOOLE 1 (+ 4000 LOW) (- 4000 LOW)))
+	(setq blocksize (boole 1 (+ (d-mem-size) low) (- (d-mem-size) low)))
      A  (COND ((> (+ LOW BLOCKSIZE) HIGH)
 	       (SETQ BLOCKSIZE (TRUNCATE BLOCKSIZE 2))
 	       (GO A)))
@@ -1049,7 +1097,10 @@
 	       (SETQ CONS-LAP-WDS-SINCE-LAST-SYM 0)
 	       (COND ((AND DISPATCH-ARM 
 			   (EQ LOCALITY 'D-MEM))
-		      (SETQ D-MEM-LOC (LDB 1413 (CONS-LAP-ARG-EVAL WD)))
+;		      (SETQ D-MEM-LOC (LDB 1413 (CONS-LAP-ARG-EVAL WD)))
+		      ;; quux: the address is ir<22:12>, and ir<23:12> at 40. bits (a1.4).
+		      (setq d-mem-loc (ldb (if (= *word-width* 40.) 1414 1413)
+					   (cons-lap-arg-eval wd)))
 		      (SETQ DISPATCH-ARM NIL))
 		     ((NOT (EQUAL 
 			    (CONS-LAP-SYMEVAL WD)
@@ -1119,6 +1170,10 @@
 	(COND (DISPATCH-ARM 
 	       (CONS-LAP-BARF WD 'STORAGE-WD-IN-UNLOCATED-DISPATCH-BLOCK 'DATA)))
 	(SETQ V (CONS-WORD-EVAL WD))
+	;; quux: an a or m location's initial value is a word like a constant:
+	;; at 40. bits zero-extended from 32 (a1.5), so m-minus-one is 37777777777.
+	(when (memq locality '(a-mem m-mem))
+	  (setq v (cons-lap-word-value v wd)))
 	(COND ((EQ LOCALITY 'A-MEM)
 	       (COND ((>= A-MEM-LOC (ARRAY-ACTIVE-LENGTH A-MEM))
 		      (CONS-LAP-BARF A-MEM-LOC 'A-MEM-OVERFLOW 'DATA))
@@ -1301,7 +1356,9 @@
 
 (DEFUN CONS-LAP-DEFAULT-AND-BUGGER 
          (INSTRUCTION-CONTEXT COMBINED-VALUE COMBINED-INDICATORS DESTINATION-INDICATORS)
-  (PROG (T1 T2 INST)
+;  (PROG (T1 T2 INST)
+  ;; quux: lc-byte-mode, a byte word's lc byte mode at 40. bits.
+  (prog (t1 t2 inst lc-byte-mode)
 ;	(PRINT (LIST INSTRUCTION-CONTEXT 
 ;		     COMBINED-VALUE 
 ;		     COMBINED-INDICATORS 
@@ -1322,7 +1379,10 @@
 				'BAD-INSTRUCTION-TYPE
 				'WARN)
 		 (GO X)))
-    ALU (COND ((NULL (MEMQ 'ALU-OUTPUT-BUS-SELECTOR-MULTIPLIER 	;DEFAULT OUTPUT BUS
+    ALU (when (and (= *word-width* 40.)	;quux: an alu word has no lc byte mode (a1.1)
+		   (memq 'lc-byte-mode-multiplier combined-indicators))
+	  (cons-lap-barf combined-value 'lc-byte-mode-on-ldb-jump-and-dispatch-only 'data))
+	(COND ((NULL (MEMQ 'ALU-OUTPUT-BUS-SELECTOR-MULTIPLIER 	;DEFAULT OUTPUT BUS
 			   COMBINED-INDICATORS))		;SELECTOR IF NOT SPECD
 	       (SETQ COMBINED-VALUE (PLUS COMBINED-VALUE 1_12.))))
 	(COND ((MEMQ 'ALU-OP COMBINED-INDICATORS)
@@ -1342,6 +1402,16 @@
     ALU-1
        (GO X)
     BYTE
+       ;; quux: at 40. bits a byte word's ir<11:10> are length bits, so it has
+       ;; no misc function (a1.1): a halt there is refused, and lc byte mode
+       ;; (instruction-stream, 3 in ir<11:10>) is taken back out of the sum
+       ;; before its carry can reach the sr bit, and set in ir<24> below.
+       (when (= *word-width* 40.)
+	 (when (memq 'halt-multiplier combined-indicators)
+	   (cons-lap-barf combined-value 'halt-in-a-byte-instruction 'data))
+	 (when (memq 'lc-byte-mode-multiplier combined-indicators)
+	   (setq combined-value (- combined-value 3_10.))	;instruction-stream's value
+	   (setq lc-byte-mode t)))
        (COND ((NULL (MEMQ 'A-MEM COMBINED-INDICATORS))	;DEFAULT A-MEM ADR TO
 	      (SETQ COMBINED-VALUE 			;A-ZERO IF NOT SUPPLIED,
 		    (PLUS COMBINED-VALUE 2_32.)))) ;THIS RIGHT FOR BOTH LDB AND DPB
@@ -1349,12 +1419,30 @@
        (SETQ T1 (LDB 1401 COMBINED-VALUE))	;GET SR-BIT
        (SETQ COMBINED-VALUE (DPB (- 1 T1) ;STORE IT BACK COMPLEMENTED
 				    1401 COMBINED-VALUE))
+       ;; quux: lc byte mode is ldb's alone at 40. bits (a1.2, q-a1i), in ir<24>:
+       ;; a deposit's mask would want another addend than its rotate.
+       (when lc-byte-mode
+	 (cond ((not (= (ldb 1402 combined-value) 1))
+		(cons-lap-barf combined-value 'lc-byte-mode-on-ldb-only 'data))
+	       ((not (zerop (ldb 3001 combined-value)))
+		(cons-lap-barf combined-value 'ir-24-already-set 'data))
+	       (t (setq combined-value (+ combined-value 1_24.)))))
        (COND ((> (LDB 1402 COMBINED-VALUE) 1)
 	      (GO X1)))	;DONT BUGGER DPB OR SEL DEPOS
     M-ROTATE-BUGGER				;32. REFLECT M-ROTATE FIELD
+       ;; quux: at 40. bits reflected mod 40., over the 6-bit rotate.
+       (when (= *word-width* 40.)
+	 (setq combined-value
+	       (cons-lap-reflect-rotate-40 combined-value (= inst 600000000000000)))
+	 (go x1))
        (SETQ T1 (LOGAND 6037 COMBINED-VALUE))	;GOBBLE MISC FCTN
        ;AND M-ROTATE
     M-ROTATE-BUGGER-1
+       ;; quux: a jump's bit test, at 40. bits (the byte and dispatch came
+       ;; through above).
+       (when (= *word-width* 40.)
+	 (setq combined-value (cons-lap-reflect-rotate-40 combined-value nil))
+	 (go x1))
        (SETQ T1 (LOGAND 37 T1))
        (SETQ T2 (LOGAND 37 (- 40 T1)))
        (SETQ COMBINED-VALUE (PLUS COMBINED-VALUE (- T2 T1)))
@@ -1370,6 +1458,23 @@
        (COND ((> (LOGAND T1 77) 37) (GO X1)))	;TEST-CONDITION, DONT HACK
        (GO M-ROTATE-BUGGER-1)		;RANDOMLY SAVE A BIGNUM OP
        ))
+
+;; quux: the reflection of cons-lap-default-and-bugger at 40. bits.  the
+;; machine rotates m left by the rotate mod 40. (a1.2), so a byte at position p
+;; is brought to bit 0 by (40. - p) mod 40.  a byte instruction's rotate is its
+;; 6 bits ir<5:0>; a jump's or a dispatch's is ir<4:0>, with bit 5 in ir<47>.
+(defun cons-lap-reflect-rotate-40 (value byte-p)
+  "VALUE, a microinstruction, with its rotate r made (40. - r) mod 40.; BYTE-P for a byte instruction."
+  (let ((r (if byte-p
+	       (ldb 0006 value)
+	     (+ (ldb 0005 value) (* 32. (ldb 5701 value)))))
+	(e 0))
+    (unless (< r 40.)
+      (cons-lap-barf value 'rotate-past-39 'data))
+    (setq e (\ (- 40. r) 40.))
+    (if byte-p
+	(dpb e 0006 value)
+      (dpb (ldb 0501 e) 5701 (dpb (ldb 0005 e) 0005 value)))))
 
 ;CONSTANT LISTS.
 ;A LIST OF LISTS.  CAR IS VALUE OF CONSTANT, CADR IS ADDRESS, CADDR IS #USERS, CADDDR IS 
@@ -1377,7 +1482,9 @@
 
 (DEFUN CONS-M-CONSTANT (C)
   (PROG (TEM V)
-	(SETQ V (CONS-LAP-ARG-EVAL C))
+;	(SETQ V (CONS-LAP-ARG-EVAL C))
+	;; quux: zero-extended from 32 bits at 40. bits (a1.5), so -1 is location 3.
+	(setq v (cons-lap-word-value (cons-lap-arg-eval c) c))
 	(COND ((= V 0) 
 		(SETQ TEM 2))	;M LOCN 2 ALWAYS HAS 0
 	      ((OR (= V 37777777777) (= V -1))
@@ -1395,7 +1502,9 @@
 
 (DEFUN CONS-A-CONSTANT (C)
   (PROG (TEM V)
-	(SETQ V (CONS-LAP-ARG-EVAL C))
+;	(SETQ V (CONS-LAP-ARG-EVAL C))
+	;; quux: zero-extended from 32 bits at 40. bits (a1.5), so -1 is location 3.
+	(setq v (cons-lap-word-value (cons-lap-arg-eval c) c))
 	(COND ((= V 0) 
 		(SETQ TEM 2))	;A LOCN 2 ALWAYS HAS 0
 	      ((OR (= V 37777777777) (= V -1))
@@ -1530,23 +1639,50 @@ L	(COND ((NULL X) (RETURN V)))
 							FORCE-ALU-OR-BYTE))
 			(CONS-GET-NEW-CONTEXT 'FORCE-BYTE)))
 		(SETQ V1 (CONS-LAP-EVAL (CADR EXP)) V2 (CONS-LAP-EVAL (CADDR EXP)))
+		;; quux: at 40. bits a byte is up to 40. bits long and starts at
+		;; bits 0 to 39. (a1.1, a1.2).  a byte instruction's rotate is
+		;; ir<5:0> and its length - 1 ir<11:6>; a dispatch's or a jump's
+		;; rotate keeps ir<4:0> and puts its bit 5 in ir<47>, since ir<5>
+		;; is the dispatch's length and the jump's condition mode.  the
+		;; rotate is still the byte's position here, reflected later by
+		;; cons-lap-default-and-bugger.
+		(when (and (= *word-width* 40.)
+			   (memq instruction-context '(force-byte force-dispatch force-jump))
+			   (not (< v2 40.)))
+		  (cons-lap-barf (caddr exp) 'byte-position-past-bit-39 'data))
 		(COND ((EQ INSTRUCTION-CONTEXT 'FORCE-BYTE)
-		       (AND (> V1 32.) (CONS-LAP-BARF (CADR EXP)
-						      'BYTE-SIZE-GREATER-THAN-32
-						      'DATA))
+;		       (AND (> V1 32.) (CONS-LAP-BARF (CADR EXP)
+;						      'BYTE-SIZE-GREATER-THAN-32
+;						      'DATA))
+		       (cond ((not (= *word-width* 40.))
+			      (and (> v1 32.) (cons-lap-barf (cadr exp)
+							     'byte-size-greater-than-32
+							     'data)))
+			     ((> v1 40.) (cons-lap-barf (cadr exp)
+							'byte-size-greater-than-40
+							'data)))
 		       (AND (ZEROP V1) (SETQ V1 1))	;Byte size 0, doing OA hackery, use 1-1
-		       (SETQ V (+ (* 1_5. (1- V1)) V2))) ;1- byte size, MROT not buggered yet
+;		       (SETQ V (+ (* 1_5. (1- V1)) V2))) ;1- byte size, MROT not buggered yet
+		       (setq v (if (= *word-width* 40.)
+				   (+ (* 1_6 (1- v1)) v2)	;length - 1 in ir<11:6>
+				 (+ (* 1_5. (1- v1)) v2))))	;1- byte size, MROT not buggered yet
 		      ((EQ INSTRUCTION-CONTEXT 'FORCE-DISPATCH)
 			(AND (> V1 7) (CONS-LAP-BARF (CADR EXP)
 						     'DISPATCH-BYTE-SIZE-GREATER-THAN-7
 						     'DATA))
-			(SETQ V (+ (* 1_5. V1) V2)))
+;			(SETQ V (+ (* 1_5. V1) V2)))
+			(setq v (if (= *word-width* 40.)
+				    (+ (* 1_5. v1) (ldb 0005 v2) (* (ldb 0501 v2) 1_47.))
+				  (+ (* 1_5. v1) v2))))
 		      ((EQ INSTRUCTION-CONTEXT 'FORCE-JUMP)
 			(COND ((NOT (= 1 V1))
 				(CONS-LAP-BARF (CADR EXP) 
 						'CAN-ONLY-TEST-ONE-BIT-FIELD-WITH-JUMP 
 						 'DATA)))
-			(SETQ V V2))
+;			(SETQ V V2))
+			(setq v (if (= *word-width* 40.)
+				    (+ (ldb 0005 v2) (* (ldb 0501 v2) 1_47.))
+				  v2)))
 		      (T (CONS-LAP-BARF INSTRUCTION-CONTEXT 
 					'BYTE-FIELD-IN-BAD-CONTEXT 
 					'DATA)))
@@ -1693,7 +1829,13 @@ L	(COND ((NULL X) (RETURN V)))
 	      ((EQ (CAR EXP) 'LISP-BYTE)
 		(RETURN (CONS-LAP-GET-BYTE-VALUE (CONVERT-LISP-BYTE (CADR EXP)) VAL)))
 	      ((EQ (CAR EXP) 'BYTE-FIELD)
-		(RETURN (DPB VAL (+ (LSH (CADDR EXP) 6) (CADR EXP)) 0)))
+		;; quux: at 40. bits a field may be 32 bits or wider, as the pointer
+		;; is (a1.5), and dpb takes only a field that fits in a fixnum, so the
+		;; value is placed by arithmetic there: its low bits, shifted to the field.
+		(if (= *word-width* 40.)
+		    (return (* (logand val (1- (expt 2 (cadr exp)))) (expt 2 (caddr exp))))
+;		(RETURN (DPB VAL (+ (LSH (CADDR EXP) 6) (CADR EXP)) 0)))
+		  (return (dpb val (+ (lsh (caddr exp) 6) (cadr exp)) 0))))
 	      (T (CONS-LAP-BARF EXP 'CONS-LAP-GET-BYTE-VALUE 'WARN)))
 ))
 

@@ -68,9 +68,18 @@
 
 ;MISC FUNCTION CODES
 
-(DEFPROP INSTRUCTION-STREAM 3_10. CONS-LAP-SYM)
+;(DEFPROP INSTRUCTION-STREAM 3_10. CONS-LAP-SYM)
 (DEFPROP WRITE-DISPATCH-RAM (FORCE-DISPATCH 2_10.) CONS-LAP-SYM)
-(DEFPROP HALT-CONS 1_10. CONS-LAP-SYM)
+;(DEFPROP HALT-CONS 1_10. CONS-LAP-SYM)
+;; quux: lc byte mode (3) and halt (1) are fields, with the same values as
+;; before, so that the micro-assembler sees them in a word: at 40. bits a byte
+;; word's ir<11:10> are length bits, so it takes lc byte mode in ir<24> (ldb
+;; only) and refuses a halt, and an alu word refuses lc byte mode (contract
+;; g2's appendix a1.1, a1.2).  at 32. bits the words are what they were.
+(defprop lc-byte-mode-multiplier 3_10. cons-lap-sym)
+(defprop halt-multiplier 1_10. cons-lap-sym)
+(defprop instruction-stream (field lc-byte-mode-multiplier 1) cons-lap-sym)
+(defprop halt-cons (field halt-multiplier 1) cons-lap-sym)
 
 (DEFPROP I-LONG 1000000000000000 CONS-LAP-SYM)
 

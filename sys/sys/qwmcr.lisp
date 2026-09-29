@@ -29,6 +29,8 @@
 (DEFVAR CONSLP-OUTPUT-SYMBOL-PREDICTED-FILEPOS)
 (DEFVAR CONSLP-OUTPUT-CURRENT-FILEPOS)
 (PROCLAIM '(SPECIAL CONSLP-OUTPUT VERSION-NUMBER CONSLP-OUTPUT-PATHNAME))
+;; quux: the word width, cadrlp's: 32. or 40. (contract g2).
+(proclaim '(special *word-width*))
 
 (DEFUN OUT16 (FILE HALFWORD)
   (INCF CONSLP-OUTPUT-CURRENT-FILEPOS)
@@ -67,7 +69,11 @@
 	  (WRITE-I-MEM I-MEM 1 FILE)
 	  (WRITE-D-MEM D-MEM 2 FILE)
 	  (WRITE-MICRO-CODE-SYMBOL-AREA-PART-1 FILE)
-	  (WRITE-A-MEM A-MEM 4 FILE)
+;	  (WRITE-A-MEM A-MEM 4 FILE)
+	  ;; quux: at 40. bits a memory is section 5, two words a location
+	  ;; (contract g2's appendix a1.12, q-a1g); section 4 is 32 bits a
+	  ;; location, and prom 2001 halts on it.
+	  (write-a-mem a-mem (if (= *word-width* 40.) 5 4) file)
 	  (WRITE-MICRO-CODE-SYMBOL-AREA-PART-2 FILE)
 	  ;; quux: partition order ends on a whole block, 1000 halves, and
 	  ;; with no half of a word left held.
@@ -101,7 +107,15 @@
   (LET ((SIZE (ARRAY-LENGTH A-ARRAY)))
     (OUT32 FILE SIZE)
     (DO ((I 0 (1+ I))) ((= I SIZE))
-      (OUT32 FILE (OR (AREF A-ARRAY I) 0)))))
+;      (OUT32 FILE (OR (AREF A-ARRAY I) 0)))))
+      ;; quux: section 5 (40. bits) puts out each location as <31:0> and
+      ;; then <39:32> in the low byte of a second word, its <31:8> zero
+      ;; (a1.12); section 4 as the one word it was.
+      (let ((word (or (aref a-array i) 0)))
+	(cond ((= code 5)
+	       (out32 file word)		;out32 puts out <31:0> alone
+	       (out32 file (ldb 4010 word)))
+	      (t (out32 file word)))))))
 
 (DEFUN WRITE-I-MEM (ARRAY CODE FILE)
   (OUT32 FILE CODE)				;Code for this kind of section.
@@ -125,7 +139,10 @@
 	(+ CONSLP-OUTPUT-CURRENT-FILEPOS
 	   4					;rest of this block
 	   6					;A/M header
-	   4000					;A/M data
+;	   4000					;A/M data
+	   ;; quux: A/M data, 2000 locations of two halves, or at 40. bits of
+	   ;; four (section 5, two words a location).
+	   (if (= *word-width* 40.) 10000 4000)
 	   ))
   ;; Rel disk block #
   (OUT32 FILE (TRUNCATE (+ CONSLP-OUTPUT-SYMBOL-PREDICTED-FILEPOS 777) 1000))
