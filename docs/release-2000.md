@@ -47,7 +47,7 @@ Every change to a source file carries a comment in that file saying why.
   and one from its result, made cold loads byte for byte the CADR route's,
   and compiled files that differ from its only in their headers' time,
   system version and order, and in generated symbol numbers
-  (docs/building.md, "Building a System 2000 band on QUUX"). The CADR route
+  (docs/building.md, "Building a band on QUUX"). The CADR route
   stays as the fallback until it is retired.
 
 ## QUUX

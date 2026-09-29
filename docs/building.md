@@ -30,9 +30,9 @@ sources.
 | Size of the finished world | 20614 blocks |
 | Saved band | LOD5, "Exp 1000.0", boots and answers |
 
-## Building a System 2000 band on QUUX
+## Building a band on QUUX
 
-System 2000 is built on QUUX alone: a 2000 band compiles the next one, on
+QUUX's system is built on QUUX alone: a band of `main` compiles the next one, on
 one machine, with no CADR (the user, 2026-09-25, as the CADR will never get
 a file device). The route through the CADR, below, stays documented as the
 fallback until it is retired. The stages are the ones described under "The
@@ -41,7 +41,7 @@ stages"; what differs is where each one runs and how the disk is handled.
 **The disk** is a GPT (docs/booting.md), made on the host with `sgdisk`:
 MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
 
-1. **The builder goes in LOD2.** Copy the previous 2000 band (its current
+1. **The builder goes in LOD2.** Copy the previous band (its current
    LOD partition) into LOD2 and its microcode's `ucadr.mcr` into MCR1, and
    set attribute bit 48 on MCR1 and LOD2. Nothing writes LOD2 after this:
    the cold load goes to LOD3 and the finished world to LOD4, so a failed
@@ -72,7 +72,7 @@ MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
    carries the TELNET listener here too, though it serves no file
    (`docs/lispm-check.md`, "The file server").
 6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
-   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2000 ..."`), and LOD2, LOD3
+   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2001 ..."`), and LOD2, LOD3
    and PAGE zeroed before the disk is handed over.
 
 **Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
@@ -469,7 +469,7 @@ overwrite question automatically without first checking its destination.
 
 ## 5. Boot the cold load
 
-On QUUX's GPT disk, see "Building a System 2000 band on QUUX", step 4. On a LABL pack:
+On QUUX's GPT disk, see "Building a band on QUUX", step 4. On a LABL pack:
 
 Make the cold load's partition the current band, then boot. With the machine stopped, muir's `diskpack` does it. The same stop is the moment to make room for the finished world, since both are label edits:
 

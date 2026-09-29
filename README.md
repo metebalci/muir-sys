@@ -31,7 +31,7 @@ functional source, gives the revision, and its **feature page**, the read-only
 first 64 words of its register page, gives its sizes. The system reads both at boot rather than
 assuming them.
 
-What System 2000 uses so far:
+What the system on `main` uses so far:
 
 | | QUUX | the CADR |
 |---|---|---|
@@ -41,11 +41,12 @@ What System 2000 uses so far:
 | the 60-cycle clock (revision 4) | the processor's own tick | the display's vertical interrupt |
 | display | the video controller, a 1-bit frame buffer, 1920 by 1080 by default, sized from the feature page | 768 by 963, with a sync program |
 
-The microcode is **microcode 2000**, the first change to the microcode itself,
-which stayed 323 while it was MIT's, and the machine boots it with **boot
-PROM 2000**: QUUX's numbers are the 2000s, the CADR's the 1000s. Both are for
-QUUX alone and stop on anything else, as a System 2000 band does.
-[`docs/release-2000.md`](docs/release-2000.md) records each
+QUUX's microcode is MIT's 323 changed, released first as **microcode 2000**
+with **boot PROM 2000** and System 2000: QUUX's numbers are the 2000s, the
+CADR's the 1000s. `main` is now **System 2001**, on **microcode 2001** and
+**boot PROM 2001**. Both are for QUUX alone and stop on anything else, as a
+band from `main` does.
+[`docs/release-2001.md`](docs/release-2001.md) records each
 change as it is made; [`docs/booting.md`](docs/booting.md) follows a machine
 from power-on to Lisp.
 
@@ -119,8 +120,10 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
+- [`docs/release-2001.md`](docs/release-2001.md) --- every change System 2001,
+  in progress on `main`, makes to System 2000.
 - [`docs/release-2000.md`](docs/release-2000.md) --- every change System 2000
-  makes to System 1001, recorded as it is made.
+  makes to System 1001.
 - [`docs/booting.md`](docs/booting.md) --- how a machine boots, from power-on
   through the boot PROM and the microcode to the first macroinstruction.
 - [`docs/release-1001.md`](docs/release-1001.md) --- every change System 1001

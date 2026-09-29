@@ -22,7 +22,7 @@ building; `docs/building.md` covers that.
 ## Stage 1: the PROM loads microcode
 
 The PROM is `sys/ucadr/promh.text`, assembled to `sys/ubin/promh.mcr`. It knows
-nothing about bands, Lisp or virtual memory. This tree's PROM is version 2000,
+nothing about bands, Lisp or virtual memory. This tree's PROM is version 2001,
 MIT's version 9 changed for QUUX, and it boots QUUX alone: it reads only
 block-disk, and it finds the microcode through the disk's GPT (below). The CADR
 keeps MIT's PROM, which the `cadr` branch has.

@@ -1,5 +1,4 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
-;;; System 2000, QUUX's first system, in progress on main: QUUX's numbers are the
-;;; 2000s and the CADR's the 1000s (Mete, 2026-09-27); it was 1002 until then.
+;;; System 2001, in progress on main since System 2000 was released.
 
-("System" 2000)
+("System" 2001)
