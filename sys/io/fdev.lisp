@@ -3,7 +3,7 @@
 ;;; This is SYS: IO; FDEV
 ;;;
 ;;; quux: the driver of quux's file device (contract q9, revision 9).  the
-;;; device is muir's as built at e11026a, described in its docs/quux.md,
+;;; device is muir's as built at ab87378, described in its docs/quux.md,
 ;;; "the file device": folders of the host served to the machine under the
 ;;; pathname host HOST, commands and responses in two rings in main memory,
 ;;; the bytes moved by dma, and only control and the rings' indexes in the

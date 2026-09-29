@@ -22,7 +22,7 @@ Every change to a source file carries a comment in that file saying why.
   byte, as the PROM neither prints nor checks a version; its `promh.tbl`
   and `promh.sym` differ only in the version. A band saved on microcode
   1000 boots on 2000 and loads its error table ("[Loading error table for
-  microcode version 2000]"; band M4a, System 1002, on muir 1a89ed0).
+  microcode version 2000]"; band M4a, System 1002, on muir db1e0f3).
 
 ## QUUX only
 
@@ -290,7 +290,7 @@ Every change to a source file carries a comment in that file saying why.
     log (`io/dledit.lisp`) and the band receiver (`sys2/band.lisp`) speak
     of blocks; `cold/qcom.lisp` names block-disk's status bits and masks.
   The label keeps its geometry words, for the tools that print them.
-  Tested on muir 08a5fa3 with block-disk: the PROM loads the microcode, a
+  Tested on muir ba8d42e with block-disk: the PROM loads the microcode, a
   cold load boots and QLDs, the saved band boots; Lisp reads the label and
   a band's first blocks, writes and reads back a block, read-compares, and
   a read past the end reports it; the host's reading of the pack agrees.
@@ -309,7 +309,7 @@ Every change to a source file carries a comment in that file saying why.
     `ERROR-BUFFER-NOT-LOADED` if the section does not cover page 3, checked
     before anything is loaded. The halts before them keep their addresses;
     `GO` moves from 36037 to 36043 (`ucadr/promh.text`). Tested on muir
-    b7d3e82, micro and rtl, with band dev9: cold and warm boots keep the
+    365c160, micro and rtl, with band dev9: cold and warm boots keep the
     world; up to the microcode's location 6 the pack is unchanged, and of
     main memory only pages 3-6 and word 777 change.
   - **QUUX's `.mcr` is written in partition order**: each word's low half
@@ -333,7 +333,7 @@ Every change to a source file carries a comment in that file saying why.
     halts are after the last code (36632, 36634, 36636), so `GO` stays at
     36043; `ERROR-BAD-LABEL` and `ERROR-NO-MICR` are no longer reached. It
     still writes nothing to the disk, and in main memory only pages 3-6 and
-    word 777. Tested on muir 7dfc41c, 0d14efc and 53ee46d, micro and rtl,
+    word 777. Tested on muir 630c7d7, 8141283 and 5addbee, micro and rtl,
     with microcode `ucode-1000-gpt2` and the GPT band: cold boot, a warm
     boot that keeps the world, a save into LOD3 and `(disk-restore 3)` into
     it at 1280x1024; it boots with MCR1 current, with MCR2
@@ -387,7 +387,7 @@ Every change to a source file carries a comment in that file saying why.
     also writes a partial last block, which MIT's dropped (`io/disk.lisp`).
   - **A QUUX disk is at most 8 GiB** (2^24 LBAs), so the microcode and Lisp
     read only an LBA's low word.
-  Tested on muir 7dfc41c, on T-300-size disks with a GPT, with a test PROM
+  Tested on muir 630c7d7, on T-300-size disks with a GPT, with a test PROM
   that loads the microcode from block 17 (the real PROM's GPT reader was not
   done yet). Cold boots by bit 48 of LOD4, LOD3 and LOD1; QLD; saves into
   LOD4, LOD1 and LOD3; an incremental save and its cold boot from its base
@@ -430,7 +430,7 @@ Every change to a source file carries a comment in that file saying why.
   ahead of the network, which stays the source below revision 9, and
   `SET-LOCAL-TIME` reads neither: with no argument it still asks for the
   time. The clock is read-only; the time zone stays the site's
-  (`io1/time.lisp`). Tested on muir 09e88ef with `--rtc` at 1790000000,
+  (`io1/time.lisp`). Tested on muir ca21dd0 with `--rtc` at 1790000000,
   2^31 and 2^32-1 and on the host's clock: the universal time is the clock
   plus the constant, and a boot sends no TIME request; on a revision 8
   muir the band asks for the time as before.
@@ -444,12 +444,12 @@ Every change to a source file carries a comment in that file saying why.
   NIL without the clock, and the old count stands. The time is unknown
   exactly when it was (`*LAST-TIME-UPDATE-TIME*` NIL). `(TIME)`, timeouts,
   `PROCESS-SLEEP` and the scheduler stay on the tick and the microsecond
-  clock (`io1/time.lisp`). Tested on muir e11026a, micro unpaced, with the
+  clock (`io1/time.lisp`). Tested on muir ab87378, micro unpaced, with the
   change saved into a band: with `--rtc` fixed, `GET-UNIVERSAL-TIME` equals
   the clock at every sample over 65 s (it and the old count agree in rate
   there, but the count lagged the clock by up to a second); on the host's
   clock it equals the clock and the host's second, where the old count ran
-  11 s ahead in 66 s; the who-line shows the clock's time; on muir 53ee46d
+  11 s ahead in 66 s; the who-line shows the clock's time; on muir 5addbee
   (revision 8) the offset is NIL and the band asks the network, as before.
 - **Files from QUUX's host through the file device, as `HOST:`** (muir's
   contract Q9, revision 9; migration step M2: `SYS:` stays on OZ).
@@ -484,7 +484,7 @@ Every change to a source file carries a comment in that file saying why.
   `COPY-FILE` keeps a file's date. The home directory is
   `HOST: /home/<user>/`, the user id in lower case. Names are checked (1 to
   255 bytes of 040-176 a component) and `..` resolved before a command is
-  sent. muir e11026a's own behaviour, as built: a DIRECTORY of a missing
+  sent. muir ab87378's own behaviour, as built: a DIRECTORY of a missing
   directory is DNF, names the host refuses are not listed, writes in
   progress (`.quux-write-*`) are hidden, and a name the host refuses with
   EINVAL is IPS.
@@ -508,7 +508,7 @@ Every change to a source file carries a comment in that file saying why.
   `report: script-ends`. MINI also logs one `mini: read NAME BYTES` line
   for each file. After QLD, `MINI-REPORT` uses the driver's
   `FILE-DEVICE-LOG` when it is loaded. Measured in a full build on QUUX
-  (muir b777f19, micro engine), with the driver: 40 files, 1,508,398 bytes,
+  (muir a2efda5, micro engine), with the driver: 40 files, 1,508,398 bytes,
   all through the device, each byte for byte the host's file; the 38 that
   MINI also read over Chaos in the earlier build match it. ozd saw no MINI
   connection. QLD passed
@@ -521,7 +521,7 @@ Every change to a source file carries a comment in that file saying why.
   for. A boot reads its error table through the file device and reaches the
   herald with no ozd and no Chaos peer at all, with the time from the
   real-time clock, and QLD runs the same way. The band was built on QUUX
-  (muir b777f19, revision 9, micro engine) with dev11's microcode and PROM:
+  (muir a2efda5, revision 9, micro engine) with dev11's microcode and PROM:
   the builder moved `SYS:` to `HOST` in its running world, recompiled SITE
   and SYSTEM (`:RECOMPILE`, 211 files, 1 h 52 min) through `HOST`, and made
   the cold load, all with ozd serving no file; the cold load then booted
@@ -552,8 +552,8 @@ Every change to a source file carries a comment in that file saying why.
   no device there: a file device left enabled runs on through the PROM
   until the microcode's `RESET-MACHINE` pulses `<28>`. `GO` stays at 36043;
   the code ends at 36646 (was 36636), and the GPT halts move to 36642,
-  36644 and 36646. Tested with dev11's microcode on muir 7a5136c (revision
-  10) and b777f19 (revision 9), micro and rtl, with bands dev11 and M23b:
+  36644 and 36646. Tested with dev11's microcode on muir 1cc35e5 (revision
+  10) and a2efda5 (revision 9), micro and rtl, with bands dev11 and M23b:
   each boots to its listener, and to it again after a `%DISK-RESTORE`, and
   `INTR-TICK` runs 600 times in 10 s of simulated time after each on both
   revisions (with the old PROM on revision 10: 0); muir's M9, M10 and M11
@@ -581,7 +581,7 @@ Every change to a source file carries a comment in that file saying why.
   `INTR-TICK` clears it with 403, in place of their destination 3 writes
   (`ucadr/uc-cold-disk.lisp:884-896`, `ucadr/uc-interrupt.lisp:368-378`).
   Revision 10 keeps no alias of timer 0 there: destination 3 writes only M,
-  as destination 4 does (Q11 as amended on 27 Sep; muir 1a89ed0), so a band
+  as destination 4 does (Q11 as amended on 27 Sep; muir db1e0f3), so a band
   on the previous microcode 1000 has no tick on revision 10, and this
   system's bands move to this microcode.
   `INTR` turns timer 1 or 2 off when word 100 `<1>` or `<7>` (`<2>` from
@@ -598,7 +598,7 @@ Every change to a source file carries a comment in that file saying why.
   (`sys/genric.lisp:1839-1853`). Named A, M and D memory is where it was, so
   bands saved on the previous microcode 1000 run on this one with its
   `UCADR TBL` served. Tested with band M4a (System 1002, Q9's step M4) on
-  muir 947926e (revision 10) and b777f19 (revision 9), micro and rtl, each
+  muir 6f872e1 (revision 10) and a2efda5 (revision 9), micro and rtl, each
   check also run against dev11's microcode or against this microcode with
   the one step taken out: on revision 9 it halts at `MACHINE-NOT-QUUX-10`
   with no write of words 104 or 110-115, with either PROM, and reaches
@@ -669,10 +669,10 @@ Every change to a source file carries a comment in that file saying why.
   - The band is built from its cold load, since the cold load and the
     screens saved in the band carry the old addresses. The builder (band
     M4a, whose Lisp reads the old page) compiled and made the cold load on
-    muir-sim 4e0ca1b (revision 10) with the old microcode; the cold load
-    then booted on muir-sim bba9b3a (revision 11) with the new PROM and
+    muir-sim b30e35e (revision 10) with the old microcode; the cold load
+    then booted on muir-sim 2ac0ce6 (revision 11) with the new PROM and
     microcode, and MINI read QLD's 40 files through the file device.
-  - Tested on muir-sim bba9b3a, micro and rtl, at 1024x768, 1280x1024 and
+  - Tested on muir-sim 2ac0ce6, micro and rtl, at 1024x768, 1280x1024 and
     1920x1080: from power-on, after a `%DISK-RESTORE` and after a warm boot
     through the PROM the band reaches the listener, word 110 reads 401 and
     111 16,667, and `INTR-TICK` runs 600 times (599 twice) in 10 s of
@@ -726,7 +726,7 @@ Every change to a source file carries a comment in that file saying why.
   by the 32-word table, which moves the A constants; named A, M and D
   memory stays where it was, so band 2000 runs on this microcode with its
   `UCADR TBL` served, and no band is rebuilt.
-  - Tested on muir-sim cd072dc (S2), micro and rtl, with ref/band-2000's
+  - Tested on muir-sim 4812430 (S2), micro and rtl, with ref/band-2000's
     band and this microcode written over its MCR1, the RTC counted: on
     revision 12 `RESET-MACHINE` takes 8,275 microcycles, 67 before (the
     fill 8,193, the check 15), twice in a cold boot; at `BEG06` the
@@ -792,7 +792,7 @@ Every change to a source file carries a comment in that file saying why.
   by 26 words (24 no-ops and the two writes); named A, M and D memory
   stays where it was, and no band is rebuilt; `UCADR TBL` changes, since
   error-table entries move.
-  - Tested on muir-sim 5c31525, with ref/band-2000's band and this
+  - Tested on muir-sim b60b9f1, with ref/band-2000's band and this
     microcode written over its MCR1. muir-sim's scan of every return whose
     next microinstruction runs lists 29 sites on the microcode before and
     none on this one. With the operand bit on every entry whose operand
@@ -833,7 +833,7 @@ Every change to a source file carries a comment in that file saying why.
   reads the PDL only at PDL-INDEX, and the one after its `POPJ` writes only
   M-T (section 3.3). I memory grows by 6 words and A memory by 3 constants;
   named A, M and D memory stays where it was, and no band is rebuilt.
-  - Tested on muir-sim 3c4b4dc (a `git archive` copy with the profile's
+  - Tested on muir-sim f76de64 (a `git archive` copy with the profile's
     checkers watching from the microcode's own fill), with ref/band-2000's
     band and this microcode over its MCR1. The profile of 12 workloads on
     rtl (sync K=4, 4K cache, the Arty's memory timing, the RTC counted from
@@ -967,7 +967,7 @@ Every change to a source file carries a comment in that file saying why.
   disk, Chaosnet, `BITBLT`), whose returns go back into microcode. I memory
   grows by 10 words; named A, M and D memory stays where it was, and no band
   is rebuilt; `UCADR TBL` changes, since error-table entries move.
-  - Tested on muir-sim 24583a1 (a `git archive` copy), with the band and
+  - Tested on muir-sim 3947455 (a `git archive` copy), with the band and
     PROM of ref/band-2000-h8a-s6 and this microcode over its MCR1. The
     profile of 12 workloads on rtl with the prefetch (`MUIR_PREFETCH=a-line`,
     the microcode's own fill, sync K=4, 4K cache, the Arty's memory timing,
@@ -1031,7 +1031,7 @@ Every change to a source file carries a comment in that file saying why.
   exported. `WEEKDAY-IN-MONTH` finds the n-th or last weekday of a month on
   `GREGORIAN-DAY-COUNT`, the day count `ENCODE-UNIVERSAL-TIME` now shares
   (`io1/time.lisp`).
-- Tested on muir e11026a, micro unpaced, on the dev11 band with Q9 part 1
+- Tested on muir ab87378, micro unpaced, on the dev11 band with Q9 part 1
   and the calendar fix, with the change loaded: 31,774 times from 2026 to
   2106 decoded as Python's zoneinfo (tzdata 2026c) does for Europe/Berlin,
   Europe/London, America/New_York, Australia/Sydney, Asia/Tokyo,
@@ -1110,7 +1110,7 @@ Every change to a source file carries a comment in that file saying why.
   own servers of Systems 100 to 1001) has its dates read as UTC, off by its
   zone's offset; ozd's default, `--file-dates utc`, agrees with this system.
 - Checked on the System 2000 development band (microcode 2000, muir
-  1a89ed0's `quux`) with `IO; FILE; OPEN` compiled and loaded, at
+  db1e0f3's `quux`) with `IO; FILE; OPEN` compiled and loaded, at
   Europe/Berlin and at a fixed `-1`: `"07/15/26 12:00:00"` parses to
   3993105600 (12:00 GMT) where the band gave 3993098400 (Berlin) and
   3993102000 (`-1`); 3993105600 prints `"07/15/2026 12:00:00"` where it

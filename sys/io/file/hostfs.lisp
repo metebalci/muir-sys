@@ -4,7 +4,7 @@
 ;;;
 ;;; quux: the pathname host HOST, the folders its host computer serves to it
 ;;; through quux's file device (contract q9, revision 9; muir's docs/quux.md,
-;;; "the file device", as built at muir e11026a).  the driver, the rings and
+;;; "the file device", as built at muir ab87378).  the driver, the rings and
 ;;; the registers are SYS: IO; FDEV; this file is the host, its access and its
 ;;; streams, on the model of SYS: FILE; FSACC and FSSTR.
 ;;;
