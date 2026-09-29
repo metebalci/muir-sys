@@ -1135,7 +1135,7 @@ Every change to a source file carries a comment in that file saying why.
   which reads FILE dates at its site's zone, is served them so. Measured on
   the 1001 band: a file's date is exact with `mit` and `-1`, and 3600 s early
   in January and 7200 s early in July with ozd's default, `utc`.
-- **The release tools** (`1331881`, `f5a60d5`, `2ab511f`), tracked by
+- **The release tools** (`62d296d`, `0ade1dc`, `2bf5307`), tracked by
   `.gitignore:39-42`. `tools/release-scan` reads every byte a release
   publishes by what a file holds (a gzip and its header, a tar's members and
   headers, a VHD through its block table, anything else raw) and fails on a

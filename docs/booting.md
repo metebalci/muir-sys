@@ -6,7 +6,7 @@ function. It follows the tree's own code, and each claim cites a file and line.
 
 It was carried over from lmz-sys, bishop's line (`fecd0a5`), and every
 citation re-checked against this tree. Line numbers in `promh.text`,
-`uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `07c7648`, before
+`uc-disk.lisp` and `uc-cold-disk.lisp` are those of commit `014a1b5`, before
 QUUX's disk became block-disk; the labels named with them are still there,
 except those block-disk removed, as noted below. Nothing here is about compiling or
 building; `docs/building.md` covers that.
@@ -28,13 +28,13 @@ block-disk, and it finds the microcode through the disk's GPT (below). The CADR
 keeps MIT's PROM, which the `cadr` branch has.
 
 The two PROMs sit in different places. MIT's is at control store location 0
-(`(IF PROM (LOC 0))`, `promh.text:77` on `cadr` at `c633992`): the board decodes
+(`(IF PROM (LOC 0))`, `promh.text:77` on `cadr` at `a40c267`): the board decodes
 the first 1K of the control store as PROM, in place of I-memory, until the mode
 register's `PROM-DISABLE` bit is set ("0 first 1K I memory is PROM", MIT's
 `cadr/ir.bits`, line 115 of muir-sim's `mit/cadr/ir.bits`), and it starts at 0
 with `(JUMP GO)` (`:77-79` there). QUUX's is 1K words of the control store at
 36000-37777, read-only and never disabled, where a reset sets the PC
-(`promh.text:88-99` at `381edfb`); the microcode it loads lives in 0-35777, and
+(`promh.text:88-99` at `98d1b81`); the microcode it loads lives in 0-35777, and
 the PROM halts at `ERROR-MICROCODE-TOO-BIG` on one that reaches 36000
 (`:655-656` there).
 
@@ -154,9 +154,9 @@ Both programs keep a spin loop there that counts `Q-R` down (`promh.text:81-84`,
 switches off underneath it and the loaded microcode's location 6 continues the
 same loop. QUUX's PROM is never switched off and writes nothing to 766012: it
 jumps to the microcode's location 6 (`JUMP-TO-6`, `promh.text:756-762` at
-`381edfb`), whose loop counts `Q-R` down the same way, and the microcode sets
+`98d1b81`), whose loop counts `Q-R` down the same way, and the microcode sets
 error stop itself, bit 0 of the register page's word 102 (`uc-cadr.lisp:108-129`
-at `c3a162a`). On the CADR the loop works because the two programs agree on
+at `e07aaaa`). On the CADR the loop works because the two programs agree on
 where the constant -1 lives: the PROM's `A-ONES` is A-memory location 3
 (`promh.text:33-36`), and the microcode's `A-MINUS-ONE` is annotated "MUST BE 3"
 (`uc-parameters.lisp:528-531`). `FILL-M-LOOP` puts the microcode's -1 there,

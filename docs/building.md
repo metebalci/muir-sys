@@ -76,7 +76,7 @@ MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
    and PAGE zeroed before the disk is handed over.
 
 **Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
-`624ad92` with the same five sources recompiled as in the CADR-route build
+`3569eeb` with the same five sources recompiled as in the CADR-route build
 of that tree. Build A had dev11 (CADR-built) as its builder and took path
 4a; build B had A's band as its builder and took path 4b:
 
@@ -769,7 +769,7 @@ git merge-base --is-ancestor <sha> origin/main &&
 ```
 
 For a CADR release the two are the other way round. `release-1001`
-(`d0d68de`) and older are on both lines.
+(`3d26e6d`) and older are on both lines.
 
 **3. An annotated tag at the SHA**, like `release-1000`'s and
 `release-1001`'s, with Mete's identity as the tagger, unsigned:
