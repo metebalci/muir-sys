@@ -178,7 +178,7 @@ subnet. The band it builds can, so the last step moves it:
 
 ### Writing a release pack
 
-A release pack has muir's default layout and only the microcode and the band loaded (`diskpack`, muir `daefb0c` or later):
+A release pack has muir's default layout and only the microcode and the band loaded (`diskpack`, muir `a50e716` or later):
 
 ```
 initialize                               2 MCR, PAGE, 4 LOD of 49419 blocks
