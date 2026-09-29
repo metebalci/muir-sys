@@ -113,7 +113,10 @@ PATTERNS = [
     ('claude-session', 'a Claude session',
      re.compile(rb'claude\.ai/(?:code|chat|artifact)|session[_-]?id', re.I)),
 ]
-IPV4 = re.compile(rb'(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?![\d.])')
+# The look-ahead refuses a digit or a dot followed by a digit, not any dot:
+# (?![\d.]) let the full stop after an address ending a sentence hide it.
+# IPV4 = re.compile(rb'(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?![\d.])')
+IPV4 = re.compile(rb'(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?!\d|\.\d)')
 DOC_NETS = [ipaddress.ip_network(n) for n in
             ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '0.0.0.0/32')]
 EMAIL = re.compile(rb'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')

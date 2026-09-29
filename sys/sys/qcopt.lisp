@@ -317,11 +317,21 @@
   (or (constantp x)
       (symbolp x)))
 
+;;; with fewer than two arguments the loop built (internal-\\ n nil), so a
+;;; compiled (gcd n) signalled that nil was of the wrong type.  such a form
+;;; is now left alone and calls the function \\, which handles it.
+;(defoptimizer convert-\\ \\ (internal-\\) (form)
+;  (loop for arg-form in (cdddr form)
+;	with answer = `(internal-\\ ,(second form) ,(third form))
+;	do (setq answer `(internal-\\ ,answer ,arg-form))
+;	finally (return answer)))
 (defoptimizer convert-\\ \\ (internal-\\) (form)
-  (loop for arg-form in (cdddr form)
-	with answer = `(internal-\\ ,(second form) ,(third form))
-	do (setq answer `(internal-\\ ,answer ,arg-form))
-	finally (return answer)))
+  (if (null (cddr form))
+      form
+    (loop for arg-form in (cdddr form)
+	  with answer = `(internal-\\ ,(second form) ,(third form))
+	  do (setq answer `(internal-\\ ,answer ,arg-form))
+	  finally (return answer))))
 
 (defoptimizer float-optimizer float (internal-float) (form)
   (cond ((null (cddr form))			;One arg

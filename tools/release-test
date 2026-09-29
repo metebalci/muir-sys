@@ -20,6 +20,8 @@ section 1.5, planted faults (a)-(d), and section 1.3):
                untracked ones not ignored), as release-test/..., tar.gz with
                owner root: passes
   (a)          the same with a home directory planted in a Lisp file: fails
+  (e)          the same with a private address ending a sentence ("at
+               A.B.C.D.") in a Lisp file: fails
   (d)          the same with a new address added to sys/man/bug-mail.txt:
                fails, while MIT's addresses there pass by rule (2)
   owner        the same with every member owned by this user, as the
@@ -64,6 +66,7 @@ SUMS = os.path.join(TOOLS, 'release-sums')
 HOME = ('/' + 'home' + '/' + 'ada' + '/x').encode()
 FOUND = HOME.decode().rsplit('/', 1)[0]      # what the pattern matches of it
 ADDRESS = ('nobody' + '@' + 'example' + '.org').encode()
+PRIVATE = ('10' + '.0.0' + '.5').encode()  # a private address (RFC 1918)
 
 results = []
 
@@ -210,6 +213,11 @@ def main():
     tree_tarball(W('a.tar.gz'), {lisp: lambda d: d + b'\n;; ' + HOME + b'\n'})
     case('(a) a home directory in a Lisp file', [SCAN, W('a.tar.gz')], 1,
          fails=[(lisp, 'a home directory', FOUND)])
+    # A private address ending a sentence: the scan's IPv4 pattern refused a
+    # match followed by any dot, so the full stop after it hid the address.
+    tree_tarball(W('e.tar.gz'), {lisp: lambda d: d + b'\n;; at ' + PRIVATE + b'.\n'})
+    case('(e) a private address ending a sentence', [SCAN, W('e.tar.gz')], 1,
+         fails=[(lisp, 'a private address', PRIVATE.decode())])
     bug = 'sys/man/bug-mail.txt'
     tree_tarball(W('d.tar.gz'), {bug: lambda d: d + b'\n' + ADDRESS + b'\n'})
     case('(d) a new address in bug-mail.txt', [SCAN, W('d.tar.gz')], 1,
