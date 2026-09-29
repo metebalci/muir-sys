@@ -46,3 +46,15 @@ file carries a comment in that file saying why.
   - the `.mcr` file holds A memory as section 5, two words a location, its
     `<31:0>` and then `<39:32>` (`WRITE-A-MEM`,
     `sys/sys/qwmcr.lisp:72-76`, `:110-118`, `:142-145`).
+- **A compiled `(gcd n)` or `(\\ n)` with one argument works** (`convert-\\`,
+  `sys/sys/qcopt.lisp:320-334`). The optimizer built `(internal-\\ n nil)`
+  from it, so the call signalled that `NIL` was of the wrong type; with fewer
+  than two arguments it now leaves the form alone, and the call goes to the
+  function `\\`. Two or more arguments compile as before.
+- **`tools/release-scan` finds a private address that ends a sentence**
+  (`tools/release-scan:115-118`). Its IPv4 pattern refused a match followed by
+  any dot, so the full stop after an address hid it; it now refuses only a
+  digit or a dot followed by a digit, as muir-website's public-content check
+  does. `tools/release-test` plants such an address in a Lisp file, case (e)
+  (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
+  FAIL line it planted.
