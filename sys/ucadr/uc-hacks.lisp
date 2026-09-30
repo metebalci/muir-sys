@@ -540,11 +540,23 @@ GCDBB-LONG
        ((M-S) M-Q)
 	(JUMP-NOT-EQUAL-XCT-NEXT M-E A-ZERO GCDBB-NO-LUCK)
        ((M-C) M-T)
+	;; the remainder is 0, so the gcd is the divisor in m-c, which was
+	;; returned with its sign: (gcd (expt 2 90) (- (expt 2 31))) gave
+	;; -2147483648.  it is now returned through bignum-abs, as
+	;; gcd-is-abs-m-b does: m-q holds it rather than nil, un-cons is called
+	;; rather than jumped to (it keeps m-c), and m-c's header is read for
+	;; bignum-abs, which wants it in md and the length in m-i.
 	((M-1) M-Q)
-	((M-Q) A-V-NIL)				;Possible pointer to garbage.
+;	((M-Q) A-V-NIL)				;Possible pointer to garbage.
+	((m-q) m-c)				;the divisor, for bignum-abs
 	((M-S) A-V-NIL)				;Possible pointer to garbage.
-        (JUMP-XCT-NEXT UN-CONS)
+;        (JUMP-XCT-NEXT UN-CONS)
+	(call-xct-next un-cons)
        ((M-2) M-K)				;saved just for the occasion.
+	((vma-start-read) m-c)
+	(check-page-read)
+	(jump-xct-next bignum-abs)
+       ((m-i) bignum-header-length md)
 
 GCDBB-NO-LUCK
 	;;Figure out how much it was shifted:

@@ -58,6 +58,63 @@ file carries a comment in that file saying why.
   does. `tools/release-test` plants such an address in a Lisp file, case (e)
   (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
   FAIL line it planted.
+- **`GCD` of two bignums is never negative.** When the shorter of two
+  bignums of two or more words divides the longer, `GCDBB-LONG` returned the
+  divisor with its sign, so `(gcd (expt 2 90) (- (expt 2 31)))` gave
+  -2147483648, and `LCM`, compiled `GCD` and `SYS:INTERNAL-\\` with it. It
+  now calls `UN-CONS` and returns the divisor through `BIGNUM-ABS`, as
+  `GCD-IS-ABS-M-B` does (`sys/ucadr/uc-hacks.lisp:543-559`). MIT's; the
+  CADR's line has the same fix. Of 82 cases (every mix of signs over fixnums
+  and bignums, remainders zero and not, interpreted and compiled, `LCM` and
+  `//`), 14 fail on Y3's band with microcode 2001 as it was and all pass
+  with the fix, and the 22 cases of the compiled one-argument `(gcd n)` pass.
+- **A stack group whose saved registers hold a forwarding word resumes.**
+  `SG-LOAD-BLOCK-INTO-PDL-BUFFER` reloads a stack group's leader a word at
+  a time, passing each word through `TRANSPORT-AC`, and stepped `VMA` to the
+  next word. When a saved accumulator held a `DTP-ONE-Q-FORWARD` (or a
+  header or body forward), the transporter followed it by moving `VMA` to
+  the forward's target, so every later leader word, the PDL pointers and
+  the state among them, was read from the words after that target, and the
+  machine halted at `SWAPIN+12` or `SGENT1+2`. The leader's address is now
+  kept in `M-2`, which the transporter and page faults preserve, and `VMA`
+  is loaded from it for every word (`sys/ucadr/uc-stack-groups.lisp:162-181`,
+  `:230-234`); `SGENT` restores `M-2` from the stack group afterwards.
+  MIT's; the CADR's line has the same fix. A stack group run once, its
+  saved `M-A` replaced by a one-Q forward, and resumed halts at `SWAPIN+12`
+  on Y3's band with microcode 2001 as it was, and returns 7 with the fix;
+  the same store of a fixnum resumes on both.
+- **An interpreted special binding survives a process switch.** When the
+  PDL buffer is refilled from memory (`PDL-BUFFER-REFILL`,
+  `sys/ucadr/uc-page-fault.lisp:1735`), a word that needs the transporter
+  goes through `PB-TRANS`, which dispatched on `TRANSPORT-NO-EVCP` and so
+  followed a `DTP-ONE-Q-FORWARD`: the word came back into the buffer as a
+  copy of the forward's target, cdr code and all. The interpreter forwards a
+  special variable's slot in its binding frame to the variable's value cell
+  (`sys/sys/eval.lisp:1372-1375`, `:1187`), and a closed-over frame's words
+  to their copies (`sys/sys/eval.lisp:2118-2138`). After a process switch
+  the slot was a copy of the cell: a `SETQ` wrote the stack and not the
+  variable, and the frame's last slot took the cell's cdr code, cdr-next
+  where it had cdr-nil, so `PARALLEL-BINDING-LIST`
+  (`sys/sys/eval.lisp:1323-1383`) walked past the end of its frame, and an
+  interpreted `CONDITION-CASE` now and then signalled "The argument CONS was
+  0, which is not a cons." `PB-TRANS` now dispatches on
+  `TRANSPORT-NO-EVCP-KEEP-OQF`, the same dispatch with I-ARG bit 3, which
+  leaves a one-Q forward as it is (`sys/ucadr/uc-parameters.lisp:350-356`,
+  `sys/ucadr/uc-page-fault.lisp:1802-1807`). MIT's, in microcode 323 as
+  well; the CADR's line has the same fix. The microcode's checks,
+  `tools/microcode-check/` (its `README.md`; `.gitignore` tracks it), hold
+  the case: `run pdl-refill` fails three of its four cases on Y3's band with
+  microcode 2001 as it was and passes all four with the fix, on the micro
+  and rtl engines.
+- **The three fixes change seven control-store words and add four**
+  (`GCDBB-LONG+14` and `+16`; `SG-LOAD-BLOCK-INTO-PDL-BUFFER+0`,
+  `SG-L-P-B-1+1`, `SGENT+2` and `+3`; `PB-TRANS+12`; four after
+  `GCDBB-LONG+17`), so every word from `GCDBB-LONG+20` (`GCDBB-NO-LUCK`) on
+  is four locations later; every other word, every dispatch entry and every
+  symbol of Y3's microcode 2001 is the same once moved, and the A-memory
+  words that hold control-store addresses move with them. The number stays
+  2001; `ucadr.mcr` is now `060a30b75c143d84fbfc1a6db37ced0b7141378380ebe4a7dab307b2e22dc753`.
+  Boot PROM 2001 assembles to the same four files.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
