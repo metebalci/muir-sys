@@ -1,0 +1,65 @@
+; Interpreted closures and the code around them see the variables in scope
+; (sys/sys/eval.lisp, SERIAL-BINDING-LIST and EVAL1).
+;
+; LET* builds its frame on the stack a variable at a time.  A closure made in
+; an init form copies the frame built so far, and the link that holds it, out
+; of the stack and forwards the stack words to the copies.  LET* then stored
+; its stack frame back into that link, now the closure's: the closure and the
+; body saw a frame whose first words are forwarded, which the microcode's
+; lookup does not follow, and a variable bound before the closure read as free.
+;
+; APPLY-LAMBDA builds a lambda's frame the same way, a variable at a time, and
+; a closure made in an &optional or &aux init form took the link that holds it:
+; the frame's later words were added on the stack, where no one saw them.
+;
+; EVAL1, calling an interpreted closure (an FLET or LABELS function), bound the
+; closure's environment before it evaluated the arguments, so the arguments
+; were evaluated in the closure's environment instead of the caller's.  An
+; applyhook, as the stepper's, still sees the same calls, arguments and
+; functions.
+;
+; The controls: closures that work without either fix.
+(let ((x 1)) (let ((y 2)) (let ((f (function (lambda () (list x y))))) (funcall f)))) => (1 2)
+(let ((y 21)) (flet ((g (x) (* x 2))) (g y))) => 42
+(flet ((g (x) (* x 2))) (g 21)) => 42
+; LET* with more than 16 variables builds its frame in the heap.
+(let* ((a 1) (b 2) (c 3) (d 4) (e 5) (g 6) (h 7) (i 8) (j 9) (k 10) (l 11) (m 12) (n 13) (o 14) (p 15) (q 16) (f (function (lambda () (list a q))))) (list (funcall f) a q)) => ((1 16) 1 16)
+(let* ((s 4) (f (function (lambda () s)))) (declare (special s)) (list s (funcall f))) => (4 4)
+;
+; A closure made in a LET* init form, over a variable the LET* bound before it.
+(let ((x 1)) (let* ((y 2) (f (function (lambda () (list x y))))) (funcall f))) => (1 2)
+; The LET*'s body after the closure was made.
+(let* ((y 2) (f (function (lambda () y)))) f y) => 2
+; The closure after the LET* returned.
+(funcall (let* ((y 2) (f (function (lambda () y)))) f)) => 2
+; The body and the closure share the variable, and a variable bound after the
+; closure is seen by the body.
+(let* ((y 2) (f (function (lambda () (setq y 7)))) (z 3)) (funcall f) (list y z)) => (7 3)
+(let* ((y 2) (f (function (lambda () y)))) (setq y 5) (funcall f)) => 5
+; A closure in the first init form does not see the variable it initializes.
+(let ((y 1)) (let* ((y (function (lambda () y)))) (funcall y))) => 1
+(prog* ((y 2) (f (function (lambda () y)))) (return (funcall f))) => 2
+;
+; The same in a lambda's &aux and &optional init forms.
+(funcall (function (lambda (y &aux (f (function (lambda () y)))) (funcall f))) 21) => 21
+(funcall (function (lambda (y &optional (f (function (lambda () y)))) (funcall f))) 21) => 21
+(funcall (function (lambda (y &aux (f (function (lambda () (setq y 7)))) (z 3)) (funcall f) (list y z))) 2) => (7 3)
+(let ((f 1)) (funcall (function (lambda (&optional (f (function (lambda () f)))) (funcall f))))) => 1
+;
+; The arguments of a call to a local function are evaluated where it is called.
+(flet ((g (x) (* x 2))) (let ((f (function (lambda (y) (g y))))) (funcall f 21))) => 42
+(flet ((g (x) x)) (let ((y 21)) (g y))) => 21
+(let ((y 1)) (flet ((g (x) (list x y))) (let ((y 2)) (g y)))) => (2 1)
+(labels ((fact (n) (if (< n 2) 1 (* n (fact (1- n)))))) (fact 5)) => 120
+;
+; Hooks see what they saw: an applyhook that applies as the stepper does (in the
+; environment it is given, compiled) records the calls, the functions and the
+; arguments, and an evalhook records the forms.  Both pass without the fixes.
+(progn (setf (symbol-function 'interpreter-closure-scope-add) (let ((k 1)) (function (lambda (a) (+ a k))))) (interpreter-closure-scope-add 1)) => 2
+(defvar interpreter-closure-scope-calls nil) => INTERPRETER-CLOSURE-SCOPE-CALLS
+(defun interpreter-closure-scope-applyhook (fn args env) (push (list (if (consp fn) (car fn) 'other) (copylist args)) interpreter-closure-scope-calls) (si:binding-interpreter-environment (env) (apply fn args))) => INTERPRETER-CLOSURE-SCOPE-APPLYHOOK
+(progn (compile 'interpreter-closure-scope-applyhook) (compiled-function-p #'interpreter-closure-scope-applyhook)) => T
+(progn (setq interpreter-closure-scope-calls nil) (list (evalhook '(list (interpreter-closure-scope-add 1) (interpreter-closure-scope-add 20)) nil #'interpreter-closure-scope-applyhook) (reverse interpreter-closure-scope-calls))) => ((2 21) ((LAMBDA (1)) (LAMBDA (20)) (OTHER (2 21))))
+(defvar interpreter-closure-scope-forms nil) => INTERPRETER-CLOSURE-SCOPE-FORMS
+(defun interpreter-closure-scope-evalhook (form env) (push form interpreter-closure-scope-forms) (evalhook form #'interpreter-closure-scope-evalhook nil env)) => INTERPRETER-CLOSURE-SCOPE-EVALHOOK
+(progn (setq interpreter-closure-scope-forms nil) (list (evalhook '(list (interpreter-closure-scope-add 1) (interpreter-closure-scope-add 20)) #'interpreter-closure-scope-evalhook nil) (reverse interpreter-closure-scope-forms))) => ((2 21) ((INTERPRETER-CLOSURE-SCOPE-ADD 1) 1 (+ A K) A K (INTERPRETER-CLOSURE-SCOPE-ADD 20) 20 (+ A K) A K))
