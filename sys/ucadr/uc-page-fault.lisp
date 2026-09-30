@@ -24,26 +24,44 @@
 ; DEFINITIONS OF FIELDS IN THE MAP HARDWARE
 ;  BITS IN MEMORY-MAP-DATA (FUNCTIONAL SOURCE 11).
 
+;; quux revision 13 (appendix a1.7): map(md) has the level-1 entry, 7 bits,
+;; in <38:32>, the fault bits in <31:30> as before, and the 28-bit level-2
+;; entry in <27:0>: the ten bits above its 18-bit physical page keep their
+;; order and move up by 4.  the level-2 map has 128 blocks of 32 pages of
+;; 1024 words; the invalid entry, a-level-1-map-invalid, is 177.
 (DEF-DATA-FIELD MAP-READ-FAULT-BIT 1 30.)
 (DEF-DATA-FIELD MAP-WRITE-FAULT-BIT 1 31.)
-(DEF-DATA-FIELD MAP-PHYSICAL-PAGE-NUMBER 14. 0)
-(DEF-DATA-FIELD MAP-META-BITS 6 14.)    	;THE HIGH TWO OF THESE ARE HACKABLE BY
-						; DISPATCH INSTRUCTION
-						;THE REST ARE JUST FOR SOFTWARE TO LOOK AT
-(DEF-DATA-FIELD MAP-STATUS-CODE 3 20.)
-(DEF-DATA-FIELD MAP-ACCESS-CODE 2 22.)		;NOTE BIT 22 IS IN TWO FIELDS
-(def-data-field map-first-level-map 6 24.)	;note not the same as where it writes
+;(DEF-DATA-FIELD MAP-PHYSICAL-PAGE-NUMBER 14. 0)
+;(DEF-DATA-FIELD MAP-META-BITS 6 14.)    	;THE HIGH TWO OF THESE ARE HACKABLE BY
+;						; DISPATCH INSTRUCTION
+;						;THE REST ARE JUST FOR SOFTWARE TO LOOK AT
+;(DEF-DATA-FIELD MAP-STATUS-CODE 3 20.)
+;(DEF-DATA-FIELD MAP-ACCESS-CODE 2 22.)		;NOTE BIT 22 IS IN TWO FIELDS
+;(def-data-field map-first-level-map 6 24.)	;note not the same as where it writes
 ;; quux: the level-1 entry is 6 bits, not the cadr's 5, so the level-2 map
 ;; has 64 blocks of 32 pages instead of 32.  bit 29 is the new bit.  the
 ;; invalid entry is a-level-1-map-invalid, 77, set at boot.
-(DEF-DATA-FIELD MAP-SECOND-LEVEL-MAP 24. 0)
-(DEF-DATA-FIELD MAP-ACCESS-STATUS-AND-META-BITS 10. 14.)
-(DEF-DATA-FIELD MAP-HARDWARE-READ-ACCESS 1 23.)	;HARDWARE PERMITS (AT LEAST) READ ACCESS
-						; IF THIS BIT SET.
-
-(def-data-field map-representation-type 2 16.)
-(def-data-field map-extra-pdl-meta-bit 1 18.)
-(def-data-field map-oldspace-meta-bit 1 19.)
+;(DEF-DATA-FIELD MAP-SECOND-LEVEL-MAP 24. 0)
+;(DEF-DATA-FIELD MAP-ACCESS-STATUS-AND-META-BITS 10. 14.)
+;(DEF-DATA-FIELD MAP-HARDWARE-READ-ACCESS 1 23.)	;HARDWARE PERMITS (AT LEAST) READ ACCESS
+;						; IF THIS BIT SET.
+;(def-data-field map-representation-type 2 16.)
+;(def-data-field map-extra-pdl-meta-bit 1 18.)
+;(def-data-field map-oldspace-meta-bit 1 19.)
+(def-data-field map-physical-page-number 18. 0)
+(def-data-field map-meta-bits 6 18.)    	;the high two of these are hackable by
+						; dispatch instruction
+						;the rest are just for software to look at
+(def-data-field map-status-code 3 24.)
+(def-data-field map-access-code 2 26.)		;note bit 26 is in two fields
+(def-data-field map-first-level-map 7 32.)	;where it writes too, at 40 bits
+(def-data-field map-second-level-map 28. 0)
+(def-data-field map-access-status-and-meta-bits 10. 18.)
+(def-data-field map-hardware-read-access 1 27.)	;hardware permits (at least) read access
+						; if this bit set.
+(def-data-field map-representation-type 2 20.)
+(def-data-field map-extra-pdl-meta-bit 1 22.)
+(def-data-field map-oldspace-meta-bit 1 23.)
 
 ;these definitions reduce need to conditionalize things per processor as well as being
 ; more modular.
@@ -55,14 +73,22 @@
 (assign l2-map-oldspace-meta-bit (plus map-oldspace-meta-bit memory-map-data))
 (assign l2-map-physical-page-number (plus map-physical-page-number memory-map-data))
 ;FIELDS IN VMA WHEN WRITING MAP.
-(DEF-DATA-FIELD MAP-WRITE-SECOND-LEVEL-MAP 24. 0)
-(DEF-DATA-FIELD MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1 25.)
-(DEF-DATA-FIELD MAP-WRITE-ENABLE-FIRST-LEVEL-WRITE 1 26.)
-(DEF-DATA-FIELD MAP-WRITE-FIRST-LEVEL-MAP 5 27.) ;NOTE NOT THE SAME AS WHERE IT READS
+;(DEF-DATA-FIELD MAP-WRITE-SECOND-LEVEL-MAP 24. 0)
+;(DEF-DATA-FIELD MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1 25.)
+;(DEF-DATA-FIELD MAP-WRITE-ENABLE-FIRST-LEVEL-WRITE 1 26.)
+;(DEF-DATA-FIELD MAP-WRITE-FIRST-LEVEL-MAP 5 27.) ;NOTE NOT THE SAME AS WHERE IT READS
 ;; quux: bits 4:0 of the level-1 entry are written from vma<31:27> as on the
 ;; cadr, and bit 5 from vma<24>, the one spare bit below them.  a level-1
 ;; write of an entry above 37 needs both fields.
-(def-data-field map-write-first-level-map-high 1 24.)
+;(def-data-field map-write-first-level-map-high 1 24.)
+;; quux revision 13 (appendix a1.7): the map write's word has map(md)'s
+;; layout: the level-1 entry in <38:32>, the level-2 entry in <27:0>, and the
+;; enables in <29> (level 1) and <28> (level 2); a store with both writes
+;; level 1 only.  the level-1 entry is written whole, so there is no high part.
+(def-data-field map-write-second-level-map 28. 0)
+(def-data-field map-write-enable-second-level-write 1 28.)
+(def-data-field map-write-enable-first-level-write 1 29.)
+(def-data-field map-write-first-level-map 7 32.)
 
 ; DEFINITIONS OF FIELDS IN PAGE HASH TABLE
 
@@ -71,7 +97,9 @@
 ;; 1024-word pages (contract g2, option (w)): the virtual page number is
 ;; vma<23:10>, still aligned as the vma, so that a fault on any of a page's
 ;; four map entries finds the page's one entry; bits 8 and 9 are unused.
-(def-data-field pht1-virtual-page-number 14. 10.)	;aligned same as vma
+;(def-data-field pht1-virtual-page-number 14. 10.)	;aligned same as vma
+;; quux revision 13 (appendix a1.7): the 28-bit address's page, vma<27:10>
+(def-data-field pht1-virtual-page-number 18. 10.)	;aligned same as vma
 (DEF-DATA-FIELD PHT1-SWAP-STATUS-CODE 3 0)
  (DEF-DATA-FIELD PHT1-ALL-BUT-SWAP-STATUS-CODE 29. 3)
 (DEF-DATA-FIELD PHT1-AGE 2 3)
@@ -79,18 +107,28 @@
 (DEF-DATA-FIELD PHT1-MODIFIED-BIT 1 5)		;SET IF PAGE MODIFIED
 (DEF-DATA-FIELD PHT1-VALID-BIT 1 6)
  ;WORD 2  THESE ARE NOW THE SAME BIT POSITIONS AS IN THE SECOND LEVEL MAP
-(DEF-DATA-FIELD PHT2-META-BITS 6 14.)
-(DEF-DATA-FIELD PHT2-MAP-STATUS-CODE 3 20.)
-(DEF-DATA-FIELD PHT2-MAP-ACCESS-CODE 2 22.)
-(DEF-DATA-FIELD PHT2-MAP-ACCESS-AND-STATUS-CODE 4 20.)
-(DEF-DATA-FIELD PHT2-ACCESS-STATUS-AND-META-BITS 10. 14.)
-(DEF-DATA-FIELD PHT2-PHYSICAL-PAGE-NUMBER 14. 0) 
+;(DEF-DATA-FIELD PHT2-META-BITS 6 14.)
+;(DEF-DATA-FIELD PHT2-MAP-STATUS-CODE 3 20.)
+;(DEF-DATA-FIELD PHT2-MAP-ACCESS-CODE 2 22.)
+;(DEF-DATA-FIELD PHT2-MAP-ACCESS-AND-STATUS-CODE 4 20.)
+;(DEF-DATA-FIELD PHT2-ACCESS-STATUS-AND-META-BITS 10. 14.)
+;(DEF-DATA-FIELD PHT2-PHYSICAL-PAGE-NUMBER 14. 0) 
+;; quux revision 13 (appendix a1.7): pht2 is the 28-bit level-2 entry
+(def-data-field pht2-meta-bits 6 18.)
+(def-data-field pht2-map-status-code 3 24.)
+(def-data-field pht2-map-access-code 2 26.)
+(def-data-field pht2-map-access-and-status-code 4 24.)
+(def-data-field pht2-access-status-and-meta-bits 10. 18.)
+(def-data-field pht2-physical-page-number 18. 0) 
 ;; 1024-word pages (contract g2, option (w)): a page frame is four
 ;; consecutive map entries of 256 words, aligned on 1024 words, and pht2 is
 ;; the level-2 map word of the frame's first entry, so its physical page
 ;; number is a multiple of 4 and the frame's number is its bits 13:2.  map
 ;; entry k of the page (k = vma<9:8>) is pht2 plus k.
-(def-data-field pht2-page-frame-number 12. 2)
+;(def-data-field pht2-page-frame-number 12. 2)
+;; quux revision 13: the map maps 1024-word pages natively, one entry a page,
+;; so pht2's physical page number is the frame's number.
+(def-data-field pht2-page-frame-number 18. 0)
 
 ; DEFINITIONS OF FIELDS IN THE ADDRESS
 
@@ -99,17 +137,30 @@
 ;; page's fields move to bit 10; the fields that mean the map entry or the
 ;; disk block keep bit 8 under their own names, as do vma-low-bits and
 ;; all-but-vma-low-bits, which mean the map entry.
-(DEF-DATA-FIELD VMA-MAP-BLOCK-PART 11. 13.)	;ADDRESS BLOCK OF 32. PAGES
+;(DEF-DATA-FIELD VMA-MAP-BLOCK-PART 11. 13.)	;ADDRESS BLOCK OF 32. PAGES
 ;(DEF-DATA-FIELD VMA-PAGE-ADDR-PART 16. 8)	;VIRTUAL PAGE NUMBER
 ;(DEF-DATA-FIELD VMA-PHYS-PAGE-ADDR-PART 14. 8)	;PHYSICAL PAGE NUMBER
-(def-data-field vma-page-addr-part 14. 10.)	;virtual page number (1024 words)
-(def-data-field vma-phys-page-addr-part 12. 10.) ;physical page (frame) number
-(def-data-field vma-phys-map-entry-part 14. 8)	;physical page number of a map entry
-(def-data-field vma-block-part 16. 8)		;disk block of an address, 256 words
+;(def-data-field vma-page-addr-part 14. 10.)	;virtual page number (1024 words)
+;(def-data-field vma-phys-page-addr-part 12. 10.) ;physical page (frame) number
+;(def-data-field vma-phys-map-entry-part 14. 8)	;physical page number of a map entry
+;(def-data-field vma-block-part 16. 8)		;disk block of an address, 256 words
+;(def-data-field vma-page-offset 10. 0)		;address within the page
+;(def-data-field vma-map-entry-in-page 2 8)	;which of the page's four map entries
+;(DEF-DATA-FIELD VMA-LOW-BITS 8 0)		;ADDR WITHIN PAGE
+;(DEF-DATA-FIELD ALL-BUT-VMA-LOW-BITS 24. 8)
+;; quux revision 13 (appendix a1.7): 28-bit virtual addresses, and the map
+;; maps a 1024-word page an entry, so the map entry, the page and the swap's
+;; unit are one: vma-phys-map-entry-part is the page's part, and the four-entry
+;; field of revision 12 is gone.  level 1 is indexed by vma<27:15>, a block of
+;; 32 pages.  a disk block is no longer a whole number of words (a packed page
+;; is 5 blocks), so nothing takes an address's block.
+(def-data-field vma-map-block-part 13. 15.)	;address block of 32. pages
+(def-data-field vma-page-addr-part 18. 10.)	;virtual page number (1024 words)
+(def-data-field vma-phys-page-addr-part 18. 10.) ;physical page (frame) number
+(def-data-field vma-phys-map-entry-part 18. 10.) ;physical page number of a map entry
 (def-data-field vma-page-offset 10. 0)		;address within the page
-(def-data-field vma-map-entry-in-page 2 8)	;which of the page's four map entries
-(DEF-DATA-FIELD VMA-LOW-BITS 8 0)		;ADDR WITHIN PAGE
-(DEF-DATA-FIELD ALL-BUT-VMA-LOW-BITS 24. 8)
+(def-data-field vma-low-bits 10. 0)		;addr within page
+(def-data-field all-but-vma-low-bits 22. 10.)
 
 ;NOTE: PGF-R, ETC CAN BE ENTERED RECURSIVELY IF THE PAGE IS SWAPPED OUT AND THE DISK 
 ;ROUTINES FAULT WHEN REFERENCING THE DISK CONTROL.
@@ -129,10 +180,16 @@
 PGF-R-SB(CALL-CONDITIONAL PG-FAULT-OR-INTERRUPT PGF-R-I)
 	(JUMP-CONDITIONAL NO-PG-FAULT-OR-INTERRUPT SBSER)
 	(CALL-CONDITIONAL NO-PG-FAULT INTR)
-SBSER	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER)  ;Flush on no SB req
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;SBSER	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER)  ;Flush on no SB req
+SBSER	(POPJ-IF-BIT-CLEAR (byte-field 1 34.) LOCATION-COUNTER)  ;Flush on no SB req
 	((M-TEM) M-FLAGS-NO-SEQUENCE-BREAK)	;TURN INTO ILLOP IF TRAP AT BAD TIME
 	(CALL-NOT-EQUAL M-TEM A-ZERO ILLOP)	;NOTE WOULD PROBABLY DIE LATER ANYWAY
-	((INTERRUPT-CONTROL) ANDCA LOCATION-COUNTER (A-CONSTANT 1_26.))
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;	((INTERRUPT-CONTROL) ANDCA LOCATION-COUNTER (A-CONSTANT 1_26.))
+	((INTERRUPT-CONTROL) ANDCA LOCATION-COUNTER (A-CONSTANT 1_34.))
 	((M-TEM) A-INHIBIT-SCHEDULING-FLAG)
 	(JUMP-NOT-EQUAL M-TEM A-V-NIL SB-DEFER)
 	((M-DEFERRED-SEQUENCE-BREAK-FLAG) DPB M-ZERO A-FLAGS)
@@ -397,6 +454,12 @@ DISK-PGF-RESTORE
 ;ROUTINE TO HANDLE LEVEL-1 MAP MISSES.  CALLED FROM PGF-MAP-MISS AND FROM GET-MAP-BITS.
 ;ADDRESS IN MD ON CALL AND RETURN, VMA CLOBBERED.  PGF-SAVE MUST HAVE BEEN CALLED.
 LEVEL-1-MAP-MISS
+	;; quux revision 13 (contract g2 2.6; appendix a1.7): an address with
+	;; <31:28> set is past the 28-bit space.  the level-1 map reads the
+	;; invalid block for it, and a map write there writes nothing, so it
+	;; would come here for ever: halt at address-past-28-bits instead.
+	((m-tem) (byte-field 4 28.) md)
+	(jump-not-equal m-tem a-zero address-past-28-bits)
 	((A-FIRST-LEVEL-MAP-RELOADS) ADD A-FIRST-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
 	((M-T) A-SECOND-LEVEL-MAP-REUSE-POINTER)	;ALLOCATE A BLOCK OF LVL 2 MAP
 	((MD M-A) SELECTIVE-DEPOSIT MD VMA-MAP-BLOCK-PART A-ZERO) ;-> 1ST ENTRY IN BLOCK
@@ -404,20 +467,32 @@ LEVEL-1-MAP-MISS
 	;; is written from vma<24>, apart from the other five.  m-tem is
 	;; free: page faults clobber it, and the callers
 	;; are done with it.
-	((m-tem) (byte-field 1 5) m-t)				;bit 5 of the block
-	((m-pgf-tem) dpb m-t map-write-first-level-map		;bits 4:0
-		(a-constant (byte-mask map-write-enable-first-level-write)))
-	((vma-write-map) dpb m-tem map-write-first-level-map-high a-pgf-tem)
+;	((m-tem) (byte-field 1 5) m-t)				;bit 5 of the block
+;	((m-pgf-tem) dpb m-t map-write-first-level-map		;bits 4:0
+;		(a-constant (byte-mask map-write-enable-first-level-write)))
+;	((vma-write-map) dpb m-tem map-write-first-level-map-high a-pgf-tem)
 	;; the reverse map has 64 entries for quux, too many for sys com
 	;; 440-477, so it is at 640-737.
-	((m-pgf-tem) add m-t (a-constant 240))		;reverse 1st lvl map in 240-337 of
-	((VMA-START-READ) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)  ;SYS COM AREA.
-	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT THE OLD MAP
-	(JUMP-LESS-THAN READ-MEMORY-DATA A-ZERO PGF-L1C) ;DON'T WRITE MAP IF NO PREVIOUS
+;	((m-pgf-tem) add m-t (a-constant 240))		;reverse 1st lvl map in 240-337 of
+;	((VMA-START-READ) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)  ;SYS COM AREA.
+;	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT THE OLD MAP
+;	(JUMP-LESS-THAN READ-MEMORY-DATA A-ZERO PGF-L1C) ;DON'T WRITE MAP IF NO PREVIOUS
+;	((vma-write-map) dpb				;and invalidate old 1st lvl map
+;		(m-constant -1) map-write-first-level-map	;entry so will fault if used:
+;		(a-constant (plus (byte-mask map-write-enable-first-level-write)	;all ones,
+;				  (byte-mask map-write-first-level-map-high))))	;37 or 77
+	;; quux revision 13 (appendix a1.7, a1.8): the level-1 entry, 7 bits, is
+	;; written whole from vma<38:32>, and the reverse level-1 map has 128
+	;; entries, at offsets 400-577 of the system communication area.
+	((vma-write-map) dpb m-t map-write-first-level-map	;point 1st lvl at it
+		(a-constant (byte-mask map-write-enable-first-level-write)))
+	((m-pgf-tem) add m-t (a-constant 400))		;reverse 1st lvl map in 400-577 of
+	((vma-start-read) add m-pgf-tem a-v-system-communication-area)  ;sys com area.
+	(illop-if-page-fault)				;this points md at the old map
+	(jump-less-than read-memory-data a-zero pgf-l1c) ;don't write map if no previous
 	((vma-write-map) dpb				;and invalidate old 1st lvl map
 		(m-constant -1) map-write-first-level-map	;entry so will fault if used:
-		(a-constant (plus (byte-mask map-write-enable-first-level-write)	;all ones,
-				  (byte-mask map-write-first-level-map-high))))	;37 or 77
+		(a-constant (byte-mask map-write-enable-first-level-write)))	;all ones, 177
 	((VMA) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)
 PGF-L1C	((WRITE-MEMORY-DATA-START-WRITE) M-A)		;UPDATE REVERSE FIRST LVL MAP
 	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT 1ST ENTRY IN BLOCK
@@ -433,6 +508,7 @@ PGF-L1A	((VMA-WRITE-MAP)				;FILL 2ND-LEVEL MAP WITH MAP-MISS (0)
 	((VMA) A-V-NIL)		;Don't leave garbage in VMA.
 	((MD) A-PGF-VMA)				;RESTORE MD (ADDRESS OF REFERENCE)
 	;DROP THROUGH ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER, AND RETURN
+
 ;ROUTINE TO ADVANCE SECOND LEVEL MAP REUSE POINTER, WITH CARE.  CLOBBERS Q-R
 ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER	
 	((Q-R A-SECOND-LEVEL-MAP-REUSE-POINTER)
@@ -440,6 +516,13 @@ ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER
 	(popj-after-next popj-less-than q-r a-level-1-map-invalid) ;wrap before the invalid block
        ((A-SECOND-LEVEL-MAP-REUSE-POINTER)
 		A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)	;WRAP AROUND TO AFTER THE WIRED ONES
+
+;; quux revision 13: level-1-map-miss jumps here for a reference whose address
+;; has <31:28> set, past the 28-bit space (contract g2 2.6); it is placed past
+;; advance-second-level-map-reuse-pointer's return, so that nothing falls into
+;; it.  the halt shows this location, and a-pgf-vma the address.
+address-past-28-bits
+	(call illop)
 
 ;MAP MISS COMES HERE.  ADDRESS IN VMA AND MD BOTH.
 ;SET UP FIRST-LEVEL MAP IF NECESSARY.  THEN DEAL WITH PAGE-FAULT.
@@ -632,16 +715,24 @@ PGF-RDONLY
 ;Second-level map is set-up and grants read-only access.
 FORCE-WR-RDONLY
 	(CALL PGF-SAVE)
-	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Force read/write access
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+;	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Force read/write access
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+	;; quux revision 13 (appendix a1.7): the level-2 entry below its access
+	;; code is bits 0-25, where the cadr's was 0-21
+	((vma-write-map) (byte-field 26. 0) memory-map-data	;force read/write access
+		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+				  (byte-value map-access-code 3))))
 	((VMA) A-PGF-VMA)		;Restore original VMA
 	((MD-START-WRITE) A-PGF-WMD)	;Do the write
 	(ILLOP-IF-PAGE-FAULT)
 	((MD) VMA)			;Address map again
-	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Set read-only access again
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 2))))
+;	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Set read-only access again
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 2))))
+	((vma-write-map) (byte-field 26. 0) memory-map-data	;set read-only access again
+		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+				  (byte-value map-access-code 2))))
 	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)	;Find PHT entry to mark page as modified
        ((VMA M-T) A-PGF-VMA)
 	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP) ;not found?
@@ -681,16 +772,23 @@ PGF-RWF	(CALL-IF-BIT-CLEAR M-PGF-WRITE ILLOP)
 	;; entries, and all four become read/write now, entry k from pht2 plus k.
 	;; one would do (the others trap here once each and find the page
 	;; modified), but not pht2 itself for any entry but the first.
-	((md) dpb m-zero vma-map-entry-in-page a-pgf-vma)	;address the page's first entry
-	((m-t) map-write-second-level-map m-t		;pht2 is identical to 2nd lvl map
+;	((md) dpb m-zero vma-map-entry-in-page a-pgf-vma)	;address the page's first entry
+;	((m-t) map-write-second-level-map m-t		;pht2 is identical to 2nd lvl map
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;	((vma-write-map) m-t)
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) add m-t (a-constant 1))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) add m-t (a-constant 2))
+;	((md) add md (a-constant map-entry-size))
+;	(popj-after-next (vma-write-map) add m-t (a-constant 3))
+;       ((vma m-t) a-pgf-t)				;go retry memory cycle
+	;; quux revision 13: the map maps the 1024-word page with one entry, so
+	;; that one entry becomes read/write, as the cadr's did.
+	((md) a-pgf-vma)				;address the map
+	(popj-after-next				;pht2 is identical to 2nd lvl map
+	 (vma-write-map) map-write-second-level-map m-t
 		(a-constant (byte-mask map-write-enable-second-level-write)))
-	((vma-write-map) m-t)
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) add m-t (a-constant 1))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) add m-t (a-constant 2))
-	((md) add md (a-constant map-entry-size))
-	(popj-after-next (vma-write-map) add m-t (a-constant 3))
        ((vma m-t) a-pgf-t)				;go retry memory cycle
 
 ;REFERENCE TO PAGE THAT WAS PREPAGED AND HASN'T BEEN TOUCHED YET.  GRAB IT.
@@ -722,16 +820,22 @@ PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
 	;; 1024-word pages (contract g2, option (w)): the page is four map
 	;; entries; load all four, entry k from pht2 plus k (pht2 is the first
 	;; entry's), so that the rest of the page takes no fault of its own.
-	((m-t) map-write-second-level-map read-memory-data	;value to write into map
+;	((m-t) map-write-second-level-map read-memory-data	;value to write into map
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) dpb m-zero vma-map-entry-in-page a-pgf-vma)	;address the page's first entry
+;	((vma-write-map) m-t)				;comes directly from pht2
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) add m-t (a-constant 1))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) add m-t (a-constant 2))
+;	((md) add md (a-constant map-entry-size))
+;	(popj-after-next (vma-write-map) add m-t (a-constant 3))	;write the map and return
+;       ((vma m-t) a-pgf-t)
+	;; quux revision 13: one map entry a page; load it from pht2.
+	((vma) map-write-second-level-map read-memory-data	;value to write into map
 		(a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) dpb m-zero vma-map-entry-in-page a-pgf-vma)	;address the page's first entry
-	((vma-write-map) m-t)				;comes directly from pht2
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) add m-t (a-constant 1))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) add m-t (a-constant 2))
-	((md) add md (a-constant map-entry-size))
-	(popj-after-next (vma-write-map) add m-t (a-constant 3))	;write the map and return
+	(popj-after-next				;comes directly from pht2
+	 (md-write-map) a-pgf-vma)			;write the map and return
        ((vma m-t) a-pgf-t)
 
 ;ROUTINE TO LOOK FOR PAGE ADDRESSED BY M-T IN THE PAGE HASH TABLE
@@ -766,8 +870,11 @@ COMPUTE-PAGE-HASH				;New algorithm, 3-DEC-80
 	;; 1024-word pages (contract g2, option (w)): the page is vma<23:10>, so
 	;; that every address in a page hashes alike; the same hash of it as
 	;; before: the page times 16, xor its bits above the sixth
-	((a-tem1) (byte-field 8. 16.) m-t)	;vma<23:16>
-	((m-t) (byte-field (difference q-pointer-width 6) 6) m-t)	;vma<23:10>x16+c
+;	((a-tem1) (byte-field 8. 16.) m-t)	;vma<23:16>
+;	((m-t) (byte-field (difference q-pointer-width 6) 6) m-t)	;vma<23:10>x16+c
+	;; quux revision 13: the page is vma<27:10>; the same hash of it
+	((a-tem1) (byte-field 12. 16.) m-t)	;vma<27:16>
+	((m-t) (byte-field 22. 6) m-t)		;vma<27:10>x16+c
 	((M-T) ANDCA M-T (A-CONSTANT 17))	;-C
 	((M-T) XOR M-T A-TEM1)
 	((M-T) AND M-T A-PHT-INDEX-MASK)
@@ -987,9 +1094,15 @@ COREFOUND1A	;Page needs to be written back to disk
 ;	((A-DISK-SWAP-OUT-CCW-POINTER)
 ;	     ADD A-DISK-SWAP-OUT-CCW-POINTER M-ZERO ALU-CARRY-IN-ONE)
 	;; 1024-word pages (contract g2, option (w)): four ccws, a block each
-	(call-xct-next write-page-ccws)
-       ((vma-start-write) a-disk-swap-out-ccw-pointer)
-	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
+;	(call-xct-next write-page-ccws)
+;       ((vma-start-write) a-disk-swap-out-ccw-pointer)
+;	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
+	;; quux revision 13 (appendix a1.11): one command list entry moves a
+	;; whole page, so a page takes one ccw, as the cadr's did.
+	((vma-start-write) a-disk-swap-out-ccw-pointer)
+	(illop-if-page-fault)
+	((a-disk-swap-out-ccw-pointer)
+	     add a-disk-swap-out-ccw-pointer m-zero alu-carry-in-one)
 	((A-DISK-SAVE-PGF-A) M-A)
 	((A-DISK-SAVE-PGF-B) M-B)
 	((M-TEM) A-DISK-SWITCHES)		;Multiple page swapouts enabled?
@@ -1031,14 +1144,21 @@ COREF-CCW-ADD
 	;; take later writes without a trap, and the page would go out as clean
 	;; with them lost, so flush all four: the next reference reloads each from
 	;; pht2, read/write-first.  a flush of an entry not set up does no harm.
-	((md) andca m-a (a-constant (byte-mask vma-map-entry-in-page)))	;the first entry
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) andca m-a (a-constant (byte-mask vma-map-entry-in-page)))	;the first entry
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+	;; quux revision 13: one map entry a page, as the cadr's: if it is set
+	;; up, rewrite it from pht2, now read/write-first.
+	((md) m-a)					;address the map
+	((m-tem) map-status-code memory-map-data)	;see if map is set up
+	(jump-less-than m-tem (a-constant 2) coref-ccw-add-1)
+	((vma-write-map) map-write-second-level-map m-b	;pht2 is identical to 2nd lvl map
+		(a-constant (byte-mask map-write-enable-second-level-write)))
 COREF-CCW-ADD-1
 	((A-DISK-PAGE-WRITE-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-WRITE-APPENDS)
 	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
@@ -1051,10 +1171,17 @@ COREF-CCW-ADD-1
 	;; 1024-word pages (contract g2, option (w)): m-b is pht2 here, whose
 	;; physical page is the map entry's (the page's first quarter), so it is
 	;; placed at bit 8; then four ccws, a block each.
-	((write-memory-data) dpb m-b vma-phys-map-entry-part (a-constant 1))
-	(call-xct-next write-page-ccws)
-       ((vma-start-write) a-disk-swap-out-ccw-pointer)
-	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
+;	((write-memory-data) dpb m-b vma-phys-map-entry-part (a-constant 1))
+;	(call-xct-next write-page-ccws)
+;       ((vma-start-write) a-disk-swap-out-ccw-pointer)
+;	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
+	;; quux revision 13 (appendix a1.11): pht2's physical page is the page's
+	;; frame; one ccw a page.
+	((write-memory-data) dpb m-b vma-phys-page-addr-part (a-constant 1))
+	((vma-start-write) a-disk-swap-out-ccw-pointer)
+	(illop-if-page-fault)
+	((a-disk-swap-out-ccw-pointer)
+	   m+a+1 a-disk-swap-out-ccw-pointer m-zero)
 	((M-TEM) A-DISK-SWAP-OUT-CCW-POINTER)
 	(JUMP-LESS-THAN M-TEM (A-CONSTANT DISK-SWAP-OUT-CCW-MAX) COREF-CCW-0)
 COREF-CCW-X
@@ -1154,15 +1281,22 @@ PHTDELX	((M-B) C-PDL-BUFFER-POINTER-POP)		;Restore found page frame number
 	;; 1024-word pages (contract g2, option (w)): flush all four of the
 	;; page's map entries: one left set up would map the frame, now free, and
 	;; so its next page, at the old virtual address.
-	((md) andca m-a (a-constant (byte-mask vma-map-entry-in-page)))	;access map for virt page deleted
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
+;	((md) andca m-a (a-constant (byte-mask vma-map-entry-in-page)))	;access map for virt page deleted
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	(popj-after-next
+;	 (vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+				;note that if we have a first-level map miss, this does no harm
+;       ((vma) a-v-nil)		;don't leave garbage in vma.
+	;; quux revision 13: one map entry a page, as the cadr's: flush it.
+	((md) m-a)		;access map for virt page deleted
 	(popj-after-next
-	 (vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+         (vma-write-map)					;flush 2nd lvl map, if any
+	 (a-constant (byte-mask map-write-enable-second-level-write)))
 				;note that if we have a first-level map miss, this does no harm
        ((vma) a-v-nil)		;don't leave garbage in vma.
 
@@ -1174,9 +1308,13 @@ SWAPIN1	   ;add main memory page frame number in M-B to CCW list.
 ;	(ILLOP-IF-PAGE-FAULT)
 ;	((A-DISK-SWAP-IN-CCW-POINTER) M+A+1 A-DISK-SWAP-IN-CCW-POINTER M-ZERO)
 	;; 1024-word pages (contract g2, option (w)): four ccws, a block each
-	(call-xct-next write-page-ccws)
-       ((vma-start-write) a-disk-swap-in-ccw-pointer)
-	((a-disk-swap-in-ccw-pointer) add vma (a-constant 1))
+;	(call-xct-next write-page-ccws)
+;       ((vma-start-write) a-disk-swap-in-ccw-pointer)
+;	((a-disk-swap-in-ccw-pointer) add vma (a-constant 1))
+	;; quux revision 13 (appendix a1.11): one ccw a page.
+	((vma-start-write) a-disk-swap-in-ccw-pointer)
+	(illop-if-page-fault)
+	((a-disk-swap-in-ccw-pointer) m+a+1 a-disk-swap-in-ccw-pointer m-zero)
 	((A-DISK-PAGE-READ-COUNT) ADD M-ZERO A-DISK-PAGE-READ-COUNT ALU-CARRY-IN-ONE)
 	((A-DISK-SWAPIN-SIZE) ADD A-DISK-SWAPIN-SIZE (M-CONSTANT -1))
 	(JUMP-NOT-EQUAL A-DISK-SWAPIN-SIZE M-ZERO SWAPIN-LOOP)
@@ -1217,7 +1355,9 @@ SWAPIN2-LOOP
 ;	((M-B) M+A+1 M-B A-ZERO)
 	;; 1024-word pages (contract g2, option (w)): the next page's ccws are
 	;; four on, the first of them naming its frame
-	((m-b) add m-b (a-constant blocks-per-page))
+;	((m-b) add m-b (a-constant blocks-per-page))
+	;; quux revision 13: one ccw a page, so the next page's is the next word
+	((m-b) m+a+1 m-b a-zero)
 	(JUMP-LESS-THAN-XCT-NEXT M-B A-DISK-SWAP-IN-CCW-POINTER SWAPIN2-LOOP)
 	;; Pages after the first get pre-paged swap-status
        ((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
@@ -1233,18 +1373,19 @@ SWAPIN2-X
 ;; ccws.  called with the page's first ccw, its chain bit set, started
 ;; writing (md at vma); writes the other three after it, each a block on, and
 ;; returns with vma at the last.  clobbers md.
-write-page-ccws
-	(illop-if-page-fault)
-	((write-memory-data) add md (a-constant disk-block-size))
-	((vma-start-write) add vma (a-constant 1))
-	(illop-if-page-fault)
-	((write-memory-data) add md (a-constant disk-block-size))
-	((vma-start-write) add vma (a-constant 1))
-	(illop-if-page-fault)
-	((write-memory-data) add md (a-constant disk-block-size))
-	((vma-start-write) add vma (a-constant 1))
-	(illop-if-page-fault)
-	(popj)
+;write-page-ccws
+;	(illop-if-page-fault)
+;	((write-memory-data) add md (a-constant disk-block-size))
+;	((vma-start-write) add vma (a-constant 1))
+;	(illop-if-page-fault)
+;	((write-memory-data) add md (a-constant disk-block-size))
+;	((vma-start-write) add vma (a-constant 1))
+;	(illop-if-page-fault)
+;	((write-memory-data) add md (a-constant disk-block-size))
+;	((vma-start-write) add vma (a-constant 1))
+;	(illop-if-page-fault)
+;	(popj)
+;; quux revision 13: gone; one ccw moves a page (appendix a1.11).
 
 PAGE-IN-GET-MAP-BITS   ;Get PHT2 bits and leave them in A-DISK-SWAPIN-PHT2-BITS.
 	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
@@ -1332,25 +1473,39 @@ D-SWAPAR					;VERIFY MAP STATUS CODE FROM CORE
 	;; whole page is initialised and not only its first quarter.  m-a holds
 	;; the quarter's physical page, m-b its virtual address; swapin2 sets
 	;; both again.
+;czrr	((md) a-zero)				;clobber map 0 to point to page
+;	((m-t) memory-map-data)			;save 0@2
+;	((m-a) dpb m-b pht2-page-frame-number a-zero)	;the first quarter's physical page
+;	((m-b) selective-deposit m-zero vma-page-offset a-disk-swapin-virtual-address)
+						;compute page base address
+;czrr0	((md) a-zero)
+;	((vma-write-map) dpb m-a map-physical-page-number
+;		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+;				  (byte-value map-access-code 3)))) ;r/w
+;	((vma) a-zero)
+;czrr1	((write-memory-data-start-write)	;store traps pointing to self
+;		add vma a-b)			;note dtp-trap = 0
+;	(illop-if-page-fault)
+;	(jump-less-than-xct-next vma (a-constant 377) czrr1)
+;       ((vma) add vma (a-constant 1))
+;	((m-b) add m-b (a-constant map-entry-size))	;the next quarter
+;	((m-a) add m-a (a-constant 1))
+;	((m-tem) (byte-field 2 0) m-a)
+;	(jump-not-equal m-tem a-zero czrr0)		;until all four are done
+	;; quux revision 13: one map entry maps the whole 1024-word page, so map
+	;; 0@2 to it once and fill its 1024 words, as the cadr filled its 256.
 czrr	((md) a-zero)				;clobber map 0 to point to page
 	((m-t) memory-map-data)			;save 0@2
-	((m-a) dpb m-b pht2-page-frame-number a-zero)	;the first quarter's physical page
-	((m-b) selective-deposit m-zero vma-page-offset a-disk-swapin-virtual-address)
-						;compute page base address
-czrr0	((md) a-zero)
-	((vma-write-map) dpb m-a map-physical-page-number
+	((vma-write-map) dpb m-b map-physical-page-number
 		(a-constant (plus (byte-mask map-write-enable-second-level-write)
 				  (byte-value map-access-code 3)))) ;r/w
-	((vma) a-zero)
+	((vma) a-zero)			;compute page base address
+	((a-tem1) selective-deposit m-zero vma-low-bits a-disk-swapin-virtual-address)
 czrr1	((write-memory-data-start-write)	;store traps pointing to self
-		add vma a-b)			;note dtp-trap = 0
+		add vma a-tem1)			;note dtp-trap = 0
 	(illop-if-page-fault)
-	(jump-less-than-xct-next vma (a-constant 377) czrr1)
+	(jump-less-than-xct-next vma (a-constant 1777) czrr1)
        ((vma) add vma (a-constant 1))
-	((m-b) add m-b (a-constant map-entry-size))	;the next quarter
-	((m-a) add m-a (a-constant 1))
-	((m-tem) (byte-field 2 0) m-a)
-	(jump-not-equal m-tem a-zero czrr0)		;until all four are done
 	((A-FRESH-PAGE-COUNT) ADD M-ZERO A-FRESH-PAGE-COUNT ALU-CARRY-IN-ONE)
 	((MD) A-ZERO)
 	((VMA-WRITE-MAP) MAP-WRITE-SECOND-LEVEL-MAP M-T	;RESTORE 0@2
@@ -1405,15 +1560,19 @@ AGER2	((A-PAGE-AGE-COUNT) ADD M-ZERO A-PAGE-AGE-COUNT ALU-CARRY-IN-ONE)
 	;; page's map entries, md being its pht1, so that a use of any quarter
 	;; takes the age trap; with one flushed, use through the other three
 	;; would go unseen and a page in use would age out.
-	((md) andca md (a-constant (byte-mask vma-map-entry-in-page)))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
+;	((md) andca md (a-constant (byte-mask vma-map-entry-in-page)))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	(jump-xct-next ager0)
+;       ((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+	;; quux revision 13: one map entry a page, as the cadr's
 	(jump-xct-next ager0)
-       ((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+       ((vma-write-map)				;flush 2nd lvl map, if any
+		(a-constant (byte-mask map-write-enable-second-level-write)))
 	;; AGER0 will put good data in VMA.
 
 ;CHANGE AGE-TRAP TO FLUSHABLE IF HAS BEEN AGED ENOUGH
@@ -1456,7 +1615,13 @@ XRGN1	;; Get word from ADDRESS-SPACE-MAP (assuming it starts on proper boundary!
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) ADDRESS-SPACE-MAP-BYTE-NUMBER-BYTE M-A)	;Byte number in that word
 	((M-TEM) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)
-	((OA-REG-LOW) SUB (M-CONSTANT 40) A-TEM)	;40 doesn't hurt here, IORed in
+;	((OA-REG-LOW) SUB (M-CONSTANT 40) A-TEM)	;40 doesn't hurt here, IORed in
+	;; quux revision 13 (contract g2 2.3): an ldb's rotate is (40. - position)
+	;; mod 40., 6 bits: 50 (octal) less the byte's position, 50 being 0.  no
+	;; m constant is 50, so the position is negated first.  the rotate is ored
+	;; into ir<5:0> alone, below the length's ir<11:6>.
+	((m-tem) sub m-zero a-tem)
+	((oa-reg-low) add m-tem (a-constant 50))
        ((M-T) (BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) READ-MEMORY-DATA
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(POPJ-NOT-EQUAL M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
@@ -1508,17 +1673,22 @@ XCPGS1	(JUMP-EQUAL M-E A-V-NIL XCPGS2)
 	;; page's map entries, so that every quarter takes the new status and
 	;; meta bits (the collector's flip and free-region come here a page at a
 	;; time); the address is kept in m-a and returned in md, as before.
-xcpgs2	((m-a md) c-pdl-buffer-pointer-pop)	;address location being hacked
-	((md) andca md (a-constant (byte-mask vma-map-entry-in-page)))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
-	((md) add md (a-constant map-entry-size))
-	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;xcpgs2	((m-a md) c-pdl-buffer-pointer-pop)	;address location being hacked
+;	((md) andca md (a-constant (byte-mask vma-map-entry-in-page)))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))	;flush 2nd lvl map
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) add md (a-constant map-entry-size))
+;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
 			;no harm done if map miss already, either level
-	((md) m-a)
+;	((md) m-a)
+	;; quux revision 13: one map entry a page, as the cadr's
+xcpgs2	((md) c-pdl-buffer-pointer-pop)		;address location being hacked
+	((vma-write-map)			;flush 2nd lvl map, if any
+		(a-constant (byte-mask map-write-enable-second-level-write)))
+			;no harm done if map miss already, either level
 	(POPJ-XCT-NEXT)				;MUSTN'T POPJ DURING MAP-WRITE CYCLE
        ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
 

@@ -12,8 +12,13 @@ DISK-SWAP-HANDLER
 	;; 1024-word pages (contract g2, option (w)): the page's first block, four
 	;; blocks a page; m-a may be any address in the page (a swap-in's is the
 	;; faulting word's)
+;	((m-1) vma-page-addr-part m-a)		;convert virtual address to disk address
+;	((m-1) dpb m-1 (byte-field 16. 2) a-zero)
+	;; quux revision 13 (appendix a1.11): a page is 5 blocks in the packed
+	;; transfer, so its first block is 5 times its number
 	((m-1) vma-page-addr-part m-a)		;convert virtual address to disk address
-	((m-1) dpb m-1 (byte-field 16. 2) a-zero)
+	((m-tem) dpb m-1 (byte-field 30. 2) a-zero)
+	((m-1) add m-1 a-tem)			;times 5
 	(CALL-GREATER-OR-EQUAL M-1 A-DISK-MAXIMUM ILLOP)	;Address out of bounds
 	((M-1) ADD M-1 A-DISK-OFFSET)		;Relocate to appropriate part of disk
 	(CALL START-DISK-SWAP)			;Start the disk operation
@@ -68,6 +73,9 @@ START-DISK-1-PAGE
 ;;; Bashes M-T, M-1, M-2.  Returns with A-DISK-RUN-LIGHT in VMA.
 ;;; with 1024-word pages (contract g2, option (w)) m-b and m-2 count 256-word
 ;;; blocks, a ccw each: m-b is a block's physical number, m-2 a block count.
+;;; quux revision 13 (appendix a1.11): pages again, a ccw each, the page's
+;;; physical address in <27:10> and more in <0>: m-b is a page frame number and
+;;; m-2 a page count; m-1 stays a block, the disk's address.
 START-DISK-N-PAGES
 	(CALL AWAIT-DISK)			;Wait until disk is idle
 	((A-DISK-READ-WRITE) M-T)		;Then store parameters into A-memory
@@ -82,7 +90,8 @@ START-DISK-N-PAGES
 ;	((MD) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
 	;; 1024-word pages (contract g2, option (w)): the callers count 256-word
 	;; blocks, a ccw each, not pages
-	((md) dpb m-b vma-block-part (a-constant 1))
+;	((md) dpb m-b vma-block-part (a-constant 1))
+	((md) dpb m-b vma-phys-page-addr-part (a-constant 1))	;quux revision 13: a page
 BUILD-CCW-LIST-1
 	(JUMP-GREATER-THAN M-T (A-CONSTANT 1) BUILD-CCW-LIST-2)
 	((MD) SUB MD (A-CONSTANT 1))	;last
@@ -92,7 +101,8 @@ BUILD-CCW-LIST-2
 	((M-T) SUB M-T (A-CONSTANT 1))
 	(JUMP-GREATER-THAN-XCT-NEXT M-T (A-CONSTANT 0) BUILD-CCW-LIST-1)
 ;       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
-       ((md) add md (a-constant disk-block-size))	;a block, not a 1024-word page
+;       ((md) add md (a-constant disk-block-size))	;a block, not a 1024-word page
+       ((md) add md (a-constant (eval page-size)))	;quux revision 13: a page
 	((A-DISK-RESERVED-FOR-USER) (A-CONSTANT 0))	;Not any more, it isn't!
 ;;; Here to start a disk operation that has been set up in the A-memory variables.
 ;;; Also called from interrupt level for retries

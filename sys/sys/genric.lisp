@@ -1863,7 +1863,9 @@ The microcode sets it at boot from MACHINE-ID."
     ;; quux (contract q13): quux has no xbus, so the address is printed
     ;; without the word "Xbus".
 ;    (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
-    (format stream "~&Feature page, at ~O:" (+ #o17000000 feature-page-xbus-address))
+;    (format stream "~&Feature page, at ~O:" (+ #o17000000 feature-page-xbus-address))
+    ;; quux revision 13: the i/o region's physical base is 1760000000
+    (format stream "~&Feature page, at ~O:" (+ #o1760000000 feature-page-xbus-address))
     (loop for name in feature-page-words
 	  for i from 0
 	  as word = (%xbus-read (+ feature-page-xbus-address i))

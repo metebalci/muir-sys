@@ -111,7 +111,10 @@ Will be NIL by the time YOU get to look at it")
 ;; of its word with %p-ldb: the words are 32 bits, and %xbus-read would box a
 ;; big one as a bignum, which the cold load cannot take apart.
 ;(defconst feature-page-xbus-address #o377000
-(defconst feature-page-xbus-address #o777400
+;(defconst feature-page-xbus-address #o777400
+;; quux revision 13 (contract g2 4.1): the register page is physical
+;; 1777777400, #o17777400 from the i/o region's base, 1760000000.
+(defconst feature-page-xbus-address #o17777400
   "Where QUUX's feature page is, as an argument to %XBUS-READ.")
 
 (defun feature-page-field (word ppss)
@@ -136,11 +139,18 @@ Will be NIL by the time YOU get to look at it")
 (defun video-height () (feature-page-field #o11 #o0020))
 (defun video-words-per-line () (feature-page-field #o12 #o0020))
 (defun video-buffer-length () (* (video-height) (video-words-per-line)))
+;(defun video-buffer-address ()
+;  "The virtual address of the video controller's frame buffer."
+;  (+ io-space-virtual-address
+;     (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
+;	#o17000000)))
+;; quux revision 13 (contract g2 4.1): the i/o region starts at physical
+;; 1760000000, the frame buffer's window.
 (defun video-buffer-address ()
   "The virtual address of the video controller's frame buffer."
   (+ io-space-virtual-address
      (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
-	#o17000000)))
+	#o1760000000)))
 
 ;; quux: the band's safeguard, as the microcode's machine-not-quux-6 halt is
 ;; the microcode's: a band of system 2000 on a cadr runs mit's microcode 323,

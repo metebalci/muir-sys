@@ -15,12 +15,18 @@ RESET-MACHINE
 	;; revision 11, and word 100's bits are in a new order, so this microcode
 	;; asks for 11 or more and halts at machine-not-quux-11 below it: on
 	;; revision 10 every register it writes would be nothing there.
+	;; quux revision 13 (contract g2 2.8): microcode 2001 is for the 40-bit
+	;; word, revision 13, which contains no earlier revision: below it, halt
+	;; at machine-not-quux-13 (a 32-bit machine would not even assemble this
+	;; microcode's words as they were meant).
 	((m-tem) (byte-field 20 20) machine-id)
 ;	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-10)
-	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-11)
+;	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-11)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-13)
 	((m-tem) (byte-field 14 4) machine-id)
 ;	(jump-less-than m-tem (a-constant 10.) machine-not-quux-10)
-	(jump-less-than m-tem (a-constant 11.) machine-not-quux-11)
+;	(jump-less-than m-tem (a-constant 11.) machine-not-quux-11)
+	(jump-less-than m-tem (a-constant 13.) machine-not-quux-13)
 	;; quux revision 10: interrupt-control <28>, the unibus reset, drives nothing
 	;; on quux, so its 10-microsecond pulse is gone; the register page's reset
 	;; devices takes its place (contract q11, and the q9 amendment for the file
@@ -53,7 +59,10 @@ reset-machine-quiet
 	(jump file-device-not-quiet)
 reset-machine-quiet-done
 	((INTERRUPT-CONTROL) DPB (M-CONSTANT -1)	;Clear RESET, set halfword-mode,
-		(BYTE-FIELD 1 27.) A-ZERO)		;and enable interrupts
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;		(BYTE-FIELD 1 27.) A-ZERO)		;and enable interrupts
+		(byte-field 1 35.) A-ZERO)		;and enable interrupts
 	;; timer 0's period, 16,667 microseconds, 60 hz: reset devices set it to 0,
 	;; and the prom's write does not reach a %disk-restore.  beg06 turns it on.
 	((md) (a-constant 16667.))
@@ -207,43 +216,43 @@ INITIAL-MAP-A	;Enter here with number of words to map in M-A
 	(jump-less-than m-tem (a-constant 6) machine-not-quux-6)	;revision 6: the register page
 	((a-processor-type-code) (byte-field 4 0) machine-id
 		(a-constant (byte-value q-data-type dtp-fix)))
-	((a-level-1-map-invalid) (a-constant 77))
-inimap0	;first set all level 1 map to the invalid entry, all 6 bits ones, bit 5
+;	((a-level-1-map-invalid) (a-constant 77))
+;inimap0	;first set all level 1 map to the invalid entry, all 6 bits ones, bit 5
 	;written from vma<24>
-	((vma) dpb (m-constant -1) map-write-first-level-map
-		   (a-constant (plus (byte-value map-write-enable-first-level-write 1)
-				     (byte-mask map-write-first-level-map-high))))
-	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 1 24.) A-ZERO)
-INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
-	(JUMP-NOT-EQUAL MD A-ZERO INIMAP1)
+;	((vma) dpb (m-constant -1) map-write-first-level-map
+;		   (a-constant (plus (byte-value map-write-enable-first-level-write 1)
+;				     (byte-mask map-write-first-level-map-high))))
+;	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 1 24.) A-ZERO)
+;INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
+;	(JUMP-NOT-EQUAL MD A-ZERO INIMAP1)
 	;; the entry just written for block 0 must read back as the invalid entry
 	;; machine-id promised: if the level-1 map is narrower than it says, blocks
 	;; would silently alias, so halt at map-width-mismatch.  md is 0 here,
 	;; addressing block 0.
-	((m-tem) map-first-level-map memory-map-data)
-	(jump-not-equal m-tem a-level-1-map-invalid map-width-mismatch)
+;	((m-tem) map-first-level-map memory-map-data)
+;	(jump-not-equal m-tem a-level-1-map-invalid map-width-mismatch)
 	;THEN ZERO LAST BLOCK OF LEVEL 2 MAP (the invalid block, 37 or 77, which
 	;md's level-1 entry, just set to it, points at)
-	((MD) A-ZERO)
-INIMAP2	((VMA-WRITE-MAP) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE A-ZERO)
+;	((MD) A-ZERO)
+;INIMAP2	((VMA-WRITE-MAP) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE A-ZERO)
 ;	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
 	;; 1024-word pages (contract g2, option (w)): every map entry of the
 	;; block, 256 words each, not every 1024-word page
-	((md) add md (a-constant map-entry-size))
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 13.) MD INIMAP2)
+;	((md) add md (a-constant map-entry-size))
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 13.) MD INIMAP2)
 	;NOW SET UP WIRED LEVEL 1 MAP
-	((MD) A-ZERO)
-	((M-C) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-FIRST-LEVEL-WRITE A-ZERO)
-INIMAP7	((VMA-WRITE-MAP) M-C) 
-	((MD) ADD MD (A-CONSTANT 20000))
-	(JUMP-LESS-THAN-XCT-NEXT MD A-A INIMAP7)
-       ((M-C) ADD M-C (A-CONSTANT (BYTE-VALUE MAP-WRITE-FIRST-LEVEL-MAP 1)))
+;	((MD) A-ZERO)
+;	((M-C) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-FIRST-LEVEL-WRITE A-ZERO)
+;INIMAP7	((VMA-WRITE-MAP) M-C) 
+;	((MD) ADD MD (A-CONSTANT 20000))
+;	(JUMP-LESS-THAN-XCT-NEXT MD A-A INIMAP7)
+;       ((M-C) ADD M-C (A-CONSTANT (BYTE-VALUE MAP-WRITE-FIRST-LEVEL-MAP 1)))
 	;; only the low 5 bits of the entry are counted here, which holds while
 	;; fewer than 37 blocks (248k words) are wired.
-	((A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT) 
-		MAP-WRITE-FIRST-LEVEL-MAP M-C)	;FIRST NON-WIRED
+;	((A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT) 
+;		MAP-WRITE-FIRST-LEVEL-MAP M-C)	;FIRST NON-WIRED
 	;THEN SET UP WIRED LEVEL 2 MAP
-	((MD) SETZ)
+;	((MD) SETZ)
 ;INIMAP3	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART MD	;SELF-ADDRESS
 ;		(A-CONSTANT (PLUS (BYTE-VALUE MAP-ACCESS-CODE 3)   ;RW
 ;				  ;(BYTE-VALUE MAP-STATUS-CODE 0)  ;4 READ/WRITE
@@ -253,37 +262,98 @@ INIMAP7	((VMA-WRITE-MAP) M-C)
 	;; 1024-word pages (contract g2, option (w)): wire every map entry of the
 	;; wired words, 256 words each, to itself; a step of a 1024-word page
 	;; would map one entry in four and leave holes
+;inimap3	((vma-write-map) vma-phys-map-entry-part md	;self-address
+;		(a-constant (plus (byte-value map-access-code 3)   ;rw
+				  ;(byte-value map-status-code 0)  ;4 read/write
+;				  (byte-value map-meta-bits 64) ;not old, not extra-pdl, struc
+;				  (byte-value map-write-enable-second-level-write 1))))
+;	((md) add md (a-constant map-entry-size))		;next map entry
+;	(JUMP-LESS-THAN MD A-A INIMAP3)		;LOOP UNTIL DONE ALL WIRED ADDRESSES
+;INIM3A	((M-1) (BYTE-FIELD 5 8) MD)		;IF NOT AT EVEN 1ST LVL MAP BOUNDARY...
+;	(JUMP-EQUAL M-1 A-ZERO INIM3B)		; INITIALIZE REST OF 2ND LVL BLOCK TO
+;	((VMA-WRITE-MAP)			; MAP NOT SET UP.
+;	   (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)))
+;	(JUMP-XCT-NEXT INIM3A)
+;       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;       ((md) add md (a-constant map-entry-size))	;the next map entry, not page
+
+;INIM3B						;INITIALIZE REVERSE 1ST LVL MAP
+;	((A-SECOND-LEVEL-MAP-REUSE-POINTER) A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)
+					;reverse 1st lvl map locs 240-337:
+					;quux's 64 entries do not fit in 40-77
+;	((WRITE-MEMORY-DATA) M-ZERO)	;VALUE TO GO IN WIRED ENTRIES
+;	((vma) (a-constant 637))	;a-v-system-communication-area is 400
+	;; 1024-word pages (contract g2, option (w)): the system communication
+	;; area is at 2000 (appendix a1.9), its offsets kept: 2240-2337
+;	((vma) (a-constant 2237))	;a-v-system-communication-area is 2000
+;INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((WRITE-MEMORY-DATA) ADD WRITE-MEMORY-DATA (A-CONSTANT 20000))
+;	(JUMP-LESS-THAN WRITE-MEMORY-DATA A-A INIMAP6)	;JUMP IF STILL WIRED
+;	((M-A WRITE-MEMORY-DATA) (M-CONSTANT -1))	;REST OF ENTRYS ARE -1.
+;INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
+;inimap6	(jump-less-than vma (a-constant 2337) inimap5)	;64 entries, to 2337
+;; quux revision 13 (appendix a1.7): the level-1 map has 8,192 entries of 7
+;; bits, indexed by vma<27:15>, each a block of 32 level-2 entries of a
+;; 1024-word page; the invalid block is 177.  the level-1 entry is written
+;; whole from vma<38:32>, which arithmetic does not reach (the alu's
+;; arithmetic acts on <31:0>, g2 2.2), so the wired blocks' entries are made by
+;; dpb of a count kept apart.  the reverse level-1 map has 128 entries, at the
+;; system communication area's offsets 400-577 (a1.8).
+	((a-level-1-map-invalid) (a-constant 177))
+inimap0	;first set all level 1 map to the invalid entry, all 7 bits ones
+	((vma) dpb (m-constant -1) map-write-first-level-map
+		   (a-constant (byte-value map-write-enable-first-level-write 1)))
+	((md) dpb (m-constant -1) (byte-field 1 28.) a-zero)	;the top of the 28-bit space
+inimap1	((md-write-map) sub md (a-constant 100000))	;a level-1 entry is 32k words
+	(jump-not-equal md a-zero inimap1)
+	;; the entry just written for block 0 must read back as the invalid entry
+	;; machine-id promised: if the level-1 map is narrower than it says, blocks
+	;; would silently alias, so halt at map-width-mismatch.  md is 0 here,
+	;; addressing block 0.
+	((m-tem) map-first-level-map memory-map-data)
+	(jump-not-equal m-tem a-level-1-map-invalid map-width-mismatch)
+	;then zero last block of level 2 map (the invalid block, 177, which
+	;md's level-1 entry, just set to it, points at): its 32 pages
+	((md) a-zero)
+inimap2	((vma-write-map) dpb (m-constant -1) map-write-enable-second-level-write a-zero)
+	((md) add md (a-constant (eval page-size)))
+	(jump-if-bit-clear (byte-field 1 15.) md inimap2)
+	;now set up wired level 1 map: block k for the k-th 32k words
+	((md) a-zero)
+	((m-1) a-zero)					;the block
+inimap7	((vma-write-map) dpb m-1 map-write-first-level-map
+		(a-constant (byte-value map-write-enable-first-level-write 1)))
+	((md) add md (a-constant 100000))
+	(jump-less-than-xct-next md a-a inimap7)
+       ((m-1) add m-1 (a-constant 1))
+	((a-second-level-map-reuse-pointer-init) m-1)	;first non-wired
+	;then set up wired level 2 map, a page an entry
+	((md) setz)
 inimap3	((vma-write-map) vma-phys-map-entry-part md	;self-address
 		(a-constant (plus (byte-value map-access-code 3)   ;rw
 				  ;(byte-value map-status-code 0)  ;4 read/write
 				  (byte-value map-meta-bits 64) ;not old, not extra-pdl, struc
 				  (byte-value map-write-enable-second-level-write 1))))
-	((md) add md (a-constant map-entry-size))		;next map entry
-	(JUMP-LESS-THAN MD A-A INIMAP3)		;LOOP UNTIL DONE ALL WIRED ADDRESSES
-INIM3A	((M-1) (BYTE-FIELD 5 8) MD)		;IF NOT AT EVEN 1ST LVL MAP BOUNDARY...
-	(JUMP-EQUAL M-1 A-ZERO INIM3B)		; INITIALIZE REST OF 2ND LVL BLOCK TO
-	((VMA-WRITE-MAP)			; MAP NOT SET UP.
-	   (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)))
-	(JUMP-XCT-NEXT INIM3A)
-;       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
-       ((md) add md (a-constant map-entry-size))	;the next map entry, not page
+	((md) add md (a-constant (eval page-size)))		;next page
+	(jump-less-than md a-a inimap3)		;loop until done all wired addresses
+inim3a	((m-1) (byte-field 5 10.) md)		;if not at even 1st lvl map boundary...
+	(jump-equal m-1 a-zero inim3b)		; initialize rest of 2nd lvl block to
+	((vma-write-map)			; map not set up.
+	   (a-constant (byte-value map-write-enable-second-level-write 1)))
+	(jump-xct-next inim3a)
+       ((md) add md (a-constant (eval page-size)))
 
-INIM3B						;INITIALIZE REVERSE 1ST LVL MAP
-	((A-SECOND-LEVEL-MAP-REUSE-POINTER) A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)
-					;reverse 1st lvl map locs 240-337:
-					;quux's 64 entries do not fit in 40-77
-	((WRITE-MEMORY-DATA) M-ZERO)	;VALUE TO GO IN WIRED ENTRIES
-;	((vma) (a-constant 637))	;a-v-system-communication-area is 400
-	;; 1024-word pages (contract g2, option (w)): the system communication
-	;; area is at 2000 (appendix a1.9), its offsets kept: 2240-2337
-	((vma) (a-constant 2237))	;a-v-system-communication-area is 2000
-INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)
-	((WRITE-MEMORY-DATA) ADD WRITE-MEMORY-DATA (A-CONSTANT 20000))
-	(JUMP-LESS-THAN WRITE-MEMORY-DATA A-A INIMAP6)	;JUMP IF STILL WIRED
-	((M-A WRITE-MEMORY-DATA) (M-CONSTANT -1))	;REST OF ENTRYS ARE -1.
-;INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
-inimap6	(jump-less-than vma (a-constant 2337) inimap5)	;64 entries, to 2337
+inim3b						;initialize reverse 1st lvl map
+	((a-second-level-map-reuse-pointer) a-second-level-map-reuse-pointer-init)
+	((write-memory-data) m-zero)	;value to go in wired entries
+	((vma) (a-constant 2377))	;a-v-system-communication-area is 2000: 2400-2577
+inimap5	((vma-start-write) add vma (a-constant 1))
+	(illop-if-page-fault)
+	((write-memory-data) add write-memory-data (a-constant 100000))
+	(jump-less-than write-memory-data a-a inimap6)	;jump if still wired
+	((m-a write-memory-data) (m-constant -1))	;rest of entrys are -1.
+inimap6	(jump-less-than vma (a-constant 2577) inimap5)	;128 entries, to 2577
 	(POPJ)
 
 ;; initial-map-a comes here when the level-1 map is narrower than machine-id
@@ -301,7 +371,10 @@ machine-not-quux-6
 ;; page.  the halt shows this location.
 ;; quux (contract q13): from revision 11 on, and so named machine-not-quux-11.
 ;machine-not-quux-10
-machine-not-quux-11
+;machine-not-quux-11
+;; quux revision 13 (contract g2 2.8): from revision 13 on, and so named
+;; machine-not-quux-13.
+machine-not-quux-13
 	(call illop)
 
 ;; reset-machine comes here when the file device is not quiet 2 seconds after
@@ -314,7 +387,12 @@ file-device-not-quiet
 ;; disk-restore-1 comes here when the band is not one of 1024-word pages
 ;; (contract g2, option (w)): its format is not 1100, 1101 or 1102, as a band
 ;; of 256-word pages's is not.  the halt shows this location.
-band-not-1024-word-pages
+;band-not-1024-word-pages
+;	(call illop)
+;; quux revision 13 (contract g2 2.8; appendix a1.12): disk-restore-1 comes
+;; here when the band's format is not a 40-bit band's, the fixnum 2000 or 2002:
+;; a band of revision 12 among others.  the halt shows this location.
+band-not-40-bit
 	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
@@ -373,7 +451,11 @@ PHYS-MEM-WRITE
 ;The second and third arguments may be zero to specify the current partition.
 ;The first arg may also be minus the main-memory-size, to dump an incremental band.
 DISK-SAVE (MISC-INST-ENTRY %DISK-SAVE)
-	((M-4) PDL-POP)
+;	((M-4) PDL-POP)
+	;; quux revision 13 (appendix a1.11, rule 5): the band's name is compared
+	;; with m-3, which is built by ldb from the gpt and so untagged: take the
+	;; argument's field, not its tag and cdr code.
+	((m-4) q-pointer pdl-pop)
 	((M-4) DPB PDL-POP (BYTE-FIELD 20 20) A-4)
 	((M-S) Q-POINTER PDL-TOP)
 ;	((MD) (A-CONSTANT 1000))    ;store code so this band known to be in compressed format
@@ -381,8 +463,13 @@ DISK-SAVE (MISC-INST-ENTRY %DISK-SAVE)
 	;; 1024-word pages on revision 12 is 1100 compressed, 1101 incremental and
 	;; 1102 a cold load, so that no microcode takes it for a band of 256-word
 	;; pages (1000, 1001), or the other way round
-	((md) (a-constant 1100))    ;store code so this band known to be in compressed format
+;	((md) (a-constant 1100))    ;store code so this band known to be in compressed format
+	;; quux revision 13 (appendix a1.12): a saved 40-bit band is 2000, stored
+	;; as a fixnum; 2001, an incremental one, is refused (incremental bands are
+	;; not made in 40-bit pages: disk-save-incremental halts).
+	((md) (a-constant (plus (byte-value q-data-type dtp-fix) 2000)))
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT M-S DISK-SAVE-1)
+	(jump incremental-band-not-supported)
 	((MD) ADD MD (A-CONSTANT 1))	;or incremental format, whichever it is
 	((M-S) SUB M-ZERO A-S)
 	((M-S) Q-POINTER M-S)
@@ -402,6 +489,13 @@ DISK-SAVE-1
 	((M-AP) M-ZERO)			;region to hack.
 	((M-Q) M-I)
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT PDL-POP DISK-SAVE-REGIONWISE)
+
+;; quux revision 13: incremental bands are not converted to 5-block pages;
+;; %disk-save of an incremental band and %disk-restore of one (format 2001)
+;; halt at incremental-band-not-supported.  the code below is revision 12's,
+;; unreached.
+incremental-band-not-supported
+	(call illop)
 
 DISK-SAVE-INCREMENTAL
 	((M-B) (A-CONSTANT INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN))
@@ -464,20 +558,41 @@ DISK-SR-1
 	;; 1024-word pages (contract g2, option (w)): the disk counts 256-word
 	;; blocks; a region starts on a page, and is saved to the end of the page
 	;; its free pointer is in, as with 256-word pages, four blocks a page
-	((m-i) ldb vma-block-part md)
+;	((m-i) ldb vma-block-part md)
+;	((M-I) ADD M-I A-DISK-OFFSET)
+;	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((MD) ADD MD (A-CONSTANT 377))
+;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+;	((md) add md (a-constant 1777))
+;	((m-j) ldb vma-page-addr-part md)
+;	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
+;	((M-TEM) ADD M-Q A-J)
+;	(CALL-GREATER-OR-EQUAL M-TEM A-COPY-BAND-TEM BAND-NOT-BIG-ENOUGH)
+;	((M-TEM) ADD M-I A-J)
+;	((M-TEM) SUB M-TEM A-DISK-OFFSET)
+;	(CALL-GREATER-OR-EQUAL M-TEM A-DISK-MAXIMUM ILLOP)  ;Band not within paging partition
+	;; quux revision 13 (appendix a1.11): the region's first block in the
+	;; paging partition is 5 times its first page; m-j counts its pages, to the
+	;; end of the page its free pointer is in; disk-copy-section copies pages
+	;; and advances the disk addresses 5 blocks a page.
+	((m-i) ldb vma-page-addr-part md)
+	((m-tem) dpb m-i (byte-field 30. 2) a-zero)
+	((m-i) add m-i a-tem)			;times 5
 	((M-I) ADD M-I A-DISK-OFFSET)
 	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
 	(ILLOP-IF-PAGE-FAULT)
-;	((MD) ADD MD (A-CONSTANT 377))
-;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
 	((md) add md (a-constant 1777))
-	((m-j) ldb vma-page-addr-part md)
-	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
-	((M-TEM) ADD M-Q A-J)
-	(CALL-GREATER-OR-EQUAL M-TEM A-COPY-BAND-TEM BAND-NOT-BIG-ENOUGH)
-	((M-TEM) ADD M-I A-J)
-	((M-TEM) SUB M-TEM A-DISK-OFFSET)
-	(CALL-GREATER-OR-EQUAL M-TEM A-DISK-MAXIMUM ILLOP)  ;Band not within paging partition
+	((m-j) ldb vma-page-addr-part md)	;its pages
+	((m-tem) dpb m-j (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-j)			;its blocks
+	((m-tem) add m-q a-tem)
+	(call-greater-or-equal m-tem a-copy-band-tem band-not-big-enough)
+	((m-tem) dpb m-j (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-j)
+	((m-tem) add m-i a-tem)
+	((m-tem) sub m-tem a-disk-offset)
+	(call-greater-or-equal m-tem a-disk-maximum illop)  ;band not within paging partition
 	(CALL DISK-SAVE-REGION)
 DISK-SR-2
 	((M-TEM) A-V-REGION-LENGTH)		;depend on REGION-ORIGIN and REGION-LENGTH
@@ -485,7 +600,7 @@ DISK-SR-2
 	((M-AP) ADD M-AP (A-CONSTANT 1))	; many regions there are.
 	(JUMP-LESS-THAN M-AP A-TEM DISK-SR-1)
 	((M-Q) SUB M-Q A-COPY-BAND-TEM1)
-	((MD) DPB M-Q (BYTE-FIELD 30 10) A-ZERO) ;Record active size of band.
+;	((MD) DPB M-Q (BYTE-FIELD 30 10) A-ZERO) ;Record active size of band.
 ;	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-VALID-SIZE))))
 ;	(ILLOP-IF-PAGE-FAULT)
 ;	((M-B) (A-CONSTANT 1))			;Core page frame number
@@ -496,14 +611,42 @@ DISK-SR-2
 	;; communication area is page 1, at 2000, which is block 4 of the band;
 	;; its first block, which holds the valid size, is written again, with
 	;; the ccw at 2377, its reserved last word
+;	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-valid-size))))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((m-b) (a-constant 4))			;core block of the area, 2000
+;	((m-1) a-copy-band-tem1)		;the band's first block
+;	((m-1) add m-1 (a-constant 4))		;and the area's
+;	((m-2) (a-constant 1))			;one block
+;	((m-c) (a-constant 2377))
+	;; quux revision 13: m-q is blocks, 5 a page; the valid size is words, a
+	;; fixnum, of the pages written.  the system communication area is page 1,
+	;; written again, whole, to the band's second page, blocks 5-9, with the
+	;; ccw at 2377, its reserved word.
+	((m-1) m-q)
+	(call divide-by-blocks-per-page)	;the band's pages
+	((md) dpb m-1 vma-page-addr-part (a-constant (byte-value q-data-type dtp-fix)))
 	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-valid-size))))
 	(ILLOP-IF-PAGE-FAULT)
-	((m-b) (a-constant 4))			;core block of the area, 2000
+	((m-b) (a-constant 1))			;core page frame number
 	((m-1) a-copy-band-tem1)		;the band's first block
-	((m-1) add m-1 (a-constant 4))		;and the area's
-	((m-2) (a-constant 1))			;one block
+	((m-1) add m-1 (a-constant blocks-per-page))	;its second page
+	((m-2) (a-constant 1))			;one page
 	((m-c) (a-constant 2377))
 	(JUMP COLD-DISK-WRITE)		;write it on the band.
+
+;; quux revision 13: m-1, a count of blocks, divided by blocks-per-page, 5: a
+;; page's blocks in the packed transfer.  by subtraction; only save and restore
+;; call it.  clobbers m-tem.
+divide-by-blocks-per-page
+	((m-tem) a-zero)
+divide-by-blocks-per-page-1
+	(jump-less-than m-1 (a-constant blocks-per-page) divide-by-blocks-per-page-2)
+	((m-1) sub m-1 (a-constant blocks-per-page))
+	(jump-xct-next divide-by-blocks-per-page-1)
+       ((m-tem) add m-tem (a-constant 1))
+divide-by-blocks-per-page-2
+	(popj-after-next (m-1) m-tem)
+       (no-op)
 
 ;M-I and M-J have origin and size, on disk in the PAGE partition, of a region.
 ;M-Q has disk address to copy to in band being dumped.
@@ -536,7 +679,11 @@ DISK-SAVE-REGION-LOOP
 	(JUMP DISK-SAVE-REGION-LOOP)
 
 DISK-SAVE-SECTION
-	((M-TEM) ADD M-Q A-J)
+;	((M-TEM) ADD M-Q A-J)
+	;; quux revision 13: m-j counts pages, 5 blocks each
+	((m-tem) dpb m-j (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-j)
+	((m-tem) add m-q a-tem)
 	(CALL-GREATER-OR-EQUAL M-TEM A-COPY-BAND-TEM BAND-NOT-BIG-ENOUGH)
 	(JUMP DISK-COPY-SECTION)	
 
@@ -561,7 +708,9 @@ SWAP-OUT-ALL-PAGES
 	((m-s) ldb vma-phys-page-addr-part m-s a-zero)	;number of physical pages.
 	((vma-start-read) (a-constant (plus 2000 (eval %sys-com-wired-size))))
 	(ILLOP-IF-PAGE-FAULT)
-	((m-t) vma-block-part read-memory-data)	;number of wired blocks.
+;	((m-t) vma-block-part read-memory-data)	;number of wired blocks.
+	;; quux revision 13: the wired words are written in pages, a ccw each
+	((m-t) vma-page-addr-part read-memory-data)	;number of wired pages.
 	((C-PDL-BUFFER-POINTER-PUSH) M-T)
 	((M-T) SUB M-S (A-CONSTANT 1))		;First page to do is highest in core
 ;Swap out all unwired pages first, using %DELETE-PHYSICAL-PAGE and updating the PHT normally.
@@ -578,7 +727,8 @@ SWAP-OUT-ALL-PAGES-1
 	((M-2) C-PDL-BUFFER-POINTER-POP)	;Number of wired pages
 	((M-B) M-ZERO)				;Physical memory location 0
 ;	((M-C) DPB M-2 VMA-PAGE-ADDR-PART A-ZERO)	;Put CCW list in high memory
-	((m-c) dpb m-2 vma-block-part a-zero)	;put ccw list in high memory, above the blocks
+;	((m-c) dpb m-2 vma-block-part a-zero)	;put ccw list in high memory, above the blocks
+	((m-c) dpb m-2 vma-page-addr-part a-zero)	;quux revision 13: above the pages
 	((M-S) C-PDL-BUFFER-POINTER-POP)
 	(JUMP COLD-DISK-WRITE)
 
@@ -589,7 +739,10 @@ COLD-BOOT
 ;(%DISK-RESTORE high-16-bits-of-partition-name low-16-bits)
 ;The first and second arguments may be zero to specify the current partition.
 DISK-RESTORE (MISC-INST-ENTRY %DISK-RESTORE)
-	((M-4) C-PDL-BUFFER-POINTER-POP)
+;	((M-4) C-PDL-BUFFER-POINTER-POP)
+	;; quux revision 13 (appendix a1.11, rule 5): the argument's field, as at
+	;; disk-save
+	((m-4) q-pointer c-pdl-buffer-pointer-pop)
 	((M-4) DPB C-PDL-BUFFER-POINTER-POP (BYTE-FIELD 20 20) A-4)
 DISK-RESTORE-1
 	((WRITE-MEMORY-DATA) (A-CONSTANT 200000))	;64K to be direct-mapped
@@ -616,9 +769,11 @@ DISK-RESTORE-1
 	;; quux: and halt at run-light-shares-disk-slot, rather than hang, if the
 	;; run light's entry would overwrite the disk registers'.
 	((m-1) a-disk-run-light)
-	((m-1) (byte-field 5 8) m-1)
+;	((m-1) (byte-field 5 8) m-1)
+	((m-1) (byte-field 5 10.) m-1)		;quux revision 13: vma<14:10>, a page's slot
 	((m-2) a-disk-regs-base)
-	((m-2) (byte-field 5 8) m-2)
+;	((m-2) (byte-field 5 8) m-2)
+	((m-2) (byte-field 5 10.) m-2)
 	(jump-equal m-1 a-2 run-light-shares-disk-slot)
 	(CALL-XCT-NEXT COLD-FAKE-L2-MAP)	; before things set up.  Another RESET-MACHINE
        ((MD) A-DISK-RUN-LIGHT)			; will be done at beg0000 eventually anyway.
@@ -647,7 +802,8 @@ MEM-SIZE-LOOP
 	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
 ;	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
-	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
+;	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
+	((m-2) (a-constant low-pages))		;quux revision 13: core pages 0, 1, and 2
 	((M-B) (A-CONSTANT 0))			;..
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN)) ;CCW list after MICRO-CODE-SYMBOL-AREA
 	(CALL COLD-DISK-READ)
@@ -662,20 +818,47 @@ MEM-SIZE-LOOP
 	;; cold load before.  the save stores a bare number and the cold load a
 	;; fixnum, so the pointer field is compared.
        ((vma) (a-constant (plus 2000 (eval %sys-com-band-format))))
-	((m-tem) q-pointer md)
-	(jump-equal m-tem (a-constant 1100) disk-restore-regionwise)  ;compressed partition.
-	(jump-equal m-tem (a-constant 1101) disk-restore-incremental) ;incremental partition.
-	(jump-not-equal m-tem (a-constant 1102) band-not-1024-word-pages)
+;	((m-tem) q-pointer md)
+;	(jump-equal m-tem (a-constant 1100) disk-restore-regionwise)  ;compressed partition.
+;	(jump-equal m-tem (a-constant 1101) disk-restore-incremental) ;incremental partition.
+;	(jump-not-equal m-tem (a-constant 1102) band-not-1024-word-pages)
+	;; quux revision 13 (contract g2 2.8; appendix a1.12): a 40-bit band's
+	;; format is a fixnum, compared whole with fixnum constants: 2000 saved,
+	;; 2002 a cold load.  2001, incremental, halts at
+	;; incremental-band-not-supported, and anything else, a 32-bit band's
+	;; 1000-1102 among them, at band-not-40-bit, rather than be taken for a
+	;; cold load.
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2000))
+		disk-restore-regionwise)  ;compressed partition.
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2001))
+		incremental-band-not-supported) ;incremental partition.
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2002))
+		band-not-40-bit)
 ;Non-compressed band (must be a cold-load band, I think).
 	(CALL-XCT-NEXT PHYS-MEM-READ)		;Get useful size of partition, in words
 ;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-VALID-SIZE))))
 ;	((M-D) VMA-PAGE-ADDR-PART MD)		;Number of valid pages
        ((vma) (a-constant (plus 2000 (eval %sys-com-valid-size))))
-	((m-d) vma-block-part md)		;number of valid blocks
-	(JUMP-LESS-OR-EQUAL M-J A-D DISK-COPY-PART-1)
-	((M-J) M-D)				;M-J is number of pages to copy (min sizes)
-DISK-COPY-PART-1
-	(CALL-GREATER-THAN M-J A-R ILLOP)	;Not enough room in destination partition
+;	((m-d) vma-block-part md)		;number of valid blocks
+;	(JUMP-LESS-OR-EQUAL M-J A-D DISK-COPY-PART-1)
+;	((M-J) M-D)				;M-J is number of pages to copy (min sizes)
+;DISK-COPY-PART-1
+;	(CALL-GREATER-THAN M-J A-R ILLOP)	;Not enough room in destination partition
+	;; quux revision 13: m-j and m-r are the band's and the paging
+	;; partition's blocks, 5 a page; disk-copy-section copies pages.  the valid
+	;; pages, if the band holds them.
+	((m-d) vma-page-addr-part md)		;number of valid pages
+	((m-tem) dpb m-d (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-d)			;their blocks
+	(jump-less-or-equal m-tem a-j disk-copy-part-1)
+	((m-1) m-j)				;or as many as the band holds
+	(call divide-by-blocks-per-page)
+	((m-d) m-1)
+	((m-tem) dpb m-d (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-d)
+disk-copy-part-1
+	(call-greater-than m-tem a-r illop)	;not enough room in destination partition
+	((m-j) m-d)				;m-j is number of pages to copy (min sizes)
 	(CALL DISK-COPY-SECTION)
 	(JUMP COLD-SWAP-IN)
 
@@ -683,8 +866,11 @@ DISK-RESTORE-REGIONWISE
 	((M-K) A-ZERO)
 ;	((M-I) ADD M-I (A-CONSTANT 3))
 ;	((M-J) SUB M-J (A-CONSTANT 3))
-	((m-i) add m-i (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
-	((m-j) sub m-j (a-constant low-pages-blocks))
+;	((m-i) add m-i (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+;	((m-j) sub m-j (a-constant low-pages-blocks))
+	;; quux revision 13: 3 pages of 5 blocks
+	((m-i) add m-i (a-constant (eval (* 3 5))))
+	((m-j) sub m-j (a-constant (eval (* 3 5))))
   ;Micro-code-symbol-area has a free pointer
   ;of zero, so is not copied into band.  Therefore, REGION-ORIGIN, etc. start at 3rd page
   ;of band
@@ -730,17 +916,32 @@ DISK-RR-1
 ;	((M-Q) LDB VMA-PAGE-ADDR-PART MD)
 	;; 1024-word pages (contract g2, option (w)): blocks, as disk-sr-1 saves
 	;; them: the region to the end of its free pointer's page
-	((m-q) ldb vma-block-part md)
+;	((m-q) ldb vma-block-part md)
+;	((M-Q) ADD M-Q A-DISK-OFFSET)
+;	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((MD) ADD MD (A-CONSTANT 377))
+;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+;	((md) add md (a-constant 1777))
+;	((m-j) ldb vma-page-addr-part md)
+;	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
+;	(CALL-GREATER-OR-EQUAL M-I A-COPY-BAND-TEM ILLOP) ;bandwise EOF.
+;	((M-TEM) ADD M-Q A-J)
+;	((M-TEM) SUB M-TEM A-DISK-OFFSET)
+	;; quux revision 13, as disk-sr-1: the region's first block in the paging
+	;; partition, 5 a page, and its pages
+	((m-q) ldb vma-page-addr-part md)
+	((m-tem) dpb m-q (byte-field 30. 2) a-zero)
+	((m-q) add m-q a-tem)			;times 5
 	((M-Q) ADD M-Q A-DISK-OFFSET)
 	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
 	(ILLOP-IF-PAGE-FAULT)
-;	((MD) ADD MD (A-CONSTANT 377))
-;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
 	((md) add md (a-constant 1777))
-	((m-j) ldb vma-page-addr-part md)
-	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
+	((m-j) ldb vma-page-addr-part md)	;its pages
 	(CALL-GREATER-OR-EQUAL M-I A-COPY-BAND-TEM ILLOP) ;bandwise EOF.
-	((M-TEM) ADD M-Q A-J)
+	((m-tem) dpb m-j (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-j)			;its blocks
+	((m-tem) add m-q a-tem)
 	((M-TEM) SUB M-TEM A-DISK-OFFSET)
 	(CALL-GREATER-OR-EQUAL M-TEM A-DISK-MAXIMUM ILLOP)   ;page partition not big enuf
 							     ; for this band.
@@ -833,7 +1034,9 @@ DISK-RESTORE-BITMAP-SEARCH-2
 ;; 1024-word pages (contract g2, option (w)): above the region tables, which
 ;; are at 10000-17777 (disk-restore-regionwise-subr reads them to below the
 ;; buffer); block 40, 20000
-(assign inc-band-bitmap-buffer-page-origin 40)
+;(assign inc-band-bitmap-buffer-page-origin 40)
+;; quux revision 13: pages again; page 10, 20000
+(assign inc-band-bitmap-buffer-page-origin 10)
 (assign inc-band-bitmap-buffer-origin 20000)
 
 DISK-RESTORE-INCREMENTAL
@@ -935,10 +1138,17 @@ COLD-SWAP-IN
 	;; 1024-word pages (contract g2, option (w)): the area at 2000, and the
 	;; wired words read in 256-word blocks, the disk's unit
        ((vma) (a-constant (plus 2000 (eval %sys-com-wired-size))))
-	((m-2) vma-block-part read-memory-data)	;number of wired blocks
+;	((m-2) vma-block-part read-memory-data)	;number of wired blocks
+;	((M-C) Q-POINTER READ-MEMORY-DATA)	;Save for later, also put CCW list there
+;	((M-B) (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
+;	((M-1) ADD M-B A-DISK-OFFSET)
+;	((M-2) SUB M-2 (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
+	;; quux revision 13: pages, 5 blocks each on the disk
+	((m-2) vma-page-addr-part read-memory-data)	;number of wired pages
 	((M-C) Q-POINTER READ-MEMORY-DATA)	;Save for later, also put CCW list there
 	((M-B) (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
-	((M-1) ADD M-B A-DISK-OFFSET)
+	((m-1) (a-constant (eval (* 4 5))))	;page 4's first block
+	((M-1) ADD M-1 A-DISK-OFFSET)
 	((M-2) SUB M-2 (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
 	(CALL COLD-DISK-READ)
 ;;; Set things up according to actual main memory size
@@ -1071,7 +1281,10 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	;; Find out where to page off of if we don't know already 
 	(CALL-EQUAL A-DISK-OFFSET M-ZERO WARM-READ-GPT)
 	;; Clear the unused pages of the PHT and PPD out of the map
-	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-V-PHYSICAL-PAGE-DATA-END)
+;	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-V-PHYSICAL-PAGE-DATA-END)
+	;; quux revision 13: to the end of the 1024-word page, where the map's
+	;; entry now ends (y3 rounded to a 256-word map entry)
+	((md) dpb (m-constant -1) (byte-field 10. 0) a-v-physical-page-data-end)
 	((MD) ADD MD (A-CONSTANT 1))		;First page above PPD
 	(JUMP-GREATER-OR-EQUAL MD A-V-REGION-ORIGIN BEGCM2)
 BEGCM1	((VMA-WRITE-MAP) (A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
@@ -1218,11 +1431,22 @@ cold-read-gpt
        ((m-1) a-zero)			;block 0: the protective mbr, and lba 1
 	(call-xct-next phys-mem-read)	; the gpt header, from word 200
 ;       ((vma) dpb m-b vma-phys-page-addr-part (a-constant 200))
-       ((vma) dpb m-b vma-block-part (a-constant 200))	;m-b is a block, 256 words
-	(jump-not-equal md (a-constant 4022243105) gpt-missing)	;"EFI "
+;       ((vma) dpb m-b vma-block-part (a-constant 200))	;m-b is a block, 256 words
+;	(jump-not-equal md (a-constant 4022243105) gpt-missing)	;"EFI "
+;	(call-xct-next phys-mem-read)
+;       ((vma) add vma (a-constant 1))
+;	(jump-not-equal md (a-constant 12424440520) gpt-missing)	;"PART"
+	;; quux revision 13 (appendix a1.11): the gpt is read by the 4-byte
+	;; transfer, a page of 4 blocks, block m-1 in its first 400 words, and
+	;; every word read carries tag 005: a constant compared with one is a
+	;; fixnum (rule 1), a count read from it is tested against zero by an
+	;; ordering condition (rule 2), and a byte taken by ldb is untagged (rule
+	;; 3).  m-b is the buffer's page frame.
+       ((vma) dpb m-b vma-phys-page-addr-part (a-constant 200))
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 4022243105)) gpt-missing)	;"EFI "
 	(call-xct-next phys-mem-read)
        ((vma) add vma (a-constant 1))
-	(jump-not-equal md (a-constant 12424440520) gpt-missing)	;"PART"
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 12424440520)) gpt-missing)	;"PART"
 	(call-xct-next phys-mem-read)
        ((vma) add vma (a-constant 21))	;word 222: the entries' first lba
 	(jump-if-bit-set (byte-field 1 0) md gpt-missing)	;not on a block
@@ -1232,24 +1456,30 @@ cold-read-gpt
 	((a-gpt-count) md)
 	(call-xct-next phys-mem-read)
        ((vma) add vma (a-constant 1))	;word 225: the size of an entry
-	(jump-not-equal md (a-constant 200) gpt-missing)	;must be 128 bytes
+;	(jump-not-equal md (a-constant 200) gpt-missing)	;must be 128 bytes
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 200)) gpt-missing)	;must be 128 bytes
 	((m-q) setz)			;no PAGE yet
 	((m-i) setz)			;no band yet (none starts at block 0)
 gpt-next-block				;read the next block of 8 entries
-	(jump-equal m-zero a-gpt-count gpt-done)
+;	(jump-equal m-zero a-gpt-count gpt-done)
+	(jump-greater-or-equal m-zero a-gpt-count gpt-done)	;quux revision 13: rule 2
 	(call-xct-next cold-read-gpt-block)
        ((m-1) a-gpt-block)
 	((a-gpt-block) m+a+1 m-zero a-gpt-block)
 ;	((m-c) dpb m-b vma-phys-page-addr-part a-zero)	;m-c: the entry
-	((m-c) dpb m-b vma-block-part a-zero)	;m-c: the entry (m-b is a block)
+;	((m-c) dpb m-b vma-block-part a-zero)	;m-c: the entry (m-b is a block)
+	((m-c) dpb m-b vma-phys-page-addr-part a-zero)	;quux revision 13: m-b is a page
 gpt-next-entry				;dispatch on the type's first word
 	(call-xct-next phys-mem-read)
        ((vma) m-c)
-	(jump-equal md (a-constant 10624537245) gpt-page-entry)
-	(jump-equal md (a-constant 24354602160) gpt-band-entry)
+;	(jump-equal md (a-constant 10624537245) gpt-page-entry)
+;	(jump-equal md (a-constant 24354602160) gpt-band-entry)
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 10624537245)) gpt-page-entry)
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 24354602160)) gpt-band-entry)
 gpt-entry-done
 	((a-gpt-count) add (m-constant -1) a-gpt-count)
-	(jump-equal m-zero a-gpt-count gpt-done)
+;	(jump-equal m-zero a-gpt-count gpt-done)
+	(jump-greater-or-equal m-zero a-gpt-count gpt-done)	;quux revision 13: rule 2
 	((m-c) add m-c (a-constant 40))	;32 words an entry
 	((m-tem) (byte-field 8. 0) m-c)
 	(jump-not-equal m-tem a-zero gpt-next-entry)
@@ -1258,13 +1488,14 @@ gpt-entry-done
 gpt-page-entry				;the type's other three words
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 1))
-	(jump-not-equal md (a-constant 11366203257) gpt-entry-done)
+	;; quux revision 13: fixnum constants (appendix a1.11, rule 1)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 11366203257)) gpt-entry-done)
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 2))
-	(jump-not-equal md (a-constant 10115335662) gpt-entry-done)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 10115335662)) gpt-entry-done)
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 3))
-	(jump-not-equal md (a-constant 31024200467) gpt-entry-done)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 31024200467)) gpt-entry-done)
 	(jump-not-equal m-q a-zero gpt-entry-done)	;the first PAGE wins
 	(call gpt-entry-extent)
 	((m-q) m-1)
@@ -1274,13 +1505,14 @@ gpt-page-entry				;the type's other three words
 gpt-band-entry				;the type's other three words
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 1))
-	(jump-not-equal md (a-constant 10160342724) gpt-entry-done)
+	;; quux revision 13: fixnum constants (appendix a1.11, rule 1)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 10160342724)) gpt-entry-done)
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 2))
-	(jump-not-equal md (a-constant 14564524207) gpt-entry-done)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 14564524207)) gpt-entry-done)
 	(call-xct-next phys-mem-read)
        ((vma) add m-c (a-constant 3))
-	(jump-not-equal md (a-constant 27023041220) gpt-entry-done)
+	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 27023041220)) gpt-entry-done)
 	(jump-equal m-4 a-minus-one gpt-entry-done)	;PAGE only
 	(jump-not-equal m-i a-zero gpt-entry-done)	;the first match wins
 	(jump-not-equal m-4 a-zero gpt-band-named)
@@ -1302,16 +1534,23 @@ gpt-done
 	(jump-equal m-q a-zero gpt-no-page)
 	((a-disk-offset) m-q)
 	((a-disk-maximum) m-r)
+	;; quux revision 13: and its pages, 5 blocks each (make-region's bound)
+	((m-1) m-r)
+	(call divide-by-blocks-per-page)
+	((a-disk-maximum-pages) m-1)
 	(popj-equal m-4 a-minus-one)
 	(jump-equal m-i a-zero gpt-no-band)
 	((a-loaded-band) (byte-field 30 10) m-3 (a-constant (byte-value q-data-type dtp-fix)))
 	(popj)
 
 ;; read block m-1 of the gpt into the page in a-gpt-buffer-page, left in m-b.
+;; quux revision 13 (appendix a1.11): by the 4-byte transfer, a page of 4
+;; blocks from block m-1, which is the page's words 0-377.
 cold-read-gpt-block
 	((m-b) a-gpt-buffer-page)
 	((m-2) (a-constant 1))
-	(jump-xct-next cold-disk-read)
+;	(jump-xct-next cold-disk-read)
+	(jump-xct-next cold-disk-read-4-byte)
        ((m-c) a-gpt-ccw)
 
 ;; the entry at m-c: its first block in m-1, its size in blocks in m-2.  a
@@ -1385,6 +1624,8 @@ WARM-READ-GPT
 
 ;; physical page 0 to pdl buffer locations 0-377 and back, around the warm
 ;; boot's reading of the gpt into page 0.
+;; quux revision 13 (appendix a1.9): a read of the gpt fills the whole page,
+;; 1024 words, so the whole page is parked, pdl buffer locations 0-1777.
 gpt-park-page-0
 	((pdl-buffer-index) setz)
 gpt-park-page-0-1
@@ -1392,7 +1633,8 @@ gpt-park-page-0-1
        ((vma) pdl-buffer-index)
 	((c-pdl-buffer-index) md)
 	((pdl-buffer-index) m+1 pdl-buffer-index)
-	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-park-page-0-1)
+;	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-park-page-0-1)
+	(jump-if-bit-clear (byte-field 1 10.) pdl-buffer-index gpt-park-page-0-1)
 	(popj)
 
 gpt-unpark-page-0
@@ -1402,7 +1644,8 @@ gpt-unpark-page-0-1
 	(call-xct-next phys-mem-write)
        ((vma) pdl-buffer-index)
 	((pdl-buffer-index) m+1 pdl-buffer-index)
-	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-unpark-page-0-1)
+;	(jump-if-bit-clear (byte-field 1 8.) pdl-buffer-index gpt-unpark-page-0-1)
+	(jump-if-bit-clear (byte-field 1 10.) pdl-buffer-index gpt-unpark-page-0-1)
 	(popj)
 
 ;;; Lowest level disk routines.
@@ -1411,10 +1654,16 @@ gpt-unpark-page-0-1
 
 ;The copy buffer must be far enough above INC-BAND-BITMAP-BUFFER-ORIGIN
 ;to leave room for as large a bitmap as we want to deal with.
-(ASSIGN COPY-BUFFER-CCW-PAGE-ORIGIN 100)
-(ASSIGN COPY-BUFFER-CCW-ORIGIN 40000)	;above * page-size
-(ASSIGN COPY-BUFFER-CCW-BLOCK-LENGTH 1000)
-(ASSIGN COPY-BUFFER-PAGE-ORIGIN 102)
+;(ASSIGN COPY-BUFFER-CCW-PAGE-ORIGIN 100)
+;(ASSIGN COPY-BUFFER-CCW-ORIGIN 40000)	;above * page-size
+;(ASSIGN COPY-BUFFER-CCW-BLOCK-LENGTH 1000)
+;(ASSIGN COPY-BUFFER-PAGE-ORIGIN 102)
+;; quux revision 13: in 1024-word pages, the same words: the ccw list at 40000,
+;; page 20, up to 1000 pages at a time, and the buffer from page 21, 42000.
+(assign copy-buffer-ccw-page-origin 20)
+(assign copy-buffer-ccw-origin 40000)	;above * page-size
+(assign copy-buffer-ccw-block-length 1000)
+(assign copy-buffer-page-origin 21)
 
 ;Copy one sequence of disk blocks into another.
 ;M-I and M-J now have the start and size of the sequence to be copied from.
@@ -1429,10 +1678,13 @@ gpt-unpark-page-0-1
 
 DISK-COPY-SECTION
 ;Here M-I, M-Q and M-J are as updated for blocks already transfered.
+	;; quux revision 13 (appendix a1.11): m-j counts pages, m-i and m-q are
+	;; blocks, 5 a page in the packed transfer; a transfer moves pages.
 	(POPJ-EQUAL M-J A-ZERO)			;If done.
 ;M-D gets max # blocks we can transfer at once.
 ;	((M-D) VMA-PHYS-PAGE-ADDR-PART M-S)		;Number of pages in main memory
-	((m-d) vma-block-part m-s)		;number of blocks in main memory (1024-word pages)
+;	((m-d) vma-block-part m-s)		;number of blocks in main memory (1024-word pages)
+	((m-d) vma-phys-page-addr-part m-s)	;number of pages in main memory
 	((M-D) SUB M-D (A-CONSTANT COPY-BUFFER-PAGE-ORIGIN))	;memory not used for buffer
 ;Copy at most 1000 pages at a time since that is size of 2-page command list
 	(JUMP-LESS-THAN M-D (A-CONSTANT COPY-BUFFER-CCW-BLOCK-LENGTH) DISK-COPY-PART-2)
@@ -1450,8 +1702,12 @@ DISK-COPY-PART-3
 	((M-2) M-D)
 	((M-1) M-Q)				;Write some out
 	(CALL COLD-DISK-WRITE)
-	((M-I) ADD M-I A-D)			;Advance pointers
-	((M-Q) ADD M-Q A-D)
+;	((M-I) ADD M-I A-D)			;Advance pointers
+;	((M-Q) ADD M-Q A-D)
+	((m-tem) dpb m-d (byte-field 30. 2) a-zero)	;quux revision 13: the pages' blocks
+	((m-tem) add m-tem a-d)
+	((m-i) add m-i a-tem)			;advance pointers
+	((m-q) add m-q a-tem)
 	((M-J) SUB M-J A-D)
 	(JUMP DISK-COPY-SECTION)
 
@@ -1477,10 +1733,21 @@ COLD-DISK-READ-1				;1 page read
 ;	((M-C) (A-CONSTANT 777))
 	((m-c) (a-constant 2377))	;1024-word pages: sys com area's 377, at 2000 (one block)
 COLD-DISK-READ
+	;; quux revision 13 (appendix a1.11): pages by the packed transfer
 	((VMA) A-DISK-RUN-LIGHT)
 	((WRITE-MEMORY-DATA) (M-CONSTANT -1))
 	((VMA-START-WRITE) ADD VMA (A-CONSTANT 2))	;Turn on run bar
 	((M-T) (A-CONSTANT DISK-READ-COMMAND))
+	(JUMP COLD-RUN-DISK)
+
+;; quux revision 13 (appendix a1.11): read m-2 pages by the 4-byte transfer,
+;; 4 blocks a page, each word's <31:0> from 4 bytes, tagged 005: the gpt, whose
+;; bytes the machine reads as 32-bit words.  arguments as cold-disk-read's.
+cold-disk-read-4-byte
+	((VMA) A-DISK-RUN-LIGHT)
+	((WRITE-MEMORY-DATA) (M-CONSTANT -1))
+	((VMA-START-WRITE) ADD VMA (A-CONSTANT 2))	;turn on run bar
+	((m-t) (a-constant (plus disk-read-command 1_12.)))
 	(JUMP COLD-RUN-DISK)
 
 ))

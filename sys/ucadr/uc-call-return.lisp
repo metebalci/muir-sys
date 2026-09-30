@@ -134,7 +134,11 @@ QMRCL1	((VMA-START-READ) ADD M-A		;GET FUNCTION CELL
 
 ;DON'T CALL QBND4 TO AVOID REFERENCING A-SELF VIA SLOW VIRTUAL-MEMORY PATH
 BIND-SELF	;Bind SELF to M-A
-	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;; quux revision 13: m constant 32., a slack at least the 24. this test
+;; always had; the pointer width is 32 now, and m memory holds only two
+;; constants, 40 and 50 (a1.11)
+	((M-TEM) ADD (m-constant 40) A-QLBNDP)
 	((M-TEM) SUB M-TEM A-QLBNDH)
 	(CALL-IF-BIT-CLEAR BOXED-SIGN-BIT M-TEM TRAP)
 	    (ERROR-TABLE PDL-OVERFLOW SPECIAL)
@@ -157,7 +161,11 @@ BIND-SELF-1
 
 ;Bind SELF-MAPPING-TABLE to M-B
 BIND-SELF-MAP
-	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;; quux revision 13: m constant 32., a slack at least the 24. this test
+;; always had; the pointer width is 32 now, and m memory holds only two
+;; constants, 40 and 50 (a1.11)
+	((M-TEM) ADD (m-constant 40) A-QLBNDP)
 	((M-TEM) SUB M-TEM A-QLBNDH)
 	(CALL-IF-BIT-CLEAR BOXED-SIGN-BIT M-TEM TRAP)
 	    (ERROR-TABLE PDL-OVERFLOW SPECIAL)
@@ -439,7 +447,11 @@ QCLS1-LEXICAL-ENVIRONMENT
 
 ;Bind LEXICAL-ENVIRONMENT to M-A
 BIND-LEXICAL-ENVIRONMENT
-	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;	((M-TEM) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)
+;; quux revision 13: m constant 32., a slack at least the 24. this test
+;; always had; the pointer width is 32 now, and m memory holds only two
+;; constants, 40 and 50 (a1.11)
+	((M-TEM) ADD (m-constant 40) A-QLBNDP)
 	((M-TEM) SUB M-TEM A-QLBNDH)
 	(CALL-IF-BIT-CLEAR BOXED-SIGN-BIT M-TEM TRAP)
 	    (ERROR-TABLE PDL-OVERFLOW SPECIAL)
@@ -608,7 +620,10 @@ QLLV-NOT-TAIL-REC
 	((M-TEM) SUB LOCATION-COUNTER A-TEM1 OUTPUT-SELECTOR-RIGHTSHIFT-1) ;Relative PC (hwds)
 	;; Build exit-state word from PC, M-FLAGS, and previous contents
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-EXIT-STATE)))
-	((A-TEM1) SELECTIVE-DEPOSIT PDL-INDEX-INDIRECT (BYTE-FIELD 21 17) A-TEM)
+;	((A-TEM1) SELECTIVE-DEPOSIT PDL-INDEX-INDIRECT (BYTE-FIELD 21 17) A-TEM)
+	;; quux revision 13: bits 15-39, the tag with them, from the exit-state
+	;; word; m-tem's <39:32> are the location counter's flags (appendix a1.6).
+	((a-tem1) selective-deposit pdl-index-indirect (byte-field 31 17) a-tem)
 			;CODE KNOWS THAT %%LP-EXS-EXIT-PC IS 0017
 	(POPJ-AFTER-NEXT			;Save M-QBBFL then clear it
 	 (PDL-INDEX-INDIRECT) DPB M-FLAGS (LISP-BYTE %%LP-EXS-PC-STATUS) A-TEM1)
@@ -1207,8 +1222,13 @@ MVRB2	(CHECK-PAGE-READ)				;need to follow invisible pntrs here
 ;After the first time, it is a list-pointer to the last cons in the list.
 ;XNCONS mustn't clobber M-I, M-R; XSETCDR1 mustn't clobber M-R.
 MVRC	(JUMP-EQUAL M-S (A-CONSTANT 1) MVRC1)	;Returning no values?
-	((M-I) ADD M-K				;Save address of prev ADI Q
-		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE) -1)))
+;	((M-I) ADD M-K				;Save address of prev ADI Q
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE) -1)))
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-k, an address, has none: the address less one, then the locative's
+;; tag by dpb (a constant's -1 would also borrow from the tag, appendix a1.5).
+	((m-i) sub m-k (a-constant 1))		;save address of prev adi q
+	((m-i) dpb m-i q-pointer (a-constant (byte-value q-data-type dtp-locative)))
 	(CALL-XCT-NEXT XNCONS)			;Cons up a 2-Q cons, cdr NIL, to M-T
        ((PDL-PUSH M-R) M-T)	;Save value returning, will be car
 	(CALL-XCT-NEXT MKCONT)			;Get pointer to list tail
@@ -1646,8 +1666,15 @@ XTHRW1A	((M-TEM) A-CATCH-TAG)			;CHECK FOR THROW TAG OF 0
 	(JUMP-EQUAL M-TEM (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX))
 		QMDDR0)				;YES, RETURN FROM THIS FRAME
 	(JUMP-EQUAL M-R A-CATCH-COUNT XTHRW1B)	;JUMP IF NO COUNT
-	((A-CATCH-COUNT Q-R) ADD A-CATCH-COUNT (M-CONSTANT -1))
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 23.) Q-R XUWR1)  ;REACHED MAGIC COUNT, RESUME BY RETURNING
+;	((A-CATCH-COUNT Q-R) ADD A-CATCH-COUNT (M-CONSTANT -1))
+;	(JUMP-IF-BIT-SET (BYTE-FIELD 1 23.) Q-R XUWR1)  ;REACHED MAGIC COUNT, RESUME BY RETURNING
+	;; quux revision 13 (contract g2 2.2): arithmetic keeps m's tag, so the
+	;; count, a fixnum, is the m operand of its own decrement; with (m-constant
+	;; -1) as m it would lose its tag.  one microinstruction more.  the count is
+	;; spent when it goes negative, the fixnum's sign, bit 31.
+	((q-r) a-catch-count)
+	((a-catch-count q-r) sub q-r (a-constant 1))
+	(jump-if-bit-set boxed-sign-bit q-r xuwr1)  ;reached magic count, resume by returning
 XTHRW1B	(CALL-IF-BIT-SET M-QBBFL BBLKP)  	;POP BINDING-BLOCK IF FRAME HAS ONE
 	((PDL-INDEX) ADD M-AP (A-CONSTANT (EVAL %LP-CALL-STATE)))
 	((A-TEM1) (LISP-BYTE %%LP-CLS-DELTA-TO-OPEN-BLOCK) PDL-INDEX-INDIRECT)
@@ -2222,7 +2249,14 @@ QLENTR-NOT-METHOD
 	(JUMP-IF-BIT-SET (LISP-BYTE %%ARG-DESC-QUOTED-REST) READ-MEMORY-DATA QLFOA1)
 	(JUMP-IF-BIT-SET (LISP-BYTE %%ARG-DESC-EVALED-REST) READ-MEMORY-DATA QLFOA1)
 	((A-LOCALP) M+A+1 M-E A-AP)
-	((A-TEM1) M+A+1 M-E (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	((A-TEM1) M+A+1 M-E (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	;; quux revision 13 (contract g2 2.2): arithmetic keeps m's tag, and m-e is
+	;; untagged, so the sum would have no fixnum tag and the entry state pushed
+	;; from it would not be a fixnum.  the origin is made first and deposited
+	;; into a fixnum: one microinstruction more.
+	((m-tem) m+1 m-e)
+	((a-tem1) dpb m-tem (lisp-byte %%lp-ens-macro-local-block-origin)
+		(a-constant (byte-value q-data-type dtp-fix)))
 ;Quickly detect case of all desired spread args supplied.
 	(JUMP-EQUAL-XCT-NEXT M-E A-R QFL1)
        ((PDL-INDEX-INDIRECT) DPB M-R (LISP-BYTE %%LP-ENS-NUM-ARGS-SUPPLIED) A-TEM1)
@@ -2693,7 +2727,11 @@ QBSPCL	((M-B) PDL-INDEX-INDIRECT)		;GET VAL TO BIND TO (ARG OR LOCAL)
 				;Note that PDL-INDEX is clobbered by overflow trap.
 	((VMA-START-READ) M-T)			;GET SPECIAL VALUE CELL POINTER
 	(CHECK-PAGE-READ)
-	((M-1) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
+;	((M-1) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
+;; quux revision 13: m constant 32., a slack at least the 24. this test
+;; always had; the pointer width is 32 now, and m memory holds only two
+;; constants, 40 and 50 (a1.11)
+	((M-1) ADD (m-constant 40) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
 	((M-1) SUB M-1 A-QLBNDH)		; BE AROUND AT THE WRONG TIME).
 	(CALL-IF-BIT-CLEAR BOXED-SIGN-BIT M-1 TRAP)
 	    (ERROR-TABLE PDL-OVERFLOW SPECIAL)
@@ -2811,7 +2849,10 @@ SB-REINSTATE		;SB deferred.  Take it now?
 	(POPJ-NOT-EQUAL M-TEM A-V-NIL)
 	((LOCATION-COUNTER) LOCATION-COUNTER)   ;write LC (assuring fetch of PC)
 	(POPJ-AFTER-NEXT   			; and set SB req.
-	  (INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;	  (INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+	  (INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_34.))
        ((M-DEFERRED-SEQUENCE-BREAK-FLAG) DPB M-ZERO A-FLAGS)
 
 BBLKP-PG-FAULT

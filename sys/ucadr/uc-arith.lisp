@@ -48,7 +48,13 @@ mpy-negative
 ;   DIVIDEND IN M-1, DIVISOR IN M-2
 ;   QUOTIENT IN Q-R, REMAINDER IN M-1, CLOBBERS A-TEM1
 
-DIV	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-1 A-ZERO DIV1)
+;; quux revision 13 (contract g1 2.4): a fixnum is 32 bits, so a dividend of
+;; -2^31 and a divisor of -1 now reach the divide, whose quotient, 2^31, does
+;; not fit: the divide's overflow bit would take it for a division by zero.  a
+;; divisor of -1 is done here: the quotient is minus the dividend, to 32 bits,
+;; and the remainder 0.  qidiv sees -2^31 by -1 first and makes the bignum.
+DIV	(jump-equal m-2 a-minus-one div-by-minus-one)
+	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-1 A-ZERO DIV1)
        ((A-TEM1 Q-R) M-1)	;Q GETS MAGNITUDE OF DIVIDEND, A-TEM1 SAVES ORIGINAL
 	((Q-R) SUB M-ZERO A-TEM1)
 ;; quux: one divide does the divide-first-step and the 31 divide-steps, and
@@ -66,6 +72,11 @@ DIV2	((A-TEM1) XOR M-2 A-TEM1)	;IF SIGNS OF DIVIDEND AND DIVISOR ARE DIFFERENT,
 	(POPJ-AFTER-NEXT
 	 (A-TEM1) Q-R)
        ((Q-R) SUB M-ZERO A-TEM1)	;THEN QUOTIENT IS NEGATIVE
+
+div-by-minus-one
+	((q-r) sub m-zero a-1)
+	(popj-after-next (m-1) a-zero)
+       ((a-tem1) q-r)
 
 
 ;FIXNUM EXPONENTIATION ROUTINE.
@@ -183,8 +194,12 @@ XGCDL	(JUMP-EQUAL M-2 A-ZERO XGCD5)
 	((M-2) M-TEM)
 XGCD1	(JUMP-IF-BIT-SET (BYTE-FIELD 1 0) M-1 XGCD2)
 	(JUMP-IF-BIT-SET (BYTE-FIELD 1 0) M-2 XGCD3)
-	((M-A) SUB M-A (A-CONSTANT 37))			;BOTH EVEN
-							;ADD1 TO ROTATE FIELD, SUB1 FROM LENGTH
+;	((M-A) SUB M-A (A-CONSTANT 37))			;BOTH EVEN
+;							;ADD1 TO ROTATE FIELD, SUB1 FROM LENGTH
+;; quux revision 13: the length - 1 field is ir<11:6>, so one off the length
+;; and one onto the rotate is - 100 + 1 (a1.1)
+	((m-a) sub m-a (a-constant 77))			;both even
+							;add1 to rotate field, sub1 from length
         ((M-2) M-2 OUTPUT-SELECTOR-RIGHTSHIFT-1)
 XGCD3	(JUMP-XCT-NEXT XGCDL)				;M-1 EVEN
        ((M-1) M-1 OUTPUT-SELECTOR-RIGHTSHIFT-1)
@@ -247,7 +262,10 @@ BIGNUM-RIGHT-JUST-FFO-1
 	((M-TEM) (A-CONSTANT 30.))
 	((M-TEM) SUB M-TEM A-4)
 	((M-A) ADD M-TEM (A-CONSTANT 1))
-	((M-B) ADD M-TEM (A-CONSTANT 2))
+;	((M-B) ADD M-TEM (A-CONSTANT 2))
+;; quux revision 13: the ldb's rotate right by m-4 is 40. - m-4, (30. - m-4) +
+;; 10., in the ring of 40 (a1.2)
+	((m-b) add m-tem (a-constant 12))
 	((M-B) DPB M-TEM OAL-BYTL-1 A-B)
 	(POPJ-AFTER-NEXT (M-TEM) SUB M-4 (A-CONSTANT 1))
        ((M-A) DPB M-TEM OAL-BYTL-1 A-A)
@@ -635,53 +653,110 @@ FXUNPK-T-2
 
 ;;; Return the number in M-1 as either a fixnum or a bignum depending on its magnitude
 ;;; Returns it via M-T
-RETURN-M-1
-	(JUMP-LESS-THAN M-1 (A-CONSTANT NEGATIVE-SETZ) FIX-OVERFLOW-1)
-	(JUMP-GREATER-OR-EQUAL M-1 (A-CONSTANT POSITIVE-SETZ) FIX-OVERFLOW-1)
+;RETURN-M-1
+;	(JUMP-LESS-THAN M-1 (A-CONSTANT NEGATIVE-SETZ) FIX-OVERFLOW-1)
+;	(JUMP-GREATER-OR-EQUAL M-1 (A-CONSTANT POSITIVE-SETZ) FIX-OVERFLOW-1)
 	;drop into FIXPACK-T
 
 ;;; Return it via M-T checking only for single-bit overflow
-FIXPACK-T
-	(DISPATCH-POPJ-XCT-NEXT (I-ARG 0) 
-	 (BYTE-FIELD 2 (DIFFERENCE Q-POINTER-WIDTH 1))
-	 M-1 D-FXOVCK)
-       ((M-T) DPB M-1 Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;FIXPACK-T
+;	(DISPATCH-POPJ-XCT-NEXT (I-ARG 0) 
+;	 (BYTE-FIELD 2 (DIFFERENCE Q-POINTER-WIDTH 1))
+;	 M-1 D-FXOVCK)
+;       ((M-T) DPB M-1 Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 
 ;;; Return it via pdl checking only for single-bit overflow
-FIXPACK-P
-	(DISPATCH-POPJ-XCT-NEXT (I-ARG 1) 
-	 (BYTE-FIELD 2 (DIFFERENCE Q-POINTER-WIDTH 1))
-	 M-1 D-FXOVCK)
-       ((C-PDL-BUFFER-POINTER-PUSH M-T) DPB M-1 Q-POINTER
-		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
-(LOCALITY D-MEM)
+;FIXPACK-P
+;	(DISPATCH-POPJ-XCT-NEXT (I-ARG 1) 
+;	 (BYTE-FIELD 2 (DIFFERENCE Q-POINTER-WIDTH 1))
+;	 M-1 D-FXOVCK)
+;       ((C-PDL-BUFFER-POINTER-PUSH M-T) DPB M-1 Q-POINTER
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
+;(LOCALITY D-MEM)
 ;DISPATCH TABLE FOR CHECKING FOR SINGLE-BIT ADD/SUBTRACT-TYPE FIXNUM OVERFLOW
 ;ON VALUE WHICH IS UNBOXED IN M-1.  DISPATCH ON SIGN BIT AND LOW DATA TYPE BIT.
 ;I-ARG SHOULD BE 0 IF RESULT ONLY TO M-T, OR 1 IF ALSO TO PDL.  
 ;IN ANY CASE, DOES ESSENTIALLY POPJ-XCT-NEXT.
 ;NEXT SHOULD BE INSTRUCTION TO BOX M-1 AS A FIXNUM.
-(START-DISPATCH 2 0)
-D-FXOVCK	
-	(R-BIT)					 ;BITS AGREE NO OVERFLOW
-	(FIX-OVERFLOW INHIBIT-XCT-NEXT-BIT)	 ;DISAGREE => OVERFLOW
-	(FIX-OVERFLOW INHIBIT-XCT-NEXT-BIT)	 ;DISAGREE => OVERFLOW
-	(R-BIT)					 ;BITS AGREE NO OVERFLOW
-(END-DISPATCH)
-(LOCALITY I-MEM)
+;(START-DISPATCH 2 0)
+;D-FXOVCK	
+;	(R-BIT)					 ;BITS AGREE NO OVERFLOW
+;	(FIX-OVERFLOW INHIBIT-XCT-NEXT-BIT)	 ;DISAGREE => OVERFLOW
+;	(FIX-OVERFLOW INHIBIT-XCT-NEXT-BIT)	 ;DISAGREE => OVERFLOW
+;	(R-BIT)					 ;BITS AGREE NO OVERFLOW
+;(END-DISPATCH)
+;(LOCALITY I-MEM)
 
 ;;; This is called from the fixnum packing routines. M-1 contains a unboxed number
 ;;; IARG is 0 if the result is to go only to M-T, and 1 if it should also go to the
 ;;; PDL
-FIX-OVERFLOW
-	(JUMP-EQUAL READ-I-ARG A-ZERO FIX-OVERFLOW-1)
-	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC M-T-TO-CPDL)))
-FIX-OVERFLOW-1	;Enter directly here with unboxed number in M-1.  Returns bignum in M-T.
-	((M-C) M-ZERO)				;sign bit
-	(JUMP-GREATER-THAN-XCT-NEXT M-1 A-ZERO OVERFLOW-BIGNUM-CREATE)
-       ((M-2) M-ZERO)
-	(JUMP-XCT-NEXT OVERFLOW-BIGNUM-CREATE-NEGATIVE)
-       ((M-1) SUB M-ZERO A-1)
+;FIX-OVERFLOW
+;	(JUMP-EQUAL READ-I-ARG A-ZERO FIX-OVERFLOW-1)
+;	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC M-T-TO-CPDL)))
+;FIX-OVERFLOW-1	;Enter directly here with unboxed number in M-1.  Returns bignum in M-T.
+;	((M-C) M-ZERO)				;sign bit
+;	(JUMP-GREATER-THAN-XCT-NEXT M-1 A-ZERO OVERFLOW-BIGNUM-CREATE)
+;       ((M-2) M-ZERO)
+;	(JUMP-XCT-NEXT OVERFLOW-BIGNUM-CREATE-NEGATIVE)
+;       ((M-1) SUB M-ZERO A-1)
+;; quux revision 13 (contract g2 2.2, 6.1): a fixnum is the whole 32-bit field,
+;; so every 32-bit value in m-1 is a fixnum, and one that is not is a sum that
+;; overflowed 32 bits: the alu's fixnum overflow flag says so, loaded by every
+;; alu word, and tested here before any other alu word runs.  so:
+;;  - return-m-1 boxes m-1 as a fixnum, always: its callers hold a value, not a
+;;    sum (mit's checked m-1 against the 25-bit range);
+;;  - fixpack-t and fixpack-p box m-1 unless the flag is set, and are reached
+;;    directly from the alu word that made m-1 (an xct-next, or no alu word
+;;    between), in place of mit's check of bits 24 and 25, which d-fxovck was;
+;;    on overflow m-1 is the sum modulo 2^32, and fix-overflow-33 makes the
+;;    bignum of the true, 33-bit, value;
+;;  - fixbox-t and fixbox-p box m-1 without the test, for callers whose m-1 is
+;;    not such a sum (the flag is then another word's).
+RETURN-M-1
+fixbox-t
+	(popj-after-next (m-t) dpb m-1 q-pointer (a-constant (byte-value q-data-type dtp-fix)))
+       (no-op)
+
+fixbox-p
+	(popj-after-next
+	 (c-pdl-buffer-pointer-push m-t) dpb m-1 q-pointer
+		(a-constant (plus (byte-value q-data-type dtp-fix)
+				  (byte-value q-cdr-code cdr-next))))
+       (no-op)
+
+;;; Return it via M-T checking only for single-bit overflow
+FIXPACK-T
+	(popj-conditional-xct-next no-fixnum-overflow)
+       ((M-T) DPB M-1 Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	(jump fix-overflow-33)
+
+;;; Return it via pdl checking only for single-bit overflow
+FIXPACK-P
+	(popj-conditional-xct-next no-fixnum-overflow)
+       ((C-PDL-BUFFER-POINTER-PUSH M-T) DPB M-1 Q-POINTER
+		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
+	;; overflow: take back the word pushed, and push the bignum instead
+	((m-garbage) c-pdl-buffer-pointer-pop)
+	((micro-stack-data-push) (a-constant (i-mem-loc m-t-to-cpdl)))
+;; m-1 is a sum that overflowed 32 bits, modulo 2^32: the true value is m-1 +
+;; 2^32 when m-1's sign bit is set (a positive overflow), else m-1 - 2^32.  make
+;; its bignum, from the 64-bit magnitude in m-2,,m-1, as fix-2-word-overflow
+;; does.  returns the bignum in m-t.
+fix-overflow-33
+	((m-2) m-zero)
+	(jump-if-bit-set-xct-next (byte-field 1 31.) m-1 overflow-bignum-create)
+       ((m-c) m-zero)				;sign bit
+	((m-1) sub m-zero a-1)			;2^32 - m-1, to 32 bits
+	(jump-not-equal m-1 a-zero overflow-bignum-create-negative)
+	(jump-xct-next overflow-bignum-create-negative)
+       ((m-2) (a-constant 1))			;m-1 was 0: 2^32
+
+;;; Enter directly here with unboxed number in M-1.  Returns bignum in M-T.
+;;; quux revision 13: m-1 a true 32-bit value, which is a fixnum: no bignum.
+FIX-OVERFLOW-1
+	(jump return-m-1)
 
 ;;; These return here before returning a value. This puts value from M-T
 ;;; also on stack for those that need it
@@ -1087,9 +1162,10 @@ QIMUL		(ERROR-TABLE RESTART QIMUL)
 	 (BYTE-FIELD (DIFFERENCE 33. Q-POINTER-WIDTH)
 		     (DIFFERENCE Q-POINTER-WIDTH 1))
 	 A-2)	;DISCARDED BITS AND SIGN
-	(JUMP-EQUAL-XCT-NEXT M-TEM A-ZERO FIXPACK-P)   ;JUMP IF NON-OVERFLOWING POSITIVE RESULT
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-EQUAL-XCT-NEXT M-TEM A-ZERO fixbox-p)   ;JUMP IF NON-OVERFLOWING POSITIVE RESULT
        ((M-1) Q-POINTER Q-R A-TEM)		     ;SIGN EXTEND (IF NON-OVERFLOWING)
-	(JUMP-EQUAL M-TEM (A-CONSTANT -1) FIXPACK-P)   ;JUMP IF NON-OVERFLOWING NEGATIVE
+	(JUMP-EQUAL M-TEM (A-CONSTANT -1) fixbox-p)   ;JUMP IF NON-OVERFLOWING NEGATIVE
 	(JUMP-XCT-NEXT FIX-2-WORD-OVERFLOW)
        ((M-1) Q-R)
 
@@ -1107,9 +1183,16 @@ QIDIV		(ERROR-TABLE RESTART QIDIV)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIDIV0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	;; quux revision 13: -2^31 by -1, the one quotient that is not a fixnum:
+	;; minus the dividend, whose overflow fixpack-p sees
+	(jump-equal m-2 a-minus-one qidiv-by-minus-one)
 	(CALL DIV)
-	(JUMP-XCT-NEXT FIXPACK-P)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
+;	(JUMP-XCT-NEXT FIXPACK-P)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
+	(jump-xct-next fixbox-p)	;quux revision 13: the divide's quotient fits
        ((M-1) Q-R)
+qidiv-by-minus-one
+	(jump-xct-next fixpack-p)
+       ((m-1) sub m-zero a-1)
 
 XFLOOR-1 (MISC-INST-ENTRY INTERNAL-FLOOR-1)
 	((M-1) M-INST-DEST)
@@ -1140,7 +1223,8 @@ XFLOOR-1-A
     (ERROR-TABLE ARGTYP NUMBER PP T XFIX)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) DPB M-1 ARITH-FIX-ROUNDING-MODE-FIELD (A-CONSTANT ARITH-1ARG-FIX))
-	(JUMP FIXPACK-T)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP fixbox-t)
 
 XFLOOR-1-B
 	(POPJ-XCT-NEXT)
@@ -1188,7 +1272,8 @@ XFLOOR-1-CEIL
 	((M-1) ADD M-1 (A-CONSTANT 2))
 XFLOOR-1-CEIL-POSITIVE
 	(CALL DIV)
-	(JUMP-XCT-NEXT FIXPACK-T)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-XCT-NEXT fixbox-t)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
        ((M-1) Q-R)
 
 XFLOOR-1-TRUNC
@@ -1253,7 +1338,8 @@ QDIV		(ERROR-TABLE RESTART QDIV)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
 ;The args are two fixnums, now unpacked in M-1 and M-2.  Second arg packed is in M-T.
 	(JUMP-EQUAL M-1 A-ZERO QDIV-ZERO)
-	(JUMP-EQUAL M-2 (A-CONSTANT 1) FIXPACK-P)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-EQUAL M-2 (A-CONSTANT 1) fixbox-p)
 	(JUMP-GREATER-OR-EQUAL M-2 A-ZERO QDIV-SIGNS-RIGHT)
 	((M-1) SUB M-ZERO A-1)
 	((M-2) SUB M-ZERO A-2)
@@ -1288,9 +1374,10 @@ QDIV-SIGNS-RIGHT
 ;; uses and the garbage collector need not see.
 QDIV-REL-PRIME-1
 	((a-qdiv-numerator) q-r)
-	(CALL FIXPACK-P)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(CALL fixbox-p)
 	((m-1) a-qdiv-numerator)
-	(CALL FIXPACK-P)
+	(CALL fixbox-p)
 	(CALL MAKE-RATIONAL)
 	(POPJ-AFTER-NEXT
 	 (PDL-PUSH) M-T)
@@ -1301,12 +1388,13 @@ QDIV-REL-PRIME
        ((Q-R) M-B)
 
 QDIV-ZERO
-	(JUMP-XCT-NEXT FIXPACK-P)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-XCT-NEXT fixbox-p)
        ((M-1) A-ZERO)
 
 ;Here if the division comes out even: return the quotient, as an integer.
 QDIV-EVEN
-	(JUMP-XCT-NEXT FIXPACK-P)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
+	(JUMP-XCT-NEXT fixbox-p)	;DIVIDE CAN'T OVERFLOW EXCEPT FOR SETZ/-1
        ((M-1) Q-R)
 
 XRATIO-CONS (MISC-INST-ENTRY %RATIO-CONS)
@@ -1443,8 +1531,9 @@ XMAX (MISC-INST-ENTRY *MAX)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 XMAX0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
-	(JUMP-GREATER-OR-EQUAL M-1 A-2 FIXPACK-T)
-	(JUMP-XCT-NEXT FIXPACK-T)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-GREATER-OR-EQUAL M-1 A-2 fixbox-t)
+	(JUMP-XCT-NEXT fixbox-t)
        ((M-1) A-2)
 
 XMIN (MISC-INST-ENTRY *MIN)
@@ -1458,8 +1547,9 @@ XMIN (MISC-INST-ENTRY *MIN)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 XMIN0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
-	(JUMP-LESS-OR-EQUAL M-1 A-2 FIXPACK-T)
-	(JUMP-XCT-NEXT FIXPACK-T)
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(JUMP-LESS-OR-EQUAL M-1 A-2 fixbox-t)
+	(JUMP-XCT-NEXT fixbox-t)
        ((M-1) A-2)
 
 
@@ -1468,7 +1558,9 @@ XMIN (MISC-INST-ENTRY *MIN)
 ;;; Dispatch on the type of a one-argument numeric function.
 ;;; DTP-FIX unpacks and then drops through; eveything else jumps.
 (LOCALITY D-MEM)
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-NUMARG
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;NULL
@@ -1504,7 +1596,9 @@ D-NUMARG
 
 ;;; Dispatch on the type of the first numeric arg.
 ;;; DTP-FIX unpacks and then drops through; eveything else jumps.
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-NUMARG1
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;NULL
@@ -1541,7 +1635,9 @@ D-NUMARG1
 ;;; Data type dispatch on second numeric arg, when first one was a DTP-FIXNUM.
 ;;; DTP-FIXNUM unpacks and drops through; everything else jumps.  First arg
 ;;; is unpacked into M-1.  Second arg in M-T.
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-FIXNUM-NUMARG2
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;NULL
@@ -1583,7 +1679,9 @@ D-FIXNUM-NUMARG2
 ;;;  If FLONUM, M-Q has FLONUM pointer, M-C HEADER, M-I exponent, M-1 mantissa.
 ;;;  If SMALL-FLONUM, M-Q has SMALL-FLONUM pointer, M-I has exponent, M-1 mantissa.
 ;;;  Also, the original pointer is kept in M-J.
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-NUMARG2
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;NULL
@@ -2099,7 +2197,8 @@ D-XNM-ARG-2
 ARITH-ANY-OUT
 	(JUMP-NOT-EQUAL M-R (A-CONSTANT NUMBER-CODE-FIXNUM) ARITH-ANY-OUT-1)
 	((C-PDL-BUFFER-POINTER-PUSH) M-T)
-	(CALL FIXPACK-T)
+;	(CALL FIXPACK-T)
+	(call fixbox-t)		;quux revision 13: m-1 is an unpacked fixnum, not a sum
 	((M-J) M-T)
 	((M-T) C-PDL-BUFFER-POINTER-POP)
 ARITH-ANY-OUT-1
@@ -2563,7 +2662,13 @@ D-BIGNUM-1ARG
 BNCONS	(CALL SCONS-T)				;Cons in structure space, extra-pdl
 	((M-TEM) SUB M-B (A-CONSTANT 1))	;Length to go in header
 	((M-C) SELECTIVE-DEPOSIT M-C BIGNUM-HEADER-SIGN A-TEM)	;Incorporate sign
-	((WRITE-MEMORY-DATA) ADD M-C		;Make rest of header
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((WRITE-MEMORY-DATA) ADD M-C		;Make rest of header
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;				  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((WRITE-MEMORY-DATA) IOR M-C		;Make rest of header
 		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 				  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	(POPJ-AFTER-NEXT (VMA-START-WRITE M-T)	;Store header, fix M-T data type
@@ -2921,7 +3026,12 @@ BADD5	((VMA-START-READ) ADD M-R A-D)
        ((M-D) ADD M-D (A-CONSTANT 1))
 BADD4	(JUMP-GREATER-THAN M-2 A-ZERO BADD6)	;There was some carry, so store in last word.
 	((M-C) SUB M-C (A-CONSTANT 1))		;no carry so give word back.
-	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE) M-T)
 	(CHECK-PAGE-WRITE)
@@ -3072,7 +3182,12 @@ BMPY-LOOP-1-DONE
        ((M-S) ADD M-S (A-CONSTANT 1))
 	(JUMP-NOT-EQUAL M-1 A-ZERO BMPY-FULL)
 	((M-C) SUB M-C (A-CONSTANT 1))		;Result 1 word shorter than expected
-	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE) M-T)
 	(CHECK-PAGE-WRITE)
@@ -3165,7 +3280,10 @@ BIDIVR-2
 	;;		MROT = Haulong
 	(JUMP-EQUAL-XCT-NEXT M-D (A-CONSTANT 31.) BIDIVR-3)
        ((M-T) M-Q)
-	((M-K) ADD M-D (A-CONSTANT 1))		;MROT
+;	((M-K) ADD M-D (A-CONSTANT 1))		;MROT
+;; quux revision 13: the rotate right by 31. - haulong is 40. - (31. - haulong),
+;; haulong + 9., in the ring of 40 (a1.2)
+	((m-k) add m-d (a-constant 11))		;mrot
 	((M-TEM) SUB M-D (A-CONSTANT 1))	;BYTL-1
 	((M-K) DPB M-TEM OAL-BYTL-1 A-K)	;For LDB
 	((M-TEM) (A-CONSTANT 30.))
@@ -3212,7 +3330,12 @@ BIDIV-REMAINDER-COMMON
 	(CALL-XCT-NEXT SCONS-T)
        ((M-B) ADD M-I (A-CONSTANT 2))
 	((M-TEM) ADD M-I (A-CONSTANT 1))
-	((MD) ADD M-TEM (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-TEM (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-TEM (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE M-D) Q-POINTER M-T
 			       (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
@@ -3230,7 +3353,12 @@ BIDIV-REMAINDER-COMMON
 	;;allocate another temporary bignum as long as the second and keep it in M-T
 	(CALL-XCT-NEXT SCONS-T)
        ((M-B) ADD M-J (A-CONSTANT 1))
-	((MD) ADD M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE M-T) Q-POINTER M-T
 			       (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
@@ -3432,10 +3560,15 @@ BIDIV-ONCE-IN-716MILLION-1
 
 ;;; Set up args for the below from shift in M-1
 BIDIV-NORMALIZE-ENCODE-SHIFT
-	((M-TEM) SUB (M-CONSTANT 32.) A-1)	;MROT = 32. - Haulong
-	((M-K) SUB M-TEM (A-CONSTANT 2))	;BYTL-1 = 30. - Haulong
+;	((M-TEM) SUB (M-CONSTANT 32.) A-1)	;MROT = 32. - Haulong
+;	((M-K) SUB M-TEM (A-CONSTANT 2))	;BYTL-1 = 30. - Haulong
+;; quux revision 13: the ldb's rotate right by haulong is 40. - haulong in the
+;; ring of 40 (a1.2); the lengths and the dpb's rotate stay.
+	((m-tem) sub (m-constant 50) a-1)	;mrot = 40. - haulong
+	((m-k) sub m-tem (a-constant 12))	;bytl-1 = 30. - haulong
 	((M-K) DPB M-K OAL-BYTL-1 A-TEM)	;M-K constant for LDBing
-	((M-TEM) SUB M-TEM (A-CONSTANT 1))	;MROT = 31. -Haulong
+;	((M-TEM) SUB M-TEM (A-CONSTANT 1))	;MROT = 31. -Haulong
+	((m-tem) sub m-tem (a-constant 11))	;mrot = 31. - haulong
 	(POPJ-AFTER-NEXT
 	 (M-S) SUB M-1 (A-CONSTANT 1))		;BYTL-1 = Haulong - 1
        ((M-S) DPB M-S OAL-BYTL-1 A-TEM)		;M-S constant for DPBing
@@ -3618,7 +3751,12 @@ BFXMPY-1
 	(CHECK-PAGE-WRITE)
 	(POPJ-NOT-EQUAL M-1 A-ZERO)
 	((M-C) SUB M-C (A-CONSTANT 1))
-	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE) M-T)
 	(CHECK-PAGE-WRITE)
@@ -3660,7 +3798,8 @@ BDIV
 FXBDIV
 	(JUMP-EQUAL M-2 A-ZERO QDIV-ZERO)
 	((M-1) M-2)
-	(CALL FIXPACK-P)	;Push packed fixnum, then push the bignum.
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(CALL fixbox-p)	;Push packed fixnum, then push the bignum.
 	((PDL-PUSH) M-Q)
 	((VMA-START-READ M-B) M-Q)
 	(CHECK-PAGE-READ)
@@ -3672,7 +3811,8 @@ BFXDIV
 	((M-T PDL-PUSH) M-Q)	;Must not push after popj'ing since next insn may pop.
 	(POPJ-EQUAL M-2 (A-CONSTANT 1))
 	((M-1) M-2)
-	(CALL FIXPACK-P)	;Put fixnum on stack and in M-T.
+;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
+	(CALL fixbox-p)	;Put fixnum on stack and in M-T.
 	((PDL-PUSH) M-Q)
 	(CALL BFXDIV1)
 	(PDL-POP)
@@ -3908,7 +4048,12 @@ BIG-TO-ARY-1
 	;; we must now allocate a bignum to divide into.
 	(CALL-XCT-NEXT SCONS-T)
        ((M-B) ADD M-I (A-CONSTANT 1))
-	((MD) ADD M-I (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-I (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-I (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE M-T) Q-POINTER M-T
 			       (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
@@ -4041,7 +4186,8 @@ ARY-TO-BIG-CLEANUP
 ;; Clean up and return a bignum in M-T. Hands back storage and checks for fixnums.
 ;; Bignum in M-T, header in M-C, length in M-D, actual length in M-E (# of non-zero words).
 BCLEANUP
-	(JUMP-GREATER-THAN M-E (A-CONSTANT 1) BCLEANUP-X)  ;Could answer be a fixnum?
+;	(JUMP-GREATER-THAN M-E (A-CONSTANT 1) BCLEANUP-X)  ;Could answer be a fixnum?
+	(jump-greater-than m-e (a-constant 1) bcleanup-2-digits)  ;could answer be a fixnum?
 	((VMA-START-READ) ADD M-T (A-CONSTANT 1))
 	(CHECK-PAGE-READ)
 	((M-1) Q-POINTER M-T)				;For UN-CONS
@@ -4058,6 +4204,24 @@ BCLEANUP-1
 	(JUMP-XCT-NEXT UN-CONS)
        ((M-T) Q-POINTER M-TEM (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 
+;; quux revision 13: a fixnum is 32 bits, so every one-digit bignum (31 bits)
+;; is a fixnum, and so is one more: -2^31, whose magnitude takes two digits,
+;; 0 and 1.  the digits' fields are compared, whatever their tags.
+bcleanup-2-digits
+	(jump-not-equal m-e (a-constant 2) bcleanup-x)
+	(jump-if-bit-clear bignum-header-sign m-c bcleanup-x)
+	((vma-start-read) add m-t (a-constant 2))
+	(check-page-read)
+	((m-tem) q-pointer md)
+	(jump-not-equal m-tem (a-constant 1) bcleanup-x)
+	((vma-start-read) add m-t (a-constant 1))
+	(check-page-read)
+	((m-tem) q-pointer md)
+	(jump-not-equal m-tem a-zero bcleanup-x)
+	((m-1) q-pointer m-t)				;for un-cons
+	((m-2) add m-d (a-constant 1))
+	(jump-xct-next bcleanup-1)
+       ((m-tem) (a-constant negative-setz))
 BCLEANUP-SETZP
 	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT POSITIVE-SETZ) BCLEANUP-X)	;Is it setz?
 	(JUMP-IF-BIT-SET BIGNUM-HEADER-SIGN M-C BCLEANUP-1)
@@ -4065,7 +4229,12 @@ BCLEANUP-X
 	(POPJ-EQUAL M-D A-E)
 	((M-2) SUB M-D A-E)			;Number of unused words at end
 	((M-C) SUB M-C A-2)			;Fix the header
-	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-C (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE M-1) Q-POINTER M-T)
 	(CHECK-PAGE-WRITE)

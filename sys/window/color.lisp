@@ -32,10 +32,15 @@
 ;	 (%XBUS-READ XBUS-ADDR)
 ;	 (%xbus-write #o377102 1)	;Turn on error-stop-enable
 ;	 (%xbus-write #o377101 0)))	;Clear xbus nxm and parity indicators
-  (prog2 (%xbus-write #o777502 0)	;Turn off error-stop-enable
+;  (prog2 (%xbus-write #o777502 0)	;Turn off error-stop-enable
+  ;; quux revision 13 (contract g2 4.1): words 102 and 101 are #o17777502 and
+  ;; #o17777501.
+  (prog2 (%xbus-write #o17777502 0)	;turn off error-stop-enable
 	 (%XBUS-READ XBUS-ADDR)
-	 (%xbus-write #o777502 1)	;Turn on error-stop-enable
-	 (%xbus-write #o777501 0)))	;Clear xbus nxm and parity indicators
+;	 (%xbus-write #o777502 1)	;Turn on error-stop-enable
+;	 (%xbus-write #o777501 0)))	;Clear xbus nxm and parity indicators
+	 (%xbus-write #o17777502 1)	;turn on error-stop-enable
+	 (%xbus-write #o17777501 0)))	;clear xbus nxm and parity indicators
 
 (DEFUN XBUS-LOCATION-EXISTS-P (XBUS-ADDR BITS)
   "T if it is possible to turn on bits BITS in address XBUS-ADDR."

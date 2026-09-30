@@ -603,7 +603,9 @@ not converted to upper case."
   (SELECTQ MODE
 ;    ((DIRECT VIA-KBD) (%xbus-write #o377120 #o400))	;Keyboard interrupt enable
     ;; quux (contract q13): word 120 is #o777520 from revision 11.
-    ((direct via-kbd) (%xbus-write #o777520 #o400))	;Keyboard interrupt enable
+;    ((direct via-kbd) (%xbus-write #o777520 #o400))	;Keyboard interrupt enable
+    ;; quux revision 13 (contract g2 4.1): word 120 is #o17777520.
+    ((direct via-kbd) (%xbus-write #o17777520 #o400))	;keyboard interrupt enable
     (OTHERWISE (FERROR NIL "UNKNOWN MOUSE MODE"))))
 
 ;; Translate from a Unibus address to a Lisp machine virtual address, returning a fixnum.

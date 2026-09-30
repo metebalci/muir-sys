@@ -46,7 +46,10 @@ XLSH  (MISC-INST-ENTRY LSH)
    (ERROR-TABLE ARGTYP FIXNUM PP 0 XLSH0)
 	(JUMP-IF-BIT-SET BOXED-SIGN-BIT M-K XLSH1)  ;SHIFT TO RIGHT
 LSH-LEFT
-	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-K)	;COMPUTE BYTE LENGTH <24.-SHIFT-1>
+;	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-K)	;COMPUTE BYTE LENGTH <24.-SHIFT-1>
+;; quux revision 13: 31. - k as 32. - k - 1, since m memory holds only two
+;; constants, 40 and 50
+	((m-1) m-a-1 (m-constant 40) a-k)	;compute byte length <31.-shift-1>
 	(JUMP-LESS-THAN M-1 A-ZERO XLSH-ZERO)
 	(POPJ-AFTER-NEXT
 	 (OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-K)
@@ -56,8 +59,11 @@ LSH-LEFT
 XLSH1	(JUMP-LESS-THAN M-K
 	 (A-CONSTANT (DIFFERENCE (EVAL (ASH 1 %%Q-POINTER)) (DIFFERENCE Q-POINTER-WIDTH 1)))
 	 XLSH-ZERO) ;SHIFT RIGHT
-	((A-TEM1) ADD M-K (A-CONSTANT (PLUS (BYTE-MASK BITS-ABOVE-FIXNUM)  ;TO SIGN EXTEND
-					 40)))	; TO 32. COMPUTE 40-N .
+;	((A-TEM1) ADD M-K (A-CONSTANT (PLUS (BYTE-MASK BITS-ABOVE-FIXNUM)  ;TO SIGN EXTEND
+;					 40)))	; TO 32. COMPUTE 40-N .
+;; quux revision 13: a right rotate by n is a rotate of 40. - n in the ring of 40
+	((a-tem1) add m-k (a-constant (plus (byte-mask bits-above-fixnum)  ;to sign extend
+					 50)))	; to 40. compute 50-n .
 	((M-1) ADD M-K (A-CONSTANT (PLUS (BYTE-MASK BITS-ABOVE-FIXNUM)
 					 (DIFFERENCE Q-POINTER-WIDTH 1))))	;COMPUTE 24.-N-1
 	(POPJ-AFTER-NEXT 
@@ -90,11 +96,15 @@ XROT3 ;	*** THIS SHOULD PROBABLY LET YOU INTERRUPT AND SEQUENCE-BREAK OUT ***
 ;	       (3) IOR THE TWO.
 XROT3A	;REALLY DO THE WORK. BY NOW, 0 < M-K < 24.
 						;DO LSH OF STEP ONE
-	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-K)	;COMPUTE BYTE LENGTH
+;	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-K)	;COMPUTE BYTE LENGTH
+;; quux revision 13: 31. - k as 32. - k - 1 (m memory holds only 40 and 50)
+	((m-1) m-a-1 (m-constant 40) a-k)	;compute byte length
 ;	(JUMP-LESS-THAN M-1 A-ZERO XLSH-ZERO)   ;CANT BE
 	((OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-K)
 	((A-TEM3) DPB M-T (BYTE-FIELD 0 0) A-ZERO)	;PART 1 DONE
-	((A-TEM2) ADD M-K (A-CONSTANT (DIFFERENCE 32. Q-POINTER-WIDTH)))	; 40-<24.-N>
+;	((A-TEM2) ADD M-K (A-CONSTANT (DIFFERENCE 32. Q-POINTER-WIDTH)))	; 40-<24.-N>
+;; quux revision 13: the rotate right by 32. - n is 40. - (32. - n) in the ring of 40
+	((a-tem2) add m-k (a-constant (difference 40. q-pointer-width)))	; 50-<40-n>
 	((M-ZR) SUB M-K (A-CONSTANT 1))		;BYTE LENGTH MINUS ONE
 	((OA-REG-LOW) DPB M-ZR OAL-BYTL-1 A-TEM2)
 	(POPJ-AFTER-NEXT			;PART 2 DONE
@@ -338,13 +348,37 @@ XASH (MISC-INST-ENTRY ASH)
 	(JUMP-GREATER-THAN M-2 A-ZERO XASH1)
 	((M-2) (A-CONSTANT 1))			;Shifting too far, preserve only sign
 XASH1	((M-4) SUB M-2 (A-CONSTANT 1))		;Byte size -1
-	((OA-REG-LOW) DPB M-4 OAL-BYTL-1 A-2)	;Use byte hardware
+;	((OA-REG-LOW) DPB M-4 OAL-BYTL-1 A-2)	;Use byte hardware
+;; quux revision 13: the rotate right by 32. - m-2 is 40. - (32. - m-2), m-2 +
+;; 10, in the ring of 40 (a1.2); the length stays m-2.
+	((m-tem) add m-2 (a-constant 10))
+	((oa-reg-low) dpb m-4 oal-bytl-1 a-tem)	;use byte hardware
 	((M-1) (BYTE-FIELD 0 0) M-1 A-3)	;Do the right arithmetic shift
-	(JUMP FIXPACK-T)
+;	(JUMP FIXPACK-T)
+;; quux revision 13: a right shift of a fixnum is a fixnum, and m-1 is no sum
+;; whose overflow flag fixpack-t could test.
+	(jump fixbox-t)
 
 ;Left ASH of a fixnum turns into DPB.
 XASH2	((C-PDL-BUFFER-POINTER-PUSH M-4)	;Put arg 1 back on pdl
 		Q-POINTER M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;; quux revision 13: the fixnum is the whole 32-bit field, so no shift fits in
+;; the word with room to spare, as a shift by less than 7. did at 25 bits.
+;; x shifted left by n (1 to 30.) is a fixnum when bits 31. to 31. - n of x
+;; all equal its sign: when x's low 31. - n bits under its sign (m-3) are x.
+;; then the result is x's low 32. - n bits at n.  otherwise the bignum code
+;; below, as before.
+	(jump-greater-or-equal m-2 (a-constant 31.) xash-bignum)
+	((m-k) m-a-1 (m-constant 40) a-2)	;31. - n, length - 1 of the bits kept
+	((m-j) sub m-k (a-constant 1))		;30. - n
+	((oa-reg-low) dpb m-j oal-bytl-1 a-zero)
+	((m-tem) (byte-field 0 0) m-1 a-3)	;x's low 31. - n bits under its sign
+	(jump-not-equal m-tem a-1 xash-bignum)	;bits lost: a bignum
+	((m-garbage) c-pdl-buffer-pointer-pop)	;take arg 1 back off the pdl
+	((oa-reg-low) dpb m-k oal-bytl-1 a-2)
+	((m-1) dpb m-1 (byte-field 0 0) a-zero)	;x's low 32. - n bits at n
+	(jump fixbox-t)
+xash-bignum
 	((M-1) SELECTIVE-DEPOSIT M-3
 	 (BYTE-FIELD (DIFFERENCE 33. Q-POINTER-WIDTH)
 		     (DIFFERENCE Q-POINTER-WIDTH 1))

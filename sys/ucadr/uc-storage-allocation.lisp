@@ -184,9 +184,15 @@ CONS-GET-AREA		(ERROR-TABLE RESTART CONS-GET-AREA)
 	(CALL-EQUAL M-TEM (A-CONSTANT (EVAL DTP-SYMBOL)) CONS-GET-AREA-1)
 	(POPJ-AFTER-NEXT DISPATCH Q-DATA-TYPE M-S TRAP-UNLESS-FIXNUM)
     (ERROR-TABLE ARGTYP AREA M-S NIL CONS-GET-AREA)
-       (CALL-GREATER-THAN M-S (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-						(EVAL SIZE-OF-AREA-ARRAYS)))
-		TRAP)
+;       (CALL-GREATER-THAN M-S (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;						(EVAL SIZE-OF-AREA-ARRAYS)))
+;		TRAP)
+	;; quux revision 13 (decisions of 29 sep, g2 review 2): the comparison
+	;; orders the fields alone, where the typed word once put a negative
+	;; fixnum above the range; unsigned, a negative area number still traps.
+       (call-greater-or-equal-unsigned m-s (a-constant (plus (byte-value q-data-type dtp-fix)
+						(eval (1+ size-of-area-arrays))))
+		trap)
 
 CONS-GET-AREA-1
 	((VMA-START-READ) ADD M-S (A-CONSTANT 1))	;Fetch value
@@ -211,6 +217,10 @@ SCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 	((M-T) A-SCONS-CACHE-FREE-POINTER)		;Allocate it here
 	((A-SCONS-CACHE-FREE-POINTER) M-3)		;Advance free pointer
 	((M-3) SUB M-3 A-SCONS-CACHE-REGION-ORIGIN)	;Exit via scavenger
+	;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+	;; and m-b, the count, has none: the free pointer scav0 stores is made a
+	;; fixnum again, as the region's table holds it.
+	((m-3) dpb m-3 q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	(JUMP-XCT-NEXT SCAV0)				; which will store back free pntr
        ((M-K) A-SCONS-CACHE-REGION)
 
@@ -254,6 +264,10 @@ LCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 	((M-T) A-LCONS-CACHE-FREE-POINTER)		;Allocate it here
 	((A-LCONS-CACHE-FREE-POINTER) M-3)		;Advance free pointer
 	((M-3) SUB M-3 A-LCONS-CACHE-REGION-ORIGIN)	;Exit via scavenger
+	;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+	;; and m-b, the count, has none: the free pointer scav0 stores is made a
+	;; fixnum again, as the region's table holds it.
+	((m-3) dpb m-3 q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	(JUMP-XCT-NEXT SCAV0)				; which will store back free pntr
        ((M-K) A-LCONS-CACHE-REGION)
 
@@ -651,7 +665,10 @@ RCONS0	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)	;USE TOTAL SIZE NOT ALLOCATE
 RCONS1	((VMA-START-READ) ADD M-S A-V-AREA-MAXIMUM-SIZE)
 	(CHECK-PAGE-READ)
 	((MD) Q-POINTER READ-MEMORY-DATA)
-	(JUMP-EQUAL MD (A-CONSTANT 37777777) RCONS2) ;MAX AREA ALLOCATED, NO OVERFLOW.
+;	(JUMP-EQUAL MD (A-CONSTANT 37777777) RCONS2) ;MAX AREA ALLOCATED, NO OVERFLOW.
+	;; quux revision 13: an area of no maximum has most-positive-fixnum, 2^31-1
+	;; (make-area's and the cold load's, describe-area's test), not 2^23-1
+	(jump-equal md (a-constant 17777777777) rcons2) ;max area allocated, no overflow.
 	((M-4) Q-POINTER M-4)
 	((M-4) SUB MD A-4)			;M-4 AMOUNT LEFT BEFORE OVERFLOW
 	(JUMP-GREATER-OR-EQUAL M-4 A-3 RCONS2)	;JUMP IF NO OVERFLOW PROBLEM
@@ -726,13 +743,21 @@ MAKE-REGION
 ;	((M-TEM) VMA-PAGE-ADDR-PART M-TEM)	   ; space created or band allocated too big.
 	;; 1024-word pages (contract g2, option (w)): a-disk-maximum, the paging
 	;; partition's size, is in 256-word blocks, not pages
-	((m-tem) vma-block-part m-tem)	   ; space created or band allocated too big.
-	(JUMP-LESS-THAN M-TEM A-DISK-MAXIMUM MAKE-REGION-0)
-	((M-TEM) A-DISK-MAXIMUM)		;Ending address
-MAKE-REGION-0
+;	((m-tem) vma-block-part m-tem)	   ; space created or band allocated too big.
+;	(JUMP-LESS-THAN M-TEM A-DISK-MAXIMUM MAKE-REGION-0)
+;	((M-TEM) A-DISK-MAXIMUM)		;Ending address
+;MAKE-REGION-0
 ;	((M-K) DPB M-TEM VMA-PAGE-ADDR-PART
 ;	 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	((m-k) dpb m-tem vma-block-part
+;	((m-k) dpb m-tem vma-block-part
+;	 (a-constant (byte-value q-data-type dtp-fix)))
+	;; quux revision 13 (appendix a1.11): pages again; the paging partition's
+	;; pages are a-disk-maximum-pages (its blocks are 5 a page)
+	((m-tem) vma-page-addr-part m-tem)	   ; space created or band allocated too big.
+	(jump-less-than m-tem a-disk-maximum-pages make-region-0)
+	((m-tem) a-disk-maximum-pages)		;ending address
+make-region-0
+	((m-k) dpb m-tem vma-page-addr-part
 	 (a-constant (byte-value q-data-type dtp-fix)))
 MAKE-REGION-1
 	((M-E) ADD M-T A-3)			;End of large enough region starting here
@@ -802,7 +827,10 @@ ADDRESS-SPACE-MAP-LOOKUP
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) ADDRESS-SPACE-MAP-BYTE-NUMBER-BYTE M-T)	;Byte number in that word
 	((M-TEM) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)
-	(POPJ-AFTER-NEXT (OA-REG-LOW) SUB (M-CONSTANT 40) A-TEM) ;40 doesn't hurt here, IORed
+;	(POPJ-AFTER-NEXT (OA-REG-LOW) SUB (M-CONSTANT 40) A-TEM) ;40 doesn't hurt here, IORed
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem) ;50 doesn't hurt here, iored
        ((M-TEM) (BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) READ-MEMORY-DATA)
 
 ;Given an address in M-T, store M-K into the address space map.
@@ -957,11 +985,18 @@ XAAIA (MISC-INST-ENTRY %ALLOCATE-AND-INITIALIZE-ARRAY)
 		C-PDL-BUFFER-POINTER XAAIA1)
        ((M-2) DPB C-PDL-BUFFER-POINTER-POP	;HEADER
 	    Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-ARRAY-HEADER)))
-	((WRITE-MEMORY-DATA-START-WRITE) ADD M-C	;STORE LEADER HEADER
-		(A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
-					(BYTE-VALUE %%HEADER-TYPE-FIELD
-						    %HEADER-TYPE-ARRAY-LEADER))
-				  2)))
+;	((WRITE-MEMORY-DATA-START-WRITE) ADD M-C	;STORE LEADER HEADER
+;		(A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE %%HEADER-TYPE-FIELD
+;						    %HEADER-TYPE-ARRAY-LEADER))
+;				  2)))
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-c, the leader's length, has none: the length plus 2, then the
+;; header's tag and type by ior, a logical function (the bits do not overlap).
+	((write-memory-data) add m-c (a-constant 2))
+	((write-memory-data-start-write) ior md	;store leader header
+		(a-constant (plus (byte-value q-data-type dtp-header)
+				  (byte-value %%header-type-field %header-type-array-leader))))
 	(CHECK-PAGE-WRITE)
 	((VMA M-T) ADD M-T A-C ALU-CARRY-IN-ONE)	;POINTS ONE BEFORE HEADER
 	((WRITE-MEMORY-DATA-START-WRITE) DPB M-C
@@ -1026,8 +1061,13 @@ LIST-OF-THINGS
 	(CALL LCONS)
 FILL-WITH-THINGS
 	((M-3) M-B)				;NUMBER OF CELLS TO INITIALIZE
-	((WRITE-MEMORY-DATA) LDB C-PDL-BUFFER-POINTER-POP	;CDR-NEXT
-		Q-ALL-BUT-CDR-CODE (A-CONSTANT -1))
+;	((WRITE-MEMORY-DATA) LDB C-PDL-BUFFER-POINTER-POP	;CDR-NEXT
+;		Q-ALL-BUT-CDR-CODE (A-CONSTANT -1))
+;; quux revision 13 (appendix a1.5): a constant is zero-extended from 32 bits,
+;; so -1 has no bits in the cdr code, <39:38>, and gave cdr-normal; cdr-next
+;; is written as its value.
+	((write-memory-data) ldb c-pdl-buffer-pointer-pop	;cdr-next
+		q-all-but-cdr-code (a-constant (byte-value q-cdr-code cdr-next)))
 	((VMA) SUB M-T (A-CONSTANT 1))
 	(JUMP-LESS-OR-EQUAL M-3 (A-CONSTANT 1) FILL-WITH-THINGS-1)
 FILL-WITH-THINGS-0
@@ -1110,9 +1150,13 @@ XFSHL1	(POPJ-XCT-NEXT)
 
 ;This dispatch ignores data-types 0 and -1, rather than going to ILLOP,
 ;because they are legal in stack-group array-leaders.
-(ASSIGN-EVAL NQZUSD-1 (EVAL (- 31. (LENGTH Q-DATA-TYPES))))
+;(ASSIGN-EVAL NQZUSD-1 (EVAL (- 31. (LENGTH Q-DATA-TYPES))))
+;; quux revision 13: 6-bit types, so the all-ones type (-1) is 63, not 31.
+(assign-eval nqzusd-1 (eval (- 63. (length q-data-types))))
 (LOCALITY D-MEM)
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-FSHS	(XFSHS1)				;TRAP
 	(XFSHS1)				;NULL
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;FREE
@@ -1304,7 +1348,9 @@ SINFS	(DISPATCH Q-DATA-TYPE READ-MEMORY-DATA D-SINFS)
        ((M-3) (A-CONSTANT 5))			;Symbol is easy, make it fast case
 
 (LOCALITY D-MEM)
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 D-SINFS	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;NULL
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;FREE
@@ -1698,9 +1744,15 @@ UN-CONS-1
 UN-CONS-FILL
 	((M-2) SUB M-2 (A-CONSTANT 1))		;M-2 gets length of array to fill with
 	(CALL-GREATER-THAN M-2 (A-CONSTANT (EVAL %ARRAY-MAX-SHORT-INDEX-LENGTH)) ILLOP)
-	((MD) ADD M-2 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-ARRAY-HEADER)
-					(BYTE-VALUE %%ARRAY-NUMBER-DIMENSIONS 1)
-					(EVAL ART-32B))))
+;	((MD) ADD M-2 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-ARRAY-HEADER)
+;					(BYTE-VALUE %%ARRAY-NUMBER-DIMENSIONS 1)
+;					(EVAL ART-32B))))
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-2, the length, has none: ior, a logical function, takes the tag from
+;; the constant; the length is below the header's other fields, so ior is the add.
+	((md) ior m-2 (a-constant (plus (byte-value q-data-type dtp-array-header)
+					(byte-value %%array-number-dimensions 1)
+					(eval art-32b))))
 	((VMA-START-WRITE) M-1)		;NO POPJ-AFTER-NEXT, SEE ABOVE
 	(CHECK-PAGE-WRITE)
 	(POPJ-AFTER-NEXT (M-T) C-PDL-BUFFER-POINTER-POP)	;RESTORE IT.

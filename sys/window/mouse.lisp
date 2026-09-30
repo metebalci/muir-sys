@@ -46,7 +46,9 @@
 ;; quux (contract q13): the register page is at #o777400 from revision 11,
 ;; where it was #o377000, so word 122 is #o777522.
 ;(defconst mouse-reg #o377122)
-(defconst mouse-reg #o777522)
+;(defconst mouse-reg #o777522)
+;; quux revision 13 (contract g2 4.1): word 122 is #o17777522.
+(defconst mouse-reg #o17777522)
 
 
 ;;;; Low-level routines

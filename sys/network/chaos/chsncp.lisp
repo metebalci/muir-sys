@@ -721,7 +721,9 @@ The status slot is used by the NCP to remember a small amount of info about the 
   ;; quux (contract q13): the register page is at #o777400 from revision 11,
   ;; where it was #o377000, so word 140 is #o777540.
 ;  (SETQ BASE-ADDRESS #o377140
-  (setq base-address #o777540
+;  (setq base-address #o777540
+  ;; quux revision 13 (contract g2 4.1): word 140 is #o17777540.
+  (setq base-address #o17777540
 	CONTROL-STATUS-REGISTER BASE-ADDRESS
 	MY-NUMBER-REGISTER (+ BASE-ADDRESS %CHAOS-MY-NUMBER-OFFSET)
 	WRITE-BUFFER-REGISTER (+ BASE-ADDRESS %CHAOS-WRITE-BUFFER-OFFSET)

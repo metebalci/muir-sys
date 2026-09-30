@@ -13,7 +13,9 @@ QMLP	(CALL-CONDITIONAL PG-FAULT-INTERRUPT-OR-SEQUENCE-BREAK QMLP-P-OR-I-OR-SB)
       ((MICRO-STACK-DATA-PUSH) A-MAIN-DISPATCH)	;PUT BACK RETURN FOR NEXT TIME
 
 QMLP-P-OR-I-OR-SB
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER PGF-R-I)    ;Jump on no SB
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER PGF-R-I)    ;Jump on no SB
+	;; quux revision 13 (appendix a1.6): lc's sequence.break flag is bit 34
+	(jump-if-bit-clear (byte-field 1 34.) location-counter pgf-r-i)    ;jump on no sb
 ;Prepare to take SB, make sure VMA doesnt point to untyped storage.
 	((VMA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 ;Funnyness with 0@U.  0@U is not saved as part of the SG.  Instead, it is physically
@@ -37,7 +39,9 @@ DMLP-1	(DISPATCH-XCT-NEXT M-INST-OP OPDTB)
        ((MICRO-STACK-DATA-PUSH) A-DEBUG-DISPATCH)
 
 DMLP-P-OR-I-OR-SB
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER PGF-R-I)    ;Jump on no SB
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 26.) LOCATION-COUNTER PGF-R-I)    ;Jump on no SB
+	;; quux revision 13 (appendix a1.6): lc's sequence.break flag is bit 34
+	(jump-if-bit-clear (byte-field 1 34.) location-counter pgf-r-i)    ;jump on no sb
 ;Prepare to take SB, make sure VMA doesnt point to untyped storage.
 	((VMA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 ;Funnyness with 0@U.  0@U is not saved as part of the SG.  Instead, it is physically
@@ -625,8 +629,12 @@ QBRLZ1	(POPJ-LESS-THAN-XCT-NEXT M-B (A-CONSTANT 1776))	;RETURN TO QBRLZ2 UNLESS 
 		(BYTE-FIELD 22. 10.) A-B)	;EXTEND SIGN
 ;DOUBLE-LENGTH BRANCH, LONG OFFSET IS IN SECOND HALFWORD
 	(DISPATCH ADVANCE-INSTRUCTION-STREAM)
-	((M-B) (BYTE-FIELD 17. 37) ;SAME TRICK AS WITH M-INST-ADR-*2+X. 
-			M-INST-BUFFER INSTRUCTION-STREAM)
+;	((M-B) (BYTE-FIELD 17. 37) ;SAME TRICK AS WITH M-INST-ADR-*2+X. 
+;			M-INST-BUFFER INSTRUCTION-STREAM)
+	;; quux revision 13 (contract g2 2.3): at 47, as m-inst-adr-*2+x, so that
+	;; in a ring of 40 it is a rotate of 1 again, bringing in bit 39, 0.
+	((m-b) (byte-field 17. 47) ;same trick as with m-inst-adr-*2+x. 
+			m-inst-buffer instruction-stream)
 	(POPJ-AFTER-NEXT			;RETURN TO QBRLZ2, XCT NEXT IF EXTEND SIGN
 	  POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 16.) M-B)
        ((M-B) SELECTIVE-DEPOSIT (M-CONSTANT -1)
@@ -785,24 +793,73 @@ QISP1	((C-PDL-BUFFER-POINTER-PUSH) M-T)	;NO PASS-AROUND PATH ON PDL BUFFER
 ;; only at pdl-index; the top is read in the second (contract h8a section 3.3).
 ;; a store goes in the popj's own microinstruction, and the one after the popj
 ;; writes only m-t.
+;qisp1-operand
+;	((m-1) q-typed-pointer c-pdl-buffer-index)
+;	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind2)
+;	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 77777777))
+;		qind2)
+;	(popj-after-next (m-t c-pdl-buffer-index) add m-1 (a-constant 1))
+;       (no-op)
+
+;qiadd-operand
+;	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
+;	((m-1) q-typed-pointer c-pdl-buffer-pointer)	;the top, the first
+;	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qind1)
+;	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+;		qind1)
+;	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind1)
+;	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+;		qind1)
+;	((m-1) add m-1 a-2)			;twice the data type, and the sum below it
+;	(popj-after-next (m-t c-pdl-buffer-pointer) dpb m-1 q-pointer
+;		(a-constant (plus (byte-value q-data-type dtp-fix)
+;				  (byte-value q-cdr-code cdr-next))))
+;       (no-op)
+
+;qilsp-operand
+;	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
+;	((m-1) q-typed-pointer c-pdl-buffer-pointer-pop)	;the top, the first
+;	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
+;	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+;		qilsp-operand-generic)
+;	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
+;	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
+;		qilsp-operand-generic)
+;	((m-t) a-v-nil)
+;	(popj-after-next popj-greater-or-equal m-1 a-2)
+;       ((m-t) a-v-true)
+
+;qilsp-operand-generic
+;	(jump-xct-next qind2)
+;       ((pdl-pointer) add pdl-pointer (a-constant 1))	;undo the pop, as qadpdlt does
+
+;; quux revision 13 (contract g2 2.7): family 4 rewritten.  at 40 bits the
+;; comparisons order the fields alone and ignore the tag (g2 2.2), so the
+;; typed pointer's order no longer tests the data type: a symbol or a list
+;; whose field fell in the range would pass.  each operand is tested by a
+;; dispatch on its data type, which falls through for dtp-fix (a fall-through
+;; costs a microcycle) and jumps to the generic handler for anything else, and
+;; a sum is kept in the field by the fixnum overflow condition, not by a range:
+;; every 32-bit fixnum takes the fast path.  the rules above hold: the first
+;; microinstruction reads the pdl only at pdl-index, these write only m-1 and
+;; m-2 before they jump to the generic handler (< reads the top before it pops
+;; it, so it has nothing to put back), and a store goes in the popj's own
+;; microinstruction.  the results are the generic ones, as above: sete-1+
+;; leaves the sum in m-t with cdr code 0, + leaves the sum with cdr-next in
+;; m-t and on the top, < pops the top and leaves t or nil in m-t.
 qisp1-operand
-	((m-1) q-typed-pointer c-pdl-buffer-index)
-	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind2)
-	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 77777777))
-		qind2)
-	(popj-after-next (m-t c-pdl-buffer-index) add m-1 (a-constant 1))
+	(dispatch q-data-type c-pdl-buffer-index d-fixnum-else-qind2)
+	((m-1) add c-pdl-buffer-index (a-constant 1))	;the operand's tag, and the flag
+	(jump-if-fixnum-overflow qind2)
+	(popj-after-next (m-t c-pdl-buffer-index) q-typed-pointer m-1)
        (no-op)
 
 qiadd-operand
 	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
-	((m-1) q-typed-pointer c-pdl-buffer-pointer)	;the top, the first
-	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qind1)
-	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
-		qind1)
-	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qind1)
-	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
-		qind1)
-	((m-1) add m-1 a-2)			;twice the data type, and the sum below it
+	(dispatch q-data-type m-2 d-fixnum-else-qind1)
+	(dispatch q-data-type c-pdl-buffer-pointer d-fixnum-else-qind1)	;the top, the first
+	((m-1) add c-pdl-buffer-pointer a-2)		;the sum, and the flag
+	(jump-if-fixnum-overflow qind1)
 	(popj-after-next (m-t c-pdl-buffer-pointer) dpb m-1 q-pointer
 		(a-constant (plus (byte-value q-data-type dtp-fix)
 				  (byte-value q-cdr-code cdr-next))))
@@ -810,21 +867,32 @@ qiadd-operand
 
 qilsp-operand
 	((m-2) q-typed-pointer c-pdl-buffer-index)	;the operand, the second argument
-	((m-1) q-typed-pointer c-pdl-buffer-pointer-pop)	;the top, the first
-	(jump-less-than m-2 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
-	(jump-greater-or-equal m-2 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
-		qilsp-operand-generic)
-	(jump-less-than m-1 (a-constant (byte-value q-data-type dtp-fix)) qilsp-operand-generic)
-	(jump-greater-or-equal m-1 (a-constant (plus (byte-value q-data-type dtp-fix) 40000000))
-		qilsp-operand-generic)
+	(dispatch q-data-type m-2 d-fixnum-else-qind2)
+	(dispatch q-data-type c-pdl-buffer-pointer d-fixnum-else-qind2)	;the top, the first
+	((m-1) q-typed-pointer c-pdl-buffer-pointer-pop)
 	((m-t) a-v-nil)
 	(popj-after-next popj-greater-or-equal m-1 a-2)
        ((m-t) a-v-true)
 
-qilsp-operand-generic
-	(jump-xct-next qind2)
-       ((pdl-pointer) add pdl-pointer (a-constant 1))	;undo the pop, as qadpdlt does
-
+;; the tables of family 4's dispatches (contract g2 2.7): dtp-fix falls through,
+;; as trap-unless-fixnum's does; every other data type jumps to the generic
+;; handler, not executing the next microinstruction.
+(locality d-mem)
+(start-dispatch 6 0)
+d-fixnum-else-qind1
+ (repeat 5 (inhibit-xct-next-bit qind1))	;data types 0-4
+	(p-bit r-bit)				;fix: drop through
+ (repeat 72 (inhibit-xct-next-bit qind1))	;data types 6-77
+(end-dispatch)
+
+(start-dispatch 6 0)
+d-fixnum-else-qind2
+ (repeat 5 (inhibit-xct-next-bit qind2))	;data types 0-4
+	(p-bit r-bit)				;fix: drop through
+ (repeat 72 (inhibit-xct-next-bit qind2))	;data types 6-77
+(end-dispatch)
+(locality i-mem)
+
 ;;; NON-DESTINATION-GROUP-3
 ;   EFFECTIVE ADDRESS NOT YET COMPUTED, M-T NOT VALID.
 
@@ -895,7 +963,11 @@ QBND4	(DISPATCH TRANSPORT-NO-EVCP-READ-WRITE READ-MEMORY-DATA)	;DON'T FOLLOW EXT
 		 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LOCATIVE)))
 	((MD) DPB MD Q-TYPED-POINTER A-ZERO)
 QBND4-CLOSURE-1
-	((M-1) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
+;	((M-1) ADD (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
+;; quux revision 13: m constant 32., a slack at least the 24. this test
+;; always had; the pointer width is 32 now, and m memory holds only two
+;; constants, 40 and 50 (a1.11)
+	((M-1) ADD (m-constant 40) A-QLBNDP)	;TEST P.C.E. (THIS M-CONST JUST HAPPENED TO
 	((M-1) SUB M-1 A-QLBNDH)		; BE AROUND AT THE WRONG TIME).
 	(CALL-IF-BIT-CLEAR BOXED-SIGN-BIT M-1 TRAP)
    (ERROR-TABLE PDL-OVERFLOW SPECIAL)		;M-1 SHOULD BE NEGATIVE AS 24-BIT QUANTITY

@@ -51,16 +51,28 @@
 ;(defconst mini-response-size #o377167)		;si:%file-device-response-size-register
 ;(defconst mini-response-producer #o377170)	;si:%file-device-response-producer-register
 ;(defconst mini-response-consumer #o377171)	;si:%file-device-response-consumer-register
-(defconst mini-feature-devices #o777415)	;feature word 15: <1>, si:%%file-device-feature
-(defconst mini-device-control #o777560)		;si:%file-device-control-register
-(defconst mini-device-status #o777561)		;si:%file-device-status-register
-(defconst mini-command-base #o777562)		;si:%file-device-command-base-register
-(defconst mini-command-size #o777563)		;si:%file-device-command-size-register
-(defconst mini-command-producer #o777564)	;si:%file-device-command-producer-register
-(defconst mini-response-base #o777566)		;si:%file-device-response-base-register
-(defconst mini-response-size #o777567)		;si:%file-device-response-size-register
-(defconst mini-response-producer #o777570)	;si:%file-device-response-producer-register
-(defconst mini-response-consumer #o777571)	;si:%file-device-response-consumer-register
+;(defconst mini-feature-devices #o777415)	;feature word 15: <1>, si:%%file-device-feature
+;(defconst mini-device-control #o777560)		;si:%file-device-control-register
+;(defconst mini-device-status #o777561)		;si:%file-device-status-register
+;(defconst mini-command-base #o777562)		;si:%file-device-command-base-register
+;(defconst mini-command-size #o777563)		;si:%file-device-command-size-register
+;(defconst mini-command-producer #o777564)	;si:%file-device-command-producer-register
+;(defconst mini-response-base #o777566)		;si:%file-device-response-base-register
+;(defconst mini-response-size #o777567)		;si:%file-device-response-size-register
+;(defconst mini-response-producer #o777570)	;si:%file-device-response-producer-register
+;(defconst mini-response-consumer #o777571)	;si:%file-device-response-consumer-register
+;; quux revision 13 (contract g2 4.1): the register page is #o17777400 from
+;; the i/o region's base, 1760000000.
+(defconst mini-feature-devices #o17777415)	;feature word 15: <1>, si:%%file-device-feature
+(defconst mini-device-control #o17777560)		;si:%file-device-control-register
+(defconst mini-device-status #o17777561)		;si:%file-device-status-register
+(defconst mini-command-base #o17777562)		;si:%file-device-command-base-register
+(defconst mini-command-size #o17777563)		;si:%file-device-command-size-register
+(defconst mini-command-producer #o17777564)	;si:%file-device-command-producer-register
+(defconst mini-response-base #o17777566)		;si:%file-device-response-base-register
+(defconst mini-response-size #o17777567)		;si:%file-device-response-size-register
+(defconst mini-response-producer #o17777570)	;si:%file-device-response-producer-register
+(defconst mini-response-consumer #o17777571)	;si:%file-device-response-consumer-register
 (defconst mini-command-ring #o1100)
 (defconst mini-response-ring #o1120)
 (defconst mini-buffer #o1200)

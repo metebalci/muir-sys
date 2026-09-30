@@ -361,7 +361,10 @@ TV-AOS-TRI-INC-LOOP
 	((M-K) READ-MEMORY-DATA)		;Word containing up to 8 bytes
 TV-AOS-TRI-INC-NEXT-BYTE
 	((M-C) SUB M-C (A-CONSTANT 1))		;Decrement number of pixels left
-	((M-TEM) SUB (M-CONSTANT 40) A-D)	;Reflect around 32. for LDB
+;	((M-TEM) SUB (M-CONSTANT 40) A-D)	;Reflect around 32. for LDB
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((m-tem) sub (m-constant 50) a-d)	;reflect around 40. for ldb
 	((OA-REG-LOW) DPB OAL-BYTL-1 M-Q A-TEM)	;Rotation and size
 	((M-TEM) LDB (BYTE-FIELD 0 0) M-K A-ZERO) ;Get byte of interest
 	((M-TEM) ADD M-TEM A-J)			;Frob pixel
@@ -449,7 +452,10 @@ COLR-NEXT-WORD
 COLR-NEXT-BYTE
 	((M-C) SUB M-C (A-CONSTANT 1))
 	((M-K) DPB M-J (BYTE-FIELD 3 2) A-ZERO)		;Rotation amount in bits
-	((M-TEM) SUB (M-CONSTANT 40) A-K)		;To rotate byte to low end of word
+;	((M-TEM) SUB (M-CONSTANT 40) A-K)		;To rotate byte to low end of word
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((m-tem) sub (m-constant 50) a-k)		;to rotate byte to low end of word
 	((OA-REG-LOW) DPB M-TEM OAL-MROT A-ZERO)
 	((M-3) (BYTE-FIELD 4 0) M-4 A-ZERO)		;Get byte field
 	((PDL-BUFFER-INDEX) SUB PDL-BUFFER-POINTER A-3)	;Offset to new byte
@@ -568,7 +574,12 @@ GCDBB-NO-LUCK
 				;BIDIV-REMAINDER-COMMON introduced) .
 	(CALL-XCT-NEXT SCONS-T)
        ((M-B) ADD M-J (A-CONSTANT 1))
-	((MD) ADD M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m holds only the header's rest; ior, a logical function, takes the
+;; tag from the constant.  the bits do not overlap, so ior is the add.
+;	((MD) ADD M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
+	((MD) IOR M-J (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
 					(BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-BIGNUM))))
 	((VMA-START-WRITE M-R) Q-POINTER M-T
 			       (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
@@ -637,7 +648,10 @@ GCDBB-GIVE-BACK-M-Q
 	((M-B) M-T)				;From
 	((M-D) M-T)				;To
 	;;Constant for LDB (M-K):
-	((M-K) ADD M-1 (A-CONSTANT 1))		;MROT   = M-1 + 1
+;	((M-K) ADD M-1 (A-CONSTANT 1))		;MROT   = M-1 + 1
+;; quux revision 13: the rotate right by 31. - m-1 is 40. - (31. - m-1), m-1 +
+;; 9., in the ring of 40 (a1.2)
+	((m-k) add m-1 (a-constant 11))		;mrot   = m-1 + 9.
 	((M-TEM) SUB M-1 (A-CONSTANT 1))	;BYTL-1 = M-1 + 1
 	((M-K) DPB M-TEM OAL-BYTL-1 A-K)
 	;;Constant for DPB (M-S):

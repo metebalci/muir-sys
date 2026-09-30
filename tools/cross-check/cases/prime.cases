@@ -21,7 +21,7 @@
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-coldld.qfasl"))
 (qc-file "SYS: COLD; CROSS LISP" "HOST: //home//lispm//h-cross.qfasl")
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-cross.qfasl"))
-; the tree's QCOM has 1024-word pages of 32-bit words (contract G2, option
-; (w)), so 4 disk blocks a page; the builder band's own page is 256 words
-(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (32 4 4)
+; the tree's QCOM has 1024-word pages of 40-bit words (contract G2), so 5 disk
+; blocks a page; the builder band's own page is 256 words of 32 bits
+(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
 (compiler:target-word-width) => 32

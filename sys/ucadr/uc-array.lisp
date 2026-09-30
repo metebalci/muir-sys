@@ -1149,7 +1149,10 @@ QDACM6	((VMA-START-READ) M-E)
 	(JUMP-XCT-NEXT QDACM1)				;JUST DISPLACED
        ((M-E) Q-POINTER READ-MEMORY-DATA)
 
-QBFXIT	((M-J) SUB (M-CONSTANT 40) A-TEM2)	;REFLECT BECAUSE OF SHIFTER LOSSAGE
+;QBFXIT	((M-J) SUB (M-CONSTANT 40) A-TEM2)	;REFLECT BECAUSE OF SHIFTER LOSSAGE
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+QBFXIT	((m-j) sub (m-constant 50) a-tem2)	;reflect because of shifter lossage
 QBFXIT1	((OA-REG-LOW) DPB M-J A-TEM3 OAL-MROT)	;MODIFY NEXT INSTRUCTION
 		;DPB NECESSARY BECAUSE M-J = 40 IF A-TEM2 WAS 0
 	(POPJ-AFTER-NEXT 
@@ -1429,9 +1432,14 @@ XGLOP1	(CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B
 		DSP-ARRAY-SETUP)  		;DISPLACED
 	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)	;INDEX OUT OF BOUNDS
    (ERROR-TABLE SUBSCRIPT-OOB M-Q M-S)
-	(POPJ-AFTER-NEXT 
-	 (A-TEM3) IOR A-R M-Q)
-      ((M-T) ADD A-TEM3 M-E)
+;	(POPJ-AFTER-NEXT 
+;	 (A-TEM3) IOR A-R M-Q)
+;      ((M-T) ADD A-TEM3 M-E)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag, and
+;; the address in m-e has none: the address is summed first, and the tag in
+;; m-r is ior'ed onto it.
+	(popj-after-next (m-t) add m-q a-e)
+       ((m-t) ior m-t a-r)
 
      (MISC-INST-ENTRY G-L-P)		;(G-L-P <ARRAY-POINTER-TO-ART-Q-LIST-ARRAY>)
 XGLPAR	(CALL GAHDRA)			; RETURNS LIST POINTER TO ARRAY CONTENTS

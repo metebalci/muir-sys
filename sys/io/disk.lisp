@@ -146,7 +146,9 @@ The function receives arguments :READ-COMPARE, the RQB, and the ADDRESS."
 (defun get-disk-status (rqb unit)
   (block-disk-check-unit unit)
 ;  (let ((status (%xbus-read #o377774)))
-  (let ((status (%xbus-read #o777600)))
+;  (let ((status (%xbus-read #o777600)))
+  ;; quux revision 13 (contract g2 4.1): word 200 is #o17777600.
+  (let ((status (%xbus-read #o17777600)))
     (setf (aref rqb %disk-rq-status-low) (ldb #o0020 status)
 	  (aref rqb %disk-rq-status-high) (ldb #o2020 status))
     rqb))

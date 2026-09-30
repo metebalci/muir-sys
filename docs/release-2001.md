@@ -405,3 +405,112 @@ file carries a comment in that file saying why.
     replaced by the builder's compile while a font's is not
     (`cases/check1.cases:54-64`); with `cross.lisp` as it was, those cases
     fail.
+- **The first 40-bit QUUX, revision 13** (contract G2; its appendix A1):
+  microcode 2001 and boot PROM 2001 for the 40-bit word, and the cold load
+  cross-built for it, which boots on revision 13 to its herald. Every source
+  change carries a comment "quux revision 13", the old code commented out in
+  place.
+  - **`sys/cold/qcom.lisp`**: the word's fields (G1 section 2.1): cdr code
+    `<39:38>`, data type `<37:32>`, the field `<31:0>`, a fixnum's sign bit
+    31 (`Q-FIELD-VALUES`); the ADI and special-PDL flags stay in the cdr
+    code, now bits 38 and 39 (G1 section 2.2); the region bits and the page
+    hash table's second word as the 28-bit level-2 map entry, whose ten bits
+    above the 18-bit page move up by 4, and the first word's page at
+    `<27:10>`, the dummy page 777777 (A1.7); `ART-32B` holds 32 bits (G1
+    section 2.6); A memory's window at 1757776000 and the I/O region at
+    1760000000 (A1.7); the dispatch memory's 4,096 entries, the level-1
+    map's 8,192 and the level-2 map's 4,096; `PHYSICAL-PAGE-DATA` and
+    `ADDRESS-SPACE-MAP` 4 pages each (4 M words, and a byte for each of the
+    28-bit space's quanta), `EXTRA-PDL-AREA` 5 pages fewer so that it still
+    ends at 200000, a level-1 block's boundary.
+  - **The micro-assembler** reads `QCOM` into its own package, and QCOM's
+    40-bit constants set the running 32-bit world's own values: System
+    2000's band halted loading the micro-assembler. `sys/sys/uashadow.lisp`
+    (new) shadows in `UA`, before `QCOM` is read, each numeric constant of
+    `QCOM` whose value differs from the running world's; `SYS: SYS; SYSDCL`
+    reads it first (`CADR-MICRO-ASSEMBLER`). `sys/sys/cadsym.lisp`: the
+    jump conditions 10 (fixnum overflow) and 11 (unsigned less than) of
+    A1.3, as `JUMP-IF-FIXNUM-OVERFLOW` and its kin.
+  - **Microcode 2001** (`sys/ucadr/`), over contract G2 section 6 and M4's
+    list:
+    - the fields (`uc-parameters.lisp`), and every data type dispatch at 64
+      entries and the map-bit ones at 128 (G2 section 2.4); OAL fields of
+      6 bits and a 12-bit dispatch address; the LC and interrupt-control
+      flags 8 bits higher (A1.6: sequence break 34, interrupt enable 35,
+      need-fetch 39);
+    - **fixnums of 32 bits** with the overflow condition (`uc-arith.lisp`,
+      `FIXPACK-T`, `FIXPACK-P`, `fix-overflow-33`, `fixbox-t`, `fixbox-p`;
+      `D-FXOVCK` and the 25-bit sign extension gone); a bignum's one digit
+      is always a fixnum, and so is -2^31, whose magnitude takes two digits
+      (`bcleanup-2-digits`, `uc-arith.lisp:4210`); `ASH` of a fixnum to the
+      left, with no headroom above 32 bits, shifts in the word when bits 31
+      to 31 − n all equal the sign, and takes the bignum path otherwise
+      (`XASH2`, `uc-logical.lisp:363`);
+    - **family 4 rewritten** (G2 section 2.7): each operand a dispatch on its
+      data type that falls through for `DTP-FIX`, and the overflow
+      condition (`uc-macrocode.lisp`, `d-fixnum-else-qind1`, `-qind2`);
+    - **arithmetic takes M's tag** (G2 section 2.2): where the tag came from
+      the A side, the sum is made first and the tag added by a logical
+      function or a `DPB`: bignum headers (nine sites, `ADD` to `IOR`),
+      `G-L-P`'s list pointer (`XGLOP1`, `uc-array.lisp:1431`), the cons
+      caches' free pointers (`uc-storage-allocation.lisp:219`, `:266`), the
+      array-leader and `ART-32B` headers, `MVRC`'s locative
+      (`uc-call-return.lisp:1224`) and the Chaosnet bit count;
+    - **constants zero-extended from 32 bits** (A1.5): `FILL-WITH-THINGS`
+      took its cdr code, cdr-next, from `(A-CONSTANT -1)`, which now has no
+      cdr code, so every `MAKE-LIST` list was cdr-normal
+      (`uc-storage-allocation.lisp:1062`);
+    - **the rotator is a ring of 40** (A1.2): a right rotate by n is 40 − n,
+      50 octal less n, in `LDB` and `DPB` by run-time byte pointers
+      (`uc-fctns.lisp`, `uc-array.lisp` `QBFXIT`, `uc-hacks.lisp`), `LSH`,
+      `ROT`, `ASH`, the bignum shifts (`BIDIV-NORMALIZE-ENCODE-SHIFT`,
+      `BIGNUM-RIGHT-JUST-FFO`, the unnormalize loops, `GCDBB`), `GCD`'s byte
+      pointer, the address space map's byte, and the display's
+      `%DRAW-CHAR`, `SELECT-SHEET`, the mouse cursor's second column and
+      `BITBLT`, whose source rotate is taken mod 40 and whose byte pointers
+      keep the word's bit offset mod 32 (`uc-tv.lisp`, `BITBLT-INNER-LOOP`,
+      `:687`); M memory holds two constants, now 40 and 50, and the 31. and
+      24. that were the others are made from 40 (`M-A-1`) or become 40;
+    - **the map and paging** for 28-bit addresses and 1024-word pages, one
+      map entry and one command-list entry a page (A1.7, A1.11;
+      `uc-page-fault.lisp`, `uc-disk.lisp`): level 1 by `VA<27:15>` with the
+      invalid block 177 and its reverse map at 2400-2577 (A1.8), level 2 of
+      28 bits; a reference whose address has `<31:28>` set halts at the new
+      `ADDRESS-PAST-28-BITS` (`uc-page-fault.lisp:524`), placed where nothing
+      falls into it; the page hash from `VMA<27:16>`; the band's pages 5
+      blocks, packed;
+    - **the boot** (`uc-cold-disk.lisp`): the revision check asks for 13
+      and halts at `MACHINE-NOT-QUUX-13` below it (G2 section 2.8); the
+      initial map for the 7-bit level 1; the GPT read by 4-byte transfers
+      and compared with fixnum constants (A1.11); `%DISK-SAVE` writes band
+      format 2000 as a fixnum, and the restore takes the fixnums 2000 and
+      2002, halts at `INCREMENTAL-BAND-NOT-SUPPORTED` for 2001 and at the
+      new `BAND-NOT-40-BIT` for anything else (A1.12);
+    - `SIZE-OF-HARDWARE` and the dispatch memory at 4,096 (A1.4), the
+      I/O region and A memory's window (`uc-cadr.lisp`), the register page
+      at 1777777400 and the run light at 1760000036.
+  - **Boot PROM 2001** (`sys/ucadr/promh.text`): every disk read is a
+    4-byte transfer of a page, four blocks, into the buffer, physical page 3
+    (A1.11); a fixnum zero, made before the constants, under `A-1` to `A-4`,
+    the GPT's signature words, the microcode's type word and the entry size,
+    and ordering tests for the counts read from disk; the self-test's add
+    with its ones on the A side; the 7-bit level-1 and 28-bit level-2 maps
+    cleared and written as A1.7 says, virtual page 0 the buffer, 1 the
+    system communication area for the CCW at 2377, 2 the register page at
+    virtual 5400; interrupt enable at bit 35; the dispatch memory's 4,096
+    entries; A memory as section 5 (A1.12), and a section 4, A memory at 32
+    bits, halts at the new `ERROR-A-MEM-SECTION-32-BITS` (G2 section 2.8).
+  - **Lisp**: the register page is `#o17777400` from the I/O region's base
+    (`FEATURE-PAGE-XBUS-ADDRESS`, `sys/sys/ltop.lisp`; MINI's constants,
+    `sys/cold/mini.lisp`; the keyboard, mouse, Chaosnet, disk status and
+    screen-control addresses), and the frame buffer's physical base
+    1760000000 (`VIDEO-BUFFER-ADDRESS`).
+  - **The cross build**: `cross-check-formats` lets
+    `%%ADI-PREVIOUS-ADI-FLAG` move with the cdr code
+    (`cross-format-exceptions`, `sys/cold/cross.lisp`), since neither the
+    compiler nor the FASL format holds it; `cross-dump-symbol-value` dumps
+    the value file's symbol with its package's prefix, so that the cold
+    load's `FONTS:CPTFONT` is the one the font file sets (it made a second
+    symbol, and the cold-load stream stopped on the unbound one);
+    `tools/cross-check/cases/prime.cases` expects the tree's 40-bit
+    parameters.

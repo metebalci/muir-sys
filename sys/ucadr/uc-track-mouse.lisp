@@ -84,7 +84,11 @@ CONFINE-CURSOR-3
 	;Do second column first
 	((M-2) M-A-1 M-B A-TEM)			;Byte width-1 for second column
 	((M-B) M-TEM)				;Byte width-1 for first column
-	((M-TEM) M-A-1 (M-CONSTANT 40) A-B)
+;	((M-TEM) M-A-1 (M-CONSTANT 40) A-B)
+;; quux revision 13: the second column is the pattern's bits 32. - t up, a
+;; rotate right by 32. - t: 40. - (32. - t), t + 8., in the ring of 40 (a1.2);
+;; m-b is 31. - t here.
+	((m-tem) m-a-1 (m-constant 50) a-b)
 	((M-2) DPB M-2 OAL-BYTL-1 A-TEM)	;LDB pointer for second column
 	((M-A) (A-CONSTANT MOUSE-CURSOR-PATTERN-AMEM-LOC))
 	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-MOUSE-CURSOR-HEIGHT)

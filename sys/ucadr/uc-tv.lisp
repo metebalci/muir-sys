@@ -50,9 +50,16 @@
 ;ALSO DUE TO SELECT-SHEET
 
 ;Will someone who understands these please document what the values mean?
-(ASSIGN RASTER-ALIGN-BITS 5)
+;(ASSIGN RASTER-ALIGN-BITS 5)
+;; quux revision 13: a byte instruction's rotate is ir<5:0> and its length - 1
+;; ir<11:6> (a1.1)
+(assign raster-align-bits 6)
 
-(ASSIGN RASTER-ALIGN-OFFSET 40)
+;(ASSIGN RASTER-ALIGN-OFFSET 40)
+;; quux revision 13: the offset is one in the length - 1 field, oal-bytl-1,
+;; which is ir<11:6> (a1.1): a byte pointer "+40" below holds the byte's length
+;; there rather than its length - 1, and this is taken off where it is used.
+(assign raster-align-offset 100)
 
 ;;; SELECT A SHEET FOR USE BY THE OTHER FUNCTIONS
 ;;; HERE ARE VARIABLES WE SET UP:
@@ -95,7 +102,10 @@ SELECT-SHEET-1
 	;; Offset of start of buffer in bits	
 	((A-TV-SCREEN-BUFFER-BIT-OFFSET) DPB M-Q (BYTE-FIELD 27. 0) A-ZERO) 
 	((A-TV-SCREEN-BUFFER-ADDRESS) M-E)
-	((M-TEM) ADD (M-CONSTANT 40) A-TEM)	;Size in words depends on element size
+;	((M-TEM) ADD (M-CONSTANT 40) A-TEM)	;Size in words depends on element size
+;; quux revision 13: the rotate right by 5 - pixel size is 40. - (5 - pixel
+;; size) in the ring of 40 (a1.2)
+	((m-tem) add (m-constant 50) a-tem)	;size in words depends on element size
 	((M-TEM) SUB M-TEM (A-CONSTANT 5))	; (also calculate MROT in same calc)
 	((OA-REG-LOW) DPB M-TEM OAL-MROT A-ZERO)
        ((M-TEM) (BYTE-FIELD 27. 0) M-S)		;Size of buffer in words
@@ -164,9 +174,15 @@ X-DRAW-CHAR (MISC-INST-ENTRY %DRAW-CHAR)
 	((VMA-START-READ) SUB M-A (A-CONSTANT 9.))	;M-R GETS NUMBER OF ROWS PER WORD
 	(CHECK-PAGE-READ)
 	(CALL-GREATER-THAN M-B (A-CONSTANT 32.) ILLOP)	;TOO WIDE
-	((M-I) SUB (M-CONSTANT 40) A-B)			;40 - RASTER WIDTH
-		;THIS HAS OVERFLOW BUG IF M-B=40, BUT WILL NEVER BE USED IN THAT CASE ANYWAY
-	((M-Q) DPB M-I OAL-BYTL-1 A-I)			;LDB PNTR +40 TO SHIFT FONT WORD
+;	((M-I) SUB (M-CONSTANT 40) A-B)			;40 - RASTER WIDTH
+;		;THIS HAS OVERFLOW BUG IF M-B=40, BUT WILL NEVER BE USED IN THAT CASE ANYWAY
+;	((M-Q) DPB M-I OAL-BYTL-1 A-I)			;LDB PNTR +40 TO SHIFT FONT WORD
+;; quux revision 13: the rotate right by the raster width b is 40. - b, 50 -
+;; b, in the ring of 40, and no longer the byte's length, 32. - b (a1.2).
+	((m-i) sub (m-constant 50) a-b)			;50 - raster width, the rotate
+	((m-tem) sub (m-constant 40) a-b)		;40 - raster width, the length
+		;this has overflow bug if m-b=40, but will never be used in that case anyway
+	((m-q) dpb m-tem oal-bytl-1 a-i)		;ldb pntr +100 to shift font word
 	((M-R) Q-POINTER READ-MEMORY-DATA)		; RIGHT BY ONE RASTER ROW
 	((VMA-START-READ) SUB M-A (A-CONSTANT 7))	;M-D GETS RASTER HEIGHT
 	(CHECK-PAGE-READ)
@@ -176,7 +192,14 @@ X-DRAW-CHAR (MISC-INST-ENTRY %DRAW-CHAR)
 							;NOTE C(M-T) > 0, SO NO OVERFLOW
 	((M-TEM) SUB (M-CONSTANT 40) A-T)		;LENGTH OF BYTE AT LEFT OF 1ST WORD
 	((M-T) DPB M-TEM OAL-BYTL-1 A-T)		;DPB PNTR +40 FOR THAT BYTE
-	((M-I) DPB M-K OAL-BYTL-1 A-T)			;LDB PNTR +40 FOR BYTE AT RIGHT OF 2ND
+;	((M-I) DPB M-K OAL-BYTL-1 A-T)			;LDB PNTR +40 FOR BYTE AT RIGHT OF 2ND
+;; quux revision 13: the byte at the right of the 2nd word is the font row's
+;; bits 32. - t up: a rotate right by 32. - t, t + 8. in the ring of 40, and
+;; b + t - 32. long.  the 5-bit length field dropped the 32. by itself; the
+;; 6-bit one does not (a1.1, a1.2).
+	((m-tem) sub m-k (a-constant 40))		;b + t - 32.
+	((m-i) add m-t (a-constant 10))			;t + 8. (m-t's rotate is t)
+	((m-i) dpb m-tem oal-bytl-1 a-i)		;ldb pntr +100 for byte at right of 2nd
 ;DROPS THROUGH
 ;DROPS IN
 	((VMA-START-READ M-E) ADD M-2 A-E)		;FETCH FIRST WORD OF RASTER
@@ -227,8 +250,10 @@ XTVCHO2	(JUMP-LESS-OR-EQUAL M-D (A-CONSTANT 1) XFALSE)	;STOP IF DONE
        ((VMA-START-READ M-E) ADD M-E (A-CONSTANT 1))
 
 ;THIS VERSION OF THE ABOVE IS FOR THE FAST CASE, WHERE IT DOES NOT CROSS A WORD BOUNDARY
-XTVCH4	((M-T) DPB M-B (BYTE-FIELD 6 5) A-T)	;DPB PNTR +40 FOR ALIGNING RASTER
-		;BYTE-FIELD IS ALMOST OAL-BYTL-1
+;XTVCH4	((M-T) DPB M-B (BYTE-FIELD 6 5) A-T)	;DPB PNTR +40 FOR ALIGNING RASTER
+;		;BYTE-FIELD IS ALMOST OAL-BYTL-1
+;; quux revision 13: oal-bytl-1 is six bits, ir<11:6>, and holds 32. (a1.1)
+XTVCH4	((m-t) dpb m-b oal-bytl-1 a-t)		;dpb pntr +100 for aligning raster
 	((VMA-START-READ M-E) ADD M-2 A-E)		;FETCH FIRST WORD OF RASTER
 ;M-1 WORD FROM FONT ARRAY
 ;M-A FONT ARRAY POINTER
@@ -462,7 +487,9 @@ BITBLT (MISC-INST-ENTRY BITBLT)
 	((M-ZR) SUB Q-R A-4)				;Save eventual contents of M-T
 	((M-I) M-A)					;Save eventual contents of M-D
 	((M-R) M-Q)					;X offset in bits
-	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-3)	;Make DPB ptr to convert width
+;	((M-1) SUB (M-CONSTANT (DIFFERENCE Q-POINTER-WIDTH 1)) A-3)	;Make DPB ptr to convert width
+;; quux revision 13: 31. - m-3 as 32. - m-3 - 1 (m memory holds only 40 and 50)
+	((m-1) m-a-1 (m-constant 40) a-3)	;make dpb ptr to convert width
 	((M-K) DPB M-1 OAL-BYTL-1 A-3)			; from bytes to bits
 	(CALL BITBLT-DECODE-ARRAY)			;Decode source
 	;; No sequence breaks after this point
@@ -542,8 +569,13 @@ BITBLT-LTR-3
 BITBLT-LTR-4	;Here M-J has negative width of this column
 	(JUMP-GREATER-OR-EQUAL M-J A-ZERO XFALSE)	;Return NIL if zero width (can't do)
 	((M-TEM) M-A-1 M-ZERO A-J)			;Positive byte length minus one
-	((M-K) DPB M-TEM
-	 (BYTE-FIELD 27. RASTER-ALIGN-BITS) A-R)	;Byte pointer to part of destination
+;	((M-K) DPB M-TEM
+;	 (BYTE-FIELD 27. RASTER-ALIGN-BITS) A-R)	;Byte pointer to part of destination
+;; quux revision 13: the rotate field is six bits, so it takes the destination
+;; bit offset within its word, m-r mod 32., and not m-r's bit 5 as well (a1.1)
+	((m-k) (byte-field 5 0) m-r)
+	((m-k) dpb m-tem
+	 (byte-field 27. raster-align-bits) a-k)	;byte pointer to part of destination
 	(CALL-XCT-NEXT BITBLT-INNER-LOOP)		; to be modified
        ((A-BITBLT-HOR-COUNT) M+A+1 M-TEM A-BITBLT-HOR-COUNT)	;Advance negative bit count
 	(JUMP-LESS-OR-EQUAL M-ZERO A-BITBLT-HOR-COUNT XFALSE)	;Return NIL if done
@@ -615,6 +647,9 @@ BITBLT-RTL-4
 BITBLT-RTL-5	;M-J now has positive number of bits in this column
 	(JUMP-LESS-OR-EQUAL M-J A-ZERO XFALSE)		;Return NIL if zero width (can't do)
 	((M-K) SUB M-R A-J)				;<5:0>=MROT for dest bits to modify
+;; quux revision 13: the rotate field is six bits: the offset within the word,
+;; mod 32. (a1.1)
+	((m-k) (byte-field 5 0) m-k)
 	((M-TEM) SUB M-J (A-CONSTANT 1))		;BYTL-1 for dest bits to modify
 	((M-K) DPB M-TEM
 	 (BYTE-FIELD 27. RASTER-ALIGN-BITS) A-K)	;Byte pointer to part of destination
@@ -650,6 +685,15 @@ BITBLT-RTL-5	;M-J now has positive number of bits in this column
 ;;;  M-J bit count (width of this column)
 
 BITBLT-INNER-LOOP
+;; quux revision 13: m-i, the destination's bit offset less the source's, -31.
+;; to 31., is the left rotate of the source word.  a rotate is taken mod 40
+;; (a1.2), where the ring of 32 took its low 5 bits: a negative m-i becomes m-i
+;; + 40., and then brings the source column's bits to the destination's, as
+;; neither column crosses a word boundary.  (the callers set m-i for each
+;; column.)
+	(jump-greater-or-equal m-i a-zero bitblt-inner-rotate)
+	((m-i) add m-i (a-constant 50))
+bitblt-inner-rotate
 	((M-1) SUB M-A A-B)				;Init source address
 	((M-1) ADD M-1 A-BITBLT-SRC-Y-OFFSET)		;Offset to actual starting place
 	((M-3) SUB M-C A-BITBLT-SRC-Y)			;Number source rows until wrap-around
@@ -670,13 +714,18 @@ BITBLT-INNER-2
 	((A-BITBLT-COUNT) ADD M-4 A-BITBLT-COUNT)	;Count down remaining rows
 	((M-3) SUB M-3 A-4)				;Count down source rows before wrap
 	;; Check for fast case not requiring rotate nor read of destination
-	((M-TEM) (BYTE-FIELD 5 0) M-I A-K)		;Check for rotate or part-word
-	((M-TEM) DPB M-TEM (BYTE-FIELD 10. 6) A-ALUF)	;Check for ALU function of SETA
-	(JUMP-EQUAL M-TEM (A-CONSTANT 174050) BITBLT-INNER-4)	;Go to fast case
+;	((M-TEM) (BYTE-FIELD 5 0) M-I A-K)		;Check for rotate or part-word
+;	((M-TEM) DPB M-TEM (BYTE-FIELD 10. 6) A-ALUF)	;Check for ALU function of SETA
+;	(JUMP-EQUAL M-TEM (A-CONSTANT 174050) BITBLT-INNER-4)	;Go to fast case
+;; quux revision 13: rotate ir<5:0>, length - 1 ir<11:6> (a1.1): no rotate and
+;; the whole 32. bits is 3700, under seta's 50
+	((m-tem) (byte-field 6 0) m-i a-k)		;check for rotate or part-word
+	((m-tem) dpb m-tem (byte-field 12. 6) a-aluf)	;check for alu function of seta
+	(jump-equal m-tem (a-constant 370050) bitblt-inner-4)	;go to fast case
 BITBLT-INNER-3		;This is the inner inner loop
 	((VMA-START-READ M-1) ADD M-1 A-B)		;Fetch source word
 	(CHECK-PAGE-READ)
-	((OA-REG-LOW) DPB M-I OAL-MROT A-ZERO)		;Rotate it into position
+	((OA-REG-LOW) DPB M-I OAL-MROT A-ZERO)		;Rotate it into position (mod 40)
 	((A-BITBLT-TEM) (BYTE-FIELD 32. 0) READ-MEMORY-DATA)
 	((VMA-START-READ M-2) ADD M-2 A-E)		;Fetch destination word
 	(CHECK-PAGE-READ-NO-INTERRUPT)

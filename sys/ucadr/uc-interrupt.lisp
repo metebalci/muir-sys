@@ -186,7 +186,10 @@ INTR-2	((VMA-START-WRITE) M-B)			;Write into buffer
 	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%UNIBUS-CSR-SB-ENABLE) READ-MEMORY-DATA INTR-NO-SB)
 	(JUMP-IF-BIT-CLEAR-XCT-NEXT M-SBS-UNIBUS INTR-NO-SB)
        ((MD) Q-POINTER READ-MEMORY-DATA)	;Flush the flag bit.
-	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_34.))
 INTR-NO-SB
 	(JUMP-GREATER-THAN READ-MEMORY-DATA A-B INTR-3)
 	((VMA-START-READ) ADD M-A (A-CONSTANT (EVAL (- %UNIBUS-CHANNEL-BUFFER-START
@@ -459,7 +462,10 @@ intr-tick
 	(JUMP-IF-BIT-CLEAR-XCT-NEXT M-SBS-CLOCK INTRX1)
        ((A-TV-CLOCK-COUNTER) ADD (M-CONSTANT -1) A-TV-CLOCK-RATE) ;Counted down, recycle
 	((INTERRUPT-CONTROL)			; and give sequence break if needed
-		IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;		IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+		IOR LOCATION-COUNTER (A-CONSTANT 1_34.))
 INTRX1	(JUMP-EQUAL A-DISK-BUSY M-ZERO INTRX2)	;Look for disk interrupt
 	((VMA-START-READ) A-DISK-REGS-BASE)
 	(CHECK-PAGE-READ-NO-INTERRUPT)		;Bit 3 is interrupt-request

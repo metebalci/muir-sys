@@ -6,15 +6,29 @@
 ; virtual address, normally LOWEST-A-MEM-VIRTUAL-ADDRESS.  But it can be set lower
 ; ie if you are using the new color TV board you need 128K of direct mapped space
 ; below that to reference the video buffer.
-(ASSIGN LOWEST-A-MEM-VIRTUAL-ADDRESS 176776000)	;MUST BE 0 MODULO SIZE OF A-MEM
-(ASSIGN LOWEST-IO-SPACE-VIRTUAL-ADDRESS 177000000)  ;BEGINING OF X-BUS IO SPACE
-(ASSIGN LOWEST-UNIBUS-VIRTUAL-ADDRESS 177400000)    ;END OF X-BUS, BEGINNING OF UNIBUS
+;(ASSIGN LOWEST-A-MEM-VIRTUAL-ADDRESS 176776000)	;MUST BE 0 MODULO SIZE OF A-MEM
+;(ASSIGN LOWEST-IO-SPACE-VIRTUAL-ADDRESS 177000000)  ;BEGINING OF X-BUS IO SPACE
+;(ASSIGN LOWEST-UNIBUS-VIRTUAL-ADDRESS 177400000)    ;END OF X-BUS, BEGINNING OF UNIBUS
+;; quux revision 13 (contract g2 2.6; appendix a1.7): virtual addresses are 28
+;; bits.  the i/o virtual region is the top of the mapped space,
+;; 1760000000-1777777777, virtual equal to physical, and a memory's window is
+;; just below it, 1757776000-1757777777, in the order the page fault handler
+;; tests them.  there is no unibus: its window is put past the frame buffer in
+;; the i/o region, where nothing answers.
+(assign lowest-a-mem-virtual-address 1757776000)	;must be 0 modulo size of a-mem
+(assign lowest-io-space-virtual-address 1760000000)	;the i/o virtual region
+(assign lowest-unibus-virtual-address 1770000000)	;no unibus on quux
 
 ;Compare with these after clearing the sign bit of the address
 ;(which is done since that bit is meaningless in the map on a CADR).
-(ASSIGN INTERNAL-LOWEST-A-MEM-VIRTUAL-ADDRESS 76776000)    ;MUST BE 0 MODULO SIZE OF A-MEM
-(ASSIGN INTERNAL-LOWEST-IO-SPACE-VIRTUAL-ADDRESS 77000000) ;BEGINING OF X-BUS IO SPACE
-(ASSIGN INTERNAL-LOWEST-UNIBUS-VIRTUAL-ADDRESS 77400000)   ;END OF X-BUS, BEGINNING OF UNIBUS
+;(ASSIGN INTERNAL-LOWEST-A-MEM-VIRTUAL-ADDRESS 76776000)    ;MUST BE 0 MODULO SIZE OF A-MEM
+;(ASSIGN INTERNAL-LOWEST-IO-SPACE-VIRTUAL-ADDRESS 77000000) ;BEGINING OF X-BUS IO SPACE
+;(ASSIGN INTERNAL-LOWEST-UNIBUS-VIRTUAL-ADDRESS 77400000)   ;END OF X-BUS, BEGINNING OF UNIBUS
+;; quux revision 13: no sign bit is cleared from a 28-bit address, so the
+;; internal addresses are the addresses themselves.
+(assign internal-lowest-a-mem-virtual-address 1757776000)
+(assign internal-lowest-io-space-virtual-address 1760000000)
+(assign internal-lowest-unibus-virtual-address 1770000000)
 
 ;; quux (contract q13, revision 11): the register page is the last page of
 ;; the physical space, 17777400-17777777, fixed, where it was 17377000-
@@ -22,8 +36,13 @@
 ;; (the i/o region's direct map, pgf-mm0).  every register-page address below
 ;; is made from these two, so that the page moves in one place; the old
 ;; addresses are nothing there on revision 11.
-(assign quux-register-page-virtual-address 77777400)
-(assign quux-register-page-physical-address 17777400)
+;(assign quux-register-page-virtual-address 77777400)
+;(assign quux-register-page-physical-address 17777400)
+;; quux revision 13 (contract g2 4.1): the register page is the last page of
+;; the 28-bit physical space, 1777777400, and virtual equal to physical in the
+;; i/o virtual region.
+(assign quux-register-page-virtual-address 1777777400)
+(assign quux-register-page-physical-address 1777777400)
 
 ;; quux (contract q4): the chaosnet interface is the register page's words
 ;; 140-147, word 140+k for unibus 764140+2k, the same registers in the same
@@ -49,7 +68,9 @@
 ;; locations, sys; ltop).  it was the bottom right of a 1920x1080 buffer,
 ;; which on a smaller one is past the end: every disk operation before lisp
 ;; ran was an xbus nxm (muir traced them at 17176423 on a 1280x1024 screen).
-(assign disk-run-light-virtual-address 77000036)	;XBUS ADDRESS
+;(assign disk-run-light-virtual-address 77000036)	;XBUS ADDRESS
+;; quux revision 13: the frame buffer window is at 1760000000 (g1 3.2).
+(assign disk-run-light-virtual-address 1760000036)
 
 ;; quux: the microsecond clock is the processor's source 15 (revision 5), not
 ;; the i/o board's at unibus 764120.
@@ -134,7 +155,10 @@
 ;(DISPATCH ADVANCE-INSTRUCTION-STREAM) TO GET NEXT HALFWORD
 (ASSIGN ADVANCE-INSTRUCTION-STREAM
 	(PLUS (PLUS (PLUS DISPATCH-ADVANCE-INSTRUCTION-STREAM 
-			  (BYTE-FIELD 1 31.)) ;NEEDFETCH BIT
+;			  (BYTE-FIELD 1 31.)) ;NEEDFETCH BIT
+			  ;; quux revision 13 (appendix a1.6): lc's flags moved up
+			  ;; by 8, need-fetch to bit 39.
+			  (byte-field 1 39.)) ;needfetch bit
 		    LOCATION-COUNTER)
 	      D-ADVANCE-INSTRUCTION-STREAM))
 

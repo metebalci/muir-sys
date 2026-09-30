@@ -33,8 +33,13 @@ chaos-intr-1
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 	((VMA-START-READ) ADD M-B (A-CONSTANT (EVAL %CHAOS-BIT-COUNT-OFFSET)))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
-	((WRITE-MEMORY-DATA M-TEM) M+A+1 READ-MEMORY-DATA	;Type bits are 0, bit count is
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))	;off by 1
+;	((WRITE-MEMORY-DATA M-TEM) M+A+1 READ-MEMORY-DATA	;Type bits are 0, bit count is
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))	;off by 1
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and the register read has none (it reads 000 above bit 31): the count plus
+;; one, then the fixnum's tag by dpb.
+	((m-tem) add read-memory-data (a-constant 1))	;bit count is off by 1
+	((write-memory-data m-tem) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((A-INTR-TEM1) (BYTE-FIELD 8 4) M-TEM)	;Get word count, then save bit count
 	((VMA-START-WRITE) SUB M-A (A-CONSTANT (EVAL (+ 2 %CHAOS-LEADER-BIT-COUNT))))
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
@@ -91,7 +96,10 @@ CHAOS-RCV-INTR-2
 	;; communication area is at 2000, a page of its own, not 400
        ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-receive-list))))
 	(JUMP-IF-BIT-CLEAR M-SBS-CHAOS CHAOS-INTR-EXIT)	;Request SB if enabled
-	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
+;; up by 8: sequence.break is bit 34, int.enable bit 35.
+;	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
+	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_34.))
 ;drops through
 ;drops in
 CHAOS-WAKEUP (MISC-INST-ENTRY %CHAOS-WAKEUP)

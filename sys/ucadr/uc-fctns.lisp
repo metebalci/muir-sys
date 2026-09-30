@@ -142,7 +142,9 @@ CARCDR-NO-SB
        ((M-T) ADD VMA (A-CONSTANT 1))
 
 (LOCALITY D-MEM)
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA TYPE BEFORE TAKING CAR
 ;IF DROPS THROUGH, NORMAL LIST-TYPE CAR
 CAR-PRE-DISPATCH 
@@ -178,7 +180,9 @@ CAR-PRE-DISPATCH
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT TRAP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON INPUT DATA TYPE WHEN TAKING CDR
 ;DROP THROUGH IF NORMAL LIST-TYPE CDR
 CDR-PRE-DISPATCH
@@ -833,7 +837,9 @@ XSETCAR (MISC-INST-ENTRY SETCAR)
        ((M-A) M-T)		;Save the arg where QRAR1 will return it.
 
 (LOCALITY D-MEM)
-(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 INHIBIT-XCT-NEXT-BIT)
 ;DISP ON DATA TYPE OF POINTER-TO-SMASH-CONTENTS-OF WHEN DOING RPLACA
 QRACDT	(P-BIT TRAP)	;TRAP
 	(P-BIT TRAP)	;NULL
@@ -867,7 +873,9 @@ QRACDT	(P-BIT TRAP)	;TRAP
  (REPEAT NQZUSD (P-BIT TRAP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 INHIBIT-XCT-NEXT-BIT)
 ;DISPATCH ON DATA TYPE OF POINTER-TO-SMASH-CONTENTS-OF WHEN DOING RPLACD
 QRDCDT	(P-BIT TRAP)	;TRAP
 	(P-BIT TRAP)	;NULL
@@ -1228,7 +1236,10 @@ XLLDB1	(DISPATCH (I-ARG DATA-TYPE-INVOKE-OP) ;ARG1, BYTE POINTER.  MUST BE FIXNU
     (ERROR-TABLE ARGTYP FIXNUM-FIELD PP 0)
 	((M-J) SUB M-K (A-CONSTANT 1))	   ;BYTE LENGTH MINUS ONE FIELD
 	((M-E) (BYTE-FIELD 6 6) PDL-POP) ;GET NUMBER OF PLACES OVER
-	((A-TEM2) SUB (M-CONSTANT 40) A-E)	  ;COMPENSATE FOR SHIFTER LOSSAGE
+;	((A-TEM2) SUB (M-CONSTANT 40) A-E)	  ;COMPENSATE FOR SHIFTER LOSSAGE
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((a-tem2) sub (m-constant 50) a-e)	  ;compensate for shifter lossage
 	(POPJ-AFTER-NEXT 
 	 (OA-REG-LOW) DPB M-J A-TEM2 OAL-BYTL-1)
        ((M-T) BYTE-INST 
@@ -1264,7 +1275,10 @@ XLDB  (MISC-INST-ENTRY LDB) (ERROR-TABLE RESTART XLDB)
 		 PDL-POP) ;Get number of places over
 	((M-2) SUB (M-CONSTANT 40) A-K)	   ;Maximum M-rotate to keep byte within a word
 XLDB3	(JUMP-GREATER-THAN M-E A-2 XLDB2)  ;Jump if left edge of byte off end of word
-	((A-TEM2) SUB (M-CONSTANT 40) A-E) ;Compensate for shifter lossage
+;	((A-TEM2) SUB (M-CONSTANT 40) A-E) ;Compensate for shifter lossage
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((a-tem2) sub (m-constant 50) a-e) ;compensate for shifter lossage
 	(POPJ-AFTER-NEXT 
 	 (OA-REG-LOW) DPB M-J OAL-BYTL-1 A-TEM2)
        ((M-T) BYTE-INST M-1
@@ -1355,7 +1369,10 @@ I-LDB	((M-2) ADD M-K A-E)
 	((M-4) M-K)				;ENTIRE BYTE WILL FIT.
 I-LDB2	(POPJ-EQUAL-XCT-NEXT M-4 A-ZERO)
        ((M-2) A-ZERO)				;RETURN 0 FOR 0 LENGTH BYTE.
-	((A-TEM2) SUB (M-CONSTANT 40) A-E)
+;	((A-TEM2) SUB (M-CONSTANT 40) A-E)
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((a-tem2) sub (m-constant 50) a-e)
 	((M-TEM) SUB M-4 (A-CONSTANT 1))	;HARDWARE BYTE LENGTH IS REAL VALUE -1.
 	(POPJ-AFTER-NEXT
 	 (OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-TEM2)
@@ -1386,7 +1403,10 @@ I-DPB0	(POPJ-GREATER-OR-EQUAL M-E A-ZR)	;RETURN IF ENTIRE BYTE OFF TO LEFT
 	((M-TEM) SUB M-TEM A-K)			;REDUCE SIZE OF BYTE
 	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-E)
 	((M-2) DPB M-1 A-2)			;DO THE DPB
-	((A-TEM2) M-A-1 (M-CONSTANT 40) A-TEM)	;SHIFT OVER TO USE UP WHATS BEEN DPB'ED
+;	((A-TEM2) M-A-1 (M-CONSTANT 40) A-TEM)	;SHIFT OVER TO USE UP WHATS BEEN DPB'ED
+;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
+;; the ring of 40 (a1.2)
+	((a-tem2) m-a-1 (m-constant 50) a-tem)	;shift over to use up whats been dpb'ed
 	(POPJ-AFTER-NEXT 			;FACT BYTE SIZE IS +1 DOESNT HURT,
 	 (OA-REG-LOW) DPB M-K OAL-BYTL-1 A-TEM2)	; SINCE M-1 WASN'T 32 BITS
        ((M-1) BYTE-INST M-1 A-ZERO)		;RIGHT ADJUST BITS IN M-1 FOR NEXT TIME.

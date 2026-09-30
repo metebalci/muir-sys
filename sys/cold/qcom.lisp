@@ -48,17 +48,29 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;;; Byte pointers at the parts of a Q or other thing, and their values.
 ;;; Q-FIELD-VALUES does NOT itself go into the cold load.
 (DEFCONST Q-FIELD-VALUES '(
-  %%Q-CDR-CODE 3602
-  %%Q-BOXED-SIGN-BIT 3001
-  %%Q-DATA-TYPE 3105
-  %%Q-POINTER 0031
+;  %%Q-CDR-CODE 3602
+;  %%Q-BOXED-SIGN-BIT 3001
+;  %%Q-DATA-TYPE 3105
+;  %%Q-POINTER 0031
+  ;; quux revision 13 (contract g1 2.1): a word is the cdr code <39:38>, the
+  ;; data type <37:32> and the field <31:0>, and a fixnum's sign is the
+  ;; field's top bit (g1 2.4).  the halves of the field still hold two
+  ;; macroinstructions, and characters keep today's fields (g2 7.1).
+  %%q-cdr-code 4602
+  %%q-boxed-sign-bit 3701
+  %%q-data-type 4006
+  %%q-pointer 0040
 ;  %%Q-POINTER-WITHIN-PAGE 0010
   ;; 1024-word pages (contract g2, option (w)): ten bits within the page
   %%q-pointer-within-page 0012
-  %%Q-TYPED-POINTER 0036
-  %%Q-ALL-BUT-TYPED-POINTER 3602
-  %%Q-ALL-BUT-POINTER 3107
-  %%Q-ALL-BUT-CDR-CODE 0036
+;  %%Q-TYPED-POINTER 0036
+;  %%Q-ALL-BUT-TYPED-POINTER 3602
+;  %%Q-ALL-BUT-POINTER 3107
+;  %%Q-ALL-BUT-CDR-CODE 0036
+  %%q-typed-pointer 0046
+  %%q-all-but-typed-pointer 4602
+  %%q-all-but-pointer 4010
+  %%q-all-but-cdr-code 0046
   %%Q-HIGH-HALF 2020				;Use these for referencing macro instructions
   %%Q-LOW-HALF 0020
   %%CH-FONT 1010
@@ -84,16 +96,23 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;;; map in the same orientation.  
 
 (DEFCONST Q-REGION-BITS-VALUES '(
-  %%REGION-MAP-BITS 1612		;10 bits to go into the map (access/status/meta)
-  ;; 2404				;access and status bits
-  %%REGION-OLDSPACE-META-BIT	2301	;0=old or free, 1=new or static or fixed.
+  ;; quux revision 13 (appendix a1.7): the map's ten access, status and meta
+  ;; bits sit above its 18-bit physical page, <27:18>, four bits higher than
+  ;; revision 12's, and the microcode takes them from here in place.
+;  %%REGION-MAP-BITS 1612		;10 bits to go into the map (access/status/meta)
+  %%region-map-bits 2212		;10 bits to go into the map (access/status/meta)
+  ;; 3004				;access and status bits
+;  %%REGION-OLDSPACE-META-BIT	2301	;0=old or free, 1=new or static or fixed.
+  %%region-oldspace-meta-bit	2701	;0=old or free, 1=new or static or fixed.
 					;0 causes transport-trap for read of ptr to here
-  %%REGION-EXTRA-PDL-META-BIT	2201	;0=extra-pdl, 1=normal.
+;  %%REGION-EXTRA-PDL-META-BIT	2201	;0=extra-pdl, 1=normal.
+  %%region-extra-pdl-meta-bit	2601	;0=extra-pdl, 1=normal.
 					;0 traps writing of ptr to here into "random" mem
-  %%REGION-REPRESENTATION-TYPE	2002		;Data representation type code:
+;  %%REGION-REPRESENTATION-TYPE	2002		;Data representation type code:
+  %%region-representation-type	2402		;Data representation type code:
   %REGION-REPRESENTATION-TYPE-LIST	0
   %REGION-REPRESENTATION-TYPE-STRUCTURE	1	;2 and 3 reserved for future
-  ;; 1602 spare meta bits
+  ;; 2202 spare meta bits (1602 before revision 13); 1402 spare
   ;; 1501 spare (formerly unimplemented compact-cons flag)
   %%REGION-SPACE-TYPE		1104		;Code for type of space:
   %REGION-SPACE-FREE		0		;0 free region slot
@@ -214,6 +233,7 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %SYS-COM-HIGHEST-VIRTUAL-ADDRESS	;In new band format.  You better have this amt of
 					; room in the paging partition.
   %SYS-COM-POINTER-WIDTH		;Either 24 or 25, as fixnum, or DTP-FREE in old sys.
+					;32 on quux revision 13
   ;; 6 left
   ))
 
@@ -328,8 +348,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   nr-sym			120
   macro-compiled-program	200
   page-table-area		8.		;enough for 2 megawords of main memory
-  physical-page-data		2.		;enough for 2 megawords of main memory
-  address-space-map		1		;assuming 8-bit bytes
+;  physical-page-data		2.		;enough for 2 megawords of main memory
+;  address-space-map		1		;assuming 8-bit bytes
+  ;; quux revision 13: 4 pages, 4 megawords, so that the address space map
+  ;; after it starts at 50000, on a 4-page boundary: the microcode takes its
+  ;; word by ldb of the address into the area's origin (xrgn1).  the map is 4
+  ;; pages, a byte for each of the 16,384 quanta of the 28-bit space.
+  physical-page-data		4.		;enough for 4 megawords of main memory
+  address-space-map		4		;assuming 8-bit bytes
   linear-pdl-area		20
   linear-bind-pdl-area		2
   pdl-area 			60
@@ -348,7 +374,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   micro-code-paging-area	200
   page-gc-bits			10
   fasl-table-area		41		;3 times length-of-fasl-table plus 1 page
-  extra-pdl-area		44		;note!! this is carefully calculated to cause
+;  extra-pdl-area		44		;note!! this is carefully calculated to cause
+  ;; quux revision 13: five pages fewer, for physical-page-data's and
+  ;; address-space-map's five more, so that it still starts at 102000 and ends
+  ;; at 200000, a level-1 block's boundary (32. pages, 100000 words)
+  extra-pdl-area		37		;note!! this is carefully calculated to cause
 						; extra-pdl-area to end on a level-2
   ; map boundary (200000)
   fasl-temp-area 		10
@@ -371,12 +401,21 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;(DEFCONST IO-SPACE-VIRTUAL-ADDRESS 77000000)
 ;(DEFCONST UNIBUS-VIRTUAL-ADDRESS 77400000)
 
-(DEFCONST A-MEMORY-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 176776000 1))
-(DEFCONST IO-SPACE-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177000000 1))
-(DEFCONST UNIBUS-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177400000 1))
+;(DEFCONST A-MEMORY-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 176776000 1))
+;(DEFCONST IO-SPACE-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177000000 1))
+;(DEFCONST UNIBUS-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177400000 1))
 						; doing an (ENABLE-TRAPPING)
 
-(DEFCONST MULTIBUS-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177400000 1))
+;(DEFCONST MULTIBUS-VIRTUAL-ADDRESS (%P-LDB-OFFSET 0031 177400000 1))
+;;; quux revision 13 (contract g2 2.6; appendix a1.7): 28-bit virtual addresses,
+;;; positive fixnums: a memory's window just below the i/o virtual region,
+;;; 1760000000-1777777777, virtual equal to physical; no unibus, whose window is
+;;; past the frame buffer, where nothing answers (the microcode's
+;;; lowest-*-virtual-address, uc-cadr).
+(defconst a-memory-virtual-address 1757776000)
+(defconst io-space-virtual-address 1760000000)
+(defconst unibus-virtual-address 1770000000)
+(defconst multibus-virtual-address 1770000000)
 
 (DEFCONST HEADER-FIELD-VALUES '(%%HEADER-TYPE-FIELD 2305 %%HEADER-REST-FIELD 0023))
 (DEFCONST HEADER-FIELDS (SI::GET-ALTERNATE HEADER-FIELD-VALUES))
@@ -421,7 +460,9 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST ADI-FIELD-VALUES '(
   %%ADI-TYPE			2403
   %%ADI-RET-STORING-OPTION	2103 
-  %%ADI-PREVIOUS-ADI-FLAG	3601		;Overlaps cdr-code which isn"t used in ADI words.
+;  %%ADI-PREVIOUS-ADI-FLAG	3601		;Overlaps cdr-code which isn"t used in ADI words.
+  ;; quux revision 13 (contract g1 2.2): the cdr code keeps this use, at <39:38>
+  %%adi-previous-adi-flag	4601		;overlaps cdr-code which isn"t used in adi words.
   %%ADI-RET-SWAP-SV		2001
   %%ADI-RET-NUM-VALS-TOTAL 	0606		;For ADI-ST-BLOCK; total number of values wanted.
   %%ADI-RET-NUM-VALS-EXPECTING	0006		;For ADI-ST-BLOCK; number of values still room for.
@@ -432,8 +473,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 
 ;;; These overlap the cdr-code field, which is not used in the special pdl.
 (DEFCONST SPECPDL-FIELD-VALUES '(
-  %%SPECPDL-BLOCK-START-FLAG 3601		;Flag is set on first binding of each block of bindings
-  %%SPECPDL-CLOSURE-BINDING 3701		;Flag is set on bindings made "before" entering function
+;  %%SPECPDL-BLOCK-START-FLAG 3601		;Flag is set on first binding of each block of bindings
+;  %%SPECPDL-CLOSURE-BINDING 3701		;Flag is set on bindings made "before" entering function
+  ;; quux revision 13 (contract g1 2.2): the cdr code keeps these uses, at <39:38>
+  %%specpdl-block-start-flag 4601		;flag is set on first binding of each block of bindings
+  %%specpdl-closure-binding 4701		;flag is set on bindings made "before" entering function
   ))
 (SI::ASSIGN-ALTERNATE SPECPDL-FIELD-VALUES)
 (DEFCONST SPECPDL-FIELDS (SI::GET-ALTERNATE SPECPDL-FIELD-VALUES))
@@ -736,7 +780,8 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   (ART-4B . 4)
   (ART-8B . 8)
   (ART-16B . 16.)
-  (ART-32B . 24.)
+;  (ART-32B . 24.)
+  (art-32b . 32.)	;quux revision 13 (contract g1 2.6): the whole 32-bit field
   (ART-Q-LIST . NIL) 
   (ART-STACK-GROUP-HEAD . NIL)
   (ART-SPECIAL-PDL . NIL)
@@ -857,8 +902,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;  %%PHT1-VIRTUAL-PAGE-NUMBER 1020		;ALIGNED SAME AS VMA
 ;  %PHT-DUMMY-VIRTUAL-ADDRESS 177777		;ALL ONES MEANS THIS IS DUMMY ENTRY
   ;; 1024-word pages (contract g2, option (w)): the page number is vma<23:10>
-  %%pht1-virtual-page-number 1216		;aligned same as vma
-  %pht-dummy-virtual-address 37777		;all ones means this is dummy entry
+;  %%pht1-virtual-page-number 1216		;aligned same as vma
+;  %pht-dummy-virtual-address 37777		;all ones means this is dummy entry
+  ;; quux revision 13 (appendix a1.7): vma<27:10>, the 28-bit address's page
+  %%pht1-virtual-page-number 1222		;aligned same as vma
+  %pht-dummy-virtual-address 777777		;all ones means this is dummy entry
 						;WHICH JUST REMEMBERS A FREE CORE PAGE
   %%PHT1-SWAP-STATUS-CODE 0003
   %PHT-SWAP-STATUS-NORMAL 1			;ORDINARY PAGE
@@ -876,8 +924,12 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 
   ;; Pht word 2.  This is identical to the level-2 map
 
-  %%PHT2-META-BITS 1606				;SEE %%REGION-MAP-BITS
-  %%PHT2-MAP-STATUS-CODE 2403
+;  %%PHT2-META-BITS 1606				;SEE %%REGION-MAP-BITS
+;  %%PHT2-MAP-STATUS-CODE 2403
+  ;; quux revision 13 (appendix a1.7): pht word 2 is the 28-bit level-2 map
+  ;; entry, its ten bits above the 18-bit physical page four bits higher
+  %%pht2-meta-bits 2206				;see %%region-map-bits
+  %%pht2-map-status-code 3003
   %PHT-MAP-STATUS-MAP-NOT-VALID 0		;LEVEL 1 OR 2 MAP NOT SET UP
   %PHT-MAP-STATUS-META-BITS-ONLY 1		;HAS META BITS BUT NO PHYSICAL ADDRESS
   %PHT-MAP-STATUS-READ-ONLY 2			;GARBAGE COLLECTOR CAN STILL WRITE IN IT
@@ -885,10 +937,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %PHT-MAP-STATUS-READ-WRITE 4			;READ/WRITE AND MODIFIED
   %PHT-MAP-STATUS-PDL-BUFFER 5			;MAY RESIDE IN PDL BUFFER
   %PHT-MAP-STATUS-MAR 6				;MAR SET SOMEWHERE ON THIS PAGE
-  %%PHT2-MAP-ACCESS-CODE 2602
-  %%PHT2-ACCESS-STATUS-AND-META-BITS 1612
-  %%PHT2-ACCESS-AND-STATUS-BITS 2404 
-  %%PHT2-PHYSICAL-PAGE-NUMBER 0016
+;  %%PHT2-MAP-ACCESS-CODE 2602
+;  %%PHT2-ACCESS-STATUS-AND-META-BITS 1612
+;  %%PHT2-ACCESS-AND-STATUS-BITS 2404 
+;  %%PHT2-PHYSICAL-PAGE-NUMBER 0016
+  %%pht2-map-access-code 3202
+  %%pht2-access-status-and-meta-bits 2212
+  %%pht2-access-and-status-bits 3004 
+  %%pht2-physical-page-number 0022
   ))
 (SI::ASSIGN-ALTERNATE PAGE-VALUES)
 (DEFCONST PAGE-HASH-TABLE-FIELDS (SI::GET-ALTERNATE PAGE-VALUES))
@@ -1011,7 +1067,8 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 
 ;;; Size of various hardware memories in "addressible locations"
 (DEFCONST SIZE-OF-HARDWARE-CONTROL-MEMORY   40000)
-(DEFCONST SIZE-OF-HARDWARE-DISPATCH-MEMORY  4000)
+;(DEFCONST SIZE-OF-HARDWARE-DISPATCH-MEMORY  4000)
+(defconst size-of-hardware-dispatch-memory  10000)	;quux revision 13 (appendix a1.4)
 (DEFCONST SIZE-OF-HARDWARE-A-MEMORY         2000)
 ;;; the CADR's size only.  The three conditionals gave DEFCONST more than
 ;;; one value form on a machine matching more than one feature, and this system is for
@@ -1019,9 +1076,13 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST SIZE-OF-HARDWARE-M-MEMORY         40)
 (DEFCONST SIZE-OF-HARDWARE-PDL-BUFFER       2000)
 (DEFCONST SIZE-OF-HARDWARE-MICRO-STACK        40)
-(DEFCONST SIZE-OF-HARDWARE-LEVEL-1-MAP      4000)
+;(DEFCONST SIZE-OF-HARDWARE-LEVEL-1-MAP      4000)
 ;;; quux's level-2 map, 64 blocks of 32; a cadr's is half of it, 2000.
-(defconst size-of-hardware-level-2-map      4000)
+;(defconst size-of-hardware-level-2-map      4000)
+;;; quux revision 13 (appendix a1.7): level 1 8,192 entries, level 2 128 blocks
+;;; of 32
+(defconst size-of-hardware-level-1-map      20000)
+(defconst size-of-hardware-level-2-map      10000)
 (DEFCONST SIZE-OF-HARDWARE-UNIBUS-MAP         20)
 
 (DEFCONST A-MEMORY-LOCATION-NAMES '(	;LIST IN ORDER OF CONTENTS OF A-MEMORY STARTING AT 40

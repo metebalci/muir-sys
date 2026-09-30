@@ -156,7 +156,8 @@ encodings. So:
 - **The target's table.** `cold:cross-begin` loads `QCOM`, `QDEFS` and
   `DEFMIC` into the cold-load generator's package as `MAKE-COLD` does, with
   `SYS: COLD; TARGET40` over them: the 40-bit word's fields and 1024-word
-  pages, until `QCOM` itself carries them. Each of the builder's system
+  pages, which `QCOM` itself now carries too (the overlay stays until it is
+  retired). Each of the builder's system
   constants takes the value these give it; one they do not define (the float
   formats of `SYS2; NUMDEF`, the Chaosnet opcodes) takes the value of its
   `DEFCONSTANT` in the tree being built; the fixnum limits follow the

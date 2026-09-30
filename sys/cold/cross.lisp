@@ -279,6 +279,12 @@ since the target's are the cold-load generator's own."
 	    si:%%kbd-mouse si:%%kbd-mouse-button si:%%kbd-mouse-n-clicks
 	    si:%%byte-specifier-position si:%%byte-specifier-size))
 
+;; the flag an adi word's cdr code holds (contract g1 2.2: the cdr code keeps
+;; its other uses, the adi flags), which moves with the cdr code to bit 38 of
+;; a 40-bit word.  the microcode sets and tests it, and the error handler
+;; reads it by name; neither the compiler nor the fasl format holds it.
+(defconst cross-format-exceptions '(si:%%adi-previous-adi-flag))
+
 (defun cross-check-formats ()
   (let ((bad nil))
     ;; a constant this world has no value for (QCOM's FEF-DES-DT, for one) is
@@ -286,6 +292,7 @@ since the target's are the cold-load generator's own."
     (flet ((check (s)
 	     (let ((cold (cross-cold-symbol s)))
 	       (when (and (boundp s)
+			  (not (memq s cross-format-exceptions))
 			  (not (and cold (cross-same (symeval s) (symeval cold)))))
 		 (push (list s (and cold (symeval cold)) (symeval s)) bad)))))
       (dolist (list cross-same-lists)
@@ -586,6 +593,13 @@ OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own param
 	(compiler:fasd-start-file)
 	(compiler:fasd-attributes-list
 	  (list :package (package-name (symbol-package symbol))))
+	;; fasd-attributes-list made the symbol's package fasd-package, so the
+	;; symbol would be dumped with no prefix, and the cold load, whose
+	;; fasloader takes no package from the attribute list, made a second
+	;; symbol of the name: fonts:cptfont stayed unbound, and the cold-load
+	;; stream's init method stopped on it.  with no fasd-package the symbol
+	;; is dumped with its package's prefix.
+	(setq compiler:fasd-package nil)
 	(compiler:fasd-store-value-cell symbol (compiler:fasd-constant (symbol-value symbol)))
 	(compiler:fasd-end-whack)
 	(compiler:fasd-end-file))))

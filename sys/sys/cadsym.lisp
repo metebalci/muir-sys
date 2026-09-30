@@ -66,6 +66,18 @@
 
 (DEFPROP JUMP-ON-BIT-CONDITION 0 CONS-LAP-SYM)
 
+;; quux revision 13 (contract g2, appendix a1.3): two conditions in the codes
+;; condition mode left unused, ir<4:0> 10 and 11 octal.  10 is the fixnum overflow
+;; flag, which every executed alu word loads (1 when an arithmetic function's
+;; 32-bit signed result overflowed), for the 32-bit fixnums that no longer leave
+;; room for a range check; 11 is m < a on the fields, unsigned, for the range
+;; checks that must refuse a negative index now that the field is the whole
+;; signed fixnum.  only a 40-bit assembly may use them.
+(defprop jump-on-fixnum-overflow-condition 50 cons-lap-sym)
+(defprop jump-less-than-unsigned-condition 51 cons-lap-sym)
+(defprop jump-greater-or-equal-unsigned-condition
+	 (plus invert-jump-sense jump-less-than-unsigned-condition) cons-lap-sym)
+
 ;MISC FUNCTION CODES
 
 ;(DEFPROP INSTRUCTION-STREAM 3_10. CONS-LAP-SYM)
@@ -240,6 +252,28 @@
 (DEFPROP POPJ-IF-SEQUENCE-BREAK (PLUS JUMP-IF-SEQUENCE-BREAK R-BIT) CONS-LAP-SYM)
 (DEFPROP POPJ-IF-SEQUENCE-BREAK-XCT-NEXT
 	 (PLUS JUMP-IF-SEQUENCE-BREAK-XCT-NEXT R-BIT) CONS-LAP-SYM)
+
+;; quux revision 13's two conditions (appendix a1.3), by the names they were
+;; given: the fixnum overflow flag, and m < a on the fields, unsigned, with its
+;; inverse.
+(defprop jump-if-fixnum-overflow (plus jump-op jump-on-fixnum-overflow-condition) cons-lap-sym)
+(defprop jump-if-fixnum-overflow-xct-next (plus jump-op-xct-next jump-on-fixnum-overflow-condition) cons-lap-sym)
+(defprop call-if-fixnum-overflow (plus jump-if-fixnum-overflow p-bit) cons-lap-sym)
+(defprop call-if-fixnum-overflow-xct-next (plus jump-if-fixnum-overflow-xct-next p-bit) cons-lap-sym)
+(defprop popj-if-fixnum-overflow (plus jump-if-fixnum-overflow r-bit) cons-lap-sym)
+(defprop popj-if-fixnum-overflow-xct-next (plus jump-if-fixnum-overflow-xct-next r-bit) cons-lap-sym)
+(defprop jump-less-than-unsigned (plus jump-op jump-less-than-unsigned-condition) cons-lap-sym)
+(defprop jump-less-than-unsigned-xct-next (plus jump-op-xct-next jump-less-than-unsigned-condition) cons-lap-sym)
+(defprop call-less-than-unsigned (plus jump-less-than-unsigned p-bit) cons-lap-sym)
+(defprop call-less-than-unsigned-xct-next (plus jump-less-than-unsigned-xct-next p-bit) cons-lap-sym)
+(defprop popj-less-than-unsigned (plus jump-less-than-unsigned r-bit) cons-lap-sym)
+(defprop popj-less-than-unsigned-xct-next (plus jump-less-than-unsigned-xct-next r-bit) cons-lap-sym)
+(defprop jump-greater-or-equal-unsigned (plus jump-op jump-greater-or-equal-unsigned-condition) cons-lap-sym)
+(defprop jump-greater-or-equal-unsigned-xct-next (plus jump-op-xct-next jump-greater-or-equal-unsigned-condition) cons-lap-sym)
+(defprop call-greater-or-equal-unsigned (plus jump-greater-or-equal-unsigned p-bit) cons-lap-sym)
+(defprop call-greater-or-equal-unsigned-xct-next (plus jump-greater-or-equal-unsigned-xct-next p-bit) cons-lap-sym)
+(defprop popj-greater-or-equal-unsigned (plus jump-greater-or-equal-unsigned r-bit) cons-lap-sym)
+(defprop popj-greater-or-equal-unsigned-xct-next (plus jump-greater-or-equal-unsigned-xct-next r-bit) cons-lap-sym)
 
 (DEFPROP WRITE-I-MEM (PLUS JUMP-OP P-BIT R-BIT JUMP-ALWAYS) CONS-LAP-SYM)
 

@@ -84,7 +84,9 @@
 	      CONVERT-PDL-BUFFER-ADDRESS GET-PDL-BUFFER-INDEX BITBLT-DECODE-ARRAY XAR2
 ))
 
-(ASSIGN-EVAL NQZUSD (EVAL (- 32. (LENGTH Q-DATA-TYPES))))	;# UNUSED DATA-TYPES
+;(ASSIGN-EVAL NQZUSD (EVAL (- 32. (LENGTH Q-DATA-TYPES))))	;# UNUSED DATA-TYPES
+;; quux revision 13 (contract g1 2.3): the data type is 6 bits, 64 types.
+(assign-eval nqzusd (eval (- 64. (length q-data-types))))	;# unused data-types
 (ASSIGN-EVAL NATUSD (EVAL (- 32. (LENGTH ARRAY-TYPES))))	;# UNUSED ARRAY-TYPES
 (ASSIGN-EVAL NHDUSD (EVAL (- 32. (LENGTH Q-HEADER-TYPES))))	;# UNUSED HEADER-TYPES
 (ASSIGN-EVAL VERSION-NUMBER (EVAL VERSION-NUMBER)) ;MAKE SOURCE VERSION A CONSLP SYMBOL
@@ -92,32 +94,53 @@
 ;THESE SYMBOLS GET DEFINED SUITABLY FOR USE IN BYTE INSTRUCTIONS
 ;DATA LOADED WITH THESE MUST COME FROM M BUS
 
-(DEF-DATA-FIELD Q-CDR-CODE 2 36)
+;(DEF-DATA-FIELD Q-CDR-CODE 2 36)
 ;(DEF-DATA-FIELD Q-FLAG-BIT 1 35)
-(DEF-DATA-FIELD Q-CDR-CODE-LOW-BIT 1 36)
-(DEF-DATA-FIELD Q-DATA-TYPE 5 31)
-(DEF-DATA-FIELD Q-DATA-TYPE-PLUS-ONE-BIT 6 30)
-(DEF-DATA-FIELD Q-POINTER 31 0)
+;(DEF-DATA-FIELD Q-CDR-CODE-LOW-BIT 1 36)
+;(DEF-DATA-FIELD Q-DATA-TYPE 5 31)
+;(DEF-DATA-FIELD Q-DATA-TYPE-PLUS-ONE-BIT 6 30)
+;(DEF-DATA-FIELD Q-POINTER 31 0)
+;; quux revision 13 (contract g1 2.1): a word is the cdr code <39:38>, the
+;; data type <37:32> and the field <31:0>.  the transporter's dispatch takes
+;; the type and the bit below it, whose place the map bit takes: 7 bits at 31.
+(def-data-field q-cdr-code 2 46)
+(def-data-field q-cdr-code-low-bit 1 46)
+(def-data-field q-data-type 6 40)
+(def-data-field q-data-type-plus-one-bit 7 37)
+(def-data-field q-pointer 40 0)
 ;(DEF-DATA-FIELD Q-POINTER-WITHIN-PAGE 8 0)
 ;; 1024-word pages (contract g2, option (w)): ten bits within the page
 (def-data-field q-pointer-within-page 10. 0)
 
-(DEF-DATA-FIELD Q-TYPED-POINTER 36 0)	;POINTER+DATA-TYPE
-(DEF-DATA-FIELD Q-ALL-BUT-TYPED-POINTER 2 36)
-(DEF-DATA-FIELD Q-ALL-BUT-POINTER 7 31)
-(DEF-DATA-FIELD Q-ALL-BUT-CDR-CODE 36 0)
+;(DEF-DATA-FIELD Q-TYPED-POINTER 36 0)	;POINTER+DATA-TYPE
+;(DEF-DATA-FIELD Q-ALL-BUT-TYPED-POINTER 2 36)
+;(DEF-DATA-FIELD Q-ALL-BUT-POINTER 7 31)
+;(DEF-DATA-FIELD Q-ALL-BUT-CDR-CODE 36 0)
+;; quux revision 13 (contract g1 2.1)
+(def-data-field q-typed-pointer 46 0)	;pointer+data-type
+(def-data-field q-all-but-typed-pointer 2 46)
+(def-data-field q-all-but-pointer 10 40)
+(def-data-field q-all-but-cdr-code 46 0)
 ;(DEF-DATA-FIELD Q-ALL-BUT-POINTER-WITHIN-PAGE 30 8)
 ;; 1024-word pages (contract g2, option (w)): all but the ten bits within the page
-(def-data-field q-all-but-pointer-within-page 26 12)
+;(def-data-field q-all-but-pointer-within-page 26 12)
+;; quux revision 13: the 30 bits of a 40-bit word above the ten within the page
+(def-data-field q-all-but-pointer-within-page 36 12)
 
-(ASSIGN Q-POINTER-WIDTH 25.)
+;(ASSIGN Q-POINTER-WIDTH 25.)
+(assign q-pointer-width 32.)	;quux revision 13 (contract g1 2.1)
 
 ;Stuff for address space quantization
+;; quux revision 13 (contract g2 2.6): the virtual address is 28 bits, not
+;; 24, so the quantum number and the address space map's index are 4 bits
+;; wider (the map covers the whole 28-bit space, qcom's cold-load-area-sizes).
 (DEF-DATA-FIELD VMA-QUANTUM-BYTE
-	(EVAL (- 24. (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))))
+;	(EVAL (- 24. (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))))
+	(eval (- 28. (1- (haulong %address-space-quantum-size))))
 	(EVAL (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))))
 (DEF-DATA-FIELD ADDRESS-SPACE-MAP-WORD-INDEX-BYTE
-	(EVAL (- 24. (+ (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))
+;	(EVAL (- 24. (+ (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))
+	(eval (- 28. (+ (1- (haulong %address-space-quantum-size))
 			(1- (HAULONG (// 32. %ADDRESS-SPACE-MAP-BYTE-SIZE))))))
 	(EVAL (+ (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))
 		 (1- (HAULONG (// 32. %ADDRESS-SPACE-MAP-BYTE-SIZE))))))
@@ -129,11 +152,19 @@
 	(EVAL (1- (HAULONG %ADDRESS-SPACE-MAP-BYTE-SIZE))))
 
 (DEF-DATA-FIELD SIGN-BIT 1 31.)
-(DEF-DATA-FIELD BOXED-SIGN-BIT 1 24.)  ;SIGN OF A BOXED FIXNUM
-(DEF-DATA-FIELD BOXED-NUM-EXCEPT-SIGN-BIT 24. 0)
-(ASSIGN POSITIVE-SETZ 1_24.)	;Largest value that fits in a fixnum, plus one
-(ASSIGN NEGATIVE-SETZ -1_24.)	;Smallest value that fits in a fixnum
-(DEF-DATA-FIELD BITS-ABOVE-FIXNUM 7 31)  ;BITS NOT USED IN REPRESENTING FIXNUM.
+;(DEF-DATA-FIELD BOXED-SIGN-BIT 1 24.)  ;SIGN OF A BOXED FIXNUM
+;(DEF-DATA-FIELD BOXED-NUM-EXCEPT-SIGN-BIT 24. 0)
+;(ASSIGN POSITIVE-SETZ 1_24.)	;Largest value that fits in a fixnum, plus one
+;(ASSIGN NEGATIVE-SETZ -1_24.)	;Smallest value that fits in a fixnum
+;(DEF-DATA-FIELD BITS-ABOVE-FIXNUM 7 31)  ;BITS NOT USED IN REPRESENTING FIXNUM.
+;; quux revision 13 (contract g1 2.4): a fixnum is the whole 32-bit field, a
+;; two's complement integer, so its sign is the field's bit 31 and the bits
+;; above it are the tag.
+(def-data-field boxed-sign-bit 1 31.)  ;sign of a boxed fixnum
+(def-data-field boxed-num-except-sign-bit 31. 0)
+(assign positive-setz 1_31.)	;largest value that fits in a fixnum, plus one
+(assign negative-setz -1_31.)	;smallest value that fits in a fixnum
+(def-data-field bits-above-fixnum 10 40)  ;bits not used in representing fixnum.
 
 ;"INVOKE" OPS	;GIVEN TO INVOKED ROUTINE TO TELL IT WHAT IS TRYING TO BE DONE TO IT
 ;These never got used.  DATA-TYPE-INVOKE-OP is the only one of these
@@ -171,13 +202,30 @@
 ;; entry, and a disk block of 32-bit words, stay 256 words, so a page is four
 ;; map entries and four blocks.  the map loops step by map-entry-size and
 ;; the disk code counts disk-block-size blocks; the paging code counts pages.
-(assign map-entry-size 400)
-(assign disk-block-size 400)
-(assign blocks-per-page 4)
+;(assign map-entry-size 400)
+;(assign disk-block-size 400)
+;(assign blocks-per-page 4)
 ;; the band's first three pages, the resident symbol area, the system
 ;; communication area and the scratch pad init area, which the restore reads
 ;; first and the save writes first, in blocks.
-(assign low-pages-blocks 14)
+;(assign low-pages-blocks 14)
+;; quux revision 13 (appendix a1.7, a1.11): the map maps a 1024-word page an
+;; entry, and a command list entry moves a page, so the map and the swap count
+;; pages again.  a disk block of 1 kbyte holds 204.8 40-bit words, so a page is
+;; blocks-per-page blocks, 5, in the packed transfer the paging, the band
+;; copies, save and restore use; only disk addresses are blocks.  the meter's
+;; buffer is still a block of 256 words (uc-meter).
+(assign map-entry-size 2000)
+(assign disk-block-size 400)
+(assign blocks-per-page 5)
+;; the band's first three pages, the resident symbol area, the system
+;; communication area and the scratch pad init area, which the restore reads
+;; first and the save writes first.
+(assign low-pages 3)
+;; the same in blocks, 15, for revision 12's incremental save and restore,
+;; which stay in the source but are not reached: an incremental band halts at
+;; incremental-band-not-supported (uc-cold-disk).
+(assign low-pages-blocks 15.)	;low-pages times blocks-per-page
 
 ;Page number of first page after MICRO-CODE-SYMBOL-AREA.
 ;This is used in DISK-RESTORE and DISK-SAVE.
@@ -185,7 +233,9 @@
 ;; 1024-word pages (contract g2, option (w)): the micro-code symbol area is one
 ;; page at 6000, so the first block after it is 20, 10000 words; the restore
 ;; and the save count it in blocks.
-(assign end-of-micro-code-symbol-area 20)
+;(assign end-of-micro-code-symbol-area 20)
+;; quux revision 13 (appendix a1.9): counted in pages again, page 4.
+(assign end-of-micro-code-symbol-area 4)
 
 ;INDICES IN THE SUPPORT VECTOR
 (ASSIGN SVC-NAMED-STRUCTURE-INVOKE 1) ;FUNCALL of a named-structure which isn't a hash table.
@@ -270,17 +320,28 @@
 	(PLUS JUMP-ON-PAGE-FAULT-OR-INTERRUPT-PENDING-CONDITION INVERT-JUMP-SENSE))
 (ASSIGN PG-FAULT-INTERRUPT-OR-SEQUENCE-BREAK
 	JUMP-ON-PAGE-FAULT-OR-INTERRUPT-PENDING-OR-SEQUENCE-BREAK-CONDITION)
+;; quux revision 13 (appendix a1.3): the fixnum overflow flag, and its inverse,
+;; for the conditional jumps (fixpack-t, uc-arith)
+(assign fixnum-overflow jump-on-fixnum-overflow-condition)
+(assign no-fixnum-overflow (plus jump-on-fixnum-overflow-condition invert-jump-sense))
 
 
-(DEF-DATA-FIELD OAL-BYTL-1 5 5)		;MICRO INSTRUCTION FIELDS
-(DEF-DATA-FIELD OAL-MROT 5 0)
+;(DEF-DATA-FIELD OAL-BYTL-1 5 5)		;MICRO INSTRUCTION FIELDS
+;(DEF-DATA-FIELD OAL-MROT 5 0)
+;; quux revision 13 (appendix a1.1): a byte instruction's rotate and length - 1
+;; are 6 bits each, ir<5:0> and ir<11:6>.
+(def-data-field oal-bytl-1 6 6)		;micro instruction fields
+(def-data-field oal-mrot 6 0)
 (DEF-DATA-FIELD OAH-A-SRC 10. 6)
 (DEF-DATA-FIELD OAH-M-SRC 6 0)
 (DEF-DATA-FIELD OAL-DEST 12. 14.)    ;THIS DEFINITION DOES NOT WIN FOR FUNCTIONAL DESTINATIONS
 (DEF-DATA-FIELD OAL-A-DEST 10. 14.)  ;USE THIS WHEN SUPPLYING AN A-MEMORY DESTINATION
 (DEF-DATA-FIELD OAL-M-DEST  5. 14.)  ;USE THIS WHEN SUPPLYING AN M-MEMORY DESTINATION
 (DEF-DATA-FIELD OAL-JUMP 14. 12.)
-(DEF-DATA-FIELD OAL-DISP 11. 12.)	;In OAL on CADR, in OAH on LAMBDA
+;(DEF-DATA-FIELD OAL-DISP 11. 12.)	;In OAL on CADR, in OAH on LAMBDA
+;; quux revision 13 (appendix a1.4): a dispatch's address is ir<23:12>, 4,096
+;; entries; trans-drop-through ors all ones into it to reach 7777.
+(def-data-field oal-disp 12. 12.)
 (DEF-DATA-FIELD OAL-ALUF 4 3)
 
 (ASSIGN PDL-BUFFER-LOW-WARNING 20.)  ;MAX LENGTH BASIC FRAME + ADI
@@ -437,7 +498,9 @@ M-FLAGS			;"MACHINE STATE FLAGS"
 					; IN MICRO-COMPILED FCTNS
 					;ALSO SET IF FRAME HAS CLOSURE BINDING-BLOCK
  (DEF-DATA-FIELD M-FLAGS-PROCESSOR-FLAGS 1 0)	;BYTE POINTER TO PROCESSOR FLAGS
- (DEF-DATA-FIELD M-FLAGS-EXCEPT-PROCESSOR-FLAGS 37 1)
+; (DEF-DATA-FIELD M-FLAGS-EXCEPT-PROCESSOR-FLAGS 37 1)
+ ;; quux revision 13: bits 1-39, so that m-flags keeps its fixnum tag, <37:32>
+ (def-data-field m-flags-except-processor-flags 47 1)
 ;END "PROCESSOR FLAGS", BEGIN PROCESSOR "MODES"
   (DEF-NEXT-FIELD M-CAR-SYM-MODE 2 M-FLAGS)	;CAR OF SYM GIVES: 
 						;  ERROR
@@ -524,7 +587,11 @@ M-INST-BUFFER  (0)	;LAST MACRO INSTRUCTION Q FETCHED (2 INSTRUCTIONS)
 ;  (DEF-BIT-FIELD-IN-REG M-INST-DEST-LOW-BIT 1 15 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
   (DEF-BIT-FIELD-IN-REG M-INST-OP 5 11 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
   (DEF-BIT-FIELD-IN-REG M-INST-ADR 11 0 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
-  (DEF-BIT-FIELD-IN-REG M-INST-ADR-*2+X 12 37 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
+;  (DEF-BIT-FIELD-IN-REG M-INST-ADR-*2+X 12 37 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
+  ;; quux revision 13 (contract g2 2.3): at 47 in a ring of 40, so that it
+  ;; assembles to a rotate of 1 again and the wrapped bit is bit 39, an
+  ;; instruction word's cdr code, 0 (at 37 it would rotate by 9).
+  (def-bit-field-in-reg m-inst-adr-*2+x 12 47 (plus m-inst-buffer instruction-stream))
   (DEF-BIT-FIELD-IN-REG M-INST-REGISTER 3 6 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
   (DEF-BIT-FIELD-IN-REG M-INST-DELTA 6 0 (PLUS M-INST-BUFFER INSTRUCTION-STREAM))
 
@@ -647,10 +714,13 @@ A-COUNTER-BLOCK-POINTER
 ;PAGING CONTROLS
 
 A-CHAOS-CSR-ADDRESS ((PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX) CHAOS-CSR-ADDRESS))
+;; quux revision 13: past the 28-bit address space, where the 24-bit one ended
 A-MAR-LOW ((BYTE-VALUE Q-DATA-TYPE DTP-FIX)	;CDR CODE MUST BE ZERO!
-	   77777777)		;LOWEST ADDRESS MAR IS SET ON, WITH FIXNUM TYPE
+;	   77777777)		;LOWEST ADDRESS MAR IS SET ON, WITH FIXNUM TYPE
+	   1777777777)		;lowest address mar is set on, with fixnum type
 A-MAR-HIGH ((BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-	    77777776)		;HIGHEST ADDRESS MAR IS SET ON, FIXNUM TYPE (NOT +1)
+;	    77777776)		;HIGHEST ADDRESS MAR IS SET ON, FIXNUM TYPE (NOT +1)
+	    1777777776)		;highest address mar is set on, fixnum type (not +1)
 				;IT'S UNCLEAR HOW THESE GET RELOCATED BY GC,
 				;WILL HAVE TO FIX UP LATER.
 A-SELF	((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL)) ;LAST DTP-INSTANCE, ETC INVOKED
@@ -988,7 +1058,9 @@ A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops
 (assign disk-swap-in-ccw-base 2340)  ;build ccw lists for swap in starting here
 (assign disk-swap-in-ccw-max  2360)  ; and not above here.
 ;; the pages a swap-in list holds, which bounds a multi-page swap-in
-(assign disk-swap-in-max-pages 4)
+;(assign disk-swap-in-max-pages 4)
+;; quux revision 13 (appendix a1.11): one ccw a page, so the list of 16 holds 16
+(assign disk-swap-in-max-pages 20)
 
 ;Fields in A-DISK-ADDRESS.  These are also how the CADR disk control takes them.
 (DEF-DATA-FIELD DA-UNIT	    3  28.)
@@ -1341,6 +1413,13 @@ a-macro-dispatch-generic
 	((i-mem-loc qind4))		;36 nd4
 	((plus 140000 (i-mem-loc trap)))	;37 unused
 
+;; quux revision 13 (appendix a1.11): the paging partition's size in 1024-word
+;; pages, a-disk-maximum's blocks over the 5 of a packed page, set with it
+;; (gpt-done), for make-region's bound on virtual memory.  last, so that no
+;; earlier location moves.
+a-disk-maximum-pages
+	(0)
+
 ;Arrays at fixed locations in A memory, used for the mouse
 (ASSIGN MOUSE-CURSOR-PATTERN-AMEM-LOC 1600)	;32x32 BIT ARRAY
 (ASSIGN MOUSE-BUTTONS-BUFFER-AMEM-LOC 1640)	;8 4-WORD ART-Q ENTRIES
@@ -1352,7 +1431,9 @@ a-macro-dispatch-generic
 (LOCALITY D-MEM)
 
 ;Last location in D-memory must be drop through for transporter to work right.
-(LOC 3777)
+;(LOC 3777)
+;; quux revision 13 (appendix a1.4): d-mem is 4,096 entries, so the last is 7777.
+(loc 7777)
 LAST-DMEM-LOCATION
 	(P-BIT R-BIT)
 (END-DISPATCH)
@@ -1377,7 +1458,9 @@ QMDTBD	(R-BIT INHIBIT-XCT-NEXT-BIT)		;IGNORE (POPJ IMMEDIATELY)
 (REPEAT 3 (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA TYPE.  DROPS THROUGH IN EITHER CASE BUT SKIPS IF ATOM. 
 ;AN ATOM IS ANYTHING OTHER THAN A LIST.
 SKIP-IF-ATOM
@@ -1413,7 +1496,9 @@ SKIP-IF-ATOM
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA TYPE.  DROPS THROUGH IN EITHER CASE BUT SKIPS IF NOT ATOM. 
 ;AN ATOM IS ANYTHING OTHER THAN A LIST.
 ;This exists for "symmetry" with SKIP-IF-ATOM for the microcompiler.
@@ -1452,7 +1537,9 @@ SKIP-IF-NO-ATOM
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA TYPE.  DROPS THROUGH IN EITHER CASE BUT SKIPS IF LIST.
 SKIP-IF-LIST	
 	(P-BIT R-BIT 0)			;TRAP
@@ -1487,7 +1574,9 @@ SKIP-IF-LIST
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA-TYPE OF FUNCTION GETTING CALLED (AT QMRCL OR MMCALL). 
 ;THE FUNCTION MUST BE IN BOTH M-A AND C-PDL-BUFFER-INDEX
 ;M-S HAS THE ADDRESS OF THE NEW FRAME, M-R HAS THE NUMBER OF ARGUMENTS.
@@ -1536,7 +1625,9 @@ D-QMRCL	(P-BIT ILLOP)			;TRAP
  (REPEAT NQZUSD (P-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 P-BIT)
+;(START-DISPATCH 5 P-BIT)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 P-BIT)
 ;TRAP UNLESS DATA TYPE IS FIXNUM.
 TRAP-UNLESS-FIXNUM
 	(INHIBIT-XCT-NEXT-BIT TRAP)	;TRAP
@@ -1785,7 +1876,9 @@ QBOFDT	(QBFE)
 	(P-BIT ILLOP)	;PDL ILLEGAL
 (END-DISPATCH)
 
-(START-DISPATCH 5 P-BIT)
+;(START-DISPATCH 5 P-BIT)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 P-BIT)
 ;TRAP UNLESS DATA TYPE IS SYM
 TRAP-UNLESS-SYM
 	(INHIBIT-XCT-NEXT-BIT TRAP)	;TRAP
@@ -1820,7 +1913,9 @@ TRAP-UNLESS-SYM
  (REPEAT NQZUSD (INHIBIT-XCT-NEXT-BIT TRAP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0) ;DOES XCT-NEXT UNLESS ILLOPS
+;(START-DISPATCH 5 0) ;DOES XCT-NEXT UNLESS ILLOPS
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0) ;DOES XCT-NEXT UNLESS ILLOPS
 ;POPJ if data type is not numeric.  Used by NUMBERP, EQL and EQUALP.
 POPJ-IF-NOT-NUMBER 
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;TRAP
@@ -1855,7 +1950,9 @@ POPJ-IF-NOT-NUMBER
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)  ;INHIBIT-XCT-NEXT-BIT UNLESS CANT FIGURE IT OUT 
+;(START-DISPATCH 5 0)  ;INHIBIT-XCT-NEXT-BIT UNLESS CANT FIGURE IT OUT 
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)  ;INHIBIT-XCT-NEXT-BIT UNLESS CANT FIGURE IT OUT 
 		      ; (IE INTERPRETER TRAP)
 XARGI-DISPATCH
 	(P-BIT ILLOP INHIBIT-XCT-NEXT-BIT)	;TRAP
@@ -1892,7 +1989,9 @@ XARGI-DISPATCH
  (REPEAT NQZUSD (P-BIT ILLOP INHIBIT-XCT-NEXT-BIT))
 (END-DISPATCH)
 
-(START-DISPATCH 6 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;(START-DISPATCH 6 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;; quux revision 13 (contract g2 2.4): the data type and the map bit is one bit wider, 6-bit types
+(start-dispatch 7 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
 ;EITHER DROPS THROUGH (P-R) OR CALLS (P-N) MAGIC ROUTINE.
 ;FOR TYPES WHICH AREN'T INUMS, THE 0 CASE GOES TO TRANS-OLD TO CHECK FOR OLD-SPACE
 D-TRANSPORT
@@ -1959,7 +2058,9 @@ D-TRANSPORT
 (REPEAT NQZUSD (INHIBIT-XCT-NEXT-BIT TRANS-TRAP))
 (END-DISPATCH)
 
-(START-DISPATCH 6 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;(START-DISPATCH 6 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;; quux revision 13 (contract g2 2.4): the data type and the map bit is one bit wider, 6-bit types
+(start-dispatch 7 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
 ;EITHER DROPS THROUGH (P-R) OR CALLS (P-N) MAGIC ROUTINE.
 ;FOR TYPES WHICH AREN'T INUMS, THE 0 CASE GOES TO TRANS-OLD TO CHECK FOR OLD-SPACE
 D-TRANSPORT-NO-EVCP
@@ -2028,7 +2129,9 @@ D-TRANSPORT-NO-EVCP
 ;THIS FLAVOR OF TRANSPORTER DISPATCH IS FOR THE PDL-BUFFER REFILL ROUTINE,
 ;WHICH MUST DO SOME FIXUP BEFORE CALLING THE TRANSPORTER
 ;ON THE 0 CASE OF NON-INUMS, IT MAY BE OLD-SPACE
-(START-DISPATCH 6 0)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;(START-DISPATCH 6 0)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
+;; quux revision 13 (contract g2 2.4): the data type and the map bit is one bit wider, 6-bit types
+(start-dispatch 7 0)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
 ;EITHER DROPS THROUGH (P-R) OR JUMPS TO PB-TRANS
 D-PB-TRANS	
 	(INHIBIT-XCT-NEXT-BIT PB-TRANS)		;0 TRAP
@@ -2093,7 +2196,9 @@ D-PB-TRANS
  (REPEAT NQZUSD (INHIBIT-XCT-NEXT-BIT PB-TRANS))
 (END-DISPATCH)
 
-(START-DISPATCH 6 P-BIT)	;GC-WRITE-TEST (MAP18: 0=EXTRA-PDL, 1=NORMAL)
+;(START-DISPATCH 6 P-BIT)	;GC-WRITE-TEST (MAP18: 0=EXTRA-PDL, 1=NORMAL)
+;; quux revision 13 (contract g2 2.4): the data type and the map bit is one bit wider, 6-bit types
+(start-dispatch 7 P-BIT)	;GC-WRITE-TEST (MAP18: 0=EXTRA-PDL, 1=NORMAL)
 ;TEST EVERY PIECE OF BOXED DATA EVER STORED FROM PROCESSOR TO VIRTUAL MEMORY.
 ;EITHER DROPS THROUGH (P-R) OR CALLS (P-N) MAGIC ROUTINE.
 ;CURRENTLY ANYWAY, DOESN'T TRAP ON ILL DATA TYPES.  THAT WOULD NEED AN I-ARG TO SUPPRESS IT.
@@ -2162,7 +2267,9 @@ D-GC-WRITE-TEST
  (REPEAT NQZUSD (R-BIT))
 (END-DISPATCH)
 
-(START-DISPATCH 5 0)
+;(START-DISPATCH 5 0)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 0)
 ;DISPATCH ON DATA TYPE OF WORD JUST STORED FROM PDL BUFFER INTO MAIN MEMORY,
 ;OR RETURNED FROM A FUNCTION.
 ;ILLOP ON DATA TYPE WHICH SHOULDN'T HAVE BEEN THERE IN THE FIRST PLACE

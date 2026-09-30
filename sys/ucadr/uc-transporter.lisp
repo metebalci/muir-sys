@@ -40,7 +40,9 @@ TRANS-OLD0	;Enter here if forwarding-pointer, mustn't ever drop-through
 ;Dispatch on datatype of word fetched from old space when transporting a pointer to old-space
 ;Usually go to TRANS-OLD-COPY to copy the containing structure.  Check specially for
 ;GC-FORWARD (already copied), invisibles (snap out).
-(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;(START-DISPATCH 5 INHIBIT-XCT-NEXT-BIT)
+;; quux revision 13 (contract g2 2.4): the data type is one bit wider, 6-bit types
+(start-dispatch 6 INHIBIT-XCT-NEXT-BIT)
 D-TRANS-OLD
 	(TRANS-OLD-COPY)	;TRAP
 	(TRANS-OLD-COPY)	;NULL

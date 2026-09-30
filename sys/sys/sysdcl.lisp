@@ -377,6 +377,12 @@
 (DEFSYSTEM CADR-MICRO-ASSEMBLER
   (:PACKAGE MICRO-ASSEMBLER)
   (:NICKNAMES "UA" "MICRO-ASSEMBLER")
+  ;; the names QCOM defines are shadowed in UA before anything is read into it,
+  ;; so that reading QCOM, below, cannot set the running world's GLOBAL
+  ;; constants when the tree's QCOM is not the world's (a 40-bit tree read on a
+  ;; 32-bit band, contract g2): see SYS: SYS; UASHADOW.
+  (:module shadow "SYS: SYS; UASHADOW")
+  (:readfile shadow)
   (:MODULE ASS "SYS: SYS; CADRLP")
   (:MODULE MAIN ("SYS: SYS; CDMP"
 		 "SYS: SYS; QWMCR"

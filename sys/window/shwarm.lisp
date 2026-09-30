@@ -1902,7 +1902,9 @@ SHEET's cursor is not used or moved."
 
 (defconst main-screen-buffer-address (si:video-buffer-address))
 ;(DEFCONST MAIN-SCREEN-CONTROL-ADDRESS #o377760)
-(defconst main-screen-control-address #o777610)
+;(defconst main-screen-control-address #o777610)
+;; quux revision 13 (contract g2 4.1): word 210 is #o17777610.
+(defconst main-screen-control-address #o17777610)
 (defconst main-screen-buffer-length (si:video-buffer-length))
 
 ;;;Set things up
