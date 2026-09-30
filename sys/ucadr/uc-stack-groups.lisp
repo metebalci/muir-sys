@@ -159,8 +159,17 @@ SG-WRITE-BLOCK-FROM-PDL-BUFFER
 	(JUMP-XCT-NEXT SG-WRITE-BLOCK-FROM-PDL-BUFFER)
        ((VMA) SUB VMA (A-CONSTANT 1))
 
+;; the address of the next leader word is kept in m-2, which the
+;; transporter and page faults preserve, and vma is loaded from it for every
+;; word.  the loop stepped vma itself, but transport-ac follows a forwarding
+;; word in a saved accumulator (one-q-forward, header or body forward) by
+;; moving vma to the forward's target, so every later leader word was read
+;; from the words after that target: the stack group resumed with a garbage
+;; pdl pointer and state, and the machine halted at swapin+12 or sgent1+2.
+;; the only caller, sgent, enters at sg-l-p-b-1 with m-2 set.
 SG-LOAD-BLOCK-INTO-PDL-BUFFER 
-	((VMA-START-READ) VMA)
+;	((VMA-START-READ) VMA)
+	((vma-start-read) m-2)
 	(CHECK-PAGE-READ)
 	(POPJ-LESS-OR-EQUAL M-ZR (A-CONSTANT 0))  ;IN THIS CASE, USELESS READ DONE & IGNORED
 	((M-ZR) SUB M-ZR (A-CONSTANT 1))
@@ -168,7 +177,8 @@ SG-LOAD-BLOCK-INTO-PDL-BUFFER
 	((C-PDL-BUFFER-POINTER-PUSH) READ-MEMORY-DATA)
 SG-L-P-B-1
 	(JUMP-XCT-NEXT SG-LOAD-BLOCK-INTO-PDL-BUFFER)
-       ((VMA) ADD VMA (A-CONSTANT 1))
+;       ((VMA) ADD VMA (A-CONSTANT 1))
+       ((m-2) add m-2 (a-constant 1))
 
 SG-LOAD-STATIC-STATE 		;LOAD STATIC STATE FOR STACK GROUP
 	((M-C) A-QCSTKG)
@@ -215,8 +225,13 @@ SG-LOAD-STATIC-STATE-1
 ; SWAPPED, SWAP IT BACK.
 SGENT	(CALL-XCT-NEXT SG-LOAD-STATIC-STATE)
        ((M-STACK-GROUP-SWITCH-FLAG) DPB (M-CONSTANT -1) A-FLAGS)
-	((VMA) A-QCSTKG)
-	((VMA-START-READ) SUB VMA (A-CONSTANT (PLUS 2 (EVAL SG-PDL-PHASE))))
+;	((VMA) A-QCSTKG)
+;	((VMA-START-READ) SUB VMA (A-CONSTANT (PLUS 2 (EVAL SG-PDL-PHASE))))
+	;; the leader's address is kept in m-2 as well as vma, since
+	;; sg-load-block-into-pdl-buffer below walks the leader from m-2 (see
+	;; there).  m-2 is free here: sgent2 restores it from the pdl.
+	((m-2) a-qcstkg)
+	((vma-start-read m-2) sub m-2 (a-constant (plus 2 (eval sg-pdl-phase))))
 	(CHECK-PAGE-READ)			;NO TRANSPORT SINCE IT'S A FIXNUM
 	((PDL-BUFFER-POINTER) READ-MEMORY-DATA)		;RESTORE PP WITH CORRECT PHASING
 	((M-1) Q-POINTER READ-MEMORY-DATA)
