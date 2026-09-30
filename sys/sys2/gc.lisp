@@ -969,9 +969,14 @@ AREA-STATIC-P will continue to call this area a static area."
 	     %SCAVENGER-WS-ENABLE PHYS-ADR))
     (LET ((PPD-ADR (+ (REGION-ORIGIN PHYSICAL-PAGE-DATA)
 		      (TRUNCATE PHYS-ADR PAGE-SIZE))))
-      (IF (NOT (AND (= (%P-LDB #o0020 PPD-ADR) #o177777)	;flush if fixed wired
-		    ( (%P-LDB #o2020 PPD-ADR) #o177777)))
-	  (LET ((PHT-ADR (+ (%P-LDB #o0020 PPD-ADR) (REGION-ORIGIN PAGE-TABLE-AREA))))
+;      (IF (NOT (AND (= (%P-LDB #o0020 PPD-ADR) #o177777)	;flush if fixed wired
+;		    ( (%P-LDB #o2020 PPD-ADR) #o177777)))
+;	  (LET ((PHT-ADR (+ (%P-LDB #o0020 PPD-ADR) (REGION-ORIGIN PAGE-TABLE-AREA))))
+      ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, for a
+      ;; table of 32 m words' pages, and the gc data <31:20>
+      (if (not (and (= (%p-ldb #o0024 ppd-adr) #o3777777)	;flush if fixed wired
+		    ( (%p-ldb #o2414 ppd-adr) #o7777)))
+	  (let ((pht-adr (+ (%p-ldb #o0024 ppd-adr) (region-origin page-table-area))))
 	    (IF (NOT
 		  (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT PHT-ADR)))
 		       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE PHT-ADR) %PHT-SWAP-STATUS-WIRED)))

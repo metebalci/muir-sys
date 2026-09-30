@@ -166,7 +166,9 @@ so that no page is reused while the device may write it.")
   ;; 1024-word pages (contract g2, option (w)): a page has
   ;; disk-blocks-per-page ccws, a block each, and its first is the page's
   ;; address, the page's frame being whole.
-  (let ((ccw (+ %disk-rq-ccw-list (* 2 page disk-blocks-per-page))))
+;  (let ((ccw (+ %disk-rq-ccw-list (* 2 page disk-blocks-per-page))))
+  ;; quux revision 13 (appendix a1.11): a ccw a page, the page's address
+  (let ((ccw (+ %disk-rq-ccw-list (* 2 page))))
     (+ (logand (aref rqb ccw) (- page-size))
        (ash (aref rqb (1+ ccw)) 16.))))
 

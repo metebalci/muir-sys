@@ -721,7 +721,10 @@ SWAP-OUT-ALL-PAGES-1
 	((M-T) SUB C-PDL-BUFFER-POINTER-POP (A-CONSTANT 1))
 	(JUMP-GREATER-OR-EQUAL M-T A-ZERO SWAP-OUT-ALL-PAGES-1)
 ;Now swap out all the wired pages
-	((M-A) (A-CONSTANT 200000))		;Direct-map the first 64K
+;	((M-A) (A-CONSTANT 200000))		;Direct-map the first 64K
+	;; quux revision 13: the wired words and the ccw list above them, as at
+	;; disk-restore-1
+	((m-a) (a-constant 1000000))		;direct-map the first 256k
 	(CALL INITIAL-MAP-A)
 	((M-1) A-DISK-OFFSET)			;Disk address of virtual location 0
 	((M-2) C-PDL-BUFFER-POINTER-POP)	;Number of wired pages
@@ -745,7 +748,13 @@ DISK-RESTORE (MISC-INST-ENTRY %DISK-RESTORE)
 	((m-4) q-pointer c-pdl-buffer-pointer-pop)
 	((M-4) DPB C-PDL-BUFFER-POINTER-POP (BYTE-FIELD 20 20) A-4)
 DISK-RESTORE-1
-	((WRITE-MEMORY-DATA) (A-CONSTANT 200000))	;64K to be direct-mapped
+;	((WRITE-MEMORY-DATA) (A-CONSTANT 200000))	;64K to be direct-mapped
+	;; quux revision 13: the wired words end at 530000 (the page table and
+	;; physical-page-data sized for 32 m words), and cold-swap-in puts its ccw
+	;; list above them; both must be direct-mapped, as the first 64k was, or
+	;; the level-1 miss uses the reverse map that the band's page 1 has just
+	;; overwritten.  8 level-1 blocks, 256k words.
+	((write-memory-data) (a-constant 1000000))	;256k to be direct-mapped
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)
 ;       ((VMA) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-WIRED-SIZE))))
        ((vma) (a-constant (eval (plus 2000 %sys-com-wired-size))))	;1024-word pages: at 2000
@@ -1170,6 +1179,11 @@ COLD-SWAP-IN
 	((M-TEM) SUB M-TEM A-V-PAGE-TABLE-AREA)
 	(JUMP-LESS-OR-EQUAL M-1 A-TEM COLD-REINIT-PHT-0)
 	((M-1) A-TEM)
+	;; quux revision 13 (appendix a1.9): the table holds 4 words a page, so
+	;; main memory past its pages gets no entry: m-s, the memory entered below,
+	;; is cut to the table's pages, a quarter of its words, 1024 words each,
+	;; rather than filling entries below the table's origin.
+	((m-s) dpb m-1 (byte-field 24. 8.) a-zero)
 COLD-REINIT-PHT-0
 	((A-PHT-INDEX-LIMIT) M-1)		;Size of page hash table
 	((WRITE-MEMORY-DATA) Q-POINTER M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
@@ -1205,7 +1219,9 @@ COLD-REINIT-PPD-1
 	(JUMP-GREATER-OR-EQUAL M-R A-V-PHYSICAL-PAGE-DATA COLD-REINIT-PPD-2)	;wired
 	(JUMP-GREATER-OR-EQUAL M-R A-J COLD-REINIT-PPD-3)	;free part of PHT
 COLD-REINIT-PPD-2
-	((WRITE-MEMORY-DATA) (A-CONSTANT 177777))	;Wired page, no PHT entry
+;	((WRITE-MEMORY-DATA) (A-CONSTANT 177777))	;Wired page, no PHT entry
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	((write-memory-data) (a-constant 3777777))	;Wired page, no PHT entry
 ;	((VMA-START-WRITE) (BYTE-FIELD 8 8) M-R A-V-PHYSICAL-PAGE-DATA)
 	;; 1024-word pages (contract g2, option (w)): the frame's number is
 	;; m-r<21:10>, added to the table's origin (which need not be a multiple

@@ -445,7 +445,9 @@ COLR-NEXT-Y
 	((M-J) M-Q)					;Copy array index
 	((M-Q) ADD M-Q A-D)				;Start of next row
 COLR-NEXT-WORD
-	(CALL-GREATER-OR-EQUAL M-J A-S TRAP)		;Bounds checking
+;	(CALL-GREATER-OR-EQUAL M-J A-S TRAP)		;Bounds checking
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-J A-S TRAP)		;Bounds checking
 	    (ERROR-TABLE SUBSCRIPT-OOB M-J M-S)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((M-4) READ-MEMORY-DATA)			;Word containing up to 8 bytes

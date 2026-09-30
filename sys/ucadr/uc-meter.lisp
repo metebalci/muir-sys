@@ -54,8 +54,16 @@ METER-FLUSH-BUFFER
 	(JUMP-LESS-THAN M-1 (A-CONSTANT 2) ILLOP)
 	((M-B) L2-MAP-PHYSICAL-PAGE-NUMBER)	;Get physical page number
 	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-METER-DISK-ADDRESS)
-	((A-METER-DISK-ADDRESS) M+A+1 M-ZERO A-METER-DISK-ADDRESS)	;Inc disk address
-	((A-METER-DISK-COUNT) ADD (M-CONSTANT -1) A-METER-DISK-COUNT)	;Dec meter disk count
+;	((A-METER-DISK-ADDRESS) M+A+1 M-ZERO A-METER-DISK-ADDRESS)	;Inc disk address
+;	((A-METER-DISK-COUNT) ADD (M-CONSTANT -1) A-METER-DISK-COUNT)	;Dec meter disk count
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-zero, m-minus-one and m-tem have none: the sum, then the fixnum's
+;; tag by dpb, since lisp reads these (%meter-disk-address,
+;; %meter-disk-count) as fixnums.
+	((m-tem) m+a+1 m-zero a-meter-disk-address)	;inc disk address
+	((a-meter-disk-address) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
+	((m-tem) add (m-constant -1) a-meter-disk-count)	;dec meter disk count
+	((a-meter-disk-count) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((A-METER-START-TIME) M-2)		;Save microsecond clock
 	(CALL-XCT-NEXT START-DISK-1-PAGE)	;Do the disk operation
        ((M-T) (A-CONSTANT DISK-WRITE-COMMAND))
@@ -93,7 +101,12 @@ METER-PUSH-LP
 	((VMA) A-METER-BUFFER-POINTER)
 	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-POINTER-POP)
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
-	((A-METER-BUFFER-POINTER) M+A+1 M-ZERO A-METER-BUFFER-POINTER)
+;	((A-METER-BUFFER-POINTER) M+A+1 M-ZERO A-METER-BUFFER-POINTER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-zero, m-minus-one and m-tem have none: the sum, then the fixnum's
+;; tag by dpb, since lisp reads it (%meter-buffer-pointer) as a fixnum.
+	((m-tem) m+a+1 m-zero a-meter-buffer-pointer)
+	((a-meter-buffer-pointer) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 METER-CLEANUP
 	(JUMP-LESS-THAN-XCT-NEXT M-ZERO A-METER-LENGTH METER-PUSH-LP)
        ((A-METER-LENGTH) ADD (M-CONSTANT -1) A-METER-LENGTH)
@@ -101,8 +114,14 @@ METER-CLEANUP
 					;Screw case where we are pointing to last word
 	(JUMP-NOT-EQUAL-XCT-NEXT M-1 A-MINUS-ONE METER-CLEANUP-1)	;Still buffer left
        ((A-METER-LOCK) ADD (M-CONSTANT -1) A-METER-LOCK)
-	(CALL-XCT-NEXT METER-FLUSH-BUFFER)	;Flush current buffer
-       ((A-METER-BUFFER-POINTER) ADD (M-CONSTANT -1) A-METER-BUFFER-POINTER)
+;	(CALL-XCT-NEXT METER-FLUSH-BUFFER)	;Flush current buffer
+;       ((A-METER-BUFFER-POINTER) ADD (M-CONSTANT -1) A-METER-BUFFER-POINTER)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-zero, m-minus-one and m-tem have none: the sum, then the fixnum's
+;; tag by dpb, since lisp reads it (%meter-buffer-pointer) as a fixnum.
+	((m-tem) add (m-constant -1) a-meter-buffer-pointer)
+	(call-xct-next meter-flush-buffer)	;flush current buffer
+       ((a-meter-buffer-pointer) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 					;Decrement so that it points to the right block again
 METER-CLEANUP-1
 	(CALL-XCT-NEXT READ-MICROSECOND-CLOCK)

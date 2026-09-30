@@ -640,8 +640,11 @@ NIL as arg means print a header but mention no areas."
 	   ((ZEROP N)
 	    (RETURN (VALUES (+ N-WIRED N-FIXED-WIRED)
 			    N-FIXED-WIRED)))
-	 (AND (= (%P-LDB #o0020 ADR) #o177777)
-	      ( (%P-LDB #o2020 ADR) #o177777)
+;	 (AND (= (%P-LDB #o0020 ADR) #o177777)
+;	      ( (%P-LDB #o2020 ADR) #o177777)
+	 ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, the gc data <31:20>
+	 (and (= (%p-ldb #o0024 adr) #o3777777)
+	      ( (%p-ldb #o2414 adr) #o7777)
 	      (SETQ N-FIXED-WIRED (1+ N-FIXED-WIRED)))))
     (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT ADR)))
 	 (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED)

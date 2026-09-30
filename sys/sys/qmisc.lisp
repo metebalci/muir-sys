@@ -1695,7 +1695,12 @@ with the microcode that is running."
 	    (INC-BAND-BASE-BAND NAME 0)
 	  (WHEN (AND BASE-BAND (NOT VALID-FLAG))
 	    (FERROR NIL "Band ~A is incremental, and the base band ~A is no longer valid."
-		    NAME BASE-BAND)))
+		    NAME BASE-BAND))
+	  ;; quux revision 13: microcode 2001 restores no incremental band (its
+	  ;; %disk-restore halts at incremental-band-not-supported)
+	  (when base-band
+	    (ferror nil "Band ~A is incremental; microcode ~D restores no incremental band."
+		    name %microcode-version-number)))
 	(SETQ DESIRED-UCODE (GET-UCODE-VERSION-OF-BAND NAME)))
       (RETURN-DISK-RQB RQB))
     (AND ( DESIRED-UCODE %MICROCODE-VERSION-NUMBER)
@@ -1726,6 +1731,11 @@ INCREMENTAL means to write out only those parts of the world which have changed
 				    (LDB #o0010 (CAR L)) (LDB #o1010 (CAR L))))
 	  PART-BASE PART-SIZE SYSTEM-VERSION MAX-ADDR
 	  (INC-PAGES-SAVED 0))
+    ;; quux revision 13: microcode 2001 has no incremental save (its
+    ;; %disk-save halts at incremental-band-not-supported), so it is refused
+    ;; here, with an error, before anything is changed.
+    (when incremental
+      (ferror nil "Incremental bands are not supported by microcode ~D." %microcode-version-number))
     (OR (MULTIPLE-VALUE (PART-BASE PART-SIZE)
 	  (IF NO-QUERY
 	      (FIND-DISK-PARTITION-FOR-READ PART-NAME)
@@ -1833,7 +1843,10 @@ will take a few minutes.")
 ;;; partition's size is, and a page dumped takes disk-blocks-per-page of them.
 (DEFUN CHECK-PARTITION-SIZE (PART-SIZE &OPTIONAL EXPOSE-P)
 ;  (LET ((DUMP-SIZE (ESTIMATE-DUMP-SIZE)))
-  (let ((dump-size (* (estimate-dump-size) disk-blocks-per-page)))
+;  (let ((dump-size (* (estimate-dump-size) disk-blocks-per-page)))
+  ;; quux revision 13 (appendix a1.11): a band's pages are packed,
+  ;; disk-blocks-per-packed-page blocks each
+  (let ((dump-size (* (estimate-dump-size) disk-blocks-per-packed-page)))
     (WHEN (> DUMP-SIZE PART-SIZE)
       ;; This test is not necessarily accurate, since we have not
       ;; yet shut off the world.  However, it should catch most cases,

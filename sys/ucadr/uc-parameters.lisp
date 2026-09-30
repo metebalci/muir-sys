@@ -1058,9 +1058,11 @@ A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops
 (assign disk-swap-in-ccw-base 2340)  ;build ccw lists for swap in starting here
 (assign disk-swap-in-ccw-max  2360)  ; and not above here.
 ;; the pages a swap-in list holds, which bounds a multi-page swap-in
-;(assign disk-swap-in-max-pages 4)
-;; quux revision 13 (appendix a1.11): one ccw a page, so the list of 16 holds 16
-(assign disk-swap-in-max-pages 20)
+(assign disk-swap-in-max-pages 4)
+;; quux revision 13 (appendix a1.11): one ccw a page, so the list of 16 could
+;; hold 16; the cap stays 4 pages, 4096 words a swap-in, as revision 12's was,
+;; until meters show a larger one better.
+;(assign disk-swap-in-max-pages 20)
 
 ;Fields in A-DISK-ADDRESS.  These are also how the CADR disk control takes them.
 (DEF-DATA-FIELD DA-UNIT	    3  28.)

@@ -1,0 +1,11 @@
+; A memory that Lisp reads as fixnums stays fixnums (microcode 2001; contract
+; G2 section 2.2: an arithmetic result takes M's tag, and M-ZERO's is 000).
+; ARRAY-PUSH's fill pointer (XFARY-1) and the region and page cons alarms
+; (MAKE-REGION) are incremented by a sum and a DPB of the fixnum's tag; with
+; the sum alone the next reference to them reads DTP-TRAP.  The first case
+; pushes nothing and is the control.  The metering counters (uc-meter) are
+; fixed the same way but not checked here: metering is off.
+(let ((a (make-array 4 :fill-pointer 0))) (list (fill-pointer a) (typep (fill-pointer a) 'fixnum))) => (0 T)
+(let ((a (make-array 4 :fill-pointer 0))) (array-push a 'x) (array-push a 'y) (list (fill-pointer a) (typep (fill-pointer a) 'fixnum) (listarray a) (%data-type (array-leader a 0)))) => (2 T (X Y) 5)
+(let ((a (make-array 4 :fill-pointer 3 :initial-element nil))) (list (array-push a 'x) (array-push a 'y) (fill-pointer a))) => (3 NIL 4)
+(let ((r sys:%region-cons-alarm) (p sys:%page-cons-alarm) (area (make-area :name (gensym "TYPED-A-")))) (cons-in-area 1 2 area) (list (typep sys:%region-cons-alarm 'fixnum) (typep sys:%page-cons-alarm 'fixnum) (> sys:%region-cons-alarm r) (> sys:%page-cons-alarm p))) => (T T T T)

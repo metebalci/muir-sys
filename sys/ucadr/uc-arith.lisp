@@ -183,6 +183,15 @@ GCD-DISPATCH
 ;;; Clobbers M-1, M-2, M-A, Q-R, M-TEM, A-TEM1.
 GCD-FIX-FIX
 	((M-A Q-R) (A-CONSTANT (OA-LOW-CONTEXT ((BYTE-FIELD 32. 0)))))
+;; quux revision 13: a fixnum is 32 bits, so -2^31's magnitude is no fixnum,
+;; and negating it gave -2^31 again: (gcd most-negative-fixnum 0) returned it.
+;; gcd(-2^31, 0) and gcd(-2^31, -2^31) are the bignum 2^31; with any other y,
+;; whose magnitude is below 2^31 and so has at most 30 factors of 2,
+;; gcd(-2^31, y) = gcd(2^30, y).
+	(jump-equal m-1 (a-constant 20000000000) gcd-setz-1)
+gcd-fix-fix-2
+	(jump-equal m-2 (a-constant 20000000000) gcd-setz-2)
+gcd-fix-fix-3
 	(JUMP-GREATER-OR-EQUAL M-1 A-ZERO XGCD0)	;TAKE ABS OF ARGS
 	((M-1) SUB M-ZERO A-1)
 XGCD0	(JUMP-GREATER-OR-EQUAL M-2 A-ZERO XGCDL)
@@ -216,6 +225,23 @@ XGCD4	((M-TEM) M-2)		;BOTH ODD
 XGCD5	((OA-REG-LOW) M-A)		;Final shifting step
 	((M-1) DPB M-1 (BYTE-FIELD 0 0) A-ZERO)
 	(JUMP RETURN-M-1)
+
+;; quux revision 13: m-1 is -2^31 (see gcd-fix-fix)
+gcd-setz-1
+	(jump-equal m-2 a-zero gcd-setz-result)
+	(jump-equal m-2 (a-constant 20000000000) gcd-setz-result)
+	(jump-xct-next gcd-fix-fix-3)
+       ((m-1) (a-constant 10000000000))		;2^30
+;; m-2 is -2^31, m-1 is not
+gcd-setz-2
+	(jump-equal m-1 a-zero gcd-setz-result)
+	(jump-xct-next gcd-fix-fix-3)
+       ((m-2) (a-constant 10000000000))		;2^30
+;; the bignum 2^31: -2^31 modulo 2^32 is 2^31 with the sign bit set, which
+;; fix-overflow-33 takes for a positive overflow
+gcd-setz-result
+	(jump-xct-next fix-overflow-33)
+       ((m-1) (a-constant 20000000000))
 
 ;BIGNUM GCD MOVED TO UC-HACKS FILE.
 
@@ -298,11 +324,21 @@ REMAINDER-FIX-BIG
 	(POPJ-NOT-EQUAL-XCT-NEXT M-2 (A-CONSTANT NEGATIVE-SETZ))
        ((M-T) M-C)			;RESULT IS THE FIXNUM, USUALLY
 	((M-1) BIGNUM-HEADER-LENGTH MD)	;GET THE LENGTH OF THE BIGNUM
-	(POPJ-NOT-EQUAL M-1 (A-CONSTANT 1))
-	((VMA-START-READ) ADD M-B (A-CONSTANT 1))	;READ THE BIGNUM
-	(CHECK-PAGE-READ)
-	(POPJ-AFTER-NEXT
-	  POPJ-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ))
+;	(POPJ-NOT-EQUAL M-1 (A-CONSTANT 1))
+;	((VMA-START-READ) ADD M-B (A-CONSTANT 1))	;READ THE BIGNUM
+;	(CHECK-PAGE-READ)
+;	(POPJ-AFTER-NEXT
+;	  POPJ-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ))
+;; quux revision 13: +2^31, positive-setz, is no longer one 31-bit digit but
+;; two, 0 then 1 (the digits carry tag 000, so they compare as numbers).
+	(popj-not-equal m-1 (a-constant 2))
+	((vma-start-read) add m-b (a-constant 1))	;read the bignum
+	(check-page-read)
+	(popj-not-equal md a-zero)
+	((vma-start-read) add m-b (a-constant 2))
+	(check-page-read)
+	(popj-after-next
+	  popj-not-equal md (a-constant 1))
        ((M-T) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))	;RESULT IS 0
 
 ;;; HERE THE BIGNUM IS IN M-B, FIXNUM IN M-2
@@ -2684,11 +2720,21 @@ RETURN-M-Q
        (NO-OP)
 
 BIGNUM-MINUS
-	(JUMP-NOT-EQUAL M-C (A-CONSTANT (BYTE-VALUE BIGNUM-HEADER-LENGTH 1))
-			BIGNUM-MINUS-1)	;check for +setzness
-	((VMA-START-READ) ADD M-Q (A-CONSTANT 1))
-	(CHECK-PAGE-READ)
-	(JUMP-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ) BIGNUM-MINUS-1)
+;	(JUMP-NOT-EQUAL M-C (A-CONSTANT (BYTE-VALUE BIGNUM-HEADER-LENGTH 1))
+;			BIGNUM-MINUS-1)	;check for +setzness
+;	((VMA-START-READ) ADD M-Q (A-CONSTANT 1))
+;	(CHECK-PAGE-READ)
+;	(JUMP-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ) BIGNUM-MINUS-1)
+;; quux revision 13: +2^31, positive-setz, is no longer one 31-bit digit but
+;; two, 0 then 1 (the digits carry tag 000, so they compare as numbers).
+	(jump-not-equal m-c (a-constant (byte-value bignum-header-length 2))
+			bignum-minus-1)	;check for +setzness
+	((vma-start-read) add m-q (a-constant 1))
+	(check-page-read)
+	(jump-not-equal md a-zero bignum-minus-1)
+	((vma-start-read) add m-q (a-constant 2))
+	(check-page-read)
+	(jump-not-equal md (a-constant 1) bignum-minus-1)
 	(POPJ-AFTER-NEXT (M-T) (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
 						 POSITIVE-SETZ)))
        (NO-OP)
@@ -3726,13 +3772,26 @@ RETURN-ZERO
 BFXMPY 
 FXBMPY	(JUMP-EQUAL M-2 A-ZERO RETURN-ZERO)	;0*X=0
 	(JUMP-NOT-EQUAL M-2 A-MINUS-ONE BFXMPY-OK)	;(-1)*(+SETZ)=(-SETZ)
-	(JUMP-NOT-EQUAL M-I (A-CONSTANT 1) BFXMPY-OK)
-	((VMA-START-READ) ADD M-Q A-I)
-	(CHECK-PAGE-READ)
-	(JUMP-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ) BFXMPY-OK)
-	(POPJ-AFTER-NEXT (M-T C-PDL-BUFFER-POINTER-PUSH)
-		Q-POINTER MD (A-CONSTANT (PLUS (BYTE-VALUE Q-CDR-CODE CDR-NEXT)
-					       (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
+;	(JUMP-NOT-EQUAL M-I (A-CONSTANT 1) BFXMPY-OK)
+;	((VMA-START-READ) ADD M-Q A-I)
+;	(CHECK-PAGE-READ)
+;	(JUMP-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ) BFXMPY-OK)
+;	(POPJ-AFTER-NEXT (M-T C-PDL-BUFFER-POINTER-PUSH)
+;		Q-POINTER MD (A-CONSTANT (PLUS (BYTE-VALUE Q-CDR-CODE CDR-NEXT)
+;					       (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
+;; quux revision 13: +2^31, positive-setz, is no longer one 31-bit digit but
+;; two, 0 then 1 (the digits carry tag 000, so they compare as numbers).
+	(jump-not-equal m-i (a-constant 2) bfxmpy-ok)
+	((vma-start-read) add m-q (a-constant 1))
+	(check-page-read)
+	(jump-not-equal md a-zero bfxmpy-ok)
+	((vma-start-read) add m-q (a-constant 2))
+	(check-page-read)
+	(jump-not-equal md (a-constant 1) bfxmpy-ok)
+	(popj-after-next (m-t c-pdl-buffer-pointer-push)
+		(a-constant (plus (byte-value q-cdr-code cdr-next)
+				  (byte-value q-data-type dtp-fix)
+				  positive-setz)))
        (NO-OP)
 
 BFXMPY-OK
@@ -3965,10 +4024,19 @@ FXBIDIV
        ((M-T C-PDL-BUFFER-POINTER-PUSH) (A-CONSTANT (PLUS (BYTE-VALUE Q-CDR-CODE CDR-NEXT)
 							  (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 	(POPJ-IF-BIT-SET BIGNUM-HEADER-SIGN M-C)
-	(POPJ-NOT-EQUAL M-I (A-CONSTANT 1))
-	((VMA-START-READ) ADD M-Q (A-CONSTANT 1))
-	(CHECK-PAGE-READ)
-	(POPJ-AFTER-NEXT POPJ-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ))
+;	(POPJ-NOT-EQUAL M-I (A-CONSTANT 1))
+;	((VMA-START-READ) ADD M-Q (A-CONSTANT 1))
+;	(CHECK-PAGE-READ)
+;	(POPJ-AFTER-NEXT POPJ-NOT-EQUAL MD (A-CONSTANT POSITIVE-SETZ))
+;; quux revision 13: +2^31, positive-setz, is no longer one 31-bit digit but
+;; two, 0 then 1 (the digits carry tag 000, so they compare as numbers).
+	(popj-not-equal m-i (a-constant 2))
+	((vma-start-read) add m-q (a-constant 1))
+	(check-page-read)
+	(popj-not-equal md a-zero)
+	((vma-start-read) add m-q (a-constant 2))
+	(check-page-read)
+	(popj-after-next popj-not-equal md (a-constant 1))
        ((M-T C-PDL-BUFFER-POINTER) DPB M-MINUS-ONE Q-POINTER A-T)
 
 BFXGRP 

@@ -347,14 +347,19 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   p-n-string			140
   nr-sym			120
   macro-compiled-program	200
-  page-table-area		8.		;enough for 2 megawords of main memory
+;  page-table-area		8.		;enough for 2 megawords of main memory
+  ;; quux revision 13 (appendix a1.9): 32 megawords of main memory, the
+  ;; boards' (g1): 32768 pages, 4 words each, half full
+  page-table-area		128.		;enough for 32 megawords of main memory
 ;  physical-page-data		2.		;enough for 2 megawords of main memory
 ;  address-space-map		1		;assuming 8-bit bytes
   ;; quux revision 13: 4 pages, 4 megawords, so that the address space map
   ;; after it starts at 50000, on a 4-page boundary: the microcode takes its
   ;; word by ldb of the address into the area's origin (xrgn1).  the map is 4
   ;; pages, a byte for each of the 16,384 quanta of the 28-bit space.
-  physical-page-data		4.		;enough for 4 megawords of main memory
+;  physical-page-data		4.		;enough for 4 megawords of main memory
+  ;; quux revision 13: a word for each of 32 megawords' 32768 pages
+  physical-page-data		32.		;enough for 32 megawords of main memory
   address-space-map		4		;assuming 8-bit bytes
   linear-pdl-area		20
   linear-bind-pdl-area		2
@@ -378,7 +383,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; quux revision 13: five pages fewer, for physical-page-data's and
   ;; address-space-map's five more, so that it still starts at 102000 and ends
   ;; at 200000, a level-1 block's boundary (32. pages, 100000 words)
-  extra-pdl-area		37		;note!! this is carefully calculated to cause
+;  extra-pdl-area		37		;note!! this is carefully calculated to cause
+  ;; quux revision 13: the page table's 120 and physical-page-data's 28 more
+  ;; pages move it to 552000; 53 pages end it at 700000, a level-1 block's
+  ;; boundary
+  extra-pdl-area		53		;note!! this is carefully calculated to cause
 						; extra-pdl-area to end on a level-2
   ; map boundary (200000)
   fasl-temp-area 		10
@@ -884,6 +893,13 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;;; a page's disk blocks: a page is transferred, and addressed on the disk, as
 ;;; this many 1 kbyte blocks.
 (defconst disk-blocks-per-page 4)
+;;; quux revision 13 (appendix a1.11): block-disk has two transfers.  the
+;;; 4-byte transfer, command <12>, moves <31:0> of each word, 4 bytes, so a page
+;;; is disk-blocks-per-page blocks, and any bytes on the disk come back as they
+;;; were: lisp's rqbs use it.  the packed transfer moves whole 40-bit words, 5
+;;; bytes, so a page is disk-blocks-per-packed-page blocks: paging and the
+;;; bands, whose page n is at block n * disk-blocks-per-packed-page, use it.
+(defconst disk-blocks-per-packed-page 5)
 
 (DEFCONST SIZE-OF-AREA-ARRAYS 377)
 
@@ -1313,6 +1329,8 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; quux: block-disk's, no pack and stopped by error; the cadr's was 177560.
   %DISK-STATUS-LOW-ERROR 21000
   %DISK-COMMAND-DONE-INTERRUPT-ENABLE 1_11.
+  ;; quux revision 13 (appendix a1.11): the 4-byte transfer
+  %disk-command-4-byte 1_12.
   %DISK-COMMAND-ATTENTION-INTERRUPT-ENABLE 1_10.	;Trident only
   %DISK-COMMAND-RECALIBRATE 10001005
   %DISK-COMMAND-FAULT-CLEAR 10000405		;Recalibrate on Marksman

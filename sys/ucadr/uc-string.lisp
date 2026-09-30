@@ -161,7 +161,9 @@ XSTRING-WIDTH-LOOP
        ((M-I) ADD M-I (A-CONSTANT 1))		;Advance subscripts
 	((M-Q) ADD M-Q (A-CONSTANT 1))
 	(JUMP-GREATER-OR-EQUAL M-I A-C XSTRING-WIDTH-9) ;Reached upper bound, return.
-	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-Q A-S TRAP)
     (ERROR-TABLE SUBSCRIPT-OOB M-Q M-S)
 	(DISPATCH-CALL-XCT-NEXT (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B ARRAY-TYPE-REF-DISPATCH)
        (NO-OP)
@@ -218,7 +220,9 @@ XSTRING-SEARCH-1
        ((M-I) ADD M-I (A-CONSTANT 1))		;Advance subscripts
 	((M-Q) ADD M-Q (A-CONSTANT 1))
 	(JUMP-GREATER-OR-EQUAL M-I A-C XFALSE)	;Reached upper bound, return NIL
-	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-Q A-S TRAP)
     (ERROR-TABLE SUBSCRIPT-OOB M-Q M-S)
 	(DISPATCH-CALL-XCT-NEXT (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B ARRAY-TYPE-REF-DISPATCH)
        (NO-OP)
@@ -228,7 +232,9 @@ XSTRING-SEARCH-1
 ;;; Time is reduced to 13 cycles per character.
 XSTRING-SEARCH-2
 	(JUMP-GREATER-OR-EQUAL M-I A-C XFALSE)	;Reached upper bound, return NIL
-	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-Q A-S TRAP)
     (ERROR-TABLE SUBSCRIPT-OOB M-Q M-S)
 	(DISPATCH-CALL-XCT-NEXT (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B ARRAY-TYPE-REF-DISPATCH)
 XSTRING-SEARCH-3

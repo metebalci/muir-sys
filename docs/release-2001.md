@@ -240,7 +240,8 @@ file carries a comment in that file saying why.
     (`:18-26`, `:64-164`, `load-parameters` `:403-428`); data words carry
     the tag 005 in a 40-bit cold load (`vunboxed`, `:227-235`), where a
     float is an IEEE single (`:680-681`), a bignum keeps the CADR's layout,
-    31-bit digits (`store-bignum-40`, `:782-814`), and the band format is
+    31-bit digits (`store-bignum-40`, `:782-814`), each digit's word tag 000,
+    the whole word being the digit (see "Bignum digits" below), and the band format is
     2002 (`:1237`, appendix A1.12); the system communication area's base is
     its area's origin rather than 400 (`:1154-1155`, A1.9).
     `vstore-contents` keeps a word's cdr code by `LDB` and `DPB`
@@ -514,3 +515,84 @@ file carries a comment in that file saying why.
     symbol, and the cold-load stream stopped on the unbound one);
     `tools/cross-check/cases/prime.cases` expects the tree's 40-bit
     parameters.
+  - **Range checks are unsigned** (appendix A1.3):
+    the array decoders', `G-L-P`'s, the leader's, `COPY-ARRAY-PORTION`'s,
+    `ARRAY-PUSH`'s fill pointer, the string searches', `XINSTANCE-LOC`'s and
+    the colour map's bounds checks jump or trap on the new unsigned
+    condition (`CALL-GREATER-OR-EQUAL-UNSIGNED`, and
+    `CALL-LESS-THAN-UNSIGNED` with its operands exchanged for a "greater
+    than"), so a negative index, which a 32-bit fixnum can now be, signals
+    `SUBSCRIPT-OUT-OF-BOUNDS` and writes nothing (`sys/ucadr/uc-array.lisp`,
+    `uc-string.lisp`, `uc-call-return.lisp`, `uc-hacks.lisp`); a negative
+    destination start makes `COPY-ARRAY-CONTENTS` copy nothing (`XCARC1`), as
+    a 25-bit fixnum's field did. `tools/microcode-check/cases/range-checks.cases`.
+  - **`GCD` of -2^31** (`GCD-FIX-FIX`, `sys/ucadr/uc-arith.lisp`): its
+    magnitude is no fixnum, and negating it gave -2^31 back; with 0 or itself
+    the result is the bignum 2^31, and with any other number the gcd of 2^30
+    and it. `tools/microcode-check/cases/gcd-setz.cases`.
+  - **Counters Lisp reads as fixnums stay fixnums** (contract G2 section
+    2.2: an arithmetic result takes M's tag): `ARRAY-PUSH`'s fill pointer
+    (`XFARY-1`, `uc-array.lisp`), `%REGION-CONS-ALARM` and `%PAGE-CONS-ALARM`
+    (`MAKE-REGION`, `uc-storage-allocation.lisp`), and the metering
+    counters `%METER-DISK-ADDRESS`, `%METER-DISK-COUNT` and
+    `%METER-BUFFER-POINTER` (`uc-meter.lisp`) are summed and then given the
+    fixnum's tag by `DPB`; summed with `M-ZERO` or `M-MINUS-ONE` they took
+    tag 000, and the next reference trapped. `tools/microcode-check/cases/typed-a.cases`.
+  - **+2^31 as a bignum is two digits**, 0 and 1: `BIGNUM-MINUS`, `FXBMPY`,
+    `REMAINDER-FIX-BIG` and `FXBIDIV` (`uc-arith.lisp`) looked for it as
+    one digit, as +2^24 was, so negating it, and -2^31's remainder and
+    quotient by it, gave a bignum -2^31 or a wrong answer; the literal
+    -2147483648 now reads as the fixnum. `tools/microcode-check/cases/setz.cases`.
+  - **`FIXPACK`'s flag rule** is checked: `tools/microcode-check/fixpack-flag.py`
+    reads every jump to `FIXPACK-T` and `FIXPACK-P` and the word that last
+    sets the overflow flag before it.
+  - **32 M words**: the page hash table is 128 pages and physical-page-data
+    32, enough for 32 M words (`sys/cold/qcom.lisp`), `EXTRA-PDL-AREA` 43
+    pages, ending at 700000; the page hash table's index in
+    physical-page-data is `<19:0>` and the GC data `<31:20>` (appendix A1.9;
+    `uc-page-fault.lisp`, `uc-cold-disk.lisp`, `sys/sys2/gc.lisp`,
+    `sys/sys2/describe.lisp`), no page `3777777`; the cold boot enters no more
+    main memory than the table holds, rather than filling entries below its
+    origin. The wired words now end at 530000, above the 64 K words that
+    `%DISK-RESTORE` and `%DISK-SAVE` map directly before the band's own map
+    is made, and the swap-in's CCW list goes above them; both map 256 K words
+    (`DISK-RESTORE-1`, `SWAP-OUT-ALL-PAGES`, `uc-cold-disk.lisp`), since a
+    level-1 miss there would use the reverse map that the band's page 1 has
+    just overwritten. The cold load boots to its herald with 32 M words.
+  - **The swap-in cap** is 4 pages again (`DISK-SWAP-IN-MAX-PAGES`,
+    `uc-parameters.lisp`), 4096 words, as revision 12's.
+  - **Lisp's disk transfers** (appendix A1.11; `sys/io/disk.lisp`): a CCW names
+    a page, and a transfer is 4-byte unless `*DISK-TRANSFER-PACKED*`: an RQB's
+    page is `DISK-BLOCKS-PER-PAGE` blocks and its bytes come back as the disk
+    holds them. A band's pages and the paging partition's are packed,
+    `DISK-BLOCKS-PER-PACKED-PAGE`, 5, blocks each (`sys/cold/qcom.lisp`, with
+    `%DISK-COMMAND-4-BYTE`): a band's system communication area is read packed
+    (`READ-BAND-SYS-COM`), its formats are 2000 and 2001 and its counts words
+    of 32 bits; `PAGE-IN-WORDS` reads packed pages; `DISK-INIT`'s virtual
+    memory is A memory's page, bits 10-27, or the paging partition's packed
+    pages; `CHECK-PARTITION-SIZE` counts packed blocks (`sys/sys/qmisc.lisp`);
+    the file device takes a page's address from its one CCW (`sys/io/fdev.lisp`).
+  - **Bignum digits carry tag 000**: a digit's word is the digit, its 31
+    bits with `<39:31>` zero, as the CADR's word is; this amends contract G1
+    section 2.6, under which data words carry 005. The microcode makes its
+    digits so (a 31-bit `LDB` over `A-ZERO`, or `A-ZERO`), and so its
+    whole-word digit compares (`BEQL`, `BSHFFL`, against `A-ZERO`) stay
+    numeric as MIT wrote them; the cold load's bignums (`store-bignum-40`,
+    `sys/cold/coldut.lisp`) now write the digit as it is rather than
+    `vunboxed`. Read as an object, a digit is `DTP-TRAP`, and the transporter
+    signals an error.
+  - **Incremental bands are open.** Revision 13 keeps them, converted to
+    5-block pages; until that is done, microcode 2001 halts at
+    `INCREMENTAL-BAND-NOT-SUPPORTED` on an incremental save or restore, and
+    `DISK-SAVE` and `DISK-RESTORE` refuse one first with an error
+    (`sys/sys/qmisc.lisp`).
+  - **Two halts stay where G2 section 2.6 says errors:** an address with
+    `<31:28>` set halts at `ADDRESS-PAST-28-BITS`, and the incremental save
+    and restore halt as above. Each is to become a trap with an error-table
+    entry before acceptance.
+  - **The cross build's controls** (`tools/cross-check/`): the tree's `QCOM`
+    now describes the 40-bit machine, so check 1's identity control and its
+    32-bit target of 1024-word pages take this world's parameters over it
+    (`lisp/world.lisp`, which gives every parameter this world also has its
+    value here, the symbols in a value being the cold-load package's), the
+    latter with `lisp/pages32.lisp`; `lisp/pages256.lisp` is gone.

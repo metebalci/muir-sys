@@ -1,0 +1,19 @@
+; The array bounds checks are unsigned (microcode 2001;
+; contract G2 appendix A1.3): a 32-bit fixnum can be negative, and a
+; signed compare let a negative index through.  A negative index signals
+; SUBSCRIPT-OUT-OF-BOUNDS and writes nothing; the first two cases are the
+; controls.  The condition is found by name, whatever its package.
+(let ((a (make-array 4 :initial-contents '(a b c d)))) (aref a 3)) => D
+(let ((a (make-array 4 :initial-contents '(a b c d)))) (condition-case (e) (aref a 4) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names))))) => :OOB
+(let ((a (make-array 4 :initial-contents '(a b c d)))) (condition-case (e) (aref a -1) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names))))) => :OOB
+; aset at -1 signals, and the word below the array, its header, is unchanged
+(let* ((a (make-array 4 :initial-contents '(a b c d))) (h (%p-contents-offset a 0))) (list (condition-case (e) (aset 'x a -1) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names)))) (eq h (%p-contents-offset a 0)) (listarray a))) => (:OOB T (A B C D))
+(let ((a (make-string 4 :initial-element #/a))) (condition-case (e) (aref a -1) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names))))) => :OOB
+(let ((a (make-array 4 :type 'art-8b))) (condition-case (e) (aset 7 a -1) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names))))) => :OOB
+(let ((a (make-array '(2 2)))) (condition-case (e) (aref a -1 0) (error (if (member "SUBSCRIPT-OUT-OF-BOUNDS" (mapcar #'string (send e :condition-names)) :test #'string=) :oob (send e :condition-names))))) => :OOB
+(array-in-bounds-p (make-array 4) -1) => NIL
+(array-in-bounds-p (make-array 4) 3) => T
+; a negative fill pointer: array-push stores nothing and returns NIL
+(let ((a (make-array 4 :fill-pointer 0 :initial-element nil))) (setf (array-leader a 0) -1) (list (array-push a 'x) (listarray a 4))) => (NIL (NIL NIL NIL NIL))
+; copy-array-portion with a negative start copies nothing below the array
+(let ((a (make-array 3 :initial-contents '(a b c))) (b (make-array 3 :initial-contents '(x y z)))) (ignore-errors (copy-array-portion a 0 3 b -1 2)) (list (listarray b) (listarray a))) => ((X Y Z) (A B C))

@@ -958,9 +958,13 @@ FINDCORE1
 	(ILLOP-IF-PAGE-FAULT)				;Delayed for fencepost error
 	((M-B) ADD M-B (A-CONSTANT 1))
 	(JUMP-EQUAL M-B A-FINDCORE-SCAN-POINTER FINDCORE3)	;Did all pages but 1, no luck
-	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
+;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
 	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
-	(JUMP-EQUAL-XCT-NEXT M-TEM (A-CONSTANT 177777) FINDCORE0)	;No page here
+;	(JUMP-EQUAL-XCT-NEXT M-TEM (A-CONSTANT 177777) FINDCORE0)	;No page here
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	(JUMP-EQUAL-XCT-NEXT M-TEM (a-constant 3777777) FINDCORE0)	;No page here
        ((A-COUNT-FINDCORE-STEPS) M+A+1 M-ZERO A-COUNT-FINDCORE-STEPS)
 	(ILLOP-IF-PAGE-FAULT)				;Check delayed to make code faster
 	(DISPATCH-XCT-NEXT PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-FINDCORE)
@@ -1256,7 +1260,9 @@ PHTDEL6	((C-PDL-BUFFER-POINTER-PUSH) READ-MEMORY-DATA)	;Move the cell into the h
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) SUB M-B A-V-PAGE-TABLE-AREA)		;New PHT index
 	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT
-		READ-MEMORY-DATA (BYTE-FIELD 20 20) A-TEM)
+;		READ-MEMORY-DATA (BYTE-FIELD 20 20) A-TEM)
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+		read-memory-data (byte-field 12. 20.) a-tem)
 	(ILLOP-IF-PAGE-FAULT)
 	((VMA) M-B)
 	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-POINTER-POP) ;Store PHT1
@@ -1525,8 +1531,12 @@ AGER0	((VMA-START-READ) ADD M-1 A-V-PHYSICAL-PAGE-DATA)
 	(ILLOP-IF-PAGE-FAULT)
 	((M-1) ADD M-1 (A-CONSTANT 1))
 	(POPJ-EQUAL M-1 A-FINDCORE-SCAN-POINTER)	;Return if caught up, skipping this one
-	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
-	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) AGER0)	;No page here
+;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
+;	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) AGER0)	;No page here
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	(JUMP-EQUAL M-TEM (a-constant 3777777) AGER0)	;No page here
 	((VMA-START-READ) ADD M-TEM A-V-PAGE-TABLE-AREA)
 	(ILLOP-IF-PAGE-FAULT)
 	(DISPATCH PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-AGER)
@@ -1733,8 +1743,12 @@ XDPPG (MISC-INST-ENTRY %DELETE-PHYSICAL-PAGE)
 	((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
 	(ILLOP-IF-PAGE-FAULT)
 	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END ILLOP)	;PFN too big
-	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
-	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) XFALSE)	;Already deleted or wired
+;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
+;	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) XFALSE)	;Already deleted or wired
+;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
+	(JUMP-EQUAL M-TEM (a-constant 3777777) XFALSE)	;Already deleted or wired
 	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
 	(ILLOP-IF-PAGE-FAULT)
 	(CALL COREFOUND3)				;Swap it out, delete PHT entry

@@ -1,0 +1,10 @@
+; GCD of -2^31, the most negative 32-bit fixnum, whose magnitude is not a
+; fixnum (microcode 2001, GCD-FIX-FIX).  Negating it gave it back.
+(gcd most-negative-fixnum 0) => 2147483648
+(gcd 0 most-negative-fixnum) => 2147483648
+(gcd most-negative-fixnum most-negative-fixnum) => 2147483648
+(gcd most-negative-fixnum 6) => 2
+(gcd 12 most-negative-fixnum) => 4
+(gcd most-negative-fixnum 1073741824) => 1073741824
+(gcd most-negative-fixnum -1073741824) => 1073741824
+(gcd 12 18) => 6

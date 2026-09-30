@@ -177,7 +177,11 @@ Both values are NIL if the specified band doesn't appear
 ;	  (when (= (get-disk-fixnum rqb1 %sys-com-band-format) 1001)
 ;	    (disk-read rqb1 unit (+ part-base 3))
 	  ;; 1024-word pages (contract g2, option (w)): see disk-save-incremental
-	  (disk-read rqb1 unit (band-sys-com-block part-base))
+;	  (disk-read rqb1 unit (band-sys-com-block part-base))
+	  ;; quux revision 13 (appendix a1.11): the band's page 1, read packed.
+	  ;; no 40-bit band is incremental yet (microcode 2001 halts at
+	  ;; incremental-band-not-supported), so the rest is revision 12's.
+	  (read-band-sys-com rqb1 unit part-base)
 	  (when (= (get-disk-fixnum rqb1 %sys-com-band-format) band-format-incremental)
 	    (disk-read rqb1 unit (+ part-base 14))
 	    (setq base-band-name (get-disk-string rqb1 0 4))

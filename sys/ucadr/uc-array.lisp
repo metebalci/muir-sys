@@ -81,7 +81,9 @@ XCOMMON-LISP-AR-1-X
 ;Most SUBSCRIPT-OOB errors are restarted with a pushj to this.
 XAREF-RECHECK-INDEX (ERROR-TABLE RESTART XAREF-RECHECK-INDEX)
 	(POPJ-XCT-NEXT)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 XSET-AR-1 (MISC-INST-ENTRY SET-AR-1)
 	((M-T) Q-TYPED-POINTER PDL-POP)
@@ -289,7 +291,9 @@ ARRAY-DECODE-1-FORCE-1   ;Enter from ARRAY-DECODE-1-FORCE.
 		ARRAY-DECODE-1-UNUSUAL)
 	(POPJ-AFTER-NEXT
 	 (M-S) (LISP-BYTE %%ARRAY-INDEX-LENGTH-IF-SHORT) M-B)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 ;Handle wrong-type-arg errors on arrays passed to AR/S/P-n.
 ;Returns to caller with valid array pointer in M-A.
@@ -316,7 +320,9 @@ ARRAY-DECODE-1-UNUSUAL
 	((M-E) ADD M-E (A-CONSTANT 1))
 	(POPJ-AFTER-NEXT
 	 (M-S) Q-POINTER MD)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 ;; Wrong rank, bad data type or displaced array.
 ARRAY-DECODE-1-WEIRD
@@ -330,7 +336,9 @@ ARRAY-DECODE-1-WEIRD
 	;; This sets up M-S right, and doesn't depend on it.
 	(CALL DSP-ARRAY-SETUP)
 	(POPJ-XCT-NEXT)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 ;;; Instructions for caching decoding of arrays.
 ;
@@ -545,7 +553,9 @@ ARRAY-DECODE-2-A
        ((M-Q) Q-POINTER M-Q)
 ;Return checking the subscript bounds.
 	(POPJ-XCT-NEXT)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 ;Three-dimensional array access instructions
 
@@ -677,7 +687,9 @@ ARRAY-DECODE-N-LAST-SUBSCRIPT
        ((M-Q) M-1)
 ;Return checking the subscript bounds.
 	(POPJ-XCT-NEXT)
-       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;       (CALL-GREATER-OR-EQUAL M-Q A-S TRAP)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+       (call-greater-or-equal-unsigned M-Q A-S TRAP)
 
 ;Handle single-subscript case of ARRAY-DECODE-N.
 ;Go to ARRAY-DECODE-1 with array and subscript in M-A and M-Q,
@@ -1132,7 +1144,9 @@ QDACM5	(CALL-XCT-NEXT GAHD1)		;SETS UP M-E, M-S
 QDACMI	((M-TEM) (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B  ;CHECK IF SAME ARRAY-TYPE AS ORIG REF
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(JUMP-NOT-EQUAL C-PDL-BUFFER-POINTER A-TEM QDACM8)  ;NO, ORIG MUST CONTROL
-	(JUMP-GREATER-OR-EQUAL M-D A-S QDACM7)
+;	(JUMP-GREATER-OR-EQUAL M-D A-S QDACM7)
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(jump-greater-or-equal-unsigned M-D A-S QDACM7)
 QDACM8	((M-S) M-D)
 QDACM7	(JUMP-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B QDACM6) ;FURTHER INDIR
 QDACM1	((M-GARBAGE) C-PDL-BUFFER-POINTER-POP)	;FLUSH ARRAY TYPE
@@ -1430,7 +1444,9 @@ XGLPA1	((M-TEM) (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B)
    (ERROR-TABLE ARGTYP ART-Q-LIST-ARRAY M-A T NIL)
 XGLOP1	(CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B 
 		DSP-ARRAY-SETUP)  		;DISPLACED
-	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)	;INDEX OUT OF BOUNDS
+;	(CALL-GREATER-OR-EQUAL M-Q A-S TRAP)	;INDEX OUT OF BOUNDS
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-Q A-S TRAP)	;INDEX OUT OF BOUNDS
    (ERROR-TABLE SUBSCRIPT-OOB M-Q M-S)
 ;	(POPJ-AFTER-NEXT 
 ;	 (A-TEM3) IOR A-R M-Q)
@@ -1664,9 +1680,16 @@ XFARY-1
 						;STORING BACK
 	(CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B 
 			 DSP-ARRAY-SETUP)
-	(JUMP-GREATER-OR-EQUAL M-Q A-S XFALSE)	;Index out of bounds, return NIL, don't store.
+;	(JUMP-GREATER-OR-EQUAL M-Q A-S XFALSE)	;Index out of bounds, return NIL, don't store.
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(jump-greater-or-equal-unsigned M-Q A-S XFALSE)	;Index out of bounds, return NIL, don't store.
 	((VMA) SUB M-A (A-CONSTANT 2))		;KNOW WILL WIN NOW, MUNG
-	((WRITE-MEMORY-DATA-START-WRITE) ADD A-FARY-TEM M-ZERO ALU-CARRY-IN-ONE)
+;	((WRITE-MEMORY-DATA-START-WRITE) ADD A-FARY-TEM M-ZERO ALU-CARRY-IN-ONE)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-zero, m-minus-one and m-tem have none: the sum, then the fixnum's
+;; tag by dpb, as the fill pointer was.
+	((m-tem) add a-fary-tem m-zero alu-carry-in-one)
+	((write-memory-data-start-write) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	(CHECK-PAGE-WRITE)
 	(DISPATCH-CALL (LISP-BYTE %%ARRAY-TYPE-FIELD) M-B 
 			ARRAY-TYPE-FILL-DISPATCH)
@@ -1745,7 +1768,9 @@ XFLAD1-RESTART-1
 	((VMA-START-READ) SUB M-A (A-CONSTANT 1))	;GET LENGTH OF ARRAY LEADER
 	(CHECK-PAGE-READ)	;NO TRANSPORT SINCE JUST TOUCHED HEADER
 	((A-TEM1) (LISP-BYTE %%ARRAY-LEADER-LENGTH) READ-MEMORY-DATA)
-	(CALL-GREATER-OR-EQUAL M-Q A-TEM1 TRAP)		;SUBSCRIPT OUT OF BOUNDS
+;	(CALL-GREATER-OR-EQUAL M-Q A-TEM1 TRAP)		;SUBSCRIPT OUT OF BOUNDS
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-greater-or-equal-unsigned M-Q A-TEM1 TRAP)		;SUBSCRIPT OUT OF BOUNDS
    (ERROR-TABLE SUBSCRIPT-OOB M-Q RMD XFLAD1-A)
    (ERROR-TABLE ARG-POPPED 0 M-A M-Q)
 	(POPJ-AFTER-NEXT (A-TEM1) ADD M-Q (A-CONSTANT 2))
@@ -1807,7 +1832,9 @@ XCAP (MISC-INST-ENTRY COPY-ARRAY-PORTION)
 	(CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B DSP-ARRAY-SETUP)
 	((M-R) ADD M-R A-Q)
 	((M-I) M-Q)					;TO-INDEX
-	(CALL-GREATER-THAN M-R A-S TRAP)		;TO-LENGTH IN M-R MUST BE IN-BOUNDS
+;	(CALL-GREATER-THAN M-R A-S TRAP)		;TO-LENGTH IN M-R MUST BE IN-BOUNDS
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-less-than-unsigned m-s a-r trap)		;TO-LENGTH IN M-R MUST BE IN-BOUNDS
   (ERROR-TABLE SUBSCRIPT-OOB M-R M-S)
 	((M-C) M-E)					;TO-ADDRESS
 	((M-K) M-B)					;TO-ARRAY-HEADER
@@ -1818,7 +1845,9 @@ XCAP (MISC-INST-ENTRY COPY-ARRAY-PORTION)
 	((M-T) SUB M-T A-Q)				;DON'T GET SCREWED BY DSP-ARRAY-SETUP
 	(CALL-IF-BIT-SET (LISP-BYTE %%ARRAY-DISPLACED-BIT) M-B DSP-ARRAY-SETUP)
 	((M-T) ADD M-T A-Q)
-	(CALL-GREATER-THAN M-T A-S TRAP)		;FROM-LENGTH IN M-T MUST BE IN-BOUNDS
+;	(CALL-GREATER-THAN M-T A-S TRAP)		;FROM-LENGTH IN M-T MUST BE IN-BOUNDS
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(call-less-than-unsigned m-s a-t trap)		;FROM-LENGTH IN M-T MUST BE IN-BOUNDS
   (ERROR-TABLE SUBSCRIPT-OOB M-T M-S)
 	(JUMP-XCT-NEXT XCARC1)
        ((M-S) M-T)
@@ -1839,8 +1868,14 @@ XCARC0	(CALL-XCT-NEXT GADPTR)
        ((M-K) M-B)					;TO ARRAY HEADER
   (ERROR-TABLE CALLS-SUB COPY-ARRAY-CONTENTS)
   (ERROR-TABLE ARG-POPPED 0 M-A M-T)
-XCARC1	(JUMP-GREATER-OR-EQUAL M-I A-R XTRUE)		;TO ARRAY DONE, RETURN
-	(JUMP-GREATER-OR-EQUAL M-Q A-S XCARC3)		;JUMP IF FROM ARRAY EXHAUSTED
+;XCARC1	(JUMP-GREATER-OR-EQUAL M-I A-R XTRUE)		;TO ARRAY DONE, RETURN
+;; quux revision 13 (appendix a1.3): unsigned, so a
+;; negative to-start copies nothing, as a 25-bit fixnum's field, positive as a
+;; 32-bit number, did; signed, -1 would store below the array.
+XCARC1	(jump-greater-or-equal-unsigned m-i a-r xtrue)	;to array done, return
+;	(JUMP-GREATER-OR-EQUAL M-Q A-S XCARC3)		;JUMP IF FROM ARRAY EXHAUSTED
+;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
+	(jump-greater-or-equal-unsigned M-Q A-S XCARC3)		;JUMP IF FROM ARRAY EXHAUSTED
 	(DISPATCH-CALL-XCT-NEXT				;M-T := FROM ITEM, CLOBBER M-J
 		(LISP-BYTE %%ARRAY-TYPE-FIELD) M-B ARRAY-TYPE-REF-DISPATCH)
    (ERROR-TABLE BAD-ARRAY-TYPE M-B)

@@ -1,0 +1,15 @@
+; +2^31 ("positive SETZ") as a bignum is two 31-bit digits, 0 and 1, now that
+; fixnums are 32 bits (microcode 2001): negating it, multiplying it by -1,
+; and -2^31's remainder and quotient by it give fixnums (BIGNUM-MINUS, FXBMPY,
+; REMAINDER-FIX-BIG, FXBIDIV, sys/ucadr/uc-arith.lisp).  The reader negates
+; the magnitude it read, so the literal -2147483648 is the fixnum.  The first
+; case, from arithmetic alone, is the control.
+(let ((x (- -2147483647 1))) (list x (typep x 'fixnum))) => (-2147483648 T)
+(let ((x (read-from-string "-2147483648."))) (list x (typep x 'fixnum) (eql x most-negative-fixnum))) => (-2147483648 T T)
+(let ((x (minus (expt 2 31)))) (list x (typep x 'fixnum))) => (-2147483648 T)
+(let ((x (* -1 (expt 2 31)))) (list x (typep x 'fixnum))) => (-2147483648 T)
+(let ((x (* (expt 2 31) -1))) (list x (typep x 'fixnum))) => (-2147483648 T)
+(remainder most-negative-fixnum (expt 2 31)) => 0
+(quotient most-negative-fixnum (expt 2 31)) => -1
+(quotient (expt 2 31) most-negative-fixnum) => -1
+(let ((x (minus (expt 2 32)))) (list x (typep x 'bignum))) => (-4294967296 T)

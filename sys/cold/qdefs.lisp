@@ -159,6 +159,7 @@
 (DEFCONST Q-LISP-CONSTANTS '(
   PAGE-SIZE
   disk-blocks-per-page				;1024-word pages: a page's disk blocks
+  disk-blocks-per-packed-page			;quux revision 13: a page's packed blocks
   AREA-LIST
   Q-DATA-TYPES
   SIZE-OF-AREA-ARRAYS

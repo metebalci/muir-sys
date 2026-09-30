@@ -805,6 +805,9 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 ;;; today, a word of data (vunboxed).  this keeps the cadr's bignum layout in
 ;;; the wider word; if g2's microcode changes it, this changes with it.
 ;;; nothing else extended (rationals, complexes) goes into a 40-bit cold load.
+;;; quux revision 13 (bignum digits carry tag 000, amending g1 2.6): a digit
+;;; word is the digit, <39:31> zero, as the cadr's word is and as the
+;;; microcode makes them, so a digit is written as it is, not vunboxed.
 (defun store-bignum-40 (area number)
   (or (bigp number)
       (ferror nil "~S, a ~S, has no format in a ~D-bit cold load"
@@ -813,8 +816,10 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 	 (adr (allocate-block area size)))
     (vwrite adr (vmake-pointer sym:dtp-header (%p-ldb-offset %%q-pointer number 0)))
     (loop for i from 1 below size
-	  do (vwrite-unboxed (+ adr i) (dpb (%p-ldb-offset #o2020 number i) #o2020
-					      (%p-ldb-offset #o0020 number i))))
+;	  do (vwrite-unboxed (+ adr i) (dpb (%p-ldb-offset #o2020 number i) #o2020
+;					      (%p-ldb-offset #o0020 number i))))
+	  do (vwrite (+ adr i) (dpb (%p-ldb-offset #o2020 number i) #o2020
+				    (%p-ldb-offset #o0020 number i))))
     (vmake-pointer sym:dtp-extended-number adr)))
 
 ;;; New version of qintern.  Machine builds obarray when it first comes up (easy enough).

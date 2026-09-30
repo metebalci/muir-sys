@@ -734,9 +734,17 @@ D-RCONS	(P-BIT ILLOP)		;0 FREE
 MAKE-REGION
 	((M-3) ADD M-3 (A-CONSTANT (EVAL (1- %ADDRESS-SPACE-QUANTUM-SIZE)))) ;Round up to
 	((M-3) SELECTIVE-DEPOSIT M-3 VMA-QUANTUM-BYTE A-ZERO)		     ; quantum bound
-	((A-REGION-CONS-ALARM) M+A+1 M-ZERO A-REGION-CONS-ALARM)
+;	((A-REGION-CONS-ALARM) M+A+1 M-ZERO A-REGION-CONS-ALARM)
+;; quux revision 13 (contract g2 2.2): an arithmetic result takes m's tag,
+;; and m-zero, m-minus-one and m-tem have none: the sum, then the fixnum's
+;; tag by dpb, since lisp reads these (%region-cons-alarm,
+;; %page-cons-alarm; the gc process waits on them) as fixnums.
+	((m-tem) m+a+1 m-zero a-region-cons-alarm)
+	((a-region-cons-alarm) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((M-TEM) VMA-PAGE-ADDR-PART M-3)	;Length of region in pages
-	((A-PAGE-CONS-ALARM) ADD M-TEM A-PAGE-CONS-ALARM)
+;	((A-PAGE-CONS-ALARM) ADD M-TEM A-PAGE-CONS-ALARM)
+	((m-tem) add m-tem a-page-cons-alarm)
+	((a-page-cons-alarm) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	;; Search address-space-map for suitable number of consecutive zeros
 	((M-T) A-V-FIRST-UNFIXED-AREA)		;Starting address
 	((M-TEM) A-LOWEST-DIRECT-VIRTUAL-ADDRESS)  ;Avoid losing if additional direct

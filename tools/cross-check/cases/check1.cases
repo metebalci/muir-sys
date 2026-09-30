@@ -45,18 +45,21 @@
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//t40-family.qfasl")
 (qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//t40-planted.qfasl")
 (cold:cross-end)
-; the identity control: this world's parameters.  The tree's QCOM has
-; 1024-word pages (contract G2, option (w)) and this world 256-word ones, so
-; PAGES256 puts back this world's page over the tree's QCOM
-(cold:cross-begin :overlays '("SYS: CROSS-CHECK; PAGES256 LISP") :log-directory "HOST: //home//lispm//id-")
+; the identity control: this world's parameters.  The tree's QCOM describes
+; the 40-bit machine of 1024-word pages (contract G2), so WORLD puts back every
+; parameter this world has over it
+(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP") :log-directory "HOST: //home//lispm//id-")
+(list cold:word-bits cold:blocks-per-page cold-symbols:page-size) => (32 1 256)
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//id-family.qfasl")
 (cold:cross-end)
-; a 32-bit target of this tree's 1024-word pages (contract G2, option (w)), no
-; overlay: its files name no word width, so the builder tells them by the page
+; a 32-bit target of 1024-word pages (contract G2, option (w)): this world's
+; parameters (WORLD) with the page of 1024 words (PAGES32).  Its files name no
+; word width, so the builder tells them by the page
 ; (cold:cross-foreign-file-p).  FAMILY compiled for it beside its source and
 ; then loaded: the load must be replaced by this world's compile of the
 ; source.  A font, which has no source, is data and is not replaced.
-(cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//pg-")
+(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP" "SYS: CROSS-CHECK; PAGES32 LISP") :log-directory "HOST: //home//lispm//pg-")
+(list cold:word-bits cold:blocks-per-page cold-symbols:page-size) => (32 4 1024)
 (progn (qc-file "SYS: CROSS-CHECK; FAMILY LISP") t) => T
 (not (null (cold:cross-foreign-file-p (probe-file "SYS: CROSS-CHECK; FAMILY QFASL")))) => T
 (cold:cross-foreign-file-p (probe-file "SYS: FONTS; CPTFON QFASL")) => NIL

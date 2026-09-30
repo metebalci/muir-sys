@@ -62,13 +62,14 @@ addresses), a function at each of the five points. It is compiled:
 - **for the 40-bit machine**: the constants that change (the word's fields,
   the page, the fixnum's limits) must show the target's value;
 - **with this world's own parameters** (the identity control): the tree's
-  `QCOM` with this world's 256-word page put back over it (`lisp/pages256.lisp`),
-  since the tree's pages are 1024 words (contract G2, option (w)). The QFASL
-  must equal the native compile's function for function, but for `XC-LSH`,
-  since a cross build folds no `LSH`;
-- **for this tree's own target** (32-bit words, 1024-word pages, no
-  overlay): its files name no word width, so `cold:cross-foreign-file-p`
-  tells them by the page. `FAMILY` is compiled for it beside its source and
+  `QCOM`, which describes the 40-bit machine, with every parameter this world
+  also has given this world's value (`lisp/world.lisp`). The QFASL must equal
+  the native compile's function for function, but for `XC-LSH`, since a
+  cross build folds no `LSH`;
+- **for a 32-bit target of 1024-word pages** (contract G2, option (w)):
+  this world's parameters with that page (`lisp/world.lisp`, then
+  `lisp/pages32.lisp`). Its files name no word width, so
+  `cold:cross-foreign-file-p` tells them by the page. `FAMILY` is compiled for it beside its source and
   loaded, and the load must be replaced by this world's compile of the
   source (one replaced load); `SYS: FONTS; CPTFON`, which has no source, is
   not foreign.
