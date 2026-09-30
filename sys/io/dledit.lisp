@@ -144,7 +144,10 @@ Each item looks like: (name value start-x start-y width)")
 (DEFUN PRINT-DISK-ERROR-LOG ()
   "Print a description of remembered disk errors."
   (FORMAT T "~&Disk error count ~D.~%" (READ-METER 'SYS:%COUNT-DISK-ERRORS))
-  (DO ((I #o600 (+ I 4))) ((= I #o640))
+;  (DO ((I #o600 (+ I 4))) ((= I #o640))
+  ;; 1024-word pages (contract g2, option (w); appendix a1.9): the log is at
+  ;; 2200-2237, the system communication area being at 2000, its offsets kept
+  (do ((i #o2200 (+ i 4))) ((= i #o2240))
     (LET ((CLP-CMD (P-BIGNUM I))
 	  (DA (P-BIGNUM (1+ I)))
 	  (STS (P-BIGNUM (+ I 2)))

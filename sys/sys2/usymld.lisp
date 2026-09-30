@@ -824,10 +824,14 @@ One element of ARRAY goes into each register."
 		  HADR LADR HCOUNT LCOUNT))
 	(COND ((ZEROP LCODE)
 	       (WHEN UDSP-NBLKS
-		 (SEND STREAM ':SET-POINTER (* 2 UDSP-RELBLK SI:PAGE-SIZE))
+		 ;; 1024-word pages (contract g2, option (w)): the .mcr file counts
+		 ;; 1 kbyte blocks of 256 words, which a page no longer is
+;		 (SEND STREAM ':SET-POINTER (* 2 UDSP-RELBLK SI:PAGE-SIZE))
+		 (send stream ':set-pointer (* 2 udsp-relblk 400))
 		 (DO ((UE-ARRAY (UCODE-IMAGE-ENTRY-POINTS-ARRAY IMAGE))
 		      (ADR 0 (1+ ADR))
-		      (FIN (* UDSP-NBLKS SI:PAGE-SIZE)))
+;		      (FIN (* UDSP-NBLKS SI:PAGE-SIZE)))
+		      (fin (* udsp-nblks 400)))		;words in its blocks
 		     ((= ADR FIN))
 		   (SETF (AREF UE-ARRAY ADR)
 			 (DPB (SEND STREAM ':TYI)

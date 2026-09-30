@@ -28,7 +28,8 @@
     (SETQ NECESSARY-PUT-SIZE (QUOTIENT-CEILING (* 2 PSIZE) PAGE-SIZE-IN-BITS))
     ;; Setup the PUT variables.
     (SETQ PUT-RQB (CONDITION-BIND ((RQB-TOO-LARGE #'LM-PUT-RQB-TOO-LARGE))
-		    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+;		    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+		    (lm-get-disk-rqb necessary-put-size))
 	  PAGE-USAGE-TABLE (GET-RQB-ARRAY PUT-RQB 2)
 	  PUT-LOCK NIL
 	  PUT-MODIFIED NIL
@@ -96,7 +97,8 @@
 		   (NOTIFY "Label has old configuration.")
 		   (SETQ OLD-CONFIGURATION-KLUDGE T)))
 	    (SETQ PUT-RQB (CONDITION-BIND ((RQB-TOO-LARGE #'LM-PUT-RQB-TOO-LARGE))
-			    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+;			    (GET-DISK-RQB NECESSARY-PUT-SIZE))
+			    (lm-get-disk-rqb necessary-put-size))
 		  PAGE-USAGE-TABLE (GET-RQB-ARRAY PUT-RQB 2)
 		  PUT-LOCK NIL
 		  PUT-MODIFIED NIL
@@ -107,7 +109,8 @@
 		   (NOTIFY "Trying to expand Page Usage Table")
 		   ;; First setup the new put.
 		   (UNWIND-PROTECT
-		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+;		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+		     (progn (setq tem-put-rqb (lm-get-disk-rqb actual-put-size))
 			    (LM-DISK-READ TEM-PUT-RQB (DC-PUT-BASE))
 			    ;; This will set the new space to PUT-FREE (0).
 			    (COPY-ARRAY-CONTENTS (RQB-BUFFER TEM-PUT-RQB)
@@ -131,7 +134,8 @@
 		  ((OR (> PSIZE-FROM-PARTITION ACTUAL-PSIZE) OLD-CONFIGURATION-KLUDGE)
 		   ;; The partition has compacted.  Make sure nothing was lost.
 		   (UNWIND-PROTECT
-		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+;		     (PROGN (SETQ TEM-PUT-RQB (GET-DISK-RQB ACTUAL-PUT-SIZE))
+		     (progn (setq tem-put-rqb (lm-get-disk-rqb actual-put-size))
 			    (LM-DISK-READ TEM-PUT-RQB (DC-PUT-BASE))
 			    ;; This may not be zero in old configurations.
 			    (OR OLD-CONFIGURATION-KLUDGE
@@ -397,7 +401,8 @@ order, and use the first one that exists."
     (PUT-BYTES #'DISK-CONFIGURATION-STREAM 3 PUT-SIZE)
     (MAP-WRITE #'DISK-CONFIGURATION-STREAM (FILE-MAP (DC-ROOT-DIRECTORY)))
     (WRITE-PUT)
-    (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)))
+;    (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)))
+    (lm-disk-write disk-configuration-rqb 0 1)))
 
 ;;; New, consistent directory structure.
 ;;; This is completely incompatible with the old structure.
@@ -2099,7 +2104,8 @@ structure out to disk."
 		   (RETURN NIL))))
 	;; Now fake up the new environment
 	(SETQ T-PUT-SIZE (QUOTIENT-CEILING (* 2 TSIZE) PAGE-SIZE-IN-BITS)
-	      T-PUT-RQB (GET-DISK-RQB T-PUT-SIZE)
+;	      T-PUT-RQB (GET-DISK-RQB T-PUT-SIZE)
+	      t-put-rqb (lm-get-disk-rqb t-put-size)
 	      T-PUT (GET-RQB-ARRAY T-PUT-RQB 2)
 	      T-DC (MAKE-DISK-CONFIGURATION PARTITION-SIZE TSIZE)
 	      T-PUA (MAKE-ARRAY 4 ':TYPE 'ART-32B)
@@ -2151,13 +2157,15 @@ structure out to disk."
 		   (MAP-WRITE #'DISK-CONFIGURATION-STREAM T-DMM)
 		   (LET ((LM-PARTITION-BASE TBASE)
 			 (DISK-CONFIGURATION T-DC))
-		     (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)
+;		     (LM-DISK-WRITE DISK-CONFIGURATION-RQB 0)
+		     (lm-disk-write disk-configuration-rqb 0 1)
 		     ;; Write the PUT.  First change all pages from reserved to used.
 		     (LOOP FOR I FROM 1 TO TSIZE
 			   WHEN (= (AREF T-PUT I) PUT-RESERVED)
 			   DO (ASET PUT-USED T-PUT I))
 		     (ASET PUT-CONSISTENT T-PUT 0)
-		     (LM-DISK-WRITE T-PUT-RQB 1)))
+;		     (LM-DISK-WRITE T-PUT-RQB 1)))
+		     (lm-disk-write t-put-rqb 1 t-put-size)))
 	    (RETURN-DISK-RQB DISK-CONFIGURATION-RQB)))
 	(LET ((TEM (STRING-REVERSE-SEARCH-NOT-CHAR PUT-FREE T-PUT)))
 	  (FORMAT T "~%Partition ~A may be compressed to ~D (~D to be safe)."

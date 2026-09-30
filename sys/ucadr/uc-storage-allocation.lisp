@@ -234,7 +234,8 @@ SCONS2	((VMA-START-READ) ADD M-K A-V-REGION-BITS)	;Get attributes of that region
 	((A-SCONS-CACHE-REGION-ORIGIN) M-E)
 	((A-SCONS-CACHE-FREE-POINTER Q-R) ADD M-3 A-E)
 	((M-TEM) SUB Q-R (A-CONSTANT 1))		;Location on last good page
-	((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-TEM)	;Last loc on that page
+;	((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-TEM)	;Last loc on that page
+	((m-tem) dpb (m-constant -1) vma-page-offset a-tem)	;last loc on that 1024-word page
 	(JUMP-XCT-NEXT SCAV0)
        ((A-SCONS-CACHE-FREE-LIMIT) ADD M-TEM (A-CONSTANT 1))	;Page to stop before
 
@@ -276,7 +277,8 @@ LCONS2	((VMA-START-READ) ADD M-K A-V-REGION-BITS)	;Get attributes of that region
 	((A-LCONS-CACHE-REGION-ORIGIN) M-E)
 	((A-LCONS-CACHE-FREE-POINTER Q-R) ADD M-3 A-E)
 	((M-TEM) SUB Q-R (A-CONSTANT 1))		;Location on last good page
-	((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-TEM)	;Last loc on that page
+;	((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-TEM)	;Last loc on that page
+	((m-tem) dpb (m-constant -1) vma-page-offset a-tem)	;last loc on that 1024-word page
 	(JUMP-XCT-NEXT SCAV0)
        ((A-LCONS-CACHE-FREE-LIMIT) ADD M-TEM (A-CONSTANT 1))	;Page to stop before
 
@@ -610,7 +612,10 @@ EXTRA-PDL-PURGE
 	(POPJ-LESS-THAN MD A-V-EXTRA-PDL-AREA)
 	(POPJ-GREATER-OR-EQUAL MD A-V-MICRO-CODE-ENTRY-AREA)
 	((MD) M-T)		;Get full ptr including data type
-	((VMA) (A-CONSTANT (EVAL (+ 400 %SYS-COM-TEMPORARY))))
+;	((VMA) (A-CONSTANT (EVAL (+ 400 %SYS-COM-TEMPORARY))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma) (a-constant (eval (+ 2000 %sys-com-temporary))))
 	(POPJ-AFTER-NEXT GC-WRITE-TEST)		;Use regular GC-WRITE-TEST mechanism
        ((M-T) MD)
 
@@ -718,12 +723,17 @@ MAKE-REGION
 	;; Search address-space-map for suitable number of consecutive zeros
 	((M-T) A-V-FIRST-UNFIXED-AREA)		;Starting address
 	((M-TEM) A-LOWEST-DIRECT-VIRTUAL-ADDRESS)  ;Avoid losing if additional direct
-	((M-TEM) VMA-PAGE-ADDR-PART M-TEM)	   ; space created or band allocated too big.
+;	((M-TEM) VMA-PAGE-ADDR-PART M-TEM)	   ; space created or band allocated too big.
+	;; 1024-word pages (contract g2, option (w)): a-disk-maximum, the paging
+	;; partition's size, is in 256-word blocks, not pages
+	((m-tem) vma-block-part m-tem)	   ; space created or band allocated too big.
 	(JUMP-LESS-THAN M-TEM A-DISK-MAXIMUM MAKE-REGION-0)
 	((M-TEM) A-DISK-MAXIMUM)		;Ending address
 MAKE-REGION-0
-	((M-K) DPB M-TEM VMA-PAGE-ADDR-PART
-	 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	((M-K) DPB M-TEM VMA-PAGE-ADDR-PART
+;	 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	((m-k) dpb m-tem vma-block-part
+	 (a-constant (byte-value q-data-type dtp-fix)))
 MAKE-REGION-1
 	((M-E) ADD M-T A-3)			;End of large enough region starting here
 MAKE-REGION-2	
@@ -735,7 +745,10 @@ MAKE-REGION-2
 	(JUMP-LESS-THAN M-T A-E MAKE-REGION-2)	;Found free space, but not big enough yet
 	((M-T) SUB M-T A-3)			;Base address of free space found
 	;; M-T has origin, M-3 has length, M-4 has bits.  Put region in tables.
-	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (plus 2000 %sys-com-free-region/#-list))))
 	(CHECK-PAGE-READ)
 	((M-K) Q-POINTER READ-MEMORY-DATA)	;Number of new region
 	(CALL-EQUAL M-K A-ZERO TRAP)		;Out of region numbers
@@ -743,7 +756,10 @@ MAKE-REGION-2
 	((VMA-START-READ) ADD M-K A-V-REGION-LIST-THREAD)	;CDR OFF OF LIST
 	(CHECK-PAGE-READ)
 	((WRITE-MEMORY-DATA) READ-MEMORY-DATA)	;THIS ENSURES READ CYCLE FINISHES
-	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+;	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-free-region/#-list))))
 	(CHECK-PAGE-WRITE)
 	;; Proceed to initialize the various tables, except list-thread which caller does.
 	((WRITE-MEMORY-DATA) Q-POINTER M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
@@ -814,7 +830,10 @@ FREE-REGION
 	(CALL-XCT-NEXT UPDATE-REGION-PHT);Note that this sets M-1 and M-2 to the region bounds
        ((MD) (A-CONSTANT (BYTE-VALUE MAP-STATUS-CODE 2))) ;Make read-only, no access, in PHT2
 	;; Put region in M-K onto free region-table-entry list
-	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (plus 2000 %sys-com-free-region/#-list))))
 	(ILLOP-IF-PAGE-FAULT)
 	((A-TEM2) READ-MEMORY-DATA)
 	((WRITE-MEMORY-DATA-START-WRITE) Q-POINTER M-K
@@ -859,7 +878,10 @@ UPDATE-REGION-PHT-0
 	(POPJ)
 
 GET-AREA-ORIGINS
-	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-AREA-ORIGIN-PNTR))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-AREA-ORIGIN-PNTR))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (plus 2000 %sys-com-area-origin-pntr))))
 	(ILLOP-IF-PAGE-FAULT)
 	((VMA) SUB READ-MEMORY-DATA (A-CONSTANT 1)) ;1- ADDR OF REGION-ORIGIN TABLE
 	((M-K) (A-CONSTANT (A-MEM-LOC A-V-RESIDENT-SYMBOL-AREA)))
@@ -1601,7 +1623,10 @@ XFLIP2	(JUMP-GREATER-THAN-XCT-NEXT M-K A-ZERO XFLIP1)
 XFLIPW	(CALL-XCT-NEXT SGLV)		;Save state, don't swap variables
        ((M-TEM) DPB (M-CONSTANT -1) (BYTE-FIELD 1 6) A-SG-STATE)
 ;Now transport the magic A-memory variables, which constitute the root of the world.
-	((VMA) (A-CONSTANT (EVAL (+ 400 %SYS-COM-TEMPORARY)))) ;Pretend was read from here
+;	((VMA) (A-CONSTANT (EVAL (+ 400 %SYS-COM-TEMPORARY)))) ;Pretend was read from here
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma) (a-constant (eval (+ 2000 %sys-com-temporary)))) ;pretend was read from here
 	((M-E) (A-CONSTANT (A-MEM-LOC A-VERSION)))
 XFLIPW2	((OA-REG-HIGH) DPB M-E OAH-A-SRC A-ZERO)
 	((MD) A-GARBAGE)		;A-GARBAGE IS LOCATION 0@A

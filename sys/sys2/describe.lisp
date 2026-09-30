@@ -655,7 +655,10 @@ NIL as arg means print a header but mention no areas."
 	       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED))
       (FORMAT T "~S " (AREF (SYMBOL-FUNCTION 'SYS:AREA-NAME)
 			    (%AREA-NUMBER
-			      (ASH (%P-LDB %%PHT1-VIRTUAL-PAGE-NUMBER ADR) 8)))))))
+;			      (ASH (%P-LDB %%PHT1-VIRTUAL-PAGE-NUMBER ADR) 8)))))))
+			      ;; 1024-word pages (contract g2, option (w)): the page
+			      ;; number times 1024
+			      (ash (%p-ldb %%pht1-virtual-page-number adr) 10.)))))))
 
 
 

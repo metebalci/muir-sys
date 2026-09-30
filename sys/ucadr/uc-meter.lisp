@@ -32,7 +32,10 @@ XRECEV2	(JUMP-NOT-EQUAL-XCT-NEXT M-1 A-ZERO XRECEV1)
 METER-ASSURE-ROOM
 	((M-TEM) DPB M-ZERO (BYTE-FIELD 30 10) A-METER-BUFFER-POINTER)
 	((M-TEM) ADD M-TEM A-METER-LENGTH)
-	(POPJ-LESS-THAN-XCT-NEXT M-TEM (A-CONSTANT (EVAL (- PAGE-SIZE 6))))
+;	(POPJ-LESS-THAN-XCT-NEXT M-TEM (A-CONSTANT (EVAL (- PAGE-SIZE 6))))
+	;; 1024-word pages (contract g2, option (w)): the meter buffer is one
+	;; 256-word block, the one start-disk-1-page writes, not a page
+	(popj-less-than-xct-next m-tem (a-constant (difference disk-block-size 6)))
        ((A-METER-LOCK) (A-CONSTANT 1))	;Lock out everyone
 	((VMA) A-METER-BUFFER-POINTER)	;Write a word of zero, it wont fit
 	((WRITE-MEMORY-DATA-START-WRITE) SETZ)

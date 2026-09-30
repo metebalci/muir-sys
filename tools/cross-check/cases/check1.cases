@@ -45,7 +45,20 @@
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//t40-family.qfasl")
 (qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//t40-planted.qfasl")
 (cold:cross-end)
-; the identity control: this world's parameters, no overlay
-(cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//id-")
+; the identity control: this world's parameters.  The tree's QCOM has
+; 1024-word pages (contract G2, option (w)) and this world 256-word ones, so
+; PAGES256 puts back this world's page over the tree's QCOM
+(cold:cross-begin :overlays '("SYS: CROSS-CHECK; PAGES256 LISP") :log-directory "HOST: //home//lispm//id-")
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//id-family.qfasl")
+(cold:cross-end)
+; a 32-bit target of this tree's 1024-word pages (contract G2, option (w)), no
+; overlay: its files name no word width, so the builder tells them by the page
+; (cold:cross-foreign-file-p).  FAMILY compiled for it beside its source and
+; then loaded: the load must be replaced by this world's compile of the
+; source.  A font, which has no source, is data and is not replaced.
+(cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//pg-")
+(progn (qc-file "SYS: CROSS-CHECK; FAMILY LISP") t) => T
+(not (null (cold:cross-foreign-file-p (probe-file "SYS: CROSS-CHECK; FAMILY QFASL")))) => T
+(cold:cross-foreign-file-p (probe-file "SYS: FONTS; CPTFON QFASL")) => NIL
+(progn (setq cold:*cross-replaced-loads* nil) (load "SYS: CROSS-CHECK; FAMILY QFASL") (length cold:*cross-replaced-loads*)) => 1
 (cold:cross-end)

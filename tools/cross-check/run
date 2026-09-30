@@ -43,7 +43,7 @@ TRACKED_QFASLS = ('sys/fonts/*.qfasl', 'sys/demo/tvbgar.qfasl', 'sys/sys/ucinit.
 SERVED = 'sys/cross-check'
 FIXTURES = {
     'check1': ['family.lisp', 'synth.lisp', 'planted.lisp', 'uncovered-sharp.lisp',
-               'uncovered-fold.lisp'],
+               'uncovered-fold.lisp', 'pages256.lisp'],
     'check3': [],
     'check2': ['planted.lisp', 'uncovered-sharp.lisp'],
     'native': ['copy-partition.lisp', 'pages32.lisp'],

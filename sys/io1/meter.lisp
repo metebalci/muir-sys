@@ -8,6 +8,11 @@
 (DEFVAR DISK-PARTITION-START)			;Origin of disk address
 (DEFVAR DISK-RQB)				;Disk request block
 (DEFVAR NEXT-DISK-BLOCK)			;Next disk block to return
+;;; 1024-word pages (contract g2, option (w)): the microcode's meter buffer is
+;;; one disk block, 256 words (uc-meter), written a block at a time to the
+;;; METR partition; a page is four of them.  the in-memory buffer is its first
+;;; block, a disk buffer the first block of the rqb, which holds a page.
+(defvar disk-block-buffer)			;the rqb's first block
 
 ;;; Maps over the data in buffers
 (DEFMACRO DO-OVER-DATA (VAR-LIST END-FORMS &BODY BODY)
@@ -31,7 +36,8 @@
 				   (1- PAGE-SIZE))))
   (SI:WIRE-PAGE BUFFER-ADDRESS)
   ;***bug displaced-index-offset can be negative, bombing if array exactly on page boundary.
-  (SETQ BUFFER (MAKE-ARRAY (* PAGE-SIZE 2)
+;  (SETQ BUFFER (MAKE-ARRAY (* PAGE-SIZE 2)
+  (setq buffer (make-array (* (si:disk-block-words) 2)	;one block, the microcode's
 			   ':TYPE 'ART-16B
 			   ':DISPLACED-TO BUFFER-ARRAY
 			   ':DISPLACED-INDEX-OFFSET (* 2 (- BUFFER-ADDRESS
@@ -124,6 +130,9 @@ Use (METER:RESUME-GC-PROCESS) to un-arrest GC, once you are done with metering."
 (DEFUN FRAME-SETUP ()
   (OR (BOUNDP 'DISK-RQB)
       (SETQ DISK-RQB (SI:GET-DISK-RQB)))
+  (or (boundp 'disk-block-buffer)
+      (setq disk-block-buffer (make-array (* (si:disk-block-words) 2) ':type 'art-16b
+					  ':displaced-to (array-leader disk-rqb %disk-rq-leader-buffer))))
   (SETQ NEXT-DISK-BLOCK DISK-PARTITION-START)
   (GET-NEXT-DISK-BLOCK))
 
@@ -131,7 +140,8 @@ Use (METER:RESUME-GC-PROCESS) to un-arrest GC, once you are done with metering."
   (SETQ INDEX (+ INDEX (* (AREF BUF (1+ INDEX)) 2)))
   (IF (EQ BUF BUFFER)
       ;; In last buffer, i.e the one in the memory.
-      (IF ( (LOGAND %METER-BUFFER-POINTER (1- PAGE-SIZE))	;Number of Q's in buffer
+;      (IF ( (LOGAND %METER-BUFFER-POINTER (1- PAGE-SIZE))	;Number of Q's in buffer
+      (if ( (logand %meter-buffer-pointer (1- (si:disk-block-words)))	;number of q's in buffer
 	     (FLOOR INDEX 2))
 	  (VALUES NIL)
 	(VALUES BUF INDEX))
@@ -148,8 +158,10 @@ Use (METER:RESUME-GC-PROCESS) to un-arrest GC, once you are done with metering."
   (COND ((< NEXT-DISK-BLOCK %METER-DISK-ADDRESS)
 	 (DISK-READ DISK-RQB 0 NEXT-DISK-BLOCK)
 	 (SETQ NEXT-DISK-BLOCK (1+ NEXT-DISK-BLOCK))
-	 (VALUES (ARRAY-LEADER DISK-RQB %DISK-RQ-LEADER-BUFFER) 0))
-	(T (IF (ZEROP (LOGAND %METER-BUFFER-POINTER (1- PAGE-SIZE)))
+;	 (VALUES (ARRAY-LEADER DISK-RQB %DISK-RQ-LEADER-BUFFER) 0))
+	 (values disk-block-buffer 0))		;the block read, not the page
+;	(T (IF (ZEROP (LOGAND %METER-BUFFER-POINTER (1- PAGE-SIZE)))
+	(t (if (zerop (logand %meter-buffer-pointer (1- (si:disk-block-words))))
 	       (VALUES NIL)
 	     (VALUES BUFFER 0)))))
 

@@ -939,7 +939,11 @@ Returns the uptime (an integer) if host up, NIL if host down."
 			   (CLI:READ-FROM-STRING LINE T NIL :START POS))
 		     (SETQ RQB NIL))
 		   (UNWIND-PROTECT
-		     (PROGN (SETQ RQB (GET-DISK-RQB N-BLOCKS)
+		     ;; 1024-word pages (contract g2, option (w)): N-BLOCKS blocks in whole
+		     ;; pages of disk-blocks-per-page blocks; a write reads its pages
+		     ;; first, so that the blocks after N-BLOCKS go back as they were
+;		     (PROGN (SETQ RQB (GET-DISK-RQB N-BLOCKS)
+		     (progn (setq rqb (get-disk-rqb (ceiling n-blocks disk-blocks-per-page))
 				  BLOCK-PKT-1 (GET-DISK-STRING RQB 0 484. T)
 				  BLOCK-PKT-2 (GET-DISK-STRING RQB 121. 484. T)
 				  BLOCK-PKT-3 (GET-DISK-STRING RQB 242. 56. T))
@@ -955,15 +959,19 @@ Returns the uptime (an integer) if host up, NIL if host down."
 				     (SI:TRANSMIT-PARTITION-PACKET CONN BLOCK-PKT-3)
 				     ;; Advance magic strings to next block
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-1 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-1 3)
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-2 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-2 3)
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-3 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-3 3)))
 				  (T
+				   (disk-read rqb unit block)	;1024-word pages: see above
 				   ;; Get from net
 				   (DO ((BLOCK BLOCK (1+ BLOCK))
 					(N-BLOCKS N-BLOCKS (1- N-BLOCKS)))
@@ -975,13 +983,16 @@ Returns the uptime (an integer) if host up, NIL if host down."
 				     (SI:RECEIVE-PARTITION-PACKET CONN BLOCK-PKT-3)
 				     ;; Advance magic strings to next block
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-1 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-1 3)
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-2 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-2 3)
 				     (%P-STORE-CONTENTS-OFFSET
-				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3) (* 4 PAGE-SIZE))
+;				       (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3) (* 4 PAGE-SIZE))
+				       (+ (%p-contents-offset block-pkt-3 3) (* 4 (si:disk-block-words)))
 				       BLOCK-PKT-3 3))
 				   (DISK-WRITE RQB UNIT BLOCK))))
 		     (AND BLOCK-PKT-3 (RETURN-ARRAY BLOCK-PKT-3))

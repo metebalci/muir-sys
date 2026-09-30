@@ -10,7 +10,8 @@ byte).  The map is the cold load's own: the system communication area on page
 1 (appendix A1.9), whose %SYS-COM-AREA-ORIGIN-PNTR points at REGION-ORIGIN,
 whose entry for RESIDENT-SYMBOL-AREA is where NIL is, T five words after it.
 QNIL and QT, the words MAKE-COLD reports for them (cold:cross-make-cold), are
-compared when given.  Also checks the band format (2002 for 40-bit words, A1.12)
+compared when given.  Also checks the band format (2002 for 40-bit words, 1102
+for 32-bit words at 1024-word pages, 0 at 256-word pages; A1.12)
 and the pointer width, and prints a census of the words by data type.  The data
 types, areas and array types are read from the tree this script is in
 (sys/cold/qcom.lisp).  Exits 1 on a failure.
@@ -139,8 +140,11 @@ def main():
             expect('%s: where MAKE-COLD said' % name, want == got,
                    'reported %o, found %o' % (want, got))
     bf = im.fixnum(sc + SYSCOM.index('%SYS-COM-BAND-FORMAT'))
-    expect('%%SYS-COM-BAND-FORMAT is %s' % ('2002' if bits == 40 else '0'),
-           bf == (0o2002 if bits == 40 else 0), 'octal %o' % bf if bf is not None else 'not a fixnum')
+    # 2002 for 40-bit words; 1102 for 32-bit words at 1024-word pages (contract
+    # G2, option (w)); 0 for 32-bit words at 256-word pages (A1.12)
+    want = 0o2002 if bits == 40 else 0o1102 if page == 1024 else 0
+    expect('%%SYS-COM-BAND-FORMAT is %o' % want,
+           bf == want, 'octal %o' % bf if bf is not None else 'not a fixnum')
     pw = im.fixnum(sc + SYSCOM.index('%SYS-COM-POINTER-WIDTH'))
     expect('%SYS-COM-POINTER-WIDTH', pw == im.ptr_bits, repr(pw))
     vs = im.fixnum(sc + SYSCOM.index('%SYS-COM-VALID-SIZE'))

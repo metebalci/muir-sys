@@ -98,13 +98,17 @@
 (DEF-DATA-FIELD Q-DATA-TYPE 5 31)
 (DEF-DATA-FIELD Q-DATA-TYPE-PLUS-ONE-BIT 6 30)
 (DEF-DATA-FIELD Q-POINTER 31 0)
-(DEF-DATA-FIELD Q-POINTER-WITHIN-PAGE 8 0)
+;(DEF-DATA-FIELD Q-POINTER-WITHIN-PAGE 8 0)
+;; 1024-word pages (contract g2, option (w)): ten bits within the page
+(def-data-field q-pointer-within-page 10. 0)
 
 (DEF-DATA-FIELD Q-TYPED-POINTER 36 0)	;POINTER+DATA-TYPE
 (DEF-DATA-FIELD Q-ALL-BUT-TYPED-POINTER 2 36)
 (DEF-DATA-FIELD Q-ALL-BUT-POINTER 7 31)
 (DEF-DATA-FIELD Q-ALL-BUT-CDR-CODE 36 0)
-(DEF-DATA-FIELD Q-ALL-BUT-POINTER-WITHIN-PAGE 30 8)
+;(DEF-DATA-FIELD Q-ALL-BUT-POINTER-WITHIN-PAGE 30 8)
+;; 1024-word pages (contract g2, option (w)): all but the ten bits within the page
+(def-data-field q-all-but-pointer-within-page 26 12)
 
 (ASSIGN Q-POINTER-WIDTH 25.)
 
@@ -162,9 +166,26 @@
 (ASSIGN D-LAST 3)		;Push onto stack as last argument to function call.
 (ASSIGN D-MICRO 4)		;Appears only in call-blocks.  Return to microcode.
 
+;; 1024-word pages on revision 12 (contract g2, option (w)): page-size, which
+;; qcom gives this microcode, is the page's 1024 words, but revision 12's map
+;; entry, and a disk block of 32-bit words, stay 256 words, so a page is four
+;; map entries and four blocks.  the map loops step by map-entry-size and
+;; the disk code counts disk-block-size blocks; the paging code counts pages.
+(assign map-entry-size 400)
+(assign disk-block-size 400)
+(assign blocks-per-page 4)
+;; the band's first three pages, the resident symbol area, the system
+;; communication area and the scratch pad init area, which the restore reads
+;; first and the save writes first, in blocks.
+(assign low-pages-blocks 14)
+
 ;Page number of first page after MICRO-CODE-SYMBOL-AREA.
 ;This is used in DISK-RESTORE and DISK-SAVE.
-(ASSIGN END-OF-MICRO-CODE-SYMBOL-AREA 7)
+;(ASSIGN END-OF-MICRO-CODE-SYMBOL-AREA 7)
+;; 1024-word pages (contract g2, option (w)): the micro-code symbol area is one
+;; page at 6000, so the first block after it is 20, 10000 words; the restore
+;; and the save count it in blocks.
+(assign end-of-micro-code-symbol-area 20)
 
 ;INDICES IN THE SUPPORT VECTOR
 (ASSIGN SVC-NAMED-STRUCTURE-INVOKE 1) ;FUNCALL of a named-structure which isn't a hash table.
@@ -795,7 +816,10 @@ A-DISK-PAGE-WRITE-BUSY-COUNT (0) ;Number of times had to wait while a page was
 				;written out because we wanted to use the disk
 A-DISK-PREPAGE-USED-COUNT (0)	;Number of prepaged pages that turned out to be wanted
 A-DISK-PREPAGE-NOT-USED-COUNT (0) ;Number of prepaged pages reclaimed before used
-A-DISK-ERROR-LOG-POINTER (600)	;Points to next place in disk error log to store into
+;A-DISK-ERROR-LOG-POINTER (600)	;Points to next place in disk error log to store into
+;; 1024-word pages (contract g2, option (w); appendix a1.9): the log is at
+;; 2200-2237, the system communication area's offsets 200-237 at 2000
+a-disk-error-log-pointer (2200)	;points to next place in disk error log to store into
 				;Entries lie in 600-637 range.  Each is 4 words:
 				;	clp,,cmd		(guaranteed non-zero)
 				;	disk-address read back
@@ -944,10 +968,20 @@ A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops
 
 ;; quux: swap-out ccws move from 700-717 to 440-457, where the reverse
 ;; first-level map was, because that map's 64 entries now take 640-737.
-(assign disk-swap-out-ccw-base 440) ;build ccw lists for swap out starting here
-(assign disk-swap-out-ccw-max  460) ; and not above here.
-(ASSIGN DISK-SWAP-IN-CCW-BASE 740)  ;build CCW lists for swap in starting here
-(ASSIGN DISK-SWAP-IN-CCW-MAX  760)  ; and not above here.
+;(assign disk-swap-out-ccw-base 440) ;build ccw lists for swap out starting here
+;(assign disk-swap-out-ccw-max  460) ; and not above here.
+;(ASSIGN DISK-SWAP-IN-CCW-BASE 740)  ;build CCW lists for swap in starting here
+;(ASSIGN DISK-SWAP-IN-CCW-MAX  760)  ; and not above here.
+;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+;; communication area is at 2000, with its offsets kept, so the lists are at
+;; 2040 and 2340.  a page takes four ccws, a block each, so each list of 16
+;; holds four pages: as many words a transfer as the 16 pages of 256 words did.
+(assign disk-swap-out-ccw-base 2040) ;build ccw lists for swap out starting here
+(assign disk-swap-out-ccw-max  2060) ; and not above here.
+(assign disk-swap-in-ccw-base 2340)  ;build ccw lists for swap in starting here
+(assign disk-swap-in-ccw-max  2360)  ; and not above here.
+;; the pages a swap-in list holds, which bounds a multi-page swap-in
+(assign disk-swap-in-max-pages 4)
 
 ;Fields in A-DISK-ADDRESS.  These are also how the CADR disk control takes them.
 (DEF-DATA-FIELD DA-UNIT	    3  28.)
@@ -1006,7 +1040,11 @@ A-LAST-USEC-TIME (0)
 ;NOTE THAT THESE POINT TO FIXED AREAS, WHICH HAVE ONE REGION, SO THAT
 ;CONFUSION BETWEEN AREAS AND REGIONS AT THIS LEVEL IS ALLOWED AND ENCOURAGED
 A-V-RESIDENT-SYMBOL-AREA	(0)	;RESIDENT SYM AREA
-A-V-SYSTEM-COMMUNICATION-AREA	(400)	;MUST BE AT LOC 400
+;A-V-SYSTEM-COMMUNICATION-AREA	(400)	;MUST BE AT LOC 400
+;; 1024-word pages (contract g2, option (w); appendix a1.9): every fixed area
+;; has a page of its own, so the system communication area is page 1, at 2000,
+;; and the scratch pad init area page 2, at 4000 (not 1000, as below).
+a-v-system-communication-area	(2000)	;must be at loc 2000
 A-V-SCRATCH-PAD-INIT-AREA	(0)	;MUST BE AT LOC 1000
 A-V-MICRO-CODE-SYMBOL-AREA	(0)	;FIRST 600 LOCS ARE UCODE STARTING ADRS
 					; FOR (MACRO-CODE) MISC-INST S 200-777

@@ -919,7 +919,10 @@ It can then be allocated into other regions."
 	(SETQ PHT1 (PAGE-TABLE-AREA PHTX))
 	(COND ((NOT (LDB-TEST %%VALID-BIT PHT1)) (RETURN NIL))	;Not found
 	      ((= (LDB %%VIRTUAL-PAGE-NUMBER PHT1)
-		  (LSH ADDRESS -10))		;Address match
+;		  (LSH ADDRESS -10))		;Address match
+		  ;; 1024-word pages (contract g2, option (w)): the page number
+		  ;; is the address over 1024, not 256
+		  (lsh address -12))		;address match
 	       (SETF (PAGE-TABLE-AREA PHTX)
 		     (%LOGDPB %DUMMY-VIRTUAL-ADDRESS %%VIRTUAL-PAGE-NUMBER
 			      (%LOGDPB %SWAP-STATUS-FLUSHABLE

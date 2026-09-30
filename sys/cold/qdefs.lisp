@@ -158,6 +158,7 @@
 ;;; These get declared SYSTEM-CONSTANT and get their Maclisp values shipped over.
 (DEFCONST Q-LISP-CONSTANTS '(
   PAGE-SIZE
+  disk-blocks-per-page				;1024-word pages: a page's disk blocks
   AREA-LIST
   Q-DATA-TYPES
   SIZE-OF-AREA-ARRAYS

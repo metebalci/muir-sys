@@ -496,20 +496,31 @@ instance variable in INSTANCE."
 (DEFMETHOD-IMMEDIATE (COLD-LOAD-STREAM :BEEP) (&OPTIONAL BEEP-TYPE) BEEP-TYPE
   (KBD-CONVERT-BEEP))
 
+;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+;; communication area is at 2000, a page of its own, its offsets kept, so
+;; the buffer header at its offset 100 is 2100, not 500; the buffer stays
+;; at 200-377.
 (DEFUN KBD-HARDWARE-CHAR-AVAILABLE ()
   "Returns T if a character is available in the microcode interrupt buffer"
-  ( (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
-     (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))))
+;  ( (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
+  ( (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-in-ptr))
+;     (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))))
+     (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-out-ptr))))
 
 (DEFUN KBD-GET-HARDWARE-CHAR (&AUX P)
   "Returns the next character in the microcode interrupt buffer, and NIL if there is none"
-  (WHEN ( (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
-	   (SETQ P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))))
+;  (WHEN ( (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
+  (when ( (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-in-ptr))
+;	   (SETQ P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))))
+	   (setq p (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-out-ptr))))
     (PROG1 (%P-LDB %%Q-POINTER P)
 	   (INCF P)
-	   (WHEN (= P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-END)))
-	     (SETQ P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-START))))
-	   (%P-DPB P %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR)))))
+;	   (WHEN (= P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-END)))
+	   (when (= p (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-end)))
+;	     (SETQ P (%P-LDB %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-START))))
+	     (setq p (%p-ldb %%q-pointer (+ 2100 %unibus-channel-buffer-start))))
+;	   (%P-DPB P %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR)))))
+	   (%p-dpb p %%q-pointer (+ 2100 %unibus-channel-buffer-out-ptr)))))
 
 (DEFVAR SHIFT-LOCK-XORS NIL)	;If T, both SHIFT LOCK and SHIFT is the same as neither
 				; if the character is alphabetic
@@ -549,25 +560,37 @@ not converted to upper case."
 ;; This is called when the machine is booted, warm or cold.  It's not an
 ;; initialization because it has to happen before all other initializations.
 (DEFUN INITIALIZE-WIRED-KBD-BUFFER ()
-  (DO ((I 500 (1+ I))) ((= I 512))
+;  (DO ((I 500 (1+ I))) ((= I 512))
+  (do ((i 2100 (1+ i))) ((= i 2112))
     (%P-DPB 0 %%Q-LOW-HALF I)
     (%P-DPB 0 %%Q-HIGH-HALF I))
   (DO ((I 200 (1+ I))) ((= I 400))
     (%P-DPB 0 %%Q-LOW-HALF I)
     (%P-DPB 0 %%Q-HIGH-HALF I))
-  (%P-DPB 260 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-VECTOR-ADDRESS))
-  (%P-DPB (VIRTUAL-UNIBUS-ADDRESS 764112) %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-CSR-ADDRESS))
-  (%P-DPB 40 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
-  (%P-DPB 1 %%UNIBUS-CSR-TWO-DATA-REGISTERS (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
-  (%P-DPB 1 %%UNIBUS-CSR-SB-ENABLE (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
-  (%P-DPB (VIRTUAL-UNIBUS-ADDRESS 764100) %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-DATA-ADDRESS))
+;  (%P-DPB 260 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-VECTOR-ADDRESS))
+  (%p-dpb 260 %%q-pointer (+ 2100 %unibus-channel-vector-address))
+;  (%P-DPB (VIRTUAL-UNIBUS-ADDRESS 764112) %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-CSR-ADDRESS))
+  (%p-dpb (virtual-unibus-address 764112) %%q-pointer (+ 2100 %unibus-channel-csr-address))
+;  (%P-DPB 40 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
+  (%p-dpb 40 %%q-pointer (+ 2100 %unibus-channel-csr-bits))
+;  (%P-DPB 1 %%UNIBUS-CSR-TWO-DATA-REGISTERS (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
+  (%p-dpb 1 %%unibus-csr-two-data-registers (+ 2100 %unibus-channel-csr-bits))
+;  (%P-DPB 1 %%UNIBUS-CSR-SB-ENABLE (+ 500 %UNIBUS-CHANNEL-CSR-BITS))
+  (%p-dpb 1 %%unibus-csr-sb-enable (+ 2100 %unibus-channel-csr-bits))
+;  (%P-DPB (VIRTUAL-UNIBUS-ADDRESS 764100) %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-DATA-ADDRESS))
+  (%p-dpb (virtual-unibus-address 764100) %%q-pointer (+ 2100 %unibus-channel-data-address))
 ;  (%P-DPB 1 %%Q-FLAG-BIT (+ 500 %UNIBUS-CHANNEL-DATA-ADDRESS))
-  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-START))
-  (%P-DPB 400 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-END))
+;  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-START))
+  (%p-dpb 200 %%q-pointer (+ 2100 %unibus-channel-buffer-start))
+;  (%P-DPB 400 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-END))
+  (%p-dpb 400 %%q-pointer (+ 2100 %unibus-channel-buffer-end))
 ;  (%P-DPB 1 %%Q-FLAG-BIT (+ 500 %UNIBUS-CHANNEL-BUFFER-END))	;Enable seq breaks.
-  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
-  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))
-  (SETF (SYSTEM-COMMUNICATION-AREA %SYS-COM-UNIBUS-INTERRUPT-LIST) 500)
+;  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-IN-PTR))
+  (%p-dpb 200 %%q-pointer (+ 2100 %unibus-channel-buffer-in-ptr))
+;  (%P-DPB 200 %%Q-POINTER (+ 500 %UNIBUS-CHANNEL-BUFFER-OUT-PTR))
+  (%p-dpb 200 %%q-pointer (+ 2100 %unibus-channel-buffer-out-ptr))
+;  (SETF (SYSTEM-COMMUNICATION-AREA %SYS-COM-UNIBUS-INTERRUPT-LIST) 500)
+  (setf (system-communication-area %sys-com-unibus-interrupt-list) 2100)
   (SET-MOUSE-MODE 'DIRECT))
 
 ;;; SET-MOUSE-MODE and VIRTUAL-UNIBUS-ADDRESS keep the CADR's branch only.

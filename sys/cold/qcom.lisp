@@ -52,7 +52,9 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %%Q-BOXED-SIGN-BIT 3001
   %%Q-DATA-TYPE 3105
   %%Q-POINTER 0031
-  %%Q-POINTER-WITHIN-PAGE 0010
+;  %%Q-POINTER-WITHIN-PAGE 0010
+  ;; 1024-word pages (contract g2, option (w)): ten bits within the page
+  %%q-pointer-within-page 0012
   %%Q-TYPED-POINTER 0036
   %%Q-ALL-BUT-TYPED-POINTER 3602
   %%Q-ALL-BUT-POINTER 3107
@@ -124,6 +126,9 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 
 (DEFCONST SYSTEM-COMMUNICATION-AREA-QS '(
   ;; LOCATIONS RELATIVE TO 400 IN CADR
+  ;; with 1024-word pages (contract g2, option (w); appendix a1.9) the area is
+  ;; page 1, at 2000, and every location below is 1400 higher (440 is 2040,
+  ;; 777 is 2377); the keyboard buffer stays at 200-377, in page 0
   ;; locations 400-437 are miscellaneous Qs declared below
   ;; locations 440-477 are the reverse first level map on a CADR (microcode
   ;; 323); on QUUX (microcode 2000) it is at 640-737, for its 64 entries, and
@@ -281,35 +286,72 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ))
 
 ;;; Default area size is one page
-(DEFCONST COLD-LOAD-AREA-SIZES '(
-  P-N-STRING			600
-  NR-SYM			500
-  MACRO-COMPILED-PROGRAM	1000
-  PAGE-TABLE-AREA		128.		;Enough for 2 megawords of main memory
-  PHYSICAL-PAGE-DATA		32.		;Enough for 2 megawords of main memory
-  ADDRESS-SPACE-MAP		1		;Assuming 8-bit bytes
-  LINEAR-PDL-AREA		100
-  LINEAR-BIND-PDL-AREA		10
-  PDL-AREA 			300
-  WORKING-STORAGE-AREA		400
-  PERMANENT-STORAGE-AREA	200
-  PROPERTY-LIST-AREA		100
-  CONTROL-TABLES		13
-  INIT-LIST-AREA 		340
-  MICRO-CODE-ENTRY-AREA		4
-  MICRO-CODE-ENTRY-NAME-AREA	4
-  MICRO-CODE-ENTRY-ARGS-INFO-AREA	4
-  MICRO-CODE-ENTRY-ARGLIST-AREA	4
-  MICRO-CODE-ENTRY-MAX-PDL-USAGE	4
-  MICRO-CODE-SYMBOL-NAME-AREA	4
-  MICRO-CODE-SYMBOL-AREA	4
-  MICRO-CODE-PAGING-AREA	1000
-  PAGE-GC-BITS			40
-  FASL-TABLE-AREA		201		;3 times length-of-fasl-table plus 1 page
-  EXTRA-PDL-AREA		113		;NOTE!! this is carefully calculated to cause
-						; EXTRA-PDL-AREA to end on a level-2
+;(DEFCONST COLD-LOAD-AREA-SIZES '(
+;  P-N-STRING			600
+;  NR-SYM			500
+;  MACRO-COMPILED-PROGRAM	1000
+;  PAGE-TABLE-AREA		128.		;Enough for 2 megawords of main memory
+;  PHYSICAL-PAGE-DATA		32.		;Enough for 2 megawords of main memory
+;  ADDRESS-SPACE-MAP		1		;Assuming 8-bit bytes
+;  LINEAR-PDL-AREA		100
+;  LINEAR-BIND-PDL-AREA		10
+;  PDL-AREA 			300
+;  WORKING-STORAGE-AREA		400
+;  PERMANENT-STORAGE-AREA	200
+;  PROPERTY-LIST-AREA		100
+;  CONTROL-TABLES		13
+;  INIT-LIST-AREA 		340
+;  MICRO-CODE-ENTRY-AREA		4
+;  MICRO-CODE-ENTRY-NAME-AREA	4
+;  MICRO-CODE-ENTRY-ARGS-INFO-AREA	4
+;  MICRO-CODE-ENTRY-ARGLIST-AREA	4
+;  MICRO-CODE-ENTRY-MAX-PDL-USAGE	4
+;  MICRO-CODE-SYMBOL-NAME-AREA	4
+;  MICRO-CODE-SYMBOL-AREA	4
+;  MICRO-CODE-PAGING-AREA	1000
+;  PAGE-GC-BITS			40
+;  FASL-TABLE-AREA		201		;3 times length-of-fasl-table plus 1 page
+;  EXTRA-PDL-AREA		113		;NOTE!! this is carefully calculated to cause
+;						; EXTRA-PDL-AREA to end on a level-2
+;  ; map boundary (200000)
+;  FASL-TEMP-AREA 		40
+;  ))
+;;; 1024-word pages (contract g2, option (w)): the same sizes in 1024-word
+;;; pages, a quarter of the page counts above, rounded up, so that each area
+;;; keeps its words.  the page table and physical-page-data keep their words
+;;; per word of main memory (the page table 4 words a page, half full; the
+;;; data a word a page): 2 megawords.  every fixed area is at least a page
+;;; (appendix a1.9), so the micro-code symbol area's 2000 words are one page,
+;;; at 6000, and extra-pdl-area is sized again to end at 200000.
+(defconst cold-load-area-sizes '(
+  p-n-string			140
+  nr-sym			120
+  macro-compiled-program	200
+  page-table-area		8.		;enough for 2 megawords of main memory
+  physical-page-data		2.		;enough for 2 megawords of main memory
+  address-space-map		1		;assuming 8-bit bytes
+  linear-pdl-area		20
+  linear-bind-pdl-area		2
+  pdl-area 			60
+  working-storage-area		100
+  permanent-storage-area	40
+  property-list-area		20
+  control-tables		3
+  init-list-area 		70
+  micro-code-entry-area		1
+  micro-code-entry-name-area	1
+  micro-code-entry-args-info-area	1
+  micro-code-entry-arglist-area	1
+  micro-code-entry-max-pdl-usage	1
+  micro-code-symbol-name-area	1
+  micro-code-symbol-area	1
+  micro-code-paging-area	200
+  page-gc-bits			10
+  fasl-table-area		41		;3 times length-of-fasl-table plus 1 page
+  extra-pdl-area		44		;note!! this is carefully calculated to cause
+						; extra-pdl-area to end on a level-2
   ; map boundary (200000)
-  FASL-TEMP-AREA 		40
+  fasl-temp-area 		10
   ))
 
 ;;; Next three symbols are treated bletcherously, because there isnt the right kind of
@@ -789,7 +831,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 (DEFCONST FEFHI-FIELDS (SI::GET-ALTERNATE FEFHI-VALUES))
 
 
-(DEFCONST PAGE-SIZE 400)
+;(DEFCONST PAGE-SIZE 400)
+;;; 1024-word pages (contract g1, 3.3; contract g2, option (w)): revision 12's
+;;; map entry stays 256 words, and a disk block of 32-bit words is 256 words,
+;;; so a page is four of each; the microcode maps a page with four entries.
+(defconst page-size 2000)
+;;; a page's disk blocks: a page is transferred, and addressed on the disk, as
+;;; this many 1 kbyte blocks.
+(defconst disk-blocks-per-page 4)
 
 (DEFCONST SIZE-OF-AREA-ARRAYS 377)
 
@@ -805,8 +854,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;;; Definitions of fields in page hash table
 (DEFCONST PAGE-VALUES '(
   ;; WORD 1 
-  %%PHT1-VIRTUAL-PAGE-NUMBER 1020		;ALIGNED SAME AS VMA
-  %PHT-DUMMY-VIRTUAL-ADDRESS 177777		;ALL ONES MEANS THIS IS DUMMY ENTRY
+;  %%PHT1-VIRTUAL-PAGE-NUMBER 1020		;ALIGNED SAME AS VMA
+;  %PHT-DUMMY-VIRTUAL-ADDRESS 177777		;ALL ONES MEANS THIS IS DUMMY ENTRY
+  ;; 1024-word pages (contract g2, option (w)): the page number is vma<23:10>
+  %%pht1-virtual-page-number 1216		;aligned same as vma
+  %pht-dummy-virtual-address 37777		;all ones means this is dummy entry
 						;WHICH JUST REMEMBERS A FREE CORE PAGE
   %%PHT1-SWAP-STATUS-CODE 0003
   %PHT-SWAP-STATUS-NORMAL 1			;ORDINARY PAGE

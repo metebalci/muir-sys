@@ -73,6 +73,19 @@ This is an indirect array which overlaps the appropriate portion of RQB."
   "Returns the data length of RQB, in pages."
   (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES))
 
+;;; 1024-word pages (contract g2, option (w)): an rqb holds pages of page-size
+;;; words, and a page is disk-blocks-per-page 1 kbyte disk blocks of
+;;; disk-block-words words each.  a ccw names one block, so an rqb has a ccw a
+;;; block, and a transfer of an rqb moves all its pages' blocks.  disk
+;;; addresses are in blocks; a band's page n is at block n * disk-blocks-per-page.
+(defsubst disk-block-words ()
+  "The words of one disk block in an rqb: a page's words over its blocks."
+  (floor page-size disk-blocks-per-page))
+
+(defsubst rqb-nblocks (rqb)
+  "Returns the data length of RQB, in disk blocks."
+  (* disk-blocks-per-page (array-leader rqb %disk-rq-leader-n-pages)))
+
 ;;; The next three routines are the simple versions intended to be called
 ;;; by moderately naive people (i.e. clowns).
 ;;; Note that if UNIT is not a number, it is a function called to
@@ -211,7 +224,9 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 	(FERROR NIL "Impossible to make this RQB array fit")))
     ;; See if the CCW list will run off the end of the first page, and hence
     ;; not be stored in consecutive physical addresses.
-    (IF (> (+ OVERHEAD (FLOOR %DISK-RQ-CCW-LIST 2) N-PAGES) PAGE-SIZE)
+;    (IF (> (+ OVERHEAD (FLOOR %DISK-RQ-CCW-LIST 2) N-PAGES) PAGE-SIZE)
+    ;; 1024-word pages (contract g2, option (w)): a ccw a block
+    (if (> (+ overhead (floor %disk-rq-ccw-list 2) (* n-pages disk-blocks-per-page)) page-size)
 	(FERROR 'RQB-TOO-LARGE "CCW list doesn't fit on first RQB page, ~S pages is too many"
 		N-PAGES))
     (TAGBODY
@@ -244,9 +259,13 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
       'DISK-BUFFER-AREA (%REGION-NUMBER RQB))
     (%P-STORE-CONTENTS-OFFSET RQB RQB-BUFFER 1)	;Displace RQB-BUFFER to RQB
     (%P-STORE-CONTENTS-OFFSET RQB RQB-8-BIT-BUFFER 1)
-    (STORE-ARRAY-LEADER (+ %DISK-RQ-CCW-LIST (* 2 N-PAGES))
-			RQB
-			%DISK-RQ-LEADER-N-HWDS)
+;    (STORE-ARRAY-LEADER (+ %DISK-RQ-CCW-LIST (* 2 N-PAGES))
+;			RQB
+;			%DISK-RQ-LEADER-N-HWDS)
+    ;; 1024-word pages (contract g2, option (w)): a ccw a block
+    (store-array-leader (+ %disk-rq-ccw-list (* 2 n-pages disk-blocks-per-page))
+			rqb
+			%disk-rq-leader-n-hwds)
     (SETF (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES) N-PAGES)
     (SETF (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER) RQB-BUFFER)
     (SETF (ARRAY-LEADER RQB %DISK-RQ-LEADER-8-BIT-BUFFER) RQB-8-BIT-BUFFER)
@@ -276,10 +295,14 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 
 ;; quux (contract q8): the label is the gpt, block 0 and the entry array's
 ;; 16 blocks (128 entries of 128 bytes); mit's label took three pages.
-(defconst disk-label-rqb-pages 17.)
+;(defconst disk-label-rqb-pages 17.)
+;; 1024-word pages (contract g2, option (w)): the label is 17 blocks, which
+;; an rqb holds in whole pages
+(defconst disk-label-rqb-blocks 17.)
 (DEFUN GET-DISK-LABEL-RQB ()
   "Get a disk RQB for reading the label (quux's GPT) into."
-  (GET-DISK-RQB DISK-LABEL-RQB-PAGES))
+;  (GET-DISK-RQB DISK-LABEL-RQB-PAGES))
+  (get-disk-rqb (ceiling disk-label-rqb-blocks disk-blocks-per-page)))
 
 (DEFUN COUNT-FREE-RQBS (N-PAGES)
   "Return the number of free RQBs there are whose data length is N-PAGES."
@@ -305,10 +328,20 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
   (IF (NOT WIRE-P)
       (SETF (AREF RQB %DISK-RQ-CCW-LIST-POINTER-LOW)  #o177777	;Just below TV buffer
             (aref RQB %DISK-RQ-CCW-LIST-POINTER-HIGH) #o76)
-    (DO ((CCWX 0 (1+ CCWX))
-	 (VADR (+ LOW PAGE-SIZE) (+ VADR PAGE-SIZE))	;Start with 2nd page of rqb array
-	 (PADR))
-	(( CCWX N-PAGES)	;Done, set END in last CCW
+;    (DO ((CCWX 0 (1+ CCWX))
+;	 (VADR (+ LOW PAGE-SIZE) (+ VADR PAGE-SIZE))	;Start with 2nd page of rqb array
+;	 (PADR))
+;	(( CCWX N-PAGES)	;Done, set END in last CCW
+    ;; 1024-word pages (contract g2, option (w)): a ccw for each block of each
+    ;; page, disk-blocks-per-page a page, each the physical address of its
+    ;; block (a block is one map entry, 256 words, whose physical page
+    ;; %physical-address gives)
+    (do* ((n-blocks (* n-pages disk-blocks-per-page))
+	  (block-words (disk-block-words))
+	  (ccwx 0 (1+ ccwx))
+	  (vadr (+ low page-size) (+ vadr block-words))	;start with 2nd page of rqb array
+	  (padr))
+	((>= ccwx n-blocks)	;done, set end in last ccw
 	 (SETQ PADR (%PHYSICAL-ADDRESS (+ (%POINTER RQB)
 					  1
 					  LONG-ARRAY-FLAG
@@ -316,9 +349,12 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 	 (SETF (aref RQB %DISK-RQ-CCW-LIST-POINTER-LOW) PADR)
 	 (SETF (aref RQB %DISK-RQ-CCW-LIST-POINTER-HIGH) (LSH PADR -16.)))
       (SETQ PADR (%PHYSICAL-ADDRESS VADR))
-      (SETF (AREF RQB (+ %DISK-RQ-CCW-LIST (* 2 CCWX)))
-	    (+ (LOGAND (- PAGE-SIZE) PADR)		;Low 16 bits
-	       (IF (= CCWX (1- N-PAGES)) 0 1)))		;Chain bit
+;      (SETF (AREF RQB (+ %DISK-RQ-CCW-LIST (* 2 CCWX)))
+;	    (+ (LOGAND (- PAGE-SIZE) PADR)		;Low 16 bits
+;	       (IF (= CCWX (1- N-PAGES)) 0 1)))		;Chain bit
+      (setf (aref rqb (+ %disk-rq-ccw-list (* 2 ccwx)))
+	    (+ (logand (- block-words) padr)		;low 16 bits
+	       (if (= ccwx (1- n-blocks)) 0 1)))	;chain bit
       (SETF (AREF RQB (+ %DISK-RQ-CCW-LIST 1 (* 2 CCWX)))
 	    (LSH PADR -16.)))))				;High 6 bits
 
@@ -369,7 +405,9 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 ;; is set in rqb's status as the cadr controller set it.
 (defun disk-read-compare-wired (rqb unit address
 				&optional (microcode-error-recovery let-microcode-handle-disk-errors))
-  (let* ((n-pages (disk-transfer-size rqb))
+  ;; 1024-word pages (contract g2, option (w)): disk-transfer-size counts
+  ;; blocks, a ccw each; the second rqb holds them in pages
+  (let* ((n-pages (ceiling (disk-transfer-size rqb) disk-blocks-per-page))
 	 (rqb2 (get-disk-rqb n-pages))
 	 difference)
     (unwind-protect
@@ -521,12 +559,15 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
   (OR (NUMBERP UNIT) (SEND UNIT :DISPOSE)))
 
 ;;; :READ-COMPARE not supported, nothing uses it.
+;;; 1024-word pages (contract g2, option (w)): an rqb's blocks are its pages'
+;;; (rqb-nblocks), each disk-block-words words, 1024 bytes.
 (DEFUN REMOTE-DISK-HANDLER (OP &REST ARGS)
   (DECLARE (SPECIAL REMOTE-DISK-CONN REMOTE-DISK-STREAM REMOTE-DISK-UNIT))
   (SELECTQ OP
     (:READ (LET ((RQB (CAR ARGS)))
 	     (LET ((BLOCK (CADR ARGS))
-		   (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+;		   (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+		   (n-blocks (rqb-nblocks rqb)))	;1024-word pages: four blocks a page
 	       (FORMAT REMOTE-DISK-STREAM "READ ~D ~D ~D~%" REMOTE-DISK-UNIT BLOCK N-BLOCKS)
 	       (SEND REMOTE-DISK-STREAM :FORCE-OUTPUT)
 	       (DO ((BLOCK BLOCK (1+ BLOCK))
@@ -545,17 +586,21 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 		 (RECEIVE-PARTITION-PACKET REMOTE-DISK-CONN BLOCK-PKT-3)
 		 ;; Advance magic strings to next block
 		 (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3)
-					      (* 4 PAGE-SIZE))
+;					      (* 4 PAGE-SIZE))
+					      (* 4 (disk-block-words)))
 					   BLOCK-PKT-1 3)
 		 (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3)
-					      (* 4 PAGE-SIZE))
+;					      (* 4 PAGE-SIZE))
+					      (* 4 (disk-block-words)))
 					   BLOCK-PKT-2 3)
 		 (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3)
-					      (* 4 PAGE-SIZE))
+;					      (* 4 PAGE-SIZE))
+					      (* 4 (disk-block-words)))
 					   BLOCK-PKT-3 3)))))
     (:WRITE (LET ((RQB (CAR ARGS)))
 	      (LET ((BLOCK (CADR ARGS))
-		    (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+;		    (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+		    (n-blocks (rqb-nblocks rqb)))	;1024-word pages: four blocks a page
 		(FORMAT REMOTE-DISK-STREAM "WRITE ~D ~D ~D~%" REMOTE-DISK-UNIT BLOCK N-BLOCKS)
 		(SEND REMOTE-DISK-STREAM :FORCE-OUTPUT)
 		(DO ((BLOCK BLOCK (1+ BLOCK))
@@ -573,13 +618,16 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 		  (TRANSMIT-PARTITION-PACKET REMOTE-DISK-CONN BLOCK-PKT-3)
 		  ;; Advance magic strings to next block
 		  (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-1 3)
-					       (* 4 PAGE-SIZE))
+;					       (* 4 PAGE-SIZE))
+					       (* 4 (disk-block-words)))
 					    BLOCK-PKT-1 3)
 		  (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-2 3)
-					       (* 4 PAGE-SIZE))
+;					       (* 4 PAGE-SIZE))
+					       (* 4 (disk-block-words)))
 					    BLOCK-PKT-2 3)
 		  (%P-STORE-CONTENTS-OFFSET (+ (%P-CONTENTS-OFFSET BLOCK-PKT-3 3)
-					       (* 4 PAGE-SIZE))
+;					       (* 4 PAGE-SIZE))
+					       (* 4 (disk-block-words)))
 					    BLOCK-PKT-3 3)))))
     (:DISPOSE (CHAOS:CLOSE-CONN REMOTE-DISK-CONN))
     (:UNIT-NUMBER REMOTE-DISK-UNIT)
@@ -711,7 +759,8 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
   (SELECTQ OP
     (:READ (LET ((RQB (CAR ARGS)))
 	     (LET ((BLOCK (CADR ARGS))
-		   (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+;		   (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+		   (n-blocks (rqb-nblocks rqb)))	;1024-word pages: four blocks a page
 	       (DO ((BLOCK BLOCK (1+ BLOCK))
 		    (N-BLOCKS N-BLOCKS (1- N-BLOCKS))
 		    (BUF (RQB-BUFFER RQB))
@@ -726,7 +775,8 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 			(SETF (AREF BUF (INCF BUF-IDX)) W))))))))
     (:WRITE (LET ((RQB (CAR ARGS)))
 	      (LET ((BLOCK (CADR ARGS))
-		    (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+;		    (N-BLOCKS (ARRAY-LEADER RQB %DISK-RQ-LEADER-N-PAGES)))
+		    (n-blocks (rqb-nblocks rqb)))	;1024-word pages: four blocks a page
 		(DO ((BLOCK BLOCK (1+ BLOCK))
 		     (N-BLOCKS N-BLOCKS (1- N-BLOCKS))
 		    (BUF (RQB-BUFFER RQB))
@@ -801,22 +851,35 @@ No other type is QUUX's; an entry of any other type is :OTHER.")
 	(progn
 	  (setq rqb1 (get-disk-rqb 1))
 	  (disk-read rqb1 unit 0)
-	  (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size)
-			      (rqb-buffer rqb) 0 (* 2 page-size))
+;	  (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size)
+;			      (rqb-buffer rqb) 0 (* 2 page-size))
+	  ;; 1024-word pages (contract g2, option (w)): block 0 is the page's
+	  ;; first disk-block-words words; the label rqb holds it, then the entry
+	  ;; array's blocks, a block's words apart
+	  (copy-array-portion (rqb-buffer rqb1) 0 (* 2 (disk-block-words))
+			      (rqb-buffer rqb) 0 (* 2 (disk-block-words)))
 	  (unless (and (string-equal (get-disk-string rqb #o200 8.) "EFI PART")
 		       (= (get-disk-fixnum rqb #o225) 128.)
 		       (evenp (get-disk-fixnum rqb #o222)))
 	    (ferror nil "Disk unit ~A has no GPT that QUUX reads." unit))
+;	  (setq n-blocks (min (floor (+ (get-disk-fixnum rqb #o224) 7) 8.)
+;			      (1- disk-label-rqb-pages)))
 	  (setq n-blocks (min (floor (+ (get-disk-fixnum rqb #o224) 7) 8.)
-			      (1- disk-label-rqb-pages)))
+			      (1- disk-label-rqb-blocks)))
 	  (when (plusp n-blocks)
 	    (return-disk-rqb rqb1)
 	    (setq rqb1 nil)
-	    (setq rqb1 (get-disk-rqb n-blocks))
+;	    (setq rqb1 (get-disk-rqb n-blocks))
+	    ;; whole pages holding n-blocks blocks: the read may take up to three
+	    ;; blocks more, which are not copied
+	    (setq rqb1 (get-disk-rqb (ceiling n-blocks disk-blocks-per-page)))
 	    (disk-read rqb1 unit (floor (get-disk-fixnum rqb #o222) 2))
-	    (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size n-blocks)
-				(rqb-buffer rqb) (* 2 page-size)
-				(* 2 page-size (1+ n-blocks)))))
+;	    (copy-array-portion (rqb-buffer rqb1) 0 (* 2 page-size n-blocks)
+;				(rqb-buffer rqb) (* 2 page-size)
+;				(* 2 page-size (1+ n-blocks)))))
+	    (copy-array-portion (rqb-buffer rqb1) 0 (* 2 (disk-block-words) n-blocks)
+				(rqb-buffer rqb) (* 2 (disk-block-words))
+				(* 2 (disk-block-words) (1+ n-blocks)))))
       (and rqb1 (return-disk-rqb rqb1)))))
 
 (defun write-disk-label (rqb unit)
@@ -826,7 +889,8 @@ No other type is QUUX's; an entry of any other type is :OTHER.")
 
 (defun gpt-n-entries (rqb)
   "The number of GPT entries READ-DISK-LABEL read into RQB."
-  (min (get-disk-fixnum rqb #o224) (* 8. (1- disk-label-rqb-pages))))
+;  (min (get-disk-fixnum rqb #o224) (* 8. (1- disk-label-rqb-pages))))
+  (min (get-disk-fixnum rqb #o224) (* 8. (1- disk-label-rqb-blocks))))	;1024-word pages
 
 (defun gpt-entry-loc (i)
   "The word in a label rqb where GPT entry I starts."
@@ -1091,6 +1155,30 @@ WHICH defaults to /"LOD/"."
   (DOLIST (P PARTITION-LIST-ALIST)
     (FORMAT T "~%~A:~20T~:{~<~%~20T~2:;~A ~A~>~:^, ~}" (CAR P) (CDR P))))
 
+;;; 1024-word pages (contract g2, option (w)): a band's page 1, the system
+;;; communication area (appendix a1.9), is its blocks from
+;;; disk-blocks-per-page on; its sizes, a number of pages, are
+;;; disk-blocks-per-page times as many blocks.  the band's own formats are
+;;; 1100 (compressed) and 1101 (incremental), which its microcode writes
+;;; (appendix a1.12).
+(defsubst band-sys-com-block (part-base)
+  "The disk block of the system communication area of the band at PART-BASE: its page 1."
+  (+ part-base disk-blocks-per-page))
+
+(defconst band-format-compressed #o1100)
+(defconst band-format-incremental #o1101)
+
+;;; the words are counted in blocks, not through sys-com-page-number: an
+;;; incremental band's valid size, which the microcode writes as its blocks
+;;; times 256 words, need not be whole pages, and a page count would drop its
+;;; last blocks.
+(defun sys-com-block-count (16b-buffer index)
+  "The number of disk blocks the words counted by word INDEX of a system communication area take."
+  (ceiling (logand (1- 1_24.)
+		   (logior (lsh (aref 16b-buffer (1+ (* 2 index))) #o20)
+			   (aref 16b-buffer (* 2 index))))
+	   (disk-block-words)))
+
 (DEFUN SYS-COM-PAGE-NUMBER (16B-BUFFER INDEX)
   (LSH
     (LOGAND
@@ -1116,13 +1204,20 @@ or /"CC/" which refers to the machine being debugged by this one."
       (SETQ RQB (GET-DISK-RQB))
       (SETQ VALID-SIZE
 	    (COND ((OR (NUMBERP PART) (STRING-EQUAL PART "LOD" :END1 3))
-		   (DISK-READ RQB UNIT (1+ PART-BASE))
+;		   (DISK-READ RQB UNIT (1+ PART-BASE))
+		   (disk-read rqb unit (band-sys-com-block part-base))	;1024-word pages
 		   (LET ((BUF (RQB-BUFFER RQB)))
-		     (SETQ COMPRESSED-FORMAT-P
-			   (= #o1000 (AREF BUF (* 2 %SYS-COM-BAND-FORMAT))))
-		     (SETQ INCREMENTAL-BAND-P
-			   (= #o1001 (AREF BUF (* 2 %SYS-COM-BAND-FORMAT))))
-		     (SETQ VALID-SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE))
+;		     (SETQ COMPRESSED-FORMAT-P
+;			   (= #o1000 (AREF BUF (* 2 %SYS-COM-BAND-FORMAT))))
+;		     (SETQ INCREMENTAL-BAND-P
+;			   (= #o1001 (AREF BUF (* 2 %SYS-COM-BAND-FORMAT))))
+;		     (SETQ VALID-SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE))
+		     (setq compressed-format-p
+			   (= band-format-compressed (aref buf (* 2 %sys-com-band-format))))
+		     (setq incremental-band-p
+			   (= band-format-incremental (aref buf (* 2 %sys-com-band-format))))
+		     ;; blocks, as part-size is
+		     (setq valid-size (sys-com-block-count buf %sys-com-valid-size))
 		     (SETQ VALID-SIZE (IF (AND (> VALID-SIZE #o10)
 					       ( VALID-SIZE PART-SIZE))
 					  VALID-SIZE
@@ -1133,7 +1228,8 @@ or /"CC/" which refers to the machine being debugged by this one."
 			   (AREF BUF (* 2 %SYS-COM-DESIRED-MICROCODE-VERSION)))
 		     VALID-SIZE))
 		  (T PART-SIZE)))
-      (FORMAT T "~%Partition ~A starts at ~D and is ~D pages long."
+;      (FORMAT T "~%Partition ~A starts at ~D and is ~D pages long."
+      (format t "~%Partition ~A starts at ~D and is ~D blocks long."	;blocks, not pages
 	      (STRING-UPCASE PART) PART-BASE PART-SIZE)
       (IF (OR COMPRESSED-FORMAT-P INCREMENTAL-BAND-P)
 	  (PROGN
@@ -1141,9 +1237,11 @@ or /"CC/" which refers to the machine being debugged by this one."
 		(FORMAT T "~%It is a compressed world-load.")
 	      (FORMAT T "~%It is an incremental band with base band ~A."
 		      (INC-BAND-BASE-BAND PART UNIT)))
-	    (FORMAT T "~%Data length is ~D pages, highest virtual page number is ~D."
+;	    (FORMAT T "~%Data length is ~D pages, highest virtual page number is ~D."
+	    (format t "~%Data length is ~D blocks, highest virtual page number is ~D."
 		    VALID-SIZE HIGHEST-VIRTUAL-ADDRESS))
-	(FORMAT T "~%It is in non-compressed format, data length ~D pages." VALID-SIZE))
+;	(FORMAT T "~%It is in non-compressed format, data length ~D pages." VALID-SIZE))
+	(format t "~%It is in non-compressed format, data length ~D blocks." valid-size))
       (IF DESIRED-UCODE-VERSION
 	  (FORMAT T "~%Goes with microcode version ~D." DESIRED-UCODE-VERSION)))
     (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))
@@ -1173,20 +1271,38 @@ by an actual good Lisp world."
 	(DECODE-UNIT-ARGUMENT UNIT (FORMAT NIL "searching for partitions")))
   (UNWIND-PROTECT
       (PROGN
-	(SETQ RQB (GET-DISK-RQB 20))
-	(DO ((RQB-BASE START (+ RQB-BASE 20)))
-	    ((>= RQB-BASE END))
-	  (DISK-READ RQB UNIT RQB-BASE)
-	  (DO ((IDX 0 (1+ IDX)))
-	      ((= IDX 20))
-	    (WHEN (= #O1000
-		     (AREF (RQB-BUFFER RQB)
-			   (+ (* PAGE-SIZE 2 IDX) (* 2 %SYS-COM-BAND-FORMAT))))
-	      (FORMAT T "~%Possible at block ~d:~%" (+ RQB-BASE IDX -1))
-	      (FORMAT T "Ucode version ~d~%"
-		      (AREF (RQB-BUFFER RQB)
-			    (+ (* PAGE-SIZE 2 IDX)
-			       (* 2 %SYS-COM-DESIRED-MICROCODE-VERSION))))))))
+;	(SETQ RQB (GET-DISK-RQB 20))
+;	(DO ((RQB-BASE START (+ RQB-BASE 20)))
+;	    ((>= RQB-BASE END))
+;	  (DISK-READ RQB UNIT RQB-BASE)
+;	  (DO ((IDX 0 (1+ IDX)))
+;	      ((= IDX 20))
+;	    (WHEN (= #O1000
+;		     (AREF (RQB-BUFFER RQB)
+;			   (+ (* PAGE-SIZE 2 IDX) (* 2 %SYS-COM-BAND-FORMAT))))
+;	      (FORMAT T "~%Possible at block ~d:~%" (+ RQB-BASE IDX -1))
+;	      (FORMAT T "Ucode version ~d~%"
+;		      (AREF (RQB-BUFFER RQB)
+;			    (+ (* PAGE-SIZE 2 IDX)
+;			       (* 2 %SYS-COM-DESIRED-MICROCODE-VERSION))))))))
+	;; 1024-word pages (contract g2, option (w)): 20 blocks at a time, in
+	;; whole pages, each block disk-block-words words; a band's system
+	;; communication area is its page 1, disk-blocks-per-page blocks in, and
+	;; a band of this microcode says 1100
+	(setq rqb (get-disk-rqb (ceiling 20 disk-blocks-per-page)))
+	(do ((rqb-base start (+ rqb-base 20)))
+	    ((>= rqb-base end))
+	  (disk-read rqb unit rqb-base)
+	  (do ((idx 0 (1+ idx)))
+	      ((= idx 20))
+	    (when (= band-format-compressed
+		     (aref (rqb-buffer rqb)
+			   (+ (* (disk-block-words) 2 idx) (* 2 %sys-com-band-format))))
+	      (format t "~%Possible at block ~d:~%" (- (+ rqb-base idx) disk-blocks-per-page))
+	      (format t "Ucode version ~d~%"
+		      (aref (rqb-buffer rqb)
+			    (+ (* (disk-block-words) 2 idx)
+			       (* 2 %sys-com-desired-microcode-version))))))))
     (WHEN RQB (RETURN-DISK-RQB RQB))
     (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))))
 
@@ -1204,7 +1320,8 @@ or /"CC/" which refers to the machine being debugged by this one."
 	  (FIND-DISK-PARTITION-FOR-READ PART NIL UNIT))
 	(SETQ RQB (GET-DISK-RQB))
 	(COND ((OR (NUMBERP PART) (STRING-EQUAL PART "LOD" :END1 3))
-	       (DISK-READ RQB UNIT (1+ PART-BASE))
+;	       (DISK-READ RQB UNIT (1+ PART-BASE))
+	       (disk-read rqb unit (band-sys-com-block part-base))	;1024-word pages
 	       (LET ((BUF (RQB-BUFFER RQB)))
 		 (AREF BUF (* 2 %SYS-COM-DESIRED-MICROCODE-VERSION))))))
     (UNLESS DONT-DISPOSE (DISPOSE-OF-UNIT UNIT))
@@ -1227,14 +1344,20 @@ or /"CC/" which refers to the machine being debugged by this one."
       (MULTIPLE-VALUE (PART-BASE PART-SIZE)
 	(FIND-DISK-PARTITION-FOR-READ PART NIL UNIT))
       (COND ((OR (NUMBERP PART) (STRING-EQUAL PART "LOD" :END1 3))
-	     (DISK-READ RQB UNIT (1+ PART-BASE))
+;	     (DISK-READ RQB UNIT (1+ PART-BASE))
+	     (disk-read rqb unit (band-sys-com-block part-base))	;1024-word pages
 	     (LET* ((BUF (RQB-BUFFER RQB))
-		    (SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE))
+;		    (SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE))
+		    ;; 1024-word pages (contract g2, option (w)): blocks, as
+		    ;; part-size and the paging partition's size are
+		    (size (sys-com-block-count buf %sys-com-valid-size))
 		    (FINAL-SIZE (IF (AND (> SIZE #o10) ( SIZE PART-SIZE)) SIZE PART-SIZE))
 		    (MEMORY-SIZE
-		      (SYS-COM-PAGE-NUMBER BUF %SYS-COM-HIGHEST-VIRTUAL-ADDRESS)))
+;		      (SYS-COM-PAGE-NUMBER BUF %SYS-COM-HIGHEST-VIRTUAL-ADDRESS)))
+		      (sys-com-block-count buf %sys-com-highest-virtual-address)))
 	       (VALUES FINAL-SIZE
-		       (IF (= (AREF BUF (* 2 %SYS-COM-BAND-FORMAT)) #o1000)
+;		       (IF (= (AREF BUF (* 2 %SYS-COM-BAND-FORMAT)) #o1000)
+		       (if (= (aref buf (* 2 %sys-com-band-format)) band-format-compressed)
 			   MEMORY-SIZE FINAL-SIZE)
 		       (AREF BUF (* 2 %SYS-COM-DESIRED-MICROCODE-VERSION)))))
 	    (T PART-SIZE)))
@@ -1251,8 +1374,20 @@ or /"CC/" which refers to the machine being debugged by this one."
 	     ;; (see LOCAL-MACHINE-NAME).
 	     (multiple-value (page-offset size)
 	       (find-disk-partition-by-type :page rqb 0 t))
-	     (SETQ VIRTUAL-MEMORY-SIZE (* (MIN (LDB #o1020 A-MEMORY-VIRTUAL-ADDRESS) SIZE)
-					  PAGE-SIZE)))
+;	     (SETQ VIRTUAL-MEMORY-SIZE (* (MIN (LDB #o1020 A-MEMORY-VIRTUAL-ADDRESS) SIZE)
+;					  PAGE-SIZE)))
+	     ;; 1024-word pages (contract g2, option (w)): the pages below the
+	     ;; a-memory address and the whole pages of the paging partition,
+	     ;; whose size is in blocks.  the a-memory address is a negative
+	     ;; fixnum: its page is its bits 10-23, as ldb #o1020 took bits 8-23
+	     ;; for 256-word pages (a floor of it made the size negative, and
+	     ;; address-space-warning stopped the cold load's qld).
+;	     (setq virtual-memory-size (* (min (floor a-memory-virtual-address page-size)
+;					       (floor size disk-blocks-per-page))
+;					  page-size)))
+	     (setq virtual-memory-size (* (min (ldb #o1216 a-memory-virtual-address)
+					       (floor size disk-blocks-per-page))
+					  page-size)))
     (RETURN-DISK-RQB RQB)))
 
 ;; quux (contract q8): the gpt has no pack name, which named the machine in
@@ -1329,9 +1464,14 @@ This is obsolete -- You probably want PRINT-HERALD"
 	      ((NULL (%PAGE-STATUS ADDRESS))
 	       (WITHOUT-INTERRUPTS		;Try not to get aborted
 		 (LET ((PFN (%FINDCORE)))
-		   (OR (%PAGE-IN PFN (LSH ADDRESS -8))
-		       ;; Page already got in somehow, free up the PFN
-		       (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))))))
+;		   (OR (%PAGE-IN PFN (LSH ADDRESS -8))
+;		       ;; Page already got in somehow, free up the PFN
+;		       (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))))))
+		   ;; 1024-word pages (contract g2, option (w)): the virtual page
+		   ;; number and the frame's physical address by page-size, not 256
+		   (or (%page-in pfn (floor (%pointer address) page-size))
+		       ;; page already got in somehow, free up the pfn
+		       (%create-physical-page (* pfn page-size))))))))
       (UNWIRE-PAGE ADDRESS)))
 
 (DEFUN UNWIRE-PAGE (ADDRESS)
@@ -1418,14 +1558,25 @@ or /"CC/" which refers to the machine being debugged by this one."
 	  (FIND-DISK-PARTITION-FOR-WRITE PART NIL UNIT NIL "MCR"))
 	(WITH-OPEN-FILE (FILE FILENAME :DIRECTION :INPUT :CHARACTERS NIL :BYTE-SIZE 16.)
 	  (BLOCK DONE
-	    (DO ((BUF16 (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER))
-		 (BLOCK PART-BASE (1+ BLOCK))
-		 (N PART-SIZE (1- N)))
-		((ZEROP N) (FERROR NIL "Failed to fit in partition"))
-	      (DO ((LH) (RH)
-		   (I 0 (+ I 2)))
-		  ((= I #o1000)
-		   (DISK-WRITE RQB UNIT BLOCK))
+;	    (DO ((BUF16 (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER))
+;		 (BLOCK PART-BASE (1+ BLOCK))
+;		 (N PART-SIZE (1- N)))
+;		((ZEROP N) (FERROR NIL "Failed to fit in partition"))
+;	      (DO ((LH) (RH)
+;		   (I 0 (+ I 2)))
+;		  ((= I #o1000)
+;		   (DISK-WRITE RQB UNIT BLOCK))
+	    ;; 1024-word pages (contract g2, option (w)): the rqb is a page, its
+	    ;; disk-blocks-per-page blocks written at once, so the partition
+	    ;; takes the file in whole pages
+	    (do ((buf16 (array-leader rqb %disk-rq-leader-buffer))
+		 (block part-base (+ block disk-blocks-per-page))
+		 (n part-size (- n disk-blocks-per-page)))
+		((< n disk-blocks-per-page) (ferror nil "Failed to fit in partition"))
+	      (do ((lh) (rh)
+		   (i 0 (+ i 2)))
+		  ((= i (* 2 page-size))
+		   (disk-write rqb unit block))
 		(SETQ LH (SEND FILE :TYI)
 		      RH (SEND FILE :TYI))
 		(WHEN (OR (NULL LH) (NULL RH))
@@ -1433,7 +1584,8 @@ or /"CC/" which refers to the machine being debugged by this one."
 		  ;; mit's dropped it.  a partition-order file ends on a whole
 		  ;; block, so there is none.
 		  (unless (zerop i)
-		    (array-initialize buf16 0 i #o1000)
+;		    (array-initialize buf16 0 i #o1000)
+		    (array-initialize buf16 0 i (* 2 page-size))	;the page's rest
 		    (disk-write rqb unit block))
 		  (UPDATE-PARTITION-COMMENT
 		    PART
@@ -1519,8 +1671,13 @@ or /"CC/" which refers to the machine being debugged by this one."
 	FROM-UNIT FROM-PART TO-UNIT TO-PART STREAM STARTING-HUNDRED))
 
 ;;; Copying a partition from one unit to another
+;;; 1024-word pages (contract g2, option (w)): N-PAGES-AT-A-TIME is pages of
+;;; disk-blocks-per-page blocks, 22 of them the 85 blocks of 256-word pages;
+;;; addresses and sizes stay blocks.  a transfer is whole pages, so the last
+;;; one may run past the size copied, but never past the target partition.
 (DEFUN COPY-DISK-PARTITION (FROM-UNIT FROM-PART TO-UNIT TO-PART
-			    &OPTIONAL (N-PAGES-AT-A-TIME 85.) (DELAY NIL)
+;			    &OPTIONAL (N-PAGES-AT-A-TIME 85.) (DELAY NIL)
+			    &optional (n-pages-at-a-time 22.) (delay nil)
 				      (STARTING-HUNDRED 0) (WHOLE-THING-P NIL)
 			    &AUX FROM-PART-BASE FROM-PART-SIZE TO-PART-BASE TO-PART-SIZE RQB
 			         PART-COMMENT)
@@ -1553,8 +1710,10 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 	       (UNWIND-PROTECT
 		   (PROGN (SETQ RQB (GET-DISK-RQB 1))
 			  (SETQ BUF (RQB-BUFFER RQB))
-			  (DISK-READ RQB FROM-UNIT (1+ FROM-PART-BASE))
-			  (LET ((SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE)))
+;			  (DISK-READ RQB FROM-UNIT (1+ FROM-PART-BASE))
+;			  (LET ((SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE)))
+			  (disk-read rqb from-unit (band-sys-com-block from-part-base))
+			  (let ((size (sys-com-block-count buf %sys-com-valid-size)))	;blocks
 			    (COND ((AND (> SIZE #o10) ( SIZE FROM-PART-SIZE))
 				   (SETQ FROM-PART-SIZE SIZE)
 				   (FORMAT T "... using measured size of ~D blocks." SIZE)))))
@@ -1578,10 +1737,19 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 	     (N-HUNDRED STARTING-HUNDRED)
 	     (AMT))
 	    ((OR ( FROM-ADR FROM-HIGH) (>= TO-ADR TO-HIGH)))
-	  (SETQ AMT (MIN (- FROM-HIGH FROM-ADR) (- TO-HIGH TO-ADR) N-PAGES-AT-A-TIME))
-	  (COND ((NOT (= AMT N-PAGES-AT-A-TIME))
-		 (RETURN-DISK-RQB RQB)
-		 (SETQ RQB (GET-DISK-RQB AMT))))
+;	  (SETQ AMT (MIN (- FROM-HIGH FROM-ADR) (- TO-HIGH TO-ADR) N-PAGES-AT-A-TIME))
+;	  (COND ((NOT (= AMT N-PAGES-AT-A-TIME))
+;		 (RETURN-DISK-RQB RQB)
+;		 (SETQ RQB (GET-DISK-RQB AMT))))
+	  (setq amt (min (- from-high from-adr) (- to-high to-adr)
+			 (* n-pages-at-a-time disk-blocks-per-page)))
+	  (let ((pages (ceiling amt disk-blocks-per-page)))
+	    (when (> (+ to-adr (* pages disk-blocks-per-page)) to-high)
+	      (ferror nil "Partition ~A ends ~D blocks into a page, which cannot be written alone."
+		      to-part (- to-high to-adr)))
+	    (cond ((not (= pages n-pages-at-a-time))
+		   (return-disk-rqb rqb)
+		   (setq rqb (get-disk-rqb pages)))))
 	  (DISK-READ RQB FROM-UNIT FROM-ADR)
 	  (DISK-WRITE RQB TO-UNIT TO-ADR)
 	  (WHEN ( (FLOOR (+ N-BLOCKS AMT) 100.) N-HUNDRED)
@@ -1597,8 +1765,10 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
   (DISPOSE-OF-UNIT TO-UNIT))
 
 ;;; Prints differences
+;;; 1024-word pages (contract g2, option (w)): as copy-disk-partition.
 (DEFUN COMPARE-DISK-PARTITION (FROM-UNIT FROM-PART TO-UNIT TO-PART
-			    &OPTIONAL (N-PAGES-AT-A-TIME 85.) (DELAY NIL)
+;			    &OPTIONAL (N-PAGES-AT-A-TIME 85.) (DELAY NIL)
+			    &optional (n-pages-at-a-time 22.) (delay nil)
 				      (STARTING-HUNDRED 0) (WHOLE-THING-P NIL)
 			    &AUX FROM-PART-BASE FROM-PART-SIZE TO-PART-BASE TO-PART-SIZE
 			         RQB RQB2)
@@ -1627,8 +1797,10 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 		(PROGN
 		  (SETQ RQB (GET-DISK-RQB 1))
 		  (SETQ BUF (RQB-BUFFER RQB))
-		  (DISK-READ RQB FROM-UNIT (1+ FROM-PART-BASE))
-		  (LET ((SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE)))
+;		  (DISK-READ RQB FROM-UNIT (1+ FROM-PART-BASE))
+;		  (LET ((SIZE (SYS-COM-PAGE-NUMBER BUF %SYS-COM-VALID-SIZE)))
+		  (disk-read rqb from-unit (band-sys-com-block from-part-base))
+		  (let ((size (sys-com-block-count buf %sys-com-valid-size)))	;blocks
 		    (COND ((AND (> SIZE #o10) ( SIZE FROM-PART-SIZE))
 			   (SETQ FROM-PART-SIZE SIZE)
 			   (FORMAT T "... using measured size of ~D. blocks." SIZE)))))
@@ -1644,14 +1816,25 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 	     (BUF2 (RQB-BUFFER RQB2)))
 	    ((OR ( FROM-ADR FROM-HIGH)
 		 ( TO-ADR TO-HIGH)))
-	  (SETQ AMT (MIN (- FROM-HIGH FROM-ADR) (- TO-HIGH TO-ADR) N-PAGES-AT-A-TIME))
-	  (COND ((NOT (= AMT N-PAGES-AT-A-TIME))
-		 (RETURN-DISK-RQB RQB)
-		 (RETURN-DISK-RQB RQB2)
-		 (SETQ RQB (GET-DISK-RQB AMT))
-		 (SETQ RQB2 (GET-DISK-RQB AMT))
-		 (SETQ BUF (RQB-BUFFER RQB))
-		 (SETQ BUF2 (RQB-BUFFER RQB2))))
+;	  (SETQ AMT (MIN (- FROM-HIGH FROM-ADR) (- TO-HIGH TO-ADR) N-PAGES-AT-A-TIME))
+;	  (COND ((NOT (= AMT N-PAGES-AT-A-TIME))
+;		 (RETURN-DISK-RQB RQB)
+;		 (RETURN-DISK-RQB RQB2)
+;		 (SETQ RQB (GET-DISK-RQB AMT))
+;		 (SETQ RQB2 (GET-DISK-RQB AMT))
+;		 (SETQ BUF (RQB-BUFFER RQB))
+;		 (SETQ BUF2 (RQB-BUFFER RQB2))))
+	  ;; amt is blocks; the rqbs whole pages of them (only amt's are compared)
+	  (setq amt (min (- from-high from-adr) (- to-high to-adr)
+			 (* n-pages-at-a-time disk-blocks-per-page)))
+	  (let ((pages (ceiling amt disk-blocks-per-page)))
+	    (cond ((not (= pages n-pages-at-a-time))
+		   (return-disk-rqb rqb)
+		   (return-disk-rqb rqb2)
+		   (setq rqb (get-disk-rqb pages))
+		   (setq rqb2 (get-disk-rqb pages))
+		   (setq buf (rqb-buffer rqb))
+		   (setq buf2 (rqb-buffer rqb2)))))
 	  (DISK-READ RQB FROM-UNIT FROM-ADR)
 	  (DISK-READ RQB2 TO-UNIT TO-ADR)
 	  (UNLESS (LET ((ALPHABETIC-CASE-AFFECTS-STRING-COMPARISON T))
@@ -1689,14 +1872,27 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 ;;; everything in DISK-BUFFER-AREA has to be a multiple of a page.
 ;;; This defines the number of CCWs.
 
-(DEFVAR PAGE-RQB-SIZE (- PAGE-SIZE 1 (FLOOR %DISK-RQ-CCW-LIST 2))) ;NUMBER OF CCWS
-(DEFVAR PAGE-RQB
-	(MAKE-ARRAY (* 2 (1- PAGE-SIZE)) :TYPE 'ART-16B :AREA DISK-BUFFER-AREA))
+;(DEFVAR PAGE-RQB-SIZE (- PAGE-SIZE 1 (FLOOR %DISK-RQ-CCW-LIST 2))) ;NUMBER OF CCWS
+;;; 1024-word pages (contract g2, option (w)): a page takes disk-blocks-per-page
+;;; ccws, a block each; page-rqb-size counts ccws, not pages.  a page's
+;;; halfwords are more than a short array holds, so the array is long, its
+;;; header two words: it holds one data word less, to stay one page, and its
+;;; ccw list starts a word later.  as a 1025-word array whose list pointer was
+;;; a word short of its list, disk-save's page-in-words stopped short ("disk
+;;; read stopped at block 14403., not 14554.") and the machine halted after.
+(defvar page-rqb-header-words
+	(if (> (* 2 (1- page-size)) %array-max-short-index-length) 2 1))
+(defvar page-rqb-size (- page-size page-rqb-header-words (floor %disk-rq-ccw-list 2))) ;number of ccws
+;(DEFVAR PAGE-RQB
+;	(MAKE-ARRAY (* 2 (1- PAGE-SIZE)) :TYPE 'ART-16B :AREA DISK-BUFFER-AREA))
+(defvar page-rqb
+	(make-array (* 2 (- page-size page-rqb-header-words)) :type 'art-16b :area disk-buffer-area))
 
 (DEFUN WIRE-PAGE-RQB () 
   (WIRE-PAGE (%POINTER PAGE-RQB))
   (LET ((PADR (+ (%PHYSICAL-ADDRESS PAGE-RQB)
-		 1
+;		 1
+		 page-rqb-header-words		;1024-word pages: 2, the array being long
 		 (FLOOR %DISK-RQ-CCW-LIST 2))))
     (SETF (AREF PAGE-RQB %DISK-RQ-CCW-LIST-POINTER-LOW) PADR)
     (SETF (AREF PAGE-RQB %DISK-RQ-CCW-LIST-POINTER-HIGH) (LSH PADR -16.))))
@@ -1837,12 +2033,23 @@ FROM and TO are lists of subscripts, or NIL."
 	       ;; PFNs as CCWs.
 	       (DO-FOREVER
 		 (OR (EQ (%PAGE-STATUS ADDR) NIL) (RETURN NIL))
-		 (LET ((PFN (%FINDCORE)))
-		   (SETF (AREF PAGE-RQB CCWP) (1+ (LSH PFN 8)))
-		   (SETF (AREF PAGE-RQB (1+ CCWP)) (LSH PFN -8)))
-		 (INCF CCWX 1)
-		 (INCF CCWP 2)
-		 (UNLESS (< CCWX PAGE-RQB-SIZE)
+;		 (LET ((PFN (%FINDCORE)))
+;		   (SETF (AREF PAGE-RQB CCWP) (1+ (LSH PFN 8)))
+;		   (SETF (AREF PAGE-RQB (1+ CCWP)) (LSH PFN -8)))
+;		 (INCF CCWX 1)
+;		 (INCF CCWP 2)
+;		 (UNLESS (< CCWX PAGE-RQB-SIZE)
+		 ;; 1024-word pages (contract g2, option (w)): a ccw for each of
+		 ;; the frame's blocks, each with its chain bit, the frame's
+		 ;; physical address page-size words a frame
+		 (let ((padr (* (%findcore) page-size)))
+		   (dotimes (k disk-blocks-per-page)
+		     (setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
+		     (setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
+		     (incf ccwp 2)
+		     (incf padr (disk-block-words))))
+		 (incf ccwx disk-blocks-per-page)
+		 (unless (<= (+ ccwx disk-blocks-per-page) page-rqb-size)
 		   (RETURN NIL))
 		 (SETQ ADDR (%POINTER-PLUS ADDR PAGE-SIZE))
 		 (DECF N PAGE-SIZE)
@@ -1851,19 +2058,35 @@ FROM and TO are lists of subscripts, or NIL."
 	       (WHEN (PLUSP CCWX)	;We have something to do, run the I/O op
 		 ;; Turn off chain bit
 		 (SETF (AREF PAGE-RQB (- CCWP 2)) (LOGAND (AREF PAGE-RQB (- CCWP 2)) -2))
-		 (DISK-READ-WIRED PAGE-RQB 0 (+ (LSH BASE-ADDR -8) PAGE-OFFSET))
+;		 (DISK-READ-WIRED PAGE-RQB 0 (+ (LSH BASE-ADDR -8) PAGE-OFFSET))
+		 ;; 1024-word pages (contract g2, option (w)): the page's blocks,
+		 ;; disk-blocks-per-page a page
+		 (disk-read-wired page-rqb 0 (+ (* (floor base-addr page-size) disk-blocks-per-page)
+						page-offset))
 		 ;; Make these pages in
-		 (DO ((I 0 (1+ I))
-		      (CCWP %DISK-RQ-CCW-LIST (+ 2 CCWP))
-		      (VPN (LSH BASE-ADDR -8) (1+ VPN))
-		      (PFN))
-		     ((= I CCWX))
-		   (SETQ PFN (DPB (AREF PAGE-RQB (1+ CCWP))
-				  #o1010
-				  (LDB #o1010 (AREF PAGE-RQB CCWP))))
-		   (UNLESS (%PAGE-IN PFN VPN)
-		     ;; Page already got in somehow, free up the PFN
-		     (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))
+;		 (DO ((I 0 (1+ I))
+;		      (CCWP %DISK-RQ-CCW-LIST (+ 2 CCWP))
+;		      (VPN (LSH BASE-ADDR -8) (1+ VPN))
+;		      (PFN))
+;		     ((= I CCWX))
+;		   (SETQ PFN (DPB (AREF PAGE-RQB (1+ CCWP))
+;				  #o1010
+;				  (LDB #o1010 (AREF PAGE-RQB CCWP))))
+;		   (UNLESS (%PAGE-IN PFN VPN)
+;		     ;; Page already got in somehow, free up the PFN
+;		     (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))
+		 ;; a page's first ccw names its frame
+		 (do ((i 0 (+ i disk-blocks-per-page))
+		      (ccwp %disk-rq-ccw-list (+ ccwp (* 2 disk-blocks-per-page)))
+		      (vpn (floor base-addr page-size) (1+ vpn))
+		      (pfn))
+		     ((>= i ccwx))
+		   (setq pfn (floor (dpb (aref page-rqb (1+ ccwp)) #o2020
+					 (logand (aref page-rqb ccwp) -2))
+				    page-size))
+		   (unless (%page-in pfn vpn)
+		     ;; page already got in somehow, free up the pfn
+		     (%create-physical-page (* pfn page-size))))
 		 (SETQ CCWX 0))))
       ;; UNWIND-PROTECT forms
       (UNWIRE-PAGE-RQB)
@@ -1913,6 +2136,8 @@ FROM and TO are lists of subscripts, or NIL."
 	       (RETURN-DISK-RQB RQB)))
     (DISPOSE-OF-UNIT UNIT)))
 
+;; 1024-word pages (contract g2, option (w)): the rqb is a page, four blocks;
+;; the first 2000 bytes shown are block BLOCK-NO's.
 (DEFUN INSPECT-BLOCK (BLOCK-NO &OPTIONAL (UNIT 0) &AUX RQB BUF)
   (SETQ UNIT (DECODE-UNIT-ARGUMENT UNIT "reading block"))
   (UNWIND-PROTECT

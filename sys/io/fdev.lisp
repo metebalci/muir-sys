@@ -161,8 +161,14 @@ so that no page is reused while the device may write it.")
   ;; wire-disk-rqb writes each data page's physical address into the ccw
   ;; list: the low 16 bits (bit 0 the chain bit, the page's low bits 0) and
   ;; the high bits.
-  (+ (logand (aref rqb (+ %disk-rq-ccw-list (* 2 page))) (- page-size))
-     (ash (aref rqb (+ %disk-rq-ccw-list 1 (* 2 page))) 16.)))
+;  (+ (logand (aref rqb (+ %disk-rq-ccw-list (* 2 page))) (- page-size))
+;     (ash (aref rqb (+ %disk-rq-ccw-list 1 (* 2 page))) 16.)))
+  ;; 1024-word pages (contract g2, option (w)): a page has
+  ;; disk-blocks-per-page ccws, a block each, and its first is the page's
+  ;; address, the page's frame being whole.
+  (let ((ccw (+ %disk-rq-ccw-list (* 2 page disk-blocks-per-page))))
+    (+ (logand (aref rqb ccw) (- page-size))
+       (ash (aref rqb (1+ ccw)) 16.))))
 
 (defun file-device-8-bit-view (rqb)
   "An ART-8B array over RQB's data pages, made as MAKE-DISK-RQB makes its views."

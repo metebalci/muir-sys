@@ -57,8 +57,14 @@ A-5		(0)
 ;; page-0-parity-fix: the prom writes nothing to the disk (contract q8).
 A-40		(0)
 A-400		(0)
-a-1400		(0)	;quux: physical page 3, the prom's buffer
-a-2000		(0)	;quux: the first word past the buffer
+;a-1400		(0)	;quux: physical page 3, the prom's buffer
+;a-2000		(0)	;quux: the first word past the buffer
+;; 1024-word pages (contract g2, option (w); appendix a1.9): the microcode
+;; symbol area, which the main-memory section fills, is page 3, 6000-7777, so
+;; the buffer is its first block, 6000; the system communication area is
+;; page 1, 2000, and the ccw its word 377, 2377.
+a-6000		(0)	;the prom's buffer, 6000-6377
+a-2000		(0)	;2000, the system communication area, for the ccw's 2377
 A-20000		(0)
 A-36000		(0)	;quux: the prom's first address; the microcode ends below it
 A-DISK-ERROR	(0)
@@ -83,6 +89,9 @@ A-DISK-REGS	(0)	;Virtual address of disk control registers
 A-MICR-ORIGIN	(0)	;Base disk address of microcode partition
 A-MICR-ADDRESS	(0)	;Address of next block of microcode partition
 A-MICR-N-BLOCKS	(0)	;Remaining blocks of microcode partition
+;; 1024-word pages (contract g2, option (w)): the first word past the buffer,
+;; last so that no earlier location moves
+a-6400		(0)
 
 (LOCALITY I-MEM)
 
@@ -199,6 +208,7 @@ error-two-main-mem-sections
 	;; quux: the main-memory section does not cover the buffer, physical
 	;; page 3, so loading it would leave the microcode partition's last
 	;; block there instead of what the microcode expects (contract q8).
+	;; with 1024-word pages (contract g2, option (w)) the buffer is 6000-6377.
 	(no-op)
 error-buffer-not-loaded
 	(jump halt-cons error-buffer-not-loaded)
@@ -324,7 +334,8 @@ MAKE-CONSTANTS
 	((A-5)   DPB M-ONES (BYTE-FIELD 1 2) A-1)
 	((A-40)  DPB M-ONES (BYTE-FIELD 1 5) A-ZERO)
 	((A-400) DPB M-ONES (BYTE-FIELD 1 8) A-ZERO)
-	((a-1400) dpb m-ones (byte-field 2 8) a-zero)
+;	((a-1400) dpb m-ones (byte-field 2 8) a-zero)
+	((a-6000) dpb m-ones (byte-field 2 10.) a-zero)	;1024-word pages: the buffer
 	((a-2000) dpb m-ones (byte-field 1 10.) a-zero)
 	((a-10) dpb m-ones (byte-field 1 3) a-zero)
 	((A-20000) DPB M-ONES (BYTE-FIELD 1 13.) A-ZERO)
@@ -447,19 +458,28 @@ SET-UP-THE-MAP
 ;;;  space, where it was 36776, 17377000, before, and block-disk is its words
 ;;;  200-203, virtual 1200-1203.
 ;;;  Page 3: Mapped to the second page of main memory. (system communication area)
+;;;  with 1024-word pages (contract g2, option (w); appendix a1.9) page 0 is
+;;;  physical 6000, the microcode symbol area's first block, and page 3
+;;;  physical 2000, the system communication area's.
 ;;; M-A holds the bits to write the level 1 map with r/w access, MD has zero initially.
 ;;; quux (contract q13): the two no-ops take the places of the two writes that
 ;;; went, so that every later prom address stays where it was; muir-sim's
 ;;; tests and muir-fpga's goldens name them.
 SET-UP-FOUR-PAGES
 	((m-a) dpb m-ones (byte-field 4 22.) a-zero)	;Sets bit 24 which is ignored
-	((vma-write-map) add m-a a-3)			;quux: virtual page 0, physical 3
+;	((vma-write-map) add m-a a-3)			;quux: virtual page 0, physical 3
+	;; 1024-word pages (contract g2, option (w)): the buffer is physical
+	;; 6000, 256-word page 14 (m-a's low bits are zero)
+	((vma-write-map) dpb m-ones (byte-field 2 2) a-a)	;virtual page 0, physical 14
 
 ;	((M-B) DPB M-ONES (BYTE-FIELD 11 0) A-A)
 	((m-b) dpb m-ones (byte-field 1 7) a-zero)	;quux: 200, block-disk's first word
 	((MD) A-400)
 ;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36777
-	(no-op)						;quux: page 1 is not mapped
+;	(no-op)						;quux: page 1 is not mapped
+	;; page 1 is not mapped; this word, a no-op before, makes 6400, the first
+	;; word past the buffer (1024-word pages, contract g2, option (w))
+	((a-6400) dpb m-ones (byte-field 1 8) a-6000)
 ;	((A-DISK-REGS) DPB M-ONES (BYTE-FIELD 7 2) A-ZERO)	;Virt Addr 774
 	((a-disk-regs) dpb m-ones (byte-field 1 9.) a-b)	;quux: virt addr 1200
 
@@ -470,13 +490,20 @@ SET-UP-FOUR-PAGES
 	((vma-write-map) dpb m-ones (byte-field 16 0) a-a)	;quux: M-A + 37777
 
 	((MD) ADD MD A-400)
-	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 0) A-A)	;M-A + 1
+;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 0) A-A)	;M-A + 1
+	;; 1024-word pages (contract g2, option (w)): virtual page 3 is physical
+	;; 2000-2377, the system communication area's first 256 words, for the
+	;; ccw at its word 377
+	((vma-write-map) dpb m-ones (byte-field 1 2) a-a)	;m-a + 4
 	(NO-OP)
 
 ;;; quux: page-0-parity-fix, which read and rewrote every word of page 0
 ;;; so that saving it to the disk found good parity, is gone with the save
 ;;; (contract q8).  the prom writes main memory only in its buffer, the
 ;;; section it loads there, and word 777, the ccw.
+;;; with 1024-word pages (contract g2, option (w); appendix a1.9) the buffer
+;;; is 6000-6377, in the microcode symbol area at 6000-7777, and the ccw is
+;;; word 2377, the system communication area's 377.
 
 ;;; Now turn on parity checking
 ;; quux: error stop is bit 0 of the register page's word 102, the mode, at
@@ -543,7 +570,7 @@ SET-UP-FOUR-PAGES
 READ-LABEL
 	((M-TEMP-1) SETZ)
 	(CALL-XCT-NEXT DISK-READ)
-       ((m-a) a-1400)
+       ((m-a) a-6000)		;1024-word pages: the buffer is 6000
 
 	;; m-b/ "EFI " = 4022243105
 	((m-b) dpb m-ones (byte-field 1 0) a-zero)
@@ -609,7 +636,7 @@ search-gpt
 	(jump-not-equal m-d a-zero search-gpt-entry)
 	((m-temp-1) a-gpt-block)
 	(call-xct-next disk-read)
-       ((m-a) a-1400)
+       ((m-a) a-6000)		;1024-word pages: the buffer is 6000
 	((a-gpt-block) m+a+1 m-zero a-gpt-block)
 	((m-d) a-10)
 	((m-c) setz)
@@ -728,13 +755,15 @@ DONE-LOADING
 ;;; error-buffer-not-loaded unless it starts at or below 1400 and ends at or
 ;;; above 2000.  the check comes first, so a section that fails it is never
 ;;; loaded.
+;;; with 1024-word pages (contract g2, option (w)) the buffer is 6000-6377:
+;;; at or below 6000 and at or above 6400.
 	((m-c) a-main-mem-n-blocks)
 	(jump-equal m-c a-zero error-buffer-not-loaded)
 	((m-a) a-main-mem-address)
-	(jump-greater-than m-a a-1400 error-buffer-not-loaded)
+	(jump-greater-than m-a a-6000 error-buffer-not-loaded)	;1024-word pages: 6000
 	((m-b) dpb m-c (byte-field 22. 8.) a-zero)	;its length in words
 	((m-b) add m-b a-main-mem-address)		;the first word past it
-	(jump-less-than m-b a-2000 error-buffer-not-loaded)
+	(jump-less-than m-b a-6400 error-buffer-not-loaded)	;1024-word pages: 6400
 	((m-b) a-main-mem-block)
 main-mem-loop
 	(jump-equal m-c a-zero main-mem-loaded)
@@ -793,7 +822,7 @@ GET-NEXT-PAGE
 	((A-MICR-N-BLOCKS) ADD M-ONES A-MICR-N-BLOCKS)	;Subtract 1
 	((M-TEMP-1) A-MICR-ADDRESS)
 	(CALL-XCT-NEXT DISK-READ)
-       ((m-a) a-1400)				;quux: the buffer, physical page 3
+       ((m-a) a-6000)				;the buffer, 6000 (1024-word pages)
 	(JUMP-XCT-NEXT GET-NEXT-WORD)
        ((A-MICR-ADDRESS) M+A+1 M-ZERO A-MICR-ADDRESS)
 
@@ -847,7 +876,8 @@ DISK-OP-LOW
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 	
 	;; Write the CLP register.
-	((MD) DPB M-ONES (BYTE-FIELD 9 0) A-ZERO)	;Phys Addr 777 = Virt Addr 1777
+;	((MD) DPB M-ONES (BYTE-FIELD 9 0) A-ZERO)	;Phys Addr 777 = Virt Addr 1777
+	((md) dpb m-ones (byte-field 8 0) a-2000)	;phys addr 2377 = virt addr 1777 (1024-word pages)
 	((VMA-START-WRITE) ADD VMA A-1)
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 

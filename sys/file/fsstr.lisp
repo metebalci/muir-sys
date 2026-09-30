@@ -8,7 +8,8 @@
 	 (MAP (MAP-CREATE))			;The map this stream is acting upon.
 	 (MAP-INDEX 0)				;Current index within map.
 	 (BYTE-SIZE 8)				;The byte size of the STREAM.
-	 (RQB (GET-DISK-RQB STANDARD-BLOCK-SIZE)) ;The RQB in which the physical buffer lives.
+;	 (RQB (GET-DISK-RQB STANDARD-BLOCK-SIZE)) ;The RQB in which the physical buffer lives.
+	 (rqb (lm-get-disk-rqb standard-block-size)) ;the rqb in which the physical buffer lives.
 	 (RQB-VALID-PAGES NIL))			;The number of pages of data in RQB
 	()
   (:INCLUDED-FLAVORS SI:STREAM)

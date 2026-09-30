@@ -271,7 +271,17 @@ It may be reset only when the file system is dismounted.")
 (DEFCONST PUT-USED 2)				;Page is allocated in core and on disk.
 (DEFCONST PUT-UNUSABLE 3)			;Page should not be referenced ever.
 
-(DEFVAR PAGE-SIZE-IN-BITS (* PAGE-SIZE 32.))
+;(DEFVAR PAGE-SIZE-IN-BITS (* PAGE-SIZE 32.))
+;;; 1024-word pages (contract g2, option (w)): the file system's page is its
+;;; 1 kbyte disk block, which a page of memory no longer is: 256 words.  an
+;;; rqb holds pages of four such blocks (si:rqb-nblocks), so the file system
+;;; asks for its blocks in whole pages, reads whole pages, and writes a
+;;; partial last page's other blocks back as they were (lm-disk-write).
+(defvar page-size-in-bits (* (si:disk-block-words) 32.))
+
+(defun lm-get-disk-rqb (&optional (nblocks 1))
+  "An rqb holding NBLOCKS of the file system's blocks, in whole pages."
+  (get-disk-rqb (ceiling nblocks disk-blocks-per-page)))
 
 ;; This is also in MTDEFS
 (REMPROP 'QUOTIENT-CEILING 'SOURCE-FILE-NAME)
@@ -282,7 +292,8 @@ It may be reset only when the file system is dismounted.")
   (COND ((= BYTE-SIZE 16.) (RQB-BUFFER RQB))
 	((= BYTE-SIZE 8) (RQB-8-BIT-BUFFER RQB))
 	((SETQ TYPE (CDR (ASSQ BYTE-SIZE '((4 . ART-4B) (2 . ART-2B) (1 . ART-1B)))))
-	 (MAKE-ARRAY (FLOOR (* (RQB-NPAGES RQB) PAGE-SIZE-IN-BITS) BYTE-SIZE)
+;	 (MAKE-ARRAY (FLOOR (* (RQB-NPAGES RQB) PAGE-SIZE-IN-BITS) BYTE-SIZE)
+	 (make-array (floor (* (si:rqb-nblocks rqb) page-size-in-bits) byte-size)	;all its blocks
 		     ':AREA LOCAL-FILE-SYSTEM-AREA
 		     ':TYPE TYPE
 		     ':DISPLACED-TO RQB
@@ -296,22 +307,45 @@ It may be reset only when the file system is dismounted.")
 ;; The unit is always LM-UNIT, nd the address is relative to
 ;; the current partition (LM-PARTITION).
 
-(DEFUN LM-DISK-WRITE (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+;(DEFUN LM-DISK-WRITE (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+;; 1024-word pages (contract g2, option (w)): NPAGES is the file system's
+;; blocks (see page-size-in-bits), written as the whole pages holding them;
+;; the blocks after them in the last page are read first and written back.
+(defun lm-disk-write (rqb addr &optional (npages (si:rqb-nblocks rqb)))
 ; (COND ((EQ RQB PUT-RQB) (FORMAT T "~%>>Writing the page usage table"))
 ;	((EQ RQB DISK-CONFIGURATION-RQB) (FORMAT T "~%>>Writing configuration"))
 ;	(WITHIN-FILE-SYSTEM (FORMAT T "~%>>Writing an internal structure"))
 ;	(T (FORMAT T "~%>>Writing a file block")))
   (COND ((< ADDR (DC-PARTITION-SIZE))
-	 (UNWIND-PROTECT
-	   (PROGN (SI:WIRE-DISK-RQB RQB NPAGES)
-		  (SI:DISK-WRITE-WIRED RQB LM-UNIT (+ ADDR LM-PARTITION-BASE)))
-	   (SI:UNWIRE-DISK-RQB RQB)))
+	 (let* ((pages (ceiling npages disk-blocks-per-page))
+		(extra (- (* pages disk-blocks-per-page) npages)))
+	   (when (plusp extra)
+	     ;; the last page's blocks after NPAGES, from the disk, into the rqb
+	     (let ((tem (get-disk-rqb 1))
+		   (words (si:disk-block-words)))
+	       (unwind-protect
+		   (progn (si:disk-read tem lm-unit (+ addr lm-partition-base
+						       (* (1- pages) disk-blocks-per-page)))
+			  (copy-array-portion
+			    (rqb-buffer tem) (* 2 words (- disk-blocks-per-page extra))
+			    (* 2 words disk-blocks-per-page)
+			    (rqb-buffer rqb) (* 2 words npages) (* 2 words (+ npages extra))))
+		 (return-disk-rqb tem))))
+	   (UNWIND-PROTECT
+;	     (PROGN (SI:WIRE-DISK-RQB RQB NPAGES)
+	     (progn (si:wire-disk-rqb rqb pages)
+		    (SI:DISK-WRITE-WIRED RQB LM-UNIT (+ ADDR LM-PARTITION-BASE)))
+	     (SI:UNWIRE-DISK-RQB RQB))))
 	(T (FERROR NIL "Disk Write out of range."))))
 
-(DEFUN LM-DISK-READ (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+;(DEFUN LM-DISK-READ (RQB ADDR &OPTIONAL (NPAGES (RQB-NPAGES RQB)))
+;; 1024-word pages (contract g2, option (w)): NPAGES blocks, read as the whole
+;; pages holding them.
+(defun lm-disk-read (rqb addr &optional (npages (si:rqb-nblocks rqb)))
   (COND ((< ADDR (DC-PARTITION-SIZE))
 	 (UNWIND-PROTECT
-	   (PROGN (SI:WIRE-DISK-RQB RQB NPAGES T T)	;set modified
+;	   (PROGN (SI:WIRE-DISK-RQB RQB NPAGES T T)	;set modified
+	   (progn (si:wire-disk-rqb rqb (ceiling npages disk-blocks-per-page) t t)	;set modified
 		  (SI:DISK-READ-WIRED RQB LM-UNIT (+ ADDR LM-PARTITION-BASE)))
 	   (SI:UNWIRE-DISK-RQB RQB)))
 	(T (FERROR NIL "Disk Read out of range."))))
@@ -793,7 +827,8 @@ It may be reset only when the file system is dismounted.")
 (DEFUN WRITE-PUT (&OPTIONAL FORCE-P)
   (REQUIRE-LOCK PUT-LOCK)
   (COND ((OR PUT-MODIFIED FORCE-P)
-	 (LM-DISK-WRITE PUT-RQB (DC-PUT-BASE))
+;	 (LM-DISK-WRITE PUT-RQB (DC-PUT-BASE))
+	 (lm-disk-write put-rqb (dc-put-base) (dc-put-size))	;1024-word pages: its blocks only
 	 (SETQ PUT-MODIFIED NIL))))
 
 (DEFMACRO USING-PUT (&BODY BODY)

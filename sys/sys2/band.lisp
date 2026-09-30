@@ -7,6 +7,13 @@
 ;the disk buffers, if you change the value of QUANTUM it will break; i.e.
 ;two machines with different values of quantum cannot send to each other.
 
+;;; 1024-word pages (contract g2, option (w)): QUANTUM stays 17 blocks, the
+;;; network's chunk, which a machine of 256-word pages sends and takes too; an
+;;; rqb holds it in whole pages of disk-blocks-per-page blocks, so a transfer
+;;; moves up to three blocks more than the chunk: they are read and sent no
+;;; further, and a write reads its pages first, so that it writes those blocks
+;;; back as they were.
+
 (DEFUNP BAND-TRANSFER-SERVER (&AUX CONN PKT STR TEM RQB BUF WRITE-P (QUANTUM 17.) PART-NAME
 				   PART-BASE PART-SIZE PART-COMMENT SUB-START SUB-N NB TOP
 				   (WINDOW 36.))
@@ -56,7 +63,8 @@
 	  (AND SUB-START (SETQ PART-BASE (+ PART-BASE SUB-START)
 			       PART-SIZE SUB-N))
 	  (COND (WRITE-P (UPDATE-PARTITION-COMMENT PART-NAME "Incomplete Copy" 0)))
-	  (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+;	  (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+	  (setq rqb (sys:get-disk-rqb (ceiling quantum disk-blocks-per-page))
 		BUF (SYS:RQB-BUFFER RQB))
 	  (SETQ DISK-ERROR-RETRY-COUNT 20.)	;Try to bypass hardware overrun problem
 	  (WIRE-DISK-RQB RQB)
@@ -64,13 +72,17 @@
 	  (DO ((BLOCK PART-BASE (+ BLOCK QUANTUM)))
 	      (( BLOCK TOP))
 	    (AND (< (SETQ NB (- TOP BLOCK)) QUANTUM)
-		 (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+;		 (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+		 (wire-disk-rqb rqb (ceiling (setq quantum nb) disk-blocks-per-page)))
 	    (COND ((NOT WRITE-P)		;This can modify pages without setting
 		   (DISK-READ-WIRED RQB 0 BLOCK)	; the modified bits, but as long as
 						; we dont depend on data after its unwired,
 						; it wont hurt.
-		   (ARRAY-TO-NET BUF CONN (* QUANTUM PAGE-SIZE 2)))
-		  (T (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+;		   (ARRAY-TO-NET BUF CONN (* QUANTUM PAGE-SIZE 2)))
+		   (array-to-net buf conn (* quantum (disk-block-words) 2)))
+;		  (T (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+		  (t (disk-read-wired rqb 0 block)	;1024-word pages: keep the page's other blocks
+		     (array-from-net buf conn (* quantum (disk-block-words) 2))
 		     (DISK-WRITE-WIRED RQB 0 BLOCK))))
 	  (CHAOS:FINISH-CONN CONN)
 	  (CHAOS:CLOSE-CONN CONN "Done")
@@ -149,7 +161,8 @@ as SUBSET-START, to resume where it left off."
 	     PART-SIZE (- PART-SIZE SUBSET-START))
        (AND SUBSET-N-BLOCKS (SETQ PART-SIZE SUBSET-N-BLOCKS))
        (UPDATE-PARTITION-COMMENT TO-PART "Incomplete Copy" 0)
-       (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+;       (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+       (setq rqb (sys:get-disk-rqb (ceiling quantum disk-blocks-per-page))
 	     BUF (SYS:RQB-BUFFER RQB))
        (SETQ DISK-ERROR-RETRY-COUNT 20.)	;Try to bypass hardware overrun problem
        (WIRE-DISK-RQB RQB)
@@ -157,10 +170,13 @@ as SUBSET-START, to resume where it left off."
        (DO ((BLOCK PART-BASE (+ BLOCK QUANTUM)))
 	   (( BLOCK TOP))
 	 (AND (< (SETQ NB (- TOP BLOCK)) QUANTUM)
-	      (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+;	      (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+	      (wire-disk-rqb rqb (ceiling (setq quantum nb) disk-blocks-per-page)))
 	 (AND ( (SETQ TEM (TRUNCATE (- BLOCK ORIG-PART-BASE) 100.)) N-HUNDRED)
 	      (FORMAT T "~D " (SETQ N-HUNDRED TEM)))
-	 (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+;	 (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+	 (disk-read-wired rqb 0 block)	;1024-word pages: keep the page's other blocks
+	 (array-from-net buf conn (* quantum (disk-block-words) 2))
 	 (DISK-WRITE-WIRED RQB 0 BLOCK))
        (CHAOS:CLOSE-CONN CONN "Done")
        (OR SUBSET-N-BLOCKS (UPDATE-PARTITION-COMMENT TO-PART PART-COMMENT 0))))
@@ -202,7 +218,8 @@ as SUBSET-START, to resume where it left off."
      (SETQ PART-BASE (+ PART-BASE SUBSET-START)
 	   PART-SIZE (- PART-SIZE SUBSET-START))
      (AND SUBSET-N-BLOCKS (SETQ PART-SIZE SUBSET-N-BLOCKS))
-     (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+;     (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+     (setq rqb (sys:get-disk-rqb (ceiling quantum disk-blocks-per-page))
 	   BUF (SYS:RQB-BUFFER RQB)
 	   BUF1 (MAKE-ARRAY (ARRAY-LENGTH BUF) ':TYPE 'ART-16B))
      (SETQ DISK-ERROR-RETRY-COUNT 20.)		;Try to bypass hardware overrun problem
@@ -211,10 +228,12 @@ as SUBSET-START, to resume where it left off."
      (DO ((BLOCK PART-BASE (+ BLOCK QUANTUM)))
 	 (( BLOCK TOP))
        (AND (< (SETQ NB (- TOP BLOCK)) QUANTUM)
-	    (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+;	    (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+	    (wire-disk-rqb rqb (ceiling (setq quantum nb) disk-blocks-per-page)))
        (AND ( (SETQ TEM (TRUNCATE (- BLOCK ORIG-PART-BASE) 100.)) N-HUNDRED)
 	    (FORMAT T "~D " (SETQ N-HUNDRED TEM)))
-       (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+;       (ARRAY-FROM-NET BUF CONN (* QUANTUM PAGE-SIZE 2))
+       (array-from-net buf conn (* quantum (disk-block-words) 2))
        (COND ((DISK-READ-COMPARE-WIRED RQB 0 BLOCK)
 	      (COPY-ARRAY-CONTENTS BUF BUF1)
 	      (DISK-READ-WIRED RQB 0 BLOCK)
@@ -262,7 +281,8 @@ as SUBSET-START, to resume where it left off."
      (SETQ PART-BASE (+ PART-BASE SUBSET-START)
 	   PART-SIZE (- PART-SIZE SUBSET-START))
      (AND SUBSET-N-BLOCKS (SETQ PART-SIZE SUBSET-N-BLOCKS))
-     (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+;     (SETQ RQB (SYS:GET-DISK-RQB QUANTUM)
+     (setq rqb (sys:get-disk-rqb (ceiling quantum disk-blocks-per-page))
 	   BUF (SYS:RQB-BUFFER RQB))
      (SETQ DISK-ERROR-RETRY-COUNT 20.)		;Try to bypass hardware overrun problem
      (WIRE-DISK-RQB RQB)
@@ -270,12 +290,14 @@ as SUBSET-START, to resume where it left off."
      (DO ((BLOCK PART-BASE (+ BLOCK QUANTUM)))
 	 (( BLOCK TOP))
        (AND (< (SETQ NB (- TOP BLOCK)) QUANTUM)
-	    (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+;	    (WIRE-DISK-RQB RQB (SETQ QUANTUM NB)))
+	    (wire-disk-rqb rqb (ceiling (setq quantum nb) disk-blocks-per-page)))
        (AND ( (SETQ TEM (TRUNCATE (- BLOCK ORIG-PART-BASE) 100.)) N-HUNDRED)
 	    (FORMAT T "~D " (SETQ N-HUNDRED TEM)))
        (DISK-READ-WIRED RQB 0 BLOCK)	;Modifies pages without setting modified bits.
 					;This is ok since it remains wired while we care.
-	 (ARRAY-TO-NET BUF CONN (* QUANTUM PAGE-SIZE 2)))
+;	 (ARRAY-TO-NET BUF CONN (* QUANTUM PAGE-SIZE 2)))
+	 (array-to-net buf conn (* quantum (disk-block-words) 2)))
      (CHAOS:FINISH-CONN CONN)
      (CHAOS:CLOSE-CONN CONN "Done"))
    (AND RQB (SYS:RETURN-DISK-RQB RQB))

@@ -61,9 +61,17 @@ addresses), a function at each of the five points. It is compiled:
   value in the decoded QFASL, and not this world's;
 - **for the 40-bit machine**: the constants that change (the word's fields,
   the page, the fixnum's limits) must show the target's value;
-- **with this world's own parameters** (`:overlays nil`, the identity control):
-  the QFASL must equal the native compile's function for function, but for
-  `XC-LSH`, since a cross build folds no `LSH`.
+- **with this world's own parameters** (the identity control): the tree's
+  `QCOM` with this world's 256-word page put back over it (`lisp/pages256.lisp`),
+  since the tree's pages are 1024 words (contract G2, option (w)). The QFASL
+  must equal the native compile's function for function, but for `XC-LSH`,
+  since a cross build folds no `LSH`;
+- **for this tree's own target** (32-bit words, 1024-word pages, no
+  overlay): its files name no word width, so `cold:cross-foreign-file-p`
+  tells them by the page. `FAMILY` is compiled for it beside its source and
+  loaded, and the load must be replaced by this world's compile of the
+  source (one replaced load); `SYS: FONTS; CPTFON`, which has no source, is
+  not foreign.
 
 And the controls and encodings:
 
@@ -112,7 +120,7 @@ by this tree's cold-load generator must be byte for byte the one System 2000's
 generator makes. This tree's generator is served as `SYS: CROSS-CHECK;
 COLDUT-NEW` and `COLDLD-NEW`. `check3.py` must pass on that image (256-word
 pages), and on the generator's cold load at 1024-word pages of 32-bit words,
-4 blocks a page (`lisp/pages32.lisp`).
+4 blocks a page (`lisp/pages32.lisp`), whose band format is 1102.
 
 ## Check 2: SYSTEM compiled for the target
 

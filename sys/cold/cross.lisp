@@ -419,7 +419,8 @@ since the target's are the cold-load generator's own."
 ;;; structure the tree has changed.
 (defun cross-fasload-internal (fasl-stream pkg no-msg-p)
   (let ((file (send fasl-stream :truename)))
-    (cond ((not (cross-marked-file-p file))
+;    (cond ((not (cross-marked-file-p file))
+    (cond ((not (cross-foreign-file-p file))
 	   (funcall (cross-original 'si:fasload-internal) fasl-stream pkg no-msg-p))
 	  (t (let ((host (cross-host-fasl (send fasl-stream :pathname))))
 	       (push (cons file host) *cross-replaced-loads*)
@@ -441,6 +442,20 @@ since the target's are the cold-load generator's own."
 	(let ((byte (send stream :tyi)))
 	  (if byte (vector-push byte head) (return))))
       (string-search "WORD-WIDTH" head))))
+
+;;; true if FILE was compiled for a target that this world cannot run: a file
+;;; that names a word width, or, when the target's page is not this world's,
+;;; any file with a source beside it.  a 32-bit target of 1024-word pages
+;;; (contract g2, option (w)) marks nothing, but folds its page into its code
+;;; and reads its disk-blocks-per-page: loaded here for SYSTEM's host-file-io,
+;;; its SYS: IO; FDEV stopped this world at an illop in %find-structure-header,
+;;; while this world's own compile of the same source loads and runs.  a file
+;;; with no source, such as a font, is data and is loaded as it is.
+(defun cross-foreign-file-p (file)
+  (or (cross-marked-file-p file)
+      (and (not (= sym:page-size si:page-size))
+	   (probe-file (send file :new-pathname :type :lisp :version :newest))
+	   t)))
 
 ;;; this world's QFASL of the source of FASL, compiled once in a session, with
 ;;; the cross build off (no hook, this world's values, no log)

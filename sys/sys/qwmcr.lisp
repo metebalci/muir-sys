@@ -134,6 +134,8 @@
 
 (DEFUN WRITE-MICRO-CODE-SYMBOL-AREA-PART-1 (FILE)
   (OUT32 FILE 3)				;Code for main mem section.
+  ;; 400 words are one 1 kbyte block of the .mcr file, not a page (with
+  ;; 1024-word pages, contract g2 option (w), a page is four such blocks)
   (OUT32 FILE (TRUNCATE (ARRAY-LENGTH MICRO-CODE-SYMBOL-IMAGE) 400))	;# of blocks
   (SETQ CONSLP-OUTPUT-SYMBOL-PREDICTED-FILEPOS
 	(+ CONSLP-OUTPUT-CURRENT-FILEPOS

@@ -112,9 +112,14 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	(JUMP-EQUAL M-B (A-CONSTANT INTERVAL-TIMER-VECTOR) INTR-INTERVAL-TIMER)
 	;No specially provided device handler, maybe this is a general buffered device
 	;E.g. the keyboard is one.
-	((M-A) (A-CONSTANT (EVAL (+ 400 %SYS-COM-UNIBUS-INTERRUPT-LIST
-				    %UNIBUS-CHANNEL-VECTOR-ADDRESS
-				    (- %UNIBUS-CHANNEL-LINK)))))
+;	((M-A) (A-CONSTANT (EVAL (+ 400 %SYS-COM-UNIBUS-INTERRUPT-LIST
+;				    %UNIBUS-CHANNEL-VECTOR-ADDRESS
+;				    (- %UNIBUS-CHANNEL-LINK)))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((m-a) (a-constant (eval (+ 2000 %sys-com-unibus-interrupt-list
+				    %unibus-channel-vector-address
+				    (- %unibus-channel-link)))))
 INTR-0	((VMA-START-READ) ADD M-A
 		(A-CONSTANT (EVAL (- %UNIBUS-CHANNEL-LINK %UNIBUS-CHANNEL-VECTOR-ADDRESS))))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
@@ -216,7 +221,10 @@ UB-INTR-RET-0					;**
 	;; quux (contract q3): the keyboard's channel is filled from the register
 	;; page (intr-kbd), not the unibus, so there is no unibus interrupt to
 	;; clear or enable again; clearing it could lose a chaosnet interrupt.
-	(JUMP-EQUAL M-A (A-CONSTANT (EVAL (+ 500 %UNIBUS-CHANNEL-VECTOR-ADDRESS))) XB-INTR-RET)
+;	(JUMP-EQUAL M-A (A-CONSTANT (EVAL (+ 500 %UNIBUS-CHANNEL-VECTOR-ADDRESS))) XB-INTR-RET)
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the keyboard's
+	;; channel is at 2100, the system communication area being at 2000
+	(jump-equal m-a (a-constant (eval (+ 2100 %unibus-channel-vector-address))) xb-intr-ret)
 	((MD) A-ZERO)				;Clear Unibus interrupt flag
 	((VMA-START-WRITE) (A-CONSTANT 77773021)) ;Unibus address 766042
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
@@ -321,9 +329,14 @@ INNL1	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-TRANSMIT-ENABLE) MD INNL2)
 	(JUMP-IF-BIT-SET (LISP-BYTE %%CHAOS-CSR-TRANSMIT-DONE) MD CHAOS-INTR)
 INNL2
   ;Now check all devices in the unibus vector tables.
-	((M-A) (A-CONSTANT (EVAL (+ 400 %SYS-COM-UNIBUS-INTERRUPT-LIST
-				    %UNIBUS-CHANNEL-VECTOR-ADDRESS
-				    (- %UNIBUS-CHANNEL-LINK)))))
+;	((M-A) (A-CONSTANT (EVAL (+ 400 %SYS-COM-UNIBUS-INTERRUPT-LIST
+;				    %UNIBUS-CHANNEL-VECTOR-ADDRESS
+;				    (- %UNIBUS-CHANNEL-LINK)))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((m-a) (a-constant (eval (+ 2000 %sys-com-unibus-interrupt-list
+				    %unibus-channel-vector-address
+				    (- %unibus-channel-link)))))
 INND0	((VMA-START-READ) ADD M-A
 		(A-CONSTANT (EVAL (- %UNIBUS-CHANNEL-LINK %UNIBUS-CHANNEL-VECTOR-ADDRESS))))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
@@ -352,7 +365,12 @@ intr-kbd
 	((vma-start-read) (a-constant quux-kbd-data-virtual-address))
 	(check-page-read-no-interrupt)
 	((a-intr-tem1) read-memory-data)
-	((m-a) (a-constant (eval (+ 500 %unibus-channel-vector-address))))
+;	((m-a) (a-constant (eval (+ 500 %unibus-channel-vector-address))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the channel's
+	;; header is at 2100, the system communication area being at 2000 (at 500,
+	;; in the resident symbol area's page, a key's word went to a garbage
+	;; address, a page fault in an interrupt, and the machine halted in swapin)
+	((m-a) (a-constant (eval (+ 2100 %unibus-channel-vector-address))))
 	((vma-start-read) add m-a (a-constant (eval (- %unibus-channel-buffer-in-ptr
 						       %unibus-channel-vector-address))))
 	(check-page-read-no-interrupt)

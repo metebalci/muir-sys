@@ -422,8 +422,12 @@
 		     (ldb #o0006 sym:%%q-data-type)
 		     (ldb #o0006 sym:%%q-pointer))
 	word-bytes (ceiling word-bits 8.)
-	blocks-per-page (ceiling (* sym:page-size word-bytes) (* si:page-size 4)))
-  (or (= (* blocks-per-page si:page-size 4) (* sym:page-size word-bytes))
+;	blocks-per-page (ceiling (* sym:page-size word-bytes) (* si:page-size 4)))
+;  (or (= (* blocks-per-page si:page-size 4) (* sym:page-size word-bytes))
+	;; a disk block is 1024 bytes whatever this world's page is: a builder
+	;; of 1024-word pages (contract g2, option (w)) has 4096 bytes a page
+	blocks-per-page (ceiling (* sym:page-size word-bytes) 1024.))
+  (or (= (* blocks-per-page 1024.) (* sym:page-size word-bytes))
       (ferror nil "A page of ~D words of ~D bytes is not a whole number of disk blocks"
 	      sym:page-size word-bytes)))
 
@@ -1234,7 +1238,15 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 ;  (vwrite (+ adr sym:%sys-com-band-format) (vfix 0))	;not compressed format
   ;; not compressed format.  a 40-bit cold load says so: format 2002, so that
   ;; g2's microcode refuses a 32-bit one (appendix a1.12)
-  (vwrite (+ adr sym:%sys-com-band-format) (vfix (if (= word-bits 32.) 0 2002)))
+;  (vwrite (+ adr sym:%sys-com-band-format) (vfix (if (= word-bits 32.) 0 2002)))
+  ;; and a 32-bit cold load of 1024-word pages is format 1102 (contract g2,
+  ;; option (w); appendix a1.12), which its microcode asks for and a 256-word
+  ;; page microcode does not know
+  (vwrite (+ adr sym:%sys-com-band-format)
+	  ;; not /=, which this readtable reads as = (/ escapes)
+	  (vfix (cond ((not (= word-bits 32.)) 2002)
+		      ((= sym:page-size #o2000) 1102)
+		      (t 0))))
   (vwrite (+ adr sym:%sys-com-gc-generation-number) (vfix 0))
   (vwrite (+ adr sym:%sys-com-unibus-interrupt-list) (vfix 0))
   (vwrite (+ adr sym:%sys-com-temporary) (vfix 0))

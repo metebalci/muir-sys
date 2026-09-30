@@ -254,6 +254,56 @@ changes must have given the target's value, and every function whose QFASL
 differs from System 2000's must have an explanation. Run it when a change
 could reach what the compiler evaluates.
 
+### A band of 1024-word pages for revision 12
+
+Contract G2's option (w): revision 12 runs 1024-word pages in software, each
+page four of its 256-word map entries and four 1 KiB disk blocks. The tree's
+`QCOM` has the page (`PAGE-SIZE` 2000, `DISK-BLOCKS-PER-PAGE` 4), microcode
+and PROM 2001 are assembled from the tree ("Assembling the microcode"), and
+System 2000's band builds the band with the cross build, its target the
+tree's own `QCOM`:
+
+- **Priming**, as above, and first `DISK-BLOCKS-PER-PAGE`, a system constant
+  the builder lacks, made a `SYSTEM` symbol before any file is read, so that
+  every package's files read the same one, with the builder's own value, 1
+  (its page is one block); the target's, 4, is `QCOM`'s and comes from the
+  cross build's table. The readtable compiler, `SYS: IO; RTC`, is primed
+  too:
+
+  ```lisp
+  (let ((s (intern "DISK-BLOCKS-PER-PAGE" "SYSTEM")))
+    (putprop s t 'special) (set s 1))
+  ```
+
+- **Then**, with no overlay:
+
+  ```lisp
+  (cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//y-")
+  (qc-file "SYS: SYS; SYSDCL LISP")	;and the six ALLDEFS files
+  (make-system 'site :recompile :noload :noconfirm :nowarn)
+  (si:rtc-file "SYS: IO; RDTBL LISP")
+  (si:rtc-file "SYS: IO; CRDTBL LISP")
+  ;; SYS: DEMO; WORMCH QFASL from its AST, as for any build
+  (cold:cross-compile-system)
+  (cold:cross-make-cold "LOD3")
+  (cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold.img")
+  (cold:cross-end)
+  ```
+
+  The target's files name no word width, being 32-bit, but they fold its
+  page into their code: where `MAKE-SYSTEM` loads one, the builder loads its
+  own compile of the source (`cold:cross-foreign-file-p`). The font needs no
+  redump. The cold load's band format is 1102. A compile that stopped goes
+  on from the QFASLs it wrote: `MAKE-SYSTEM` compiles only what is missing or
+  older than its source.
+- **The disk**: a GPT disk in the build disk's layout, each partition a whole
+  number of pages (a multiple of 4 blocks); microcode 2001's `ucadr.mcr` in
+  MCR1 and the cold load in LOD3, both with bit 48; PROM 2001 given to
+  `quux` with `--prom`. The cold boot runs MINI and QLD as in steps 5 and 6,
+  and the band is saved into LOD4. Its format is 1100 (1101 incremental).
+- Microcode 2001 refuses a band of 256-word pages: it halts at
+  `BAND-NOT-1024-WORD-PAGES` rather than take it for a cold load.
+
 ### The CADR route (fallback)
 
 Until it is retired: the compile and the cold load run on System 1001's

@@ -1813,9 +1813,15 @@ will take a few minutes.")
 	(CHECK-PARTITION-SIZE (+ INC-PAGES-SAVED PART-SIZE) T)
 	;; Store the size in words rather than pages.  But don't get a bignum!
 	(SETF (CLI:AREF (FUNCTION SYSTEM-COMMUNICATION-AREA) %SYS-COM-HIGHEST-VIRTUAL-ADDRESS)
-	      (LSH MAX-ADDR 8))
-	(DO ((I #o600 (1+ I)))			;Clear the disk error log
-	    ((= I #o640))
+;	      (LSH MAX-ADDR 8))
+	      ;; 1024-word pages (contract g2, option (w)): pages of 1024 words
+	      (lsh max-addr 10.))
+;	(DO ((I #o600 (1+ I)))			;Clear the disk error log
+;	    ((= I #o640))
+	;; the log is at 2200-2237, the system communication area being at 2000
+	;; with its offsets kept (appendix a1.9)
+	(do ((i #o2200 (1+ i)))			;clear the disk error log
+	    ((= i #o2240))
 	  (%P-DPB 0 %%Q-LOW-HALF I)
 	  (%P-DPB 0 %%Q-HIGH-HALF I))
 	(%DISK-SAVE (IF INCREMENTAL
@@ -1823,15 +1829,19 @@ will take a few minutes.")
 		      (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
 		    (CAR L) (CADR L))))))
 
+;;; 1024-word pages (contract g2, option (w)): PART-SIZE is blocks, as a
+;;; partition's size is, and a page dumped takes disk-blocks-per-page of them.
 (DEFUN CHECK-PARTITION-SIZE (PART-SIZE &OPTIONAL EXPOSE-P)
-  (LET ((DUMP-SIZE (ESTIMATE-DUMP-SIZE)))
+;  (LET ((DUMP-SIZE (ESTIMATE-DUMP-SIZE)))
+  (let ((dump-size (* (estimate-dump-size) disk-blocks-per-page)))
     (WHEN (> DUMP-SIZE PART-SIZE)
       ;; This test is not necessarily accurate, since we have not
       ;; yet shut off the world.  However, it should catch most cases,
       ;; so that this error will be detected before the partition comment
       ;; gets clobbered.
       (AND EXPOSE-P (SEND TV:MAIN-SCREEN :EXPOSE))
-      (FERROR NIL "Cannot save, partition too small.  Need at least ~D. pages.~@[~@
+;      (FERROR NIL "Cannot save, partition too small.  Need at least ~D. pages.~@[~@
+      (ferror nil "Cannot save, partition too small.  Need at least ~D. blocks.~@[~@
                       Warm Boot please.~]" DUMP-SIZE EXPOSE-P))
     DUMP-SIZE))
 

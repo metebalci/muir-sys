@@ -8,7 +8,12 @@
 DISK-SWAP-HANDLER
 	(CALL-XCT-NEXT DISK-PGF-SAVE)
        ((A-DISK-IDLE-TIME) M-ZERO)		;I use the disk
-	((M-1) VMA-PAGE-ADDR-PART M-A)		;Convert virtual address to disk address
+;	((M-1) VMA-PAGE-ADDR-PART M-A)		;Convert virtual address to disk address
+	;; 1024-word pages (contract g2, option (w)): the page's first block, four
+	;; blocks a page; m-a may be any address in the page (a swap-in's is the
+	;; faulting word's)
+	((m-1) vma-page-addr-part m-a)		;convert virtual address to disk address
+	((m-1) dpb m-1 (byte-field 16. 2) a-zero)
 	(CALL-GREATER-OR-EQUAL M-1 A-DISK-MAXIMUM ILLOP)	;Address out of bounds
 	((M-1) ADD M-1 A-DISK-OFFSET)		;Relocate to appropriate part of disk
 	(CALL START-DISK-SWAP)			;Start the disk operation
@@ -54,10 +59,15 @@ START-DISK-SWAP
 ;;; Returns with A-DISK-RUN-LIGHT in VMA.
 START-DISK-1-PAGE
 	((M-2) (A-CONSTANT 1))			;Transfer just one page
-	((M-C) (A-CONSTANT 777))		;CLP is always 777
+;	((M-C) (A-CONSTANT 777))		;CLP is always 777
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area's word 377 is 2377; one block, 256 words
+	((m-c) (a-constant 2377))		;clp is always 2377
 ;;; M-1 starting disk address, M-B starting main memory page frame number.
 ;;; M-2 number of pages to transfer, M-T command, M-C address of CCW list.
 ;;; Bashes M-T, M-1, M-2.  Returns with A-DISK-RUN-LIGHT in VMA.
+;;; with 1024-word pages (contract g2, option (w)) m-b and m-2 count 256-word
+;;; blocks, a ccw each: m-b is a block's physical number, m-2 a block count.
 START-DISK-N-PAGES
 	(CALL AWAIT-DISK)			;Wait until disk is idle
 	((A-DISK-READ-WRITE) M-T)		;Then store parameters into A-memory
@@ -69,7 +79,10 @@ START-DISK-N-PAGES
 	((A-DISK-ADDRESS) M-1)
 	;; Now build the CCW list
 	((VMA) ADD (M-CONSTANT -1) A-DISK-CLP)
-	((MD) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
+;	((MD) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
+	;; 1024-word pages (contract g2, option (w)): the callers count 256-word
+	;; blocks, a ccw each, not pages
+	((md) dpb m-b vma-block-part (a-constant 1))
 BUILD-CCW-LIST-1
 	(JUMP-GREATER-THAN M-T (A-CONSTANT 1) BUILD-CCW-LIST-2)
 	((MD) SUB MD (A-CONSTANT 1))	;last
@@ -78,7 +91,8 @@ BUILD-CCW-LIST-2
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 	((M-T) SUB M-T (A-CONSTANT 1))
 	(JUMP-GREATER-THAN-XCT-NEXT M-T (A-CONSTANT 0) BUILD-CCW-LIST-1)
-       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+       ((md) add md (a-constant disk-block-size))	;a block, not a 1024-word page
 	((A-DISK-RESERVED-FOR-USER) (A-CONSTANT 0))	;Not any more, it isn't!
 ;;; Here to start a disk operation that has been set up in the A-memory variables.
 ;;; Also called from interrupt level for retries
@@ -191,10 +205,17 @@ LOG-DISK-ERROR
 	((MD) A-DISK-MA)	
 	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
-	(POPJ-LESS-THAN-XCT-NEXT VMA (A-CONSTANT 637))
-       ((A-DISK-ERROR-LOG-POINTER) ADD VMA (A-CONSTANT 1))
-	(POPJ-AFTER-NEXT (A-DISK-ERROR-LOG-POINTER) (A-CONSTANT 600))
-       (NO-OP)
+;	(POPJ-LESS-THAN-XCT-NEXT VMA (A-CONSTANT 637))
+;       ((A-DISK-ERROR-LOG-POINTER) ADD VMA (A-CONSTANT 1))
+;	(POPJ-AFTER-NEXT (A-DISK-ERROR-LOG-POINTER) (A-CONSTANT 600))
+;       (NO-OP)
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the log is at
+	;; 2200-2237, the system communication area being at 2000, its offsets
+	;; kept
+	(popj-less-than-xct-next vma (a-constant 2237))
+       ((a-disk-error-log-pointer) add vma (a-constant 1))
+	(popj-after-next (a-disk-error-log-pointer) (a-constant 2200))
+       (no-op)
 
 ;; quux: mit's soft-ecc correction, commented out, is gone: block-disk has no
 ;; ecc, and it knew the cadr disk's geometry.

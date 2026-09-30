@@ -181,7 +181,10 @@ reset-machine-macro-dispatch-done
 
 INITIAL-MAP
 	(CALL-XCT-NEXT PHYS-MEM-READ)		;ADDRESS SYSTEM COMMUNICATION AREA
-       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
+;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
+	;; 1024-word pages (contract g2, option (w)): the system communication
+	;; area is at 2000, a page of its own (appendix a1.9), not 400
+       ((vma) (a-constant (plus 2000 (eval %sys-com-wired-size))))
 	((M-A) Q-POINTER MD)			;SAVE NUMBER OF WIRED WORDS
 INITIAL-MAP-A	;Enter here with number of words to map in M-A
 	;; this microcode is for quux from hardware revision 6: the 6-bit level-1
@@ -223,7 +226,10 @@ INIMAP1	((MD-WRITE-MAP) SUB MD (A-CONSTANT 20000))
 	;md's level-1 entry, just set to it, points at)
 	((MD) A-ZERO)
 INIMAP2	((VMA-WRITE-MAP) DPB (M-CONSTANT -1) MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE A-ZERO)
-	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+	;; 1024-word pages (contract g2, option (w)): every map entry of the
+	;; block, 256 words each, not every 1024-word page
+	((md) add md (a-constant map-entry-size))
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 13.) MD INIMAP2)
 	;NOW SET UP WIRED LEVEL 1 MAP
 	((MD) A-ZERO)
@@ -238,32 +244,46 @@ INIMAP7	((VMA-WRITE-MAP) M-C)
 		MAP-WRITE-FIRST-LEVEL-MAP M-C)	;FIRST NON-WIRED
 	;THEN SET UP WIRED LEVEL 2 MAP
 	((MD) SETZ)
-INIMAP3	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART MD	;SELF-ADDRESS
-		(A-CONSTANT (PLUS (BYTE-VALUE MAP-ACCESS-CODE 3)   ;RW
-				  ;(BYTE-VALUE MAP-STATUS-CODE 0)  ;4 READ/WRITE
-				  (BYTE-VALUE MAP-META-BITS 64) ;NOT OLD, NOT EXTRA-PDL, STRUC
-				  (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1))))
-	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))			;NEXT PAGE
+;INIMAP3	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART MD	;SELF-ADDRESS
+;		(A-CONSTANT (PLUS (BYTE-VALUE MAP-ACCESS-CODE 3)   ;RW
+;				  ;(BYTE-VALUE MAP-STATUS-CODE 0)  ;4 READ/WRITE
+;				  (BYTE-VALUE MAP-META-BITS 64) ;NOT OLD, NOT EXTRA-PDL, STRUC
+;				  (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1))))
+;	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))			;NEXT PAGE
+	;; 1024-word pages (contract g2, option (w)): wire every map entry of the
+	;; wired words, 256 words each, to itself; a step of a 1024-word page
+	;; would map one entry in four and leave holes
+inimap3	((vma-write-map) vma-phys-map-entry-part md	;self-address
+		(a-constant (plus (byte-value map-access-code 3)   ;rw
+				  ;(byte-value map-status-code 0)  ;4 read/write
+				  (byte-value map-meta-bits 64) ;not old, not extra-pdl, struc
+				  (byte-value map-write-enable-second-level-write 1))))
+	((md) add md (a-constant map-entry-size))		;next map entry
 	(JUMP-LESS-THAN MD A-A INIMAP3)		;LOOP UNTIL DONE ALL WIRED ADDRESSES
 INIM3A	((M-1) (BYTE-FIELD 5 8) MD)		;IF NOT AT EVEN 1ST LVL MAP BOUNDARY...
 	(JUMP-EQUAL M-1 A-ZERO INIM3B)		; INITIALIZE REST OF 2ND LVL BLOCK TO
 	((VMA-WRITE-MAP)			; MAP NOT SET UP.
 	   (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)))
 	(JUMP-XCT-NEXT INIM3A)
-       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;       ((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+       ((md) add md (a-constant map-entry-size))	;the next map entry, not page
 
 INIM3B						;INITIALIZE REVERSE 1ST LVL MAP
 	((A-SECOND-LEVEL-MAP-REUSE-POINTER) A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)
 					;reverse 1st lvl map locs 240-337:
 					;quux's 64 entries do not fit in 40-77
 	((WRITE-MEMORY-DATA) M-ZERO)	;VALUE TO GO IN WIRED ENTRIES
-	((vma) (a-constant 637))	;a-v-system-communication-area is 400
+;	((vma) (a-constant 637))	;a-v-system-communication-area is 400
+	;; 1024-word pages (contract g2, option (w)): the system communication
+	;; area is at 2000 (appendix a1.9), its offsets kept: 2240-2337
+	((vma) (a-constant 2237))	;a-v-system-communication-area is 2000
 INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
 	((WRITE-MEMORY-DATA) ADD WRITE-MEMORY-DATA (A-CONSTANT 20000))
 	(JUMP-LESS-THAN WRITE-MEMORY-DATA A-A INIMAP6)	;JUMP IF STILL WIRED
 	((M-A WRITE-MEMORY-DATA) (M-CONSTANT -1))	;REST OF ENTRYS ARE -1.
-INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
+;INIMAP6	(jump-less-than vma (a-constant 737) inimap5)	;64 entries, to 737
+inimap6	(jump-less-than vma (a-constant 2337) inimap5)	;64 entries, to 2337
 	(POPJ)
 
 ;; initial-map-a comes here when the level-1 map is narrower than machine-id
@@ -290,6 +310,12 @@ machine-not-quux-11
 ;; does this; its restart lets the claim go.  the halt shows this location.
 file-device-not-quiet
 	(call illop)
+
+;; disk-restore-1 comes here when the band is not one of 1024-word pages
+;; (contract g2, option (w)): its format is not 1100, 1101 or 1102, as a band
+;; of 256-word pages's is not.  the halt shows this location.
+band-not-1024-word-pages
+	(call illop)
 
 ;PHYSICAL MEMORY REFERENCING.
 ;THIS WORKS BY TEMPORARILY CLOBBERING LOCATION 0 OF THE SECOND-LEVEL MAP.
@@ -300,9 +326,14 @@ PHYS-MEM-READ
 	((A-TEM3) MAP-WRITE-SECOND-LEVEL-MAP	;SAVE IT (READ & WRITE THE SAME)
 		  MEMORY-MAP-DATA
 		  (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)))
-	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART VMA
-		(A-CONSTANT (PLUS (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+;	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART VMA
+;		(A-CONSTANT (PLUS (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+	;; 1024-word pages (contract g2, option (w)): map entry 0 to the 256
+	;; words holding the address, a map entry's physical page
+	((vma-write-map) vma-phys-map-entry-part vma
+		(a-constant (plus (byte-value map-write-enable-second-level-write 1)
+				  (byte-value map-access-code 3))))
 	((VMA-START-READ) DPB M-ZERO		;READ, USING LOC WITHIN PAGE ZERO
 		ALL-BUT-VMA-LOW-BITS A-TEM1)
 	(ILLOP-IF-PAGE-FAULT)			;FOO, I JUST SET UP THE MAP
@@ -319,9 +350,14 @@ PHYS-MEM-WRITE
 	((A-TEM3) MAP-WRITE-SECOND-LEVEL-MAP	;SAVE IT (READ & WRITE THE SAME)
 		  MEMORY-MAP-DATA
 		  (A-CONSTANT (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)))
-	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART VMA
-		(A-CONSTANT (PLUS (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+;	((VMA-WRITE-MAP) VMA-PHYS-PAGE-ADDR-PART VMA
+;		(A-CONSTANT (PLUS (BYTE-VALUE MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE 1)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
+	;; 1024-word pages (contract g2, option (w)): map entry 0 to the 256
+	;; words holding the address, a map entry's physical page
+	((vma-write-map) vma-phys-map-entry-part vma
+		(a-constant (plus (byte-value map-write-enable-second-level-write 1)
+				  (byte-value map-access-code 3))))
 	((MD) A-TEM2)				;RESTORE THE DATA TO BE WRITTEN
 	((VMA-START-WRITE) DPB M-ZERO		;WRITE, USING LOC WITHIN PAGE ZERO
 		ALL-BUT-VMA-LOW-BITS A-TEM1)
@@ -340,13 +376,19 @@ DISK-SAVE (MISC-INST-ENTRY %DISK-SAVE)
 	((M-4) PDL-POP)
 	((M-4) DPB PDL-POP (BYTE-FIELD 20 20) A-4)
 	((M-S) Q-POINTER PDL-TOP)
-	((MD) (A-CONSTANT 1000))    ;store code so this band known to be in compressed format
+;	((MD) (A-CONSTANT 1000))    ;store code so this band known to be in compressed format
+	;; 1024-word pages (contract g2, option (w); appendix a1.12): a band of
+	;; 1024-word pages on revision 12 is 1100 compressed, 1101 incremental and
+	;; 1102 a cold load, so that no microcode takes it for a band of 256-word
+	;; pages (1000, 1001), or the other way round
+	((md) (a-constant 1100))    ;store code so this band known to be in compressed format
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT M-S DISK-SAVE-1)
 	((MD) ADD MD (A-CONSTANT 1))	;or incremental format, whichever it is
 	((M-S) SUB M-ZERO A-S)
 	((M-S) Q-POINTER M-S)
 DISK-SAVE-1
-	((VMA-START-WRITE) (A-CONSTANT (EVAL (+ 400 %SYS-COM-BAND-FORMAT))))  ;before swapout
+;	((VMA-START-WRITE) (A-CONSTANT (EVAL (+ 400 %SYS-COM-BAND-FORMAT))))  ;before swapout
+	((vma-start-write) (a-constant (eval (+ 2000 %sys-com-band-format))))  ;before swapout
 	(ILLOP-IF-PAGE-FAULT)			; so it gets to saved image on disk
 	(CALL SWAP-OUT-ALL-PAGES)		;Make sure disk has valid data for all pages.
 	;; quux (contract q8): read the gpt into the copy buffer, which the copy
@@ -370,7 +412,10 @@ DISK-SAVE-INCREMENTAL
        ((VMA) (A-CONSTANT (PLUS INC-BAND-BITMAP-BUFFER-ORIGIN INC-BAND-BITMAP-SIZE-INDEX)))
 	((M-K) MD)
 ;Get number of pages the bit map occupies.
-	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
+;	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
+	;; 1024-word pages (contract g2, option (w)): blocks of 256 words, not
+	;; pages: the bitmap has a bit a block, and is read and skipped by blocks
+	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
 	((M-2) LDB (BYTE-FIELD 13 15) M-2)
 	((M-R) M-2)
 ;Read in the bit map.
@@ -380,7 +425,8 @@ DISK-SAVE-INCREMENTAL
 	(CALL COLD-DISK-READ)
 ;Save the first three pages into the band.
 	((M-1) M-I)
-	((M-2) (A-CONSTANT 3))
+;	((M-2) (A-CONSTANT 3))
+	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
 	((M-B) A-ZERO)
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN))
 	(CALL COLD-DISK-WRITE)
@@ -414,12 +460,19 @@ DISK-SR-1
 	(JUMP-EQUAL M-TEM A-ZERO DISK-SR-2)	;free region, forget it.
 	((VMA-START-READ) ADD M-AP A-V-REGION-ORIGIN)
 	(ILLOP-IF-PAGE-FAULT)
-	((M-I) LDB VMA-PAGE-ADDR-PART MD)
+;	((M-I) LDB VMA-PAGE-ADDR-PART MD)
+	;; 1024-word pages (contract g2, option (w)): the disk counts 256-word
+	;; blocks; a region starts on a page, and is saved to the end of the page
+	;; its free pointer is in, as with 256-word pages, four blocks a page
+	((m-i) ldb vma-block-part md)
 	((M-I) ADD M-I A-DISK-OFFSET)
 	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
 	(ILLOP-IF-PAGE-FAULT)
-	((MD) ADD MD (A-CONSTANT 377))
-	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+;	((MD) ADD MD (A-CONSTANT 377))
+;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+	((md) add md (a-constant 1777))
+	((m-j) ldb vma-page-addr-part md)
+	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
 	((M-TEM) ADD M-Q A-J)
 	(CALL-GREATER-OR-EQUAL M-TEM A-COPY-BAND-TEM BAND-NOT-BIG-ENOUGH)
 	((M-TEM) ADD M-I A-J)
@@ -433,12 +486,23 @@ DISK-SR-2
 	(JUMP-LESS-THAN M-AP A-TEM DISK-SR-1)
 	((M-Q) SUB M-Q A-COPY-BAND-TEM1)
 	((MD) DPB M-Q (BYTE-FIELD 30 10) A-ZERO) ;Record active size of band.
-	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-VALID-SIZE))))
+;	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-VALID-SIZE))))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-B) (A-CONSTANT 1))			;Core page frame number
+;	((M-1) M+A+1 M-ZERO A-COPY-BAND-TEM1)	;Disk address, second page of band.
+;	((M-2) (A-CONSTANT 1))			;one page.
+;	((M-C) (A-CONSTANT 777))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is page 1, at 2000, which is block 4 of the band;
+	;; its first block, which holds the valid size, is written again, with
+	;; the ccw at 2377, its reserved last word
+	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-valid-size))))
 	(ILLOP-IF-PAGE-FAULT)
-	((M-B) (A-CONSTANT 1))			;Core page frame number
-	((M-1) M+A+1 M-ZERO A-COPY-BAND-TEM1)	;Disk address, second page of band.
-	((M-2) (A-CONSTANT 1))			;one page.
-	((M-C) (A-CONSTANT 777))
+	((m-b) (a-constant 4))			;core block of the area, 2000
+	((m-1) a-copy-band-tem1)		;the band's first block
+	((m-1) add m-1 (a-constant 4))		;and the area's
+	((m-2) (a-constant 1))			;one block
+	((m-c) (a-constant 2377))
 	(JUMP COLD-DISK-WRITE)		;write it on the band.
 
 ;M-I and M-J have origin and size, on disk in the PAGE partition, of a region.
@@ -486,10 +550,18 @@ BAND-NOT-BIG-ENOUGH	;Destination band not big enuf.  This should have been detec
 ;For %DISK-SAVE, that doesn't matter since we just re-boot anyway.
 SWAP-OUT-ALL-PAGES
 	((C-PDL-BUFFER-POINTER-PUSH) M-S)
-	((M-S) LDB (BYTE-FIELD 16. 8) M-S A-ZERO)	;Number of physical pages.
-	((VMA-START-READ) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
+;	((M-S) LDB (BYTE-FIELD 16. 8) M-S A-ZERO)	;Number of physical pages.
+;	((VMA-START-READ) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-T) (BYTE-FIELD 16. 8) READ-MEMORY-DATA)	;Number of wired pages.
+	;; 1024-word pages (contract g2, option (w)): the physical pages are
+	;; 1024-word frames, which %delete-physical-page takes; the wired words
+	;; are written in 256-word blocks, the disk's unit; the system
+	;; communication area is at 2000
+	((m-s) ldb vma-phys-page-addr-part m-s a-zero)	;number of physical pages.
+	((vma-start-read) (a-constant (plus 2000 (eval %sys-com-wired-size))))
 	(ILLOP-IF-PAGE-FAULT)
-	((M-T) (BYTE-FIELD 16. 8) READ-MEMORY-DATA)	;Number of wired pages.
+	((m-t) vma-block-part read-memory-data)	;number of wired blocks.
 	((C-PDL-BUFFER-POINTER-PUSH) M-T)
 	((M-T) SUB M-S (A-CONSTANT 1))		;First page to do is highest in core
 ;Swap out all unwired pages first, using %DELETE-PHYSICAL-PAGE and updating the PHT normally.
@@ -505,7 +577,8 @@ SWAP-OUT-ALL-PAGES-1
 	((M-1) A-DISK-OFFSET)			;Disk address of virtual location 0
 	((M-2) C-PDL-BUFFER-POINTER-POP)	;Number of wired pages
 	((M-B) M-ZERO)				;Physical memory location 0
-	((M-C) DPB M-2 VMA-PAGE-ADDR-PART A-ZERO)	;Put CCW list in high memory
+;	((M-C) DPB M-2 VMA-PAGE-ADDR-PART A-ZERO)	;Put CCW list in high memory
+	((m-c) dpb m-2 vma-block-part a-zero)	;put ccw list in high memory, above the blocks
 	((M-S) C-PDL-BUFFER-POINTER-POP)
 	(JUMP COLD-DISK-WRITE)
 
@@ -521,7 +594,8 @@ DISK-RESTORE (MISC-INST-ENTRY %DISK-RESTORE)
 DISK-RESTORE-1
 	((WRITE-MEMORY-DATA) (A-CONSTANT 200000))	;64K to be direct-mapped
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)
-       ((VMA) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-WIRED-SIZE))))
+;       ((VMA) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-WIRED-SIZE))))
+       ((vma) (a-constant (eval (plus 2000 %sys-com-wired-size))))	;1024-word pages: at 2000
 	(CALL RESET-MACHINE)
 	;; quux: the run light back at its boot address, as a cold boot has it,
 	;; before the two fake level-2 entries below, which must fall in different
@@ -572,18 +646,32 @@ MEM-SIZE-LOOP
        ((VMA) (A-CONSTANT QUUX-ERROR-STATUS-PHYSICAL-ADDRESS)) ;quux: word 101, not 766044
 	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
-	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
+;	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
+	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
 	((M-B) (A-CONSTANT 0))			;..
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN)) ;CCW list after MICRO-CODE-SYMBOL-AREA
 	(CALL COLD-DISK-READ)
 	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-BAND-FORMAT))))
-	(JUMP-EQUAL MD (A-CONSTANT 1000) DISK-RESTORE-REGIONWISE)  ;compressed partition.
-	(JUMP-EQUAL MD (A-CONSTANT 1001) DISK-RESTORE-INCREMENTAL) ;incremental partition.
+;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-BAND-FORMAT))))
+;	(JUMP-EQUAL MD (A-CONSTANT 1000) DISK-RESTORE-REGIONWISE)  ;compressed partition.
+;	(JUMP-EQUAL MD (A-CONSTANT 1001) DISK-RESTORE-INCREMENTAL) ;incremental partition.
+	;; 1024-word pages (contract g2, option (w); appendix a1.12): 1100
+	;; compressed, 1101 incremental, 1102 a cold load.  a band of 256-word
+	;; pages (1000, 1001, or a cold load with anything else) halts at
+	;; band-not-1024-word-pages rather than load, as it was taken for a
+	;; cold load before.  the save stores a bare number and the cold load a
+	;; fixnum, so the pointer field is compared.
+       ((vma) (a-constant (plus 2000 (eval %sys-com-band-format))))
+	((m-tem) q-pointer md)
+	(jump-equal m-tem (a-constant 1100) disk-restore-regionwise)  ;compressed partition.
+	(jump-equal m-tem (a-constant 1101) disk-restore-incremental) ;incremental partition.
+	(jump-not-equal m-tem (a-constant 1102) band-not-1024-word-pages)
 ;Non-compressed band (must be a cold-load band, I think).
 	(CALL-XCT-NEXT PHYS-MEM-READ)		;Get useful size of partition, in words
-       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-VALID-SIZE))))
-	((M-D) VMA-PAGE-ADDR-PART MD)		;Number of valid pages
+;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-VALID-SIZE))))
+;	((M-D) VMA-PAGE-ADDR-PART MD)		;Number of valid pages
+       ((vma) (a-constant (plus 2000 (eval %sys-com-valid-size))))
+	((m-d) vma-block-part md)		;number of valid blocks
 	(JUMP-LESS-OR-EQUAL M-J A-D DISK-COPY-PART-1)
 	((M-J) M-D)				;M-J is number of pages to copy (min sizes)
 DISK-COPY-PART-1
@@ -593,8 +681,10 @@ DISK-COPY-PART-1
 
 DISK-RESTORE-REGIONWISE
 	((M-K) A-ZERO)
-	((M-I) ADD M-I (A-CONSTANT 3))
-	((M-J) SUB M-J (A-CONSTANT 3))
+;	((M-I) ADD M-I (A-CONSTANT 3))
+;	((M-J) SUB M-J (A-CONSTANT 3))
+	((m-i) add m-i (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+	((m-j) sub m-j (a-constant low-pages-blocks))
   ;Micro-code-symbol-area has a free pointer
   ;of zero, so is not copied into band.  Therefore, REGION-ORIGIN, etc. start at 3rd page
   ;of band
@@ -637,12 +727,18 @@ DISK-RR-1
 	(JUMP-EQUAL M-TEM A-ZERO DISK-RR-2)	;free region, forget it.
 	((VMA-START-READ) ADD M-AP A-V-REGION-ORIGIN)
 	(ILLOP-IF-PAGE-FAULT)
-	((M-Q) LDB VMA-PAGE-ADDR-PART MD)
+;	((M-Q) LDB VMA-PAGE-ADDR-PART MD)
+	;; 1024-word pages (contract g2, option (w)): blocks, as disk-sr-1 saves
+	;; them: the region to the end of its free pointer's page
+	((m-q) ldb vma-block-part md)
 	((M-Q) ADD M-Q A-DISK-OFFSET)
 	((VMA-START-READ) ADD M-AP A-V-REGION-FREE-POINTER)
 	(ILLOP-IF-PAGE-FAULT)
-	((MD) ADD MD (A-CONSTANT 377))
-	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+;	((MD) ADD MD (A-CONSTANT 377))
+;	((M-J) LDB VMA-PAGE-ADDR-PART MD)
+	((md) add md (a-constant 1777))
+	((m-j) ldb vma-page-addr-part md)
+	((m-j) dpb m-j (byte-field 16. 2) a-zero)	;its pages' blocks
 	(CALL-GREATER-OR-EQUAL M-I A-COPY-BAND-TEM ILLOP) ;bandwise EOF.
 	((M-TEM) ADD M-Q A-J)
 	((M-TEM) SUB M-TEM A-DISK-OFFSET)
@@ -718,17 +814,27 @@ DISK-RESTORE-BITMAP-SEARCH-2
 
 ;Index of page in incremental band that identifies the band's base band,
 ;and also the bitmap size.
-(ASSIGN INC-BAND-BASE-DATA-PAGE 3)
+;; 1024-word pages (contract g2, option (w)): these are blocks of the band,
+;; after its first three pages, fourteen blocks, as io1; inc writes them.
+;(ASSIGN INC-BAND-BASE-DATA-PAGE 3)
+(assign inc-band-base-data-page 14)
 ;Index in that page of the bitmap size.
 (ASSIGN INC-BAND-BITMAP-SIZE-INDEX 10)
 ;Index of page in incremental band that has a copy of the base band's REGION-FREE-POINTER
-(ASSIGN INC-BAND-BASE-FREE-POINTERS-PAGE 4)
+;(ASSIGN INC-BAND-BASE-FREE-POINTERS-PAGE 4)
+(assign inc-band-base-free-pointers-page 15)
 ;Index of page in incremental band that has start of the band's bitmap.
-(ASSIGN INC-BAND-BITMAP-PAGE 5)
+;(ASSIGN INC-BAND-BITMAP-PAGE 5)
+(assign inc-band-bitmap-page 16)
 
 ;Address and page number of buffer in core used to hold the bitmap.
-(ASSIGN INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN 20)
-(ASSIGN INC-BAND-BITMAP-BUFFER-ORIGIN 10000)
+;(ASSIGN INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN 20)
+;(ASSIGN INC-BAND-BITMAP-BUFFER-ORIGIN 10000)
+;; 1024-word pages (contract g2, option (w)): above the region tables, which
+;; are at 10000-17777 (disk-restore-regionwise-subr reads them to below the
+;; buffer); block 40, 20000
+(assign inc-band-bitmap-buffer-page-origin 40)
+(assign inc-band-bitmap-buffer-origin 20000)
 
 DISK-RESTORE-INCREMENTAL
 	((M-B) (A-CONSTANT INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN))
@@ -747,15 +853,22 @@ DISK-RESTORE-INCREMENTAL
 ;Restore the base partition of this partition.
 	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
-	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
+;	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
+	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
 	((M-B) (A-CONSTANT 0))			;..
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN)) ;CCW list after MICRO-CODE-SYMBOL-AREA
 	(CALL COLD-DISK-READ)
 	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-BAND-FORMAT))))
-	(CALL-NOT-EQUAL MD (A-CONSTANT 1000) ILLOP)  ;Must be a compressed partition.
-	((M-I) ADD M-I (A-CONSTANT 3))    ;See DISK-RESTORE-REGIONWISE for this insn.
-	((M-J) SUB M-J (A-CONSTANT 3))
+;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-BAND-FORMAT))))
+;	(CALL-NOT-EQUAL MD (A-CONSTANT 1000) ILLOP)  ;Must be a compressed partition.
+;	((M-I) ADD M-I (A-CONSTANT 3))    ;See DISK-RESTORE-REGIONWISE for this insn.
+;	((M-J) SUB M-J (A-CONSTANT 3))
+	;; 1024-word pages (contract g2, option (w)): the area at 2000, 1100 for
+	;; compressed, and three pages of fourteen blocks
+       ((vma) (a-constant (plus 2000 (eval %sys-com-band-format))))
+	(call-not-equal md (a-constant 1100) illop)  ;must be a compressed partition.
+	((m-i) add m-i (a-constant low-pages-blocks))    ;see disk-restore-regionwise for this insn.
+	((m-j) sub m-j (a-constant low-pages-blocks))
 	((M-K) A-ZERO)		;Make sure restore as a non-compressed band!
 	(CALL DISK-RESTORE-REGIONWISE-SUBR)
 ;Now check that page 4 of incremental load
@@ -767,7 +880,10 @@ DISK-RESTORE-INCREMENTAL
 	(CALL COLD-DISK-READ-1)
 	((M-1) ADD M-MINUS-ONE (A-CONSTANT INC-BAND-BITMAP-BUFFER-ORIGIN))
 	((M-2) ADD M-MINUS-ONE A-V-REGION-FREE-POINTER)
-	((M-4) (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((M-4) (A-CONSTANT (EVAL PAGE-SIZE)))
+	;; 1024-word pages (contract g2, option (w)): the free pointers of the
+	;; 256 regions, the one block read, not a whole page
+	((m-4) (a-constant 400))
 DISK-RESTORE-INCREMENTAL-CHECK
 	(CALL-XCT-NEXT PHYS-MEM-READ)
        ((M-1 VMA) M+1 M-1)
@@ -780,7 +896,10 @@ DISK-RESTORE-INCREMENTAL-CHECK
 ;It matches; go ahead and load the incremental load.
 	((M-K) PDL-POP)
 ;Get number of pages the bit map occupies.
-	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
+;	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
+	;; 1024-word pages (contract g2, option (w)): blocks of 256 words, not
+	;; pages: the bitmap has a bit a block, and is read and skipped by blocks
+	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
 	((M-2) LDB (BYTE-FIELD 13 15) M-2)
 	((M-R) M-2)
 ;Read in the bit map.
@@ -791,7 +910,8 @@ DISK-RESTORE-INCREMENTAL-CHECK
 ;Reread low 3 pages of inc band (they were clobbered by those pages of base band)
 	((M-1) M-I)
 	((M-B) A-ZERO)
-	((M-2) (A-CONSTANT 3))
+;	((M-2) (A-CONSTANT 3))
+	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN))
 	(CALL COLD-DISK-READ)
 ;Adjust M-I and M-J so that DISK-RESTORE-REGIONWISE will skip the bitmap & base band pages.
@@ -810,8 +930,12 @@ COLD-SWAP-IN
 ;;; Read in the rest of wired memory (the sys comm area has its size).
 ;;; Don't clobber the MICRO-CODE-SYMBOL-AREA
 	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
-	((M-2) VMA-PAGE-ADDR-PART READ-MEMORY-DATA)	;Number of wired pages
+;       ((VMA) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-WIRED-SIZE))))
+;	((M-2) VMA-PAGE-ADDR-PART READ-MEMORY-DATA)	;Number of wired pages
+	;; 1024-word pages (contract g2, option (w)): the area at 2000, and the
+	;; wired words read in 256-word blocks, the disk's unit
+       ((vma) (a-constant (plus 2000 (eval %sys-com-wired-size))))
+	((m-2) vma-block-part read-memory-data)	;number of wired blocks
 	((M-C) Q-POINTER READ-MEMORY-DATA)	;Save for later, also put CCW list there
 	((M-B) (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
 	((M-1) ADD M-B A-DISK-OFFSET)
@@ -819,7 +943,8 @@ COLD-SWAP-IN
 	(CALL COLD-DISK-READ)
 ;;; Set things up according to actual main memory size
 	((WRITE-MEMORY-DATA) Q-POINTER M-S (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	((VMA-START-WRITE) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-MEMORY-SIZE))))
+;	((VMA-START-WRITE) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-MEMORY-SIZE))))
+	((vma-start-write) (a-constant (plus 2000 (eval %sys-com-memory-size))))	;1024-word pages
 	(ILLOP-IF-PAGE-FAULT)
 ;;; Now set up the table of area addresses
 	(CALL GET-AREA-ORIGINS)
@@ -838,7 +963,8 @@ COLD-SWAP-IN
 COLD-REINIT-PHT-0
 	((A-PHT-INDEX-LIMIT) M-1)		;Size of page hash table
 	((WRITE-MEMORY-DATA) Q-POINTER M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-PAGE-TABLE-SIZE))))
+;	((VMA-START-WRITE) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-PAGE-TABLE-SIZE))))
+	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-page-table-size))))	;1024-word pages
 	(ILLOP-IF-PAGE-FAULT)
 	((M-J VMA) ADD M-1 A-V-PAGE-TABLE-AREA)	;Address above PHT
 	(CALL SET-PHT-INDEX-MASK)
@@ -870,7 +996,12 @@ COLD-REINIT-PPD-1
 	(JUMP-GREATER-OR-EQUAL M-R A-J COLD-REINIT-PPD-3)	;free part of PHT
 COLD-REINIT-PPD-2
 	((WRITE-MEMORY-DATA) (A-CONSTANT 177777))	;Wired page, no PHT entry
-	((VMA-START-WRITE) (BYTE-FIELD 8 8) M-R A-V-PHYSICAL-PAGE-DATA)
+;	((VMA-START-WRITE) (BYTE-FIELD 8 8) M-R A-V-PHYSICAL-PAGE-DATA)
+	;; 1024-word pages (contract g2, option (w)): the frame's number is
+	;; m-r<21:10>, added to the table's origin (which need not be a multiple
+	;; of the index's range, as the merge of the ldb assumed)
+	((m-tem) vma-phys-page-addr-part m-r)
+	((vma-start-write) add m-tem a-v-physical-page-data)
 	(ILLOP-IF-PAGE-FAULT)
 	(JUMP COLD-REINIT-PPD-4)
 
@@ -917,10 +1048,14 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	((A-METER-GLOBAL-ENABLE) A-V-NIL)	;Turn off metering
 	((A-METER-DISK-COUNT) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(CALL RESET-MACHINE)			;Reset and turn on interrupts, set up map
-	((VMA-START-READ) (A-CONSTANT 1031))	;FETCH MISCELLANEOUS SCRATCHPAD LOCS
+;	((VMA-START-READ) (A-CONSTANT 1031))	;FETCH MISCELLANEOUS SCRATCHPAD LOCS
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the scratch
+	;; pad init area is page 2, at 4000, not 1000
+	((vma-start-read) (a-constant 4031))	;fetch miscellaneous scratchpad locs
 	(ILLOP-IF-PAGE-FAULT)
 	((A-AMCENT) Q-TYPED-POINTER READ-MEMORY-DATA)
-	((VMA-START-READ) (A-CONSTANT 1021))
+;	((VMA-START-READ) (A-CONSTANT 1021))
+	((vma-start-read) (a-constant 4021))
 	(ILLOP-IF-PAGE-FAULT)
 	((A-CNSADF) Q-TYPED-POINTER READ-MEMORY-DATA)
 	((A-BACKGROUND-CONS-AREA) A-CNSADF)
@@ -940,16 +1075,19 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	((MD) ADD MD (A-CONSTANT 1))		;First page above PPD
 	(JUMP-GREATER-OR-EQUAL MD A-V-REGION-ORIGIN BEGCM2)
 BEGCM1	((VMA-WRITE-MAP) (A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
-	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+	((md) add md (a-constant map-entry-size))	;every map entry, not every 1024-word page
 	(JUMP-LESS-THAN MD A-V-REGION-ORIGIN BEGCM1)
 BEGCM2	((MD) A-V-PAGE-TABLE-AREA)
 	((MD) ADD MD A-PHT-INDEX-LIMIT)
 	(JUMP-GREATER-OR-EQUAL MD A-V-PHYSICAL-PAGE-DATA BEGCM4)
 BEGCM3	((VMA-WRITE-MAP) (A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
-	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
+	((md) add md (a-constant map-entry-size))	;every map entry, not every 1024-word page
 	(JUMP-LESS-THAN MD A-V-PHYSICAL-PAGE-DATA BEGCM3)
 BEGCM4	;; Get A-INITIAL-FEF, A-QTRSTKG, A-QCSTKG, A-QISTKG
-	((VMA) (BYTE-FIELD 9 0) (M-CONSTANT -1)) ;777 ;SCRATCH-PAD-INIT-AREA MINUS ONE
+;	((VMA) (BYTE-FIELD 9 0) (M-CONSTANT -1)) ;777 ;SCRATCH-PAD-INIT-AREA MINUS ONE
+	((vma) (byte-field 11. 0) (m-constant -1)) ;3777 ;scratch-pad-init-area (4000) minus one
 	((M-K) (A-CONSTANT (A-MEM-LOC A-SCRATCH-PAD-BEG))) ;FIRST A MEM LOC TO BLT INTO
 BEG03	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
@@ -1037,8 +1175,12 @@ run-light-shares-disk-slot
 	(call illop)
 
 COLD-FAKE-L2-MAP
-	((M-T) VMA-PHYS-PAGE-ADDR-PART MD
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	((M-T) VMA-PHYS-PAGE-ADDR-PART MD
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	;; 1024-word pages (contract g2, option (w)): the map entry's physical
+	;; page, 256 words
+	((m-t) vma-phys-map-entry-part md
+		(a-constant (byte-mask map-write-enable-second-level-write)))
 	((M-A) (A-CONSTANT 1460))	;RW ACCESS, STATUS=4, NO AREA TRAPS, REP TYPE 0
 	((VMA-WRITE-MAP) DPB M-A MAP-ACCESS-STATUS-AND-META-BITS A-T)
 	(POPJ)
@@ -1066,12 +1208,17 @@ COLD-FAKE-L2-MAP
 ;;; Clobbers M-1, M-2, M-3, M-B, M-C, M-T, M-TEM, M-I, M-J, M-Q, M-R.
 cold-read-gpt-page-0			;the cold boot and %disk-restore: page 0,
 	((a-gpt-buffer-page) a-zero)	; which the band's first pages overwrite
-	((a-gpt-ccw) (a-constant 777))
+;	((a-gpt-ccw) (a-constant 777))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the ccw is
+	;; the system communication area's word 377, 2377; the buffer is still
+	;; block 0, words 0-377
+	((a-gpt-ccw) (a-constant 2377))
 cold-read-gpt
 	(call-xct-next cold-read-gpt-block)
        ((m-1) a-zero)			;block 0: the protective mbr, and lba 1
 	(call-xct-next phys-mem-read)	; the gpt header, from word 200
-       ((vma) dpb m-b vma-phys-page-addr-part (a-constant 200))
+;       ((vma) dpb m-b vma-phys-page-addr-part (a-constant 200))
+       ((vma) dpb m-b vma-block-part (a-constant 200))	;m-b is a block, 256 words
 	(jump-not-equal md (a-constant 4022243105) gpt-missing)	;"EFI "
 	(call-xct-next phys-mem-read)
        ((vma) add vma (a-constant 1))
@@ -1093,7 +1240,8 @@ gpt-next-block				;read the next block of 8 entries
 	(call-xct-next cold-read-gpt-block)
        ((m-1) a-gpt-block)
 	((a-gpt-block) m+a+1 m-zero a-gpt-block)
-	((m-c) dpb m-b vma-phys-page-addr-part a-zero)	;m-c: the entry
+;	((m-c) dpb m-b vma-phys-page-addr-part a-zero)	;m-c: the entry
+	((m-c) dpb m-b vma-block-part a-zero)	;m-c: the entry (m-b is a block)
 gpt-next-entry				;dispatch on the type's first word
 	(call-xct-next phys-mem-read)
        ((vma) m-c)
@@ -1214,11 +1362,15 @@ gpt-odd-start				;the partition starts on an odd lba
 ;;; before BEG0000 sets it up, while the gpt is read into it; mit saved
 ;;; pages 0-2 on blocks 1, 3 and 5, which now hold gpt entries.
 WARM-READ-GPT
-	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-MEMORY-SIZE))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-MEMORY-SIZE))))
+	;; 1024-word pages (contract g2, option (w)): the area at 2000; the
+	;; table has an entry a 1024-word page (vma-page-addr-part's)
+	((vma-start-read) (a-constant (eval (plus 2000 %sys-com-memory-size))))
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) VMA-PAGE-ADDR-PART READ-MEMORY-DATA)
 	((A-V-PHYSICAL-PAGE-DATA-END) ADD M-TEM A-V-PHYSICAL-PAGE-DATA)
-	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-PAGE-TABLE-SIZE))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-PAGE-TABLE-SIZE))))
+	((vma-start-read) (a-constant (eval (plus 2000 %sys-com-page-table-size))))
 	(ILLOP-IF-PAGE-FAULT)
 	((M-1) Q-POINTER READ-MEMORY-DATA)
 	((A-PHT-INDEX-LIMIT) M-1)
@@ -1279,7 +1431,8 @@ DISK-COPY-SECTION
 ;Here M-I, M-Q and M-J are as updated for blocks already transfered.
 	(POPJ-EQUAL M-J A-ZERO)			;If done.
 ;M-D gets max # blocks we can transfer at once.
-	((M-D) VMA-PHYS-PAGE-ADDR-PART M-S)		;Number of pages in main memory
+;	((M-D) VMA-PHYS-PAGE-ADDR-PART M-S)		;Number of pages in main memory
+	((m-d) vma-block-part m-s)		;number of blocks in main memory (1024-word pages)
 	((M-D) SUB M-D (A-CONSTANT COPY-BUFFER-PAGE-ORIGIN))	;memory not used for buffer
 ;Copy at most 1000 pages at a time since that is size of 2-page command list
 	(JUMP-LESS-THAN M-D (A-CONSTANT COPY-BUFFER-CCW-BLOCK-LENGTH) DISK-COPY-PART-2)
@@ -1321,7 +1474,8 @@ COLD-AWAIT-DISK
 
 COLD-DISK-READ-1				;1 page read
 	((M-2) (A-CONSTANT 1))
-	((M-C) (A-CONSTANT 777))
+;	((M-C) (A-CONSTANT 777))
+	((m-c) (a-constant 2377))	;1024-word pages: sys com area's 377, at 2000 (one block)
 COLD-DISK-READ
 	((VMA) A-DISK-RUN-LIGHT)
 	((WRITE-MEMORY-DATA) (M-CONSTANT -1))

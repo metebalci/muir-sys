@@ -20,7 +20,10 @@ chaos-intr-1
 	((A-INTR-TEM2) Q-POINTER READ-MEMORY-DATA	;Save CSR for later
 			(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(CALL-XCT-NEXT CHAOS-LIST-GET)		;M-A gets next packet from free list
-       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-free-list))))
 	(JUMP-EQUAL M-A A-V-NIL CHAOS-XMT-INTR)	;Can't receive now, hold up
 	;; Read out the packet into this buffer, along with CSR1, CSR2, Bit-count
 	;; M-A points at the buffer and M-B points at the hardware
@@ -83,7 +86,10 @@ CHAOS-RCV-INTR-2
 	((VMA-START-WRITE) M-B)			;Write CSR to clear receiver
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 	(CALL-XCT-NEXT CHAOS-LIST-PUT)		;Add packet in M-A to receive list
-       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-RECEIVE-LIST))))
+;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-RECEIVE-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-receive-list))))
 	(JUMP-IF-BIT-CLEAR M-SBS-CHAOS CHAOS-INTR-EXIT)	;Request SB if enabled
 	((INTERRUPT-CONTROL) IOR LOCATION-COUNTER (A-CONSTANT 1_26.))
 ;drops through
@@ -95,7 +101,10 @@ CHAOS-WAKEUP (MISC-INST-ENTRY %CHAOS-WAKEUP)
 ;; If there are any buffers wanting to be transmitted, we can enable transmit interrupts.
 CHAOS-INTR-EXIT
 	((M-A) SETZ)				;20 = receive-enable, 40 = transmit-enable
-	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-free-list))))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((M-TEM) Q-TYPED-POINTER READ-MEMORY-DATA)
 	(JUMP-EQUAL M-TEM A-V-NIL CHAOS-INTR-EXIT-1)
@@ -104,7 +113,10 @@ CHAOS-INTR-EXIT
 CHAOS-INTR-EXIT-1
 	(JUMP-GREATER-THAN M-ZERO A-CHAOS-TRANSMIT-ABORTED
 		CHAOS-INTR-EXIT-2)		;Disable transmit-done if in abort-timeout
-	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((M-TEM) Q-TYPED-POINTER READ-MEMORY-DATA)
 	(JUMP-EQUAL M-TEM A-V-NIL CHAOS-INTR-EXIT-2)
@@ -145,7 +157,10 @@ CHAOS-XMT-INTR
 
 CHAOS-XMT-0
 	;; Get current or next transmit packet
-	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+;	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+	((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((A-CHAOS-TRANSMIT-ABORTED) SETZ)	;Forget this state left from previous packet
 	((M-A) Q-TYPED-POINTER READ-MEMORY-DATA) ;Note, don't call CHAOS-LIST-GET
@@ -189,9 +204,15 @@ CHAOS-XMT-3
 ;; Here when we are through with a transmit packet.
 CHAOS-XMT-DONE
 	(CALL-XCT-NEXT CHAOS-LIST-GET)		;Pull this guy off xmt list, we're done with it
-       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
 	(CALL-NOT-EQUAL-XCT-NEXT M-A A-V-NIL CHAOS-LIST-PUT)	;Add to free list
-       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
+	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
+	;; communication area is at 2000, a page of its own, not 400
+       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-free-list))))
 	(JUMP-XCT-NEXT CHAOS-XMT-0)		;Now transmit more if possible
        ((A-CHAOS-TRANSMIT-RETRY-COUNT) SETZ)	;Transmit not in progress now
 
