@@ -1,0 +1,20 @@
+; Check 2: SYSTEM compiled for the 40-bit machine (about two hours).  The
+; driver replaces X- with this part's log prefix (x1-, x2-, ...).  SYSDCL and
+; SYSTEM's definition files (ALLDEFS) first, then MAKE-SYSTEM through
+; cold:cross-compile-system; then the controls: the planted fold and an
+; uncovered #., which must stop its file.
+(cold:cross-begin :log-directory "HOST: //home//lispm//X-")
+(cold:cross-write-table)
+(qc-file "SYS: SYS; SYSDCL LISP")
+(qc-file "SYS: SYS2; DEFMAC LISP")
+(qc-file "SYS: SYS2; LMMAC LISP")
+(qc-file "SYS: EH; ERRMAC LISP")
+(qc-file "SYS: SYS2; STRUCT LISP")
+(qc-file "SYS: SYS2; SETF LISP")
+(qc-file "SYS: SYS; TYPES LISP")
+(cold:cross-compile-system)
+(qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//X-planted.qfasl")
+(qc-file "SYS: CROSS-CHECK; UNCOVERED-SHARP LISP" "HOST: //home//lispm//X-uncovered-sharp.qfasl") =>! no target value
+(probe-file "HOST: //home//lispm//X-uncovered-sharp.qfasl") => NIL
+(length cold:*cross-replaced-loads*)
+(cold:cross-end)

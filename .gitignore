@@ -32,7 +32,9 @@
 # The machine-control tools (tools/: lispm.py over TELNET, console.py over RFB),
 # kept here but not yet tracked; tools/lispm-check and its self-test are, and
 # so are the release tools: release-scan with its baseline, release-sums, and
-# their self-test release-test (docs/building.md, Publishing a release).
+# their self-test release-test (docs/building.md, Publishing a release), and
+# the cross build's checks, tools/cross-check/ (its README), whose Python
+# modules leave a __pycache__ when they run.
 /tools/*
 !/tools/lispm-check
 !/tools/lispm-check-test/
@@ -40,6 +42,8 @@
 !/tools/release-scan.baseline
 !/tools/release-sums
 !/tools/release-test
+!/tools/cross-check/
+/tools/cross-check/__pycache__/
 
 # Working notes for Claude Code, and its agents' worktrees: local, not for the
 # repository.

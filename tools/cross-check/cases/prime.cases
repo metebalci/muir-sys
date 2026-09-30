@@ -1,0 +1,25 @@
+; Priming the builder (docs/building.md, "Cross-building for the 40-bit
+; QUUX"): the compiler files the cross build changes, compiled here and loaded,
+; their QFASLs kept apart in HOST's home, whose tree's QFASLs are the target's;
+; SYSDCL; the cold-load generator and the cross build.  Then this world's own
+; parameters, which a band built before the cross build keeps.
+(qc-file "SYS: SYS; QCDEFS LISP" "HOST: //home//lispm//h-qcdefs.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-qcdefs.qfasl"))
+(qc-file "SYS: SYS; QCFASD LISP" "HOST: //home//lispm//h-qcfasd.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-qcfasd.qfasl"))
+(qc-file "SYS: SYS; QCP1 LISP" "HOST: //home//lispm//h-qcp1.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-qcp1.qfasl"))
+(qc-file "SYS: SYS; QCOPT LISP" "HOST: //home//lispm//h-qcopt.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-qcopt.qfasl"))
+(qc-file "SYS: SYS; SYSDCL LISP" "HOST: //home//lispm//h-sysdcl.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-sysdcl.qfasl"))
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDPK LISP"))
+(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//h-coldut.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-coldut.qfasl"))
+(cold:load-parameters)
+(qc-file "SYS: COLD; COLDLD LISP" "HOST: //home//lispm//h-coldld.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-coldld.qfasl"))
+(qc-file "SYS: COLD; CROSS LISP" "HOST: //home//lispm//h-cross.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-cross.qfasl"))
+(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (32 4 1)
+(compiler:target-word-width) => 32

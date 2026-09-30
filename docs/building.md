@@ -231,6 +231,29 @@ an interpreted point, with its target and builder values, every fold, every
 `cross-write-table` writes the table. `cross-copy-partition` puts the cold
 load's pages in a file, for the host to read or to write into a GPT disk.
 
+### Checking the cross build
+
+`tools/cross-check/` holds the cross build's checks and their controls, run on
+the builder band through `tools/lispm-check`; its `README.md` says what each
+shows and what it needs. `tools/cross-check/run all` runs three at once, in
+about half an hour, and writes each one's result to `run/cross-check/`:
+
+- **Check 1**: every family of system constants, at every point where the
+  compiler evaluates, compiled for a synthetic target, for the 40-bit
+  machine and for this world's own parameters, must show the target's value
+  in the decoded QFASL. With the guards, fail-closed on an uncovered `#.`
+  or fold, the compiler's encodings and a planted fold.
+- **Check 3**: the 40-bit cold load, read on the host, holds NIL and T where
+  its own map says; two planted faults must each fail that check.
+- **The native control**: on System 2000's tree, this tree's cold-load
+  generator makes byte for byte the cold load System 2000's makes.
+
+**Check 2**, `tools/cross-check/run check2`, compiles SYSTEM for the target
+(about two hours and twenty minutes). Every fold and `#.` of a constant that
+changes must have given the target's value, and every function whose QFASL
+differs from System 2000's must have an explanation. Run it when a change
+could reach what the compiler evaluates.
+
 ### The CADR route (fallback)
 
 Until it is retired: the compile and the cold load run on System 1001's

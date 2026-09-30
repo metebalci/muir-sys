@@ -1,0 +1,51 @@
+; Check 1: every family of system constants at every point where the compiler
+; evaluates, compiled for a synthetic target, for the 40-bit machine, and for
+; this world's own parameters (the identity control); check1.py reads the
+; QFASLs and tables left in HOST's home.
+; IEEE 754 rounding at its edges (compiler:float-to-binary32) and back
+; (cold:binary32-to-float): a single, 0.1, infinities, the largest single, the
+; smallest normal, a subnormal, an underflow to zero.
+(compiler:float-to-binary32 1.0) => 1065353216
+(compiler:float-to-binary32 -2.5) => 3223322624
+(compiler:float-to-binary32 0.1) => 1036831949
+(compiler:float-to-binary32 3.14159265358979) => 1078530011
+(compiler:float-to-binary32 1.5s0) => 1069547520
+(compiler:float-to-binary32 1e50) => 2139095040
+(compiler:float-to-binary32 -1e50) => 4286578688
+(compiler:float-to-binary32 3.4028234e38) => 2139095039
+(compiler:float-to-binary32 1.1754943508e-38) => 8388608
+(compiler:float-to-binary32 1e-40) => 71362
+(compiler:float-to-binary32 1e-46) => 0
+(compiler:float-to-binary32 (cold:binary32-to-float 2139095040)) => 2139095040
+(compiler:float-to-binary32 (cold:binary32-to-float 4286578688)) => 4286578688
+(compiler:float-to-binary32 (cold:binary32-to-float 71362)) => 71362
+(compiler:float-to-binary32 (cold:binary32-to-float 1)) => 1
+(compiler:float-to-binary32 (cold:binary32-to-float 2139095039)) => 2139095039
+(compiler:float-to-binary32 (cold:binary32-to-float 8388608)) => 8388608
+(compiler:float-to-binary32 (cold:binary32-to-float 1078530011)) => 1078530011
+; a closure's local slot is marked by the fixnum sign bit, bit 24 here
+(compiler:boxed-sign-bit-mark 3) => -16777213
+; the native compile, the reference for the identity control
+(qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//native-family.qfasl")
+; the guards: a data type or a format that is not this world's stops cross-begin
+(cold:cross-begin :overlays '("SYS: COLD; TARGET40 LISP" "SYS: CROSS-CHECK; SYNTH LISP")) =>! data types
+(cold:cross-begin :overlays '("SYS: COLD; TARGET40 LISP" "SYS: CROSS-CHECK; SYNTH LISP") :check-data-types nil) =>! formats
+; the synthetic target, and fail-closed: an uncovered #. or fold stops the file
+(cold:cross-begin :overlays '("SYS: COLD; TARGET40 LISP" "SYS: CROSS-CHECK; SYNTH LISP") :check-data-types nil :check-formats nil :log-directory "HOST: //home//lispm//synth-")
+(cold:cross-write-table)
+(qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//synth-family.qfasl")
+(qc-file "SYS: CROSS-CHECK; UNCOVERED-SHARP LISP" "HOST: //home//lispm//synth-uncovered-sharp.qfasl") =>! no target value
+(probe-file "HOST: //home//lispm//synth-uncovered-sharp.qfasl") => NIL
+(qc-file "SYS: CROSS-CHECK; UNCOVERED-FOLD LISP" "HOST: //home//lispm//synth-uncovered-fold.qfasl") =>! no target value
+(probe-file "HOST: //home//lispm//synth-uncovered-fold.qfasl") => NIL
+(cold:cross-end)
+; the 40-bit machine
+(cold:cross-begin :log-directory "HOST: //home//lispm//t40-")
+(cold:cross-write-table)
+(qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//t40-family.qfasl")
+(qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//t40-planted.qfasl")
+(cold:cross-end)
+; the identity control: this world's parameters, no overlay
+(cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//id-")
+(qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//id-family.qfasl")
+(cold:cross-end)

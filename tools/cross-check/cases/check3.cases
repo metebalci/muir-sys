@@ -1,0 +1,36 @@
+; Check 3: the cold load of the 40-bit machine.  The files of the cold load
+; compiled for it, the readtables and the cold load's font written for it,
+; MAKE-COLD into LOD3 (the band is opened read-only: the writes stay in the
+; run), and the partition's pages copied out for check3.py.
+; the readtable compiler, in no system, compiled and loaded as for any build
+(qc-file "SYS: IO; RTC LISP" "HOST: //home//lispm//h-rtc.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-rtc.qfasl"))
+(cold:cross-begin :log-directory "HOST: //home//lispm//c-")
+(cold:cross-write-table)
+; SI:COLD-LOAD-FILE-LIST (sys/sys/sysdcl.lisp) but its font
+(qc-file "SYS: SYS; QRAND LISP")
+(qc-file "SYS: IO; QIO LISP")
+(qc-file "SYS: IO; READ LISP")
+(qc-file "SYS: IO; PRINT LISP")
+(qc-file "SYS: WINDOW; COLD LISP")
+(qc-file "SYS: SYS; SGFCTN LISP")
+(qc-file "SYS: SYS; EVAL LISP")
+(qc-file "SYS: SYS; TYPES LISP")
+(qc-file "SYS: SYS; LTOP LISP")
+(qc-file "SYS: SYS; QFASL LISP")
+(qc-file "SYS: COLD; MINI LISP")
+(qc-file "SYS: SYS; QFCTNS LISP")
+(qc-file "SYS: SYS2; STRING LISP")
+(qc-file "SYS: SYS2; CHARACTER LISP")
+(qc-file "SYS: SYS; CLPACK LISP")
+(qc-file "SYS: COLD; GLOBAL LISP")
+(qc-file "SYS: COLD; SYSTEM LISP")
+(qc-file "SYS: COLD; LISP LISP")
+(si:rtc-file "SYS: IO; RDTBL LISP")
+(si:rtc-file "SYS: IO; CRDTBL LISP")
+(cold:cross-redump-value-file "SYS: FONTS; CPTFON QFASL" 'fonts:cptfont)
+(let ((p (si:qfasl-file-plist "SYS: IO; RDTBL QFASL"))) (getf p :word-width)) => 40
+(let ((p (si:qfasl-file-plist "SYS: FONTS; CPTFON QFASL"))) (getf p :word-width)) => 40
+(cold:cross-make-cold "LOD3")
+(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold40.img")
+(cold:cross-end)

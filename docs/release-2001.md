@@ -121,3 +121,19 @@ file carries a comment in that file saying why.
     is not the cold load's is refused, whether it names its word
     (`q-fasl-op-file-property-list`, `:878-899`) or has no attribute list,
     which makes it a 32-bit file (`cold-fasload`, `:83-91`).
+- **The cross build's checks, `tools/cross-check/`** (its `README.md`;
+  `docs/building.md`, "Checking the cross build"): a driver, `run`, which
+  primes the builder band (`cases/prime.cases`) and runs each check through
+  `tools/lispm-check` on a copy of the tree, with its test files (`lisp/`)
+  served as `SYS: CROSS-CHECK;`, and the host programs that read what the
+  builder wrote: `qfasl.py` decodes a QFASL, 40-bit ones included;
+  `check1.py` finds each family of system constants at each point where the
+  compiler evaluates with the target's value; `check3.py` reads a cold load's
+  image and `plant3.py` plants faults it must catch; `check2.py` checks a
+  cross compile's log of folds and `#.`; `compare.py` compares cross QFASLs
+  with System 2000's function by function. The native control
+  (`cases/native.cases`) makes System 2000's cold load with its own generator
+  and with this tree's, which must be byte for byte the same. `.gitignore`
+  tracks the directory. `docs/lispm-check.md:66-68`: a compiler file patched
+  alone into a band built before the cross build needs `sys/sys/qcdefs.lisp`
+  loaded first.

@@ -63,6 +63,9 @@ directory, `OZ: /lispm/` or `HOST: /home/lispm/`. Some `sys/` files do not
 load as source because they use functions only the compiler open-codes
 (`sys/io1/time.lisp` stops at "The function %PUSH is undefined"): check those
 with `--compile`.
+A compiler file patched alone into a band built before the cross build (System
+2000's) needs `sys/sys/qcdefs.lisp` given before it in `--files`, since
+`qcopt`, `qcp1` and `qcfasd` read what it defines (`tools/cross-check/README.md`).
 
 ## The file server
 

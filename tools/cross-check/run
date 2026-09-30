@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+"""tools/cross-check/run: the cross build's checks and their controls, on a
+builder band (tools/cross-check/README.md).
+
+Usage:
+  tools/cross-check/run [--out DIR] [--tree-2000 TARBALL] [--system NAME]
+                        [--fresh] CHECK... [-- LISPM-CHECK-ARGS...]
+CHECK is check1, check3, native or check2; all is check1, check3 and native.
+The checks given run at once, each in its own lispm-check run with its own
+ports.  Each gets a copy of this tree's sys/ and site/ (native: System 2000's
+tree, from TARBALL) with the files of lisp/ served as SYS: CROSS-CHECK;, runs
+cases/prime.cases and its own case file on the builder, and then its analysis
+on what the run left in HOST's home.  Output in DIR/CHECK/ (DIR is the tree's
+run/cross-check/ unless --out): lispm-check.out, the machine's logs, home/,
+result.txt.  Exit status 0 when every check given passes.
+
+check2 compiles SYSTEM (--system another, for a shorter run of the same steps)
+and keeps its tree copy between runs, with the QFASLs each run made, so that a
+run after one that stopped goes on where it stopped (--fresh starts again).
+
+lispm-check's band, ubin/, quux and ozd are this tree's defaults
+(run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
+copies are not where those defaults are found; LISPM_CHECK_BAND and the others,
+or arguments after --, choose others.  LISPM_CHECK_PORTS chooses the ports.
+"""
+import fnmatch
+import glob
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+TOOL = os.path.join(TREE, 'tools', 'lispm-check')
+# the QFASLs the tree tracks (.gitignore's exceptions); any other is a build's
+TRACKED_QFASLS = ('sys/fonts/*.qfasl', 'sys/demo/tvbgar.qfasl', 'sys/sys/ucinit.qfasl')
+SERVED = 'sys/cross-check'
+FIXTURES = {
+    'check1': ['family.lisp', 'synth.lisp', 'planted.lisp', 'uncovered-sharp.lisp',
+               'uncovered-fold.lisp'],
+    'check3': [],
+    'check2': ['planted.lisp', 'uncovered-sharp.lisp'],
+    'native': ['copy-partition.lisp', 'pages32.lisp'],
+}
+TIMEOUT = {'check1': 1800, 'check3': 7200, 'native': 3600, 'check2': 40000}
+# the files of the cross build whose digests each run records
+SOURCES = ['sys/cold/cross.lisp', 'sys/cold/target40.lisp', 'sys/cold/coldut.lisp',
+           'sys/cold/coldld.lisp', 'sys/sys/qcdefs.lisp', 'sys/sys/qcfasd.lisp',
+           'sys/sys/qcp1.lisp', 'sys/sys/qcopt.lisp', 'sys/sys/qfasl.lisp']
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def copy_tree(src, dest, all_qfasls):
+    """sys/ but sys/ubin/, and site/, from SRC to DEST, their dates kept; of
+    the QFASLs only the tracked ones unless ALL_QFASLS."""
+    shutil.rmtree(dest, ignore_errors=True)
+    for top in ('sys', 'site'):
+        for dp, dns, fns in os.walk(os.path.join(src, top)):
+            rel = os.path.relpath(dp, src)
+            if rel == 'sys':
+                dns[:] = [d for d in dns if d != 'ubin']
+            os.makedirs(os.path.join(dest, rel), exist_ok=True)
+            for f in fns:
+                r = os.path.join(rel, f)
+                if (f.endswith('.qfasl') and not all_qfasls and
+                        not any(fnmatch.fnmatch(r, p) for p in TRACKED_QFASLS)):
+                    continue
+                shutil.copy2(os.path.join(dp, f), os.path.join(dest, r))
+
+
+def tree_2000(out, tarball):
+    """System 2000's tree, sources and QFASLs, extracted once under OUT."""
+    dest = os.path.join(out, 'tree-2000')
+    stamp = os.path.join(dest, 'SHA256')
+    digest = sha256(tarball)
+    if not (os.path.exists(stamp) and open(stamp).read().strip() == digest):
+        shutil.rmtree(dest, ignore_errors=True)
+        os.makedirs(dest)
+        with tarfile.open(tarball) as t:
+            t.extractall(dest, filter='data')
+        open(stamp, 'w').write(digest + '\n')
+    tops = [d for d in os.listdir(dest) if os.path.isdir(os.path.join(dest, d, 'sys'))]
+    if len(tops) != 1:
+        raise SystemExit('cross-check: %s holds no one tree with sys/' % tarball)
+    return os.path.join(dest, tops[0])
+
+
+def environment():
+    env = dict(os.environ)
+    if 'LISPM_CHECK_BAND' not in env:
+        env['LISPM_CHECK_BAND'] = os.path.join(TREE, 'run', 'check', 'band.img')
+        env.setdefault('LISPM_CHECK_UBIN', os.path.join(TREE, 'run', 'check', 'ubin'))
+    env.setdefault('LISPM_CHECK_QUUX', os.path.join(TREE, '..', 'muir-sim', 'target', 'release', 'quux'))
+    env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
+    return env
+
+
+def lispm_check(tree, cases, timeout, extra, where):
+    """Run lispm-check; keep what the run left in HOST's home, its logs and
+    its served sys/ in WHERE; return its exit status and output."""
+    os.makedirs(where, exist_ok=True)
+    log = os.path.join(where, 'lispm-check.out')
+    cmd = [TOOL, '--tree', tree, '--keep', '--timeout', str(timeout)] + extra + [cases]
+    with open(log, 'w') as f:
+        f.write('$ %s\n' % ' '.join(cmd[:1] + [os.path.relpath(c, TREE) if c.startswith(TREE) else c
+                                               for c in cmd[1:]]))
+        f.flush()
+        rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=environment()).returncode
+    text = open(log, encoding='latin-1').read()
+    m = re.search(r'run files kept in (\S+)', text)
+    if m and os.path.isdir(m.group(1)):
+        run = m.group(1)
+        home = os.path.join(run, 'served', 'home', 'lispm')
+        if os.path.isdir(home):
+            shutil.copytree(home, os.path.join(where, 'home'), dirs_exist_ok=True)
+        if os.path.isdir(os.path.join(run, 'served', 'sys')):
+            shutil.copytree(os.path.join(run, 'served', 'sys'), os.path.join(where, 'served', 'sys'),
+                            dirs_exist_ok=True)
+        for f in glob.glob(os.path.join(run, '*.log')):
+            shutil.copy2(f, where)
+        shutil.rmtree(run)
+    return rc, text
+
+
+def analyse(argv, lines):
+    """Run an analysis script; its output to LINES; true if it passed."""
+    r = subprocess.run([sys.executable] + argv, capture_output=True, text=True)
+    lines.append('$ %s' % ' '.join(os.path.relpath(a, TREE) if a.startswith(TREE) else a
+                                   for a in argv))
+    lines.extend((r.stdout + r.stderr).rstrip('\n').split('\n'))
+    return r.returncode == 0
+
+
+def nil_and_t(text, form):
+    """The :NIL and :T of each MAKE-COLD case whose form starts with FORM."""
+    return re.findall(r'PASS  \(%s "LOD3"\)  -> \(.*?:NIL (\d+) :T (\d+)\)' % re.escape(form), text)
+
+
+def prepare(check, out, source, all_qfasls):
+    tree = os.path.join(out, 'tree')
+    if check != 'check2' or not os.path.isdir(tree):
+        copy_tree(source, tree, all_qfasls)
+    os.makedirs(os.path.join(tree, SERVED), exist_ok=True)
+    for f in FIXTURES[check]:
+        shutil.copy2(os.path.join(HERE, 'lisp', f), os.path.join(tree, SERVED, f))
+    if check == 'native':
+        for f in ('coldut', 'coldld'):
+            shutil.copy2(os.path.join(TREE, 'sys', 'cold', f + '.lisp'),
+                         os.path.join(tree, SERVED, f + '-new.lisp'))
+    return tree
+
+
+def run_check(check, out, args, extra):
+    out = os.path.join(out, check)
+    os.makedirs(out, exist_ok=True)
+    lines = ['%s, %s' % (check, time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))]
+    if check == 'native':
+        source, all_qfasls = tree_2000(os.path.dirname(out), args['tree_2000']), True
+    else:
+        source, all_qfasls = TREE, False
+    if check == 'check2' and args['fresh']:
+        shutil.rmtree(os.path.join(out, 'tree'), ignore_errors=True)
+        for p in glob.glob(os.path.join(out, 'part*')):
+            shutil.rmtree(p)
+    tree = prepare(check, out, source, all_qfasls)
+    body = open(os.path.join(HERE, 'cases', check + '.cases')).read()
+    where = out
+    if check == 'check2':
+        part = 1 + len(glob.glob(os.path.join(out, 'part*')))
+        where = os.path.join(out, 'part%d' % part)
+        body = body.replace('//X-', '//x%d-' % part)
+        if args['system'] != 'system':
+            body = re.sub(r'\(qc-file "SYS: (SYS|SYS2|EH); [A-Z]+ LISP"\)\n', '', body)
+            body = body.replace('(cold:cross-compile-system)',
+                                "(let ((si:inhibit-fdefine-warnings :just-warn)) (make-system '%s"
+                                " :compile :noload :noconfirm :nowarn :no-increment-patch))"
+                                % args['system'])
+    # nothing of an earlier run of this check is left to be read
+    for d in ('home', 'served'):
+        shutil.rmtree(os.path.join(where, d), ignore_errors=True)
+    for f in glob.glob(os.path.join(where, '*.log')) + [os.path.join(where, 'result.txt')]:
+        if os.path.exists(f):
+            os.remove(f)
+    os.makedirs(where, exist_ok=True)
+    cases = os.path.join(where, 'cases.cases')
+    prime = '' if check == 'native' else open(os.path.join(HERE, 'cases', 'prime.cases')).read()
+    open(cases, 'w').write(prime + body)
+    with open(os.path.join(where, 'manifest.txt'), 'w') as m:
+        for f in SOURCES:
+            p = os.path.join(tree, f)
+            m.write('%s  %s\n' % (sha256(p) if os.path.exists(p) else '-', f))
+    started = time.time()
+    rc, text = lispm_check(tree, cases, TIMEOUT[check], extra, where)
+    tail = [l for l in text.split('\n') if l.startswith('lispm-check: ') and 'passed' in l]
+    lines.append('lispm-check exit %d: %s' % (rc, tail[-1] if tail else 'no summary'))
+    ok = rc == 0
+    home = os.path.join(where, 'home')
+    py = lambda name: os.path.join(HERE, name)
+    if check == 'check1' and ok:
+        ok &= analyse([py('check1.py'), home], lines)
+    elif check == 'check3' and ok:
+        nt = nil_and_t(text, 'cold:cross-make-cold')
+        img = os.path.join(home, 'cold40.img')
+        ok &= bool(nt) and analyse([py('check3.py'), img, '40', '1024'] + list(nt[-1]), lines)
+        ok &= analyse([py('plant3.py'), img, '40', '1024'], lines)
+        ok &= analyse([py('check2.py'), '--prefix', 'c', home], lines)
+        native = tree_2000(os.path.dirname(out), args['tree_2000'])
+        ok &= analyse([py('compare.py'), '--prefix', 'c', os.path.join(where, 'served'), native, home],
+                      lines)
+        lines.append('sha256 %s  cold40.img' % sha256(img))
+    elif check == 'native' and ok:
+        nt = nil_and_t(text, 'cold:xc-make-cold')
+        old, new, pages = (os.path.join(home, f) for f in ('cold-old.img', 'cold-new.img',
+                                                           'cold-pages.img'))
+        same = open(old, 'rb').read() == open(new, 'rb').read()
+        lines.append('%s: the 32-bit cold load by this tree\'s generator %s the one System 2000\'s makes'
+                     % ('ok' if same else 'FAIL', 'is byte for byte' if same else 'differs from'))
+        ok &= same and len(nt) == 3
+        if len(nt) == 3:
+            ok &= analyse([py('check3.py'), new, '32', '256'] + list(nt[1]), lines)
+            ok &= analyse([py('check3.py'), pages, '32', '1024'] + list(nt[2]), lines)
+        for f in (old, new, pages):
+            lines.append('sha256 %s  %s' % (sha256(f), os.path.basename(f)))
+    elif check == 'check2':
+        # a later part resumes from the QFASLs this one made
+        for p in glob.glob(os.path.join(where, 'served', 'sys', '**', '*.qfasl'), recursive=True):
+            if os.path.getmtime(p) >= started:
+                shutil.copy2(p, os.path.join(tree, os.path.relpath(p, os.path.join(where, 'served'))))
+        if ok:
+            homes = sorted(glob.glob(os.path.join(out, 'part*', 'home')))
+            ok &= analyse([py('check2.py'), '--prefix', 'x'] + homes, lines)
+            native = tree_2000(os.path.dirname(out), args['tree_2000'])
+            ok &= analyse([py('compare.py'), '--prefix', 'x', tree, native] + homes, lines)
+    lines.append('%s %s' % (check, 'PASS' if ok else 'FAIL'))
+    open(os.path.join(where, 'result.txt'), 'w').write('\n'.join(lines) + '\n')
+    return ok, lines
+
+
+def main():
+    argv = sys.argv[1:]
+    extra = []
+    if '--' in argv:
+        extra = argv[argv.index('--') + 1:]
+        argv = argv[:argv.index('--')]
+    args = {'out': os.path.join(TREE, 'run', 'cross-check'),
+            'tree_2000': os.environ.get('CROSS_CHECK_TREE_2000',
+                                        os.path.join(TREE, '..', 'muir-sim', 'ref', 'band-2000',
+                                                     'tree-2000.tar.gz')),
+            'system': 'system', 'fresh': False}
+    checks = []
+    while argv:
+        a = argv.pop(0)
+        if a in ('--out', '--tree-2000', '--system'):
+            args[a[2:].replace('-', '_')] = argv.pop(0)
+        elif a == '--fresh':
+            args['fresh'] = True
+        elif a == 'all':
+            checks += ['check1', 'check3', 'native']
+        elif a in TIMEOUT:
+            checks.append(a)
+        else:
+            raise SystemExit(__doc__)
+    if not checks:
+        raise SystemExit(__doc__)
+    args['out'] = os.path.abspath(args['out'])
+    os.makedirs(args['out'], exist_ok=True)
+    if {'check3', 'native', 'check2'} & set(checks):
+        tree_2000(args['out'], args['tree_2000'])      # once, before the checks share it
+    results = {}
+    threads = [threading.Thread(target=lambda c=c: results.__setitem__(
+        c, run_check(c, args['out'], args, extra))) for c in dict.fromkeys(checks)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    passed = True
+    for c in dict.fromkeys(checks):
+        ok, lines = results.get(c, (False, ['%s: no result' % c]))
+        print('\n'.join(lines))
+        print()
+        passed &= ok
+    print('cross-check: %s' % ', '.join('%s %s' % (c, 'PASS' if results.get(c, (False,))[0] else 'FAIL')
+                                        for c in dict.fromkeys(checks)))
+    return 0 if passed else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
