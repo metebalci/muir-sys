@@ -71,7 +71,7 @@ Every change to a source file carries a comment in that file saying why.
   forward's target, cdr code and all. The interpreter forwards a special
   variable's slot in its binding frame to the variable's value cell
   (`sys/eval.lisp:1372-1375`, `:1187`), and a closed-over frame's words to
-  their copies (`sys/eval.lisp:2118-2138`). After a process switch the slot
+  their copies (`sys/eval.lisp:2123-2144`). After a process switch the slot
   was a copy of the cell: a `SETQ` wrote the stack and not the variable, and
   the frame's last slot took the cell's cdr code, cdr-next where it had
   cdr-nil, so `PARALLEL-BINDING-LIST` (`sys/eval.lisp:1323-1383`) walked past
@@ -87,3 +87,31 @@ Every change to a source file carries a comment in that file saying why.
   loops of 100,000 iterations of the `CONDITION-CASE` the error came 17
   times in 600,000 iterations on micro, 3 in 400,000 on rtl and 1 in 230,000
   on muir-fpga's CADR without the fix, and not in 400,000 on micro with it.
+- **An interpreted `LET` keeps its variables while a closure is made under
+  it with a temporary `DEFAULT-CONS-AREA`.** Making an interpreted closure
+  (`INTERPRETER-ENCLOSE`, `sys/eval.lisp:2094`) copies every stack frame
+  of its environment, the frames of callers still running included, and
+  forwards the stack words to the copies (`UNSTACKIFY-ENVIRONMENT`,
+  `sys/eval.lisp:2123-2144`). It consed the copies in `DEFAULT-CONS-AREA`,
+  which `QC-FILE` binds to the compiler's temporary area
+  (`sys/qcfile.lisp:362`) and resets for every file
+  (`sys/qcdefs.lisp:246`, `:253`). So a `MAKE-SYSTEM` typed inside a `LET`
+  at the listener lost that `LET`'s frame once compile-time code made a
+  closure and the area was reset: every interpreted variable reference then
+  failed ("The argument to CAR, ..., was of the wrong type"), the compiler's
+  own error recovery, an interpreted lambda, failed the same way, and the
+  errors nested until the region table was full and the machine halted in
+  `TRAP`'s recursive-error check. The copies are now consed in
+  `BACKGROUND-CONS-AREA` (`sys/eval.lisp:2118-2124`), which MIT keeps for
+  functions "which want to update permanent data structures and may be
+  called even when DEFAULT-CONS-AREA is a temporary area"
+  (`sys/qfctns.lisp:12-15`); the old code broke that rule. MIT's; the
+  QUUX line has the same fix. `docs/building.md` also says to call
+  `MAKE-SYSTEM` with no interpreted binding around it. The system's checks,
+  `tools/system-check/` (its `README.md`; `.gitignore` tracks it), hold the
+  case: `tools/system-check/run interpreter-closure` fails two of its four
+  cases on System 1002's band with this line's microcode and passes all four
+  with `eval.lisp` compiled and loaded, and a SYSTEM compile inside a `LET`,
+  which stopped at `SYS: SYS; QFCTNS` and halted in `TRAP`, compiles all its
+  files with it. Interpreted closures over `LET`, `LET*`, `FLET`, `BLOCK` and
+  `TAGBODY` give what they gave before.
