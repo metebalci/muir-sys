@@ -401,6 +401,17 @@ This function will not execute correctly unless the ~S is fixed."
 
 (DEFPROP COMPILER-ARGLIST T SI::DEBUG-INFO)
 
+;;; a local variable used in a lexical closure is listed in the fef with the
+;;; sign bit of a fixnum set (qcompile0).  that bit is the target's: this
+;;; world's %%q-boxed-sign-bit is bit 24, g2's 40-bit machine's is bit 31
+;;; (contract g1 2.4), which this world's %logdpb cannot set, so a cross
+;;; build subtracts the bit's value instead, giving the same negative fixnum
+;;; the target's %logdpb would.
+(defun boxed-sign-bit-mark (n)
+  (if *cross-target*
+      (- n (expt 2 (ldb (byte 6 6) (target-value '%%q-boxed-sign-bit))))
+    (%logdpb 1 %%q-boxed-sign-bit n)))
+
 (DEFUN QCOMPILE0 (EXP FUNCTION-TO-BE-DEFINED GENERATING-MICRO-COMPILER-INPUT-P
 		  &OPTIONAL (NAME-TO-GIVE-FUNCTION FUNCTION-TO-BE-DEFINED))
   (LET ((EXP1 EXP)
@@ -565,7 +576,10 @@ This function will not execute correctly unless the ~S is fixed."
 				       (LET ((TEM (VAR-LAP-ADDRESS HOME)))
 					 (SELECTQ (CAR TEM)
 					   (ARG (CADR TEM))
-					   (T (%LOGDPB 1 %%Q-BOXED-SIGN-BIT (CADR TEM))))))
+;					   (T (%LOGDPB 1 %%Q-BOXED-SIGN-BIT (CADR TEM))))))
+					   ;; a local is marked with the target's fixnum
+					   ;; sign bit, see boxed-sign-bit-mark below
+					   (t (boxed-sign-bit-mark (cadr tem))))))
 				   VARIABLES-USED-IN-LEXICAL-CLOSURES)))))
     ;; Set up the debug info from the local declarations and other things
     (LET ((DEBUG-INFO NIL) TEM)

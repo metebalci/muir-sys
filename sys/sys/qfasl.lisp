@@ -195,6 +195,14 @@ NO-MSG-P inhibits the message announcing that the loading is taking place."
 		 (GETF (SIXTH (OR (GETF FASL-FILE-PLIST ':FASD-DATA)
 				  (GETF FASL-FILE-PLIST ':COMPILE-DATA)))
 		       'COMPILER::NEW-DESTINATIONS))))
+    ;; a file compiled for a word other than this world's is refused: its
+    ;; attribute list names its word's width when that is not 32 bits
+    ;; (compiler:fasd-attributes-list), as in the files built for g2's 40-bit
+    ;; machine on system 2000.
+    (let ((width (getf fasl-file-plist ':word-width 32.)))
+      (unless (= width (qfasl-word-width))
+	(ferror nil "~A was compiled for a ~D-bit word, and this world's is ~D bits"
+		pathname width (qfasl-word-width))))
     ;; Enter appropriate environment defined by file property list
     (MULTIPLE-VALUE-BIND (VARS VALS)
 	(IF (NOT (STRINGP PATHNAME))
@@ -225,6 +233,14 @@ NO-MSG-P inhibits the message announcing that the loading is taking place."
     (SETQ FASL-STREAM-ARRAY NIL)
     (SETQ *LAST-FASL-FILE-FORMS* (NREVERSE *LAST-FASL-FILE-FORMS*))
     PATHNAME))
+
+;;; this world's word, in bits: its cdr code, data type and pointer.  the
+;;; constants fold when this file is compiled, to 32 in a 32-bit world, and to
+;;; 40 when the cross build compiles it for g2's machine (sys: cold; cross).
+(defun qfasl-word-width ()
+  (+ (ldb (byte 6 0) %%q-cdr-code)
+     (ldb (byte 6 0) %%q-data-type)
+     (ldb (byte 6 0) %%q-pointer)))
 
 (DEFUN QFASL-FILE-PLIST (FILE)
   "Return the attribute list of a compiled file."

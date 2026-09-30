@@ -58,3 +58,66 @@ file carries a comment in that file saying why.
   does. `tools/release-test` plants such an address in a Lisp file, case (e)
   (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
   FAIL line it planted.
+- **The cross build** (contract G2, section 7, option (iii)): System 2000's
+  band compiles SYSTEM for the 40-bit machine and writes its cold load, as
+  `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
+  - `cold/cross.lisp` (new). The target's table (`cross-build-table`,
+    `cold/cross.lisp:132`): the cold-load generator's parameters with the
+    target's overlay; for the constants those do not define, their
+    `DEFCONSTANT`s in the tree being built (`:177-228`); the fixnum limits
+    from the target's pointer field. One evaluator hook gives every
+    interpreted evaluation of a watched symbol the target's value while a
+    file compiles, and a symbol with none stops the file, its QFASL not
+    written, also after a fold whose own error is only a warning
+    (`cross-evalhook`, `cross-read`, `cross-compile-stream`, `:302-380`).
+    What the hook cannot see is checked before anything is compiled: data
+    type numbers, the compiler's misc instructions, and the FEF, FASL and
+    character formats (`:235-298`). Every fold, `#.`, watched read and
+    `LSH` or `ROT` left unfolded is logged (`:382-411`). The builder never
+    loads a 40-bit QFASL: where `MAKE-SYSTEM` loads one, it loads its own
+    compile of the source, and it tells such a file by its first bytes,
+    since reading its attribute list first changed what the load did
+    (`cross-fasload-internal`, `cross-marked-file-p`, `cross-host-fasl`,
+    `:413-465`). Then
+    `cross-begin`, `cross-end`, `cross-compile-system`, `cross-make-cold`,
+    `cross-copy-partition`, and `cross-redump-value-file` for the cold
+    load's font, which the tree holds only as a 32-bit file (`:469-593`).
+  - `cold/target40.lisp` (new): the 40-bit word's fields (G1, section 2.1)
+    and 1024-word pages, loaded over `QCOM` until `QCOM` carries them.
+  - `sys/qcdefs.lisp:744-766`: `*cross-target*`, `target-value` and
+    `target-word-width`, which the compiler's own encodings ask.
+  - `sys/qcp1.lisp:410-413`, `:582`: a closure's local slots are marked with
+    the target's fixnum sign bit, bit 31 on the 40-bit machine
+    (`boxed-sign-bit-mark`); the `%LOGDPB` it replaces is commented out.
+  - `sys/qcopt.lisp:295-300`: a cross build folds no `LSH` or `ROT`, which
+    work on the fixnum's width; the target computes them.
+  - `sys/qcfasd.lisp`: in a file for the 40-bit machine every float is an
+    IEEE single (`:247`, `:260`, `fasd-binary32` and `float-to-binary32`,
+    `:295-330`), rounded as IEEE 754 rounds to nearest: `1e50` in
+    `io/format.lisp:946` becomes an infinity. Float arrays are refused in a
+    cross build (`:396-404`), and the attribute list says `:WORD-WIDTH 40`
+    (`fasd-attributes-list`, `:507-509`); a 32-bit file carries no mark and
+    is unchanged.
+  - `sys/qfasl.lisp:198-205`, `:240-243`: the fasloader refuses a file
+    whose word is not its world's (`qfasl-word-width`), so neither world
+    loads the other's files.
+  - `cold/coldut.lisp`: a page is `blocks-per-page` disk blocks (1 today, 4
+    for 1024-word pages of 32-bit words, 5 for 40-bit ones) and a word
+    `word-bytes` bytes of the page's 8-bit buffer, least significant first
+    (`:18-26`, `:64-164`, `load-parameters` `:403-428`); data words carry
+    the tag 005 in a 40-bit cold load (`vunboxed`, `:227-235`), where a
+    float is an IEEE single (`:680-681`), a bignum keeps the CADR's layout,
+    31-bit digits (`store-bignum-40`, `:782-814`), and the band format is
+    2002 (`:1237`, appendix A1.12); the system communication area's base is
+    its area's origin rather than 400 (`:1154-1155`, A1.9).
+    `vstore-contents` keeps a word's cdr code by `LDB` and `DPB`
+    (`:246-252`): `DEPOSIT-FIELD` returns its third argument unchanged when
+    the first is a bignum, as a 32-bit word with its cdr code set is. A
+    32-bit cold load made by this generator is byte for byte the one System
+    2000's makes.
+  - `cold/coldld.lisp`: a 40-bit file's floats are binary32
+    (`q-fasl-op-small-float`, `binary32-to-float`, `:388-425`), its numeric
+    array data are data words (`:512`, `:585-602`), and a file whose word
+    is not the cold load's is refused, whether it names its word
+    (`q-fasl-op-file-property-list`, `:878-899`) or has no attribute list,
+    which makes it a 32-bit file (`cold-fasload`, `:83-91`).

@@ -282,9 +282,20 @@
 (defoptimizer arith-opt-non-associative int-char)	;
 
 
+;(defun arith-opt-non-associative (form)
+;  (if (loop for arg in (cdr form)
+;	    always (constantp arg))
+;      (fold-constants form)
+;    form))
+
+;;; a cross build (*cross-target*, qcdefs) does not fold lsh and rot: they work
+;;; on the width of a fixnum, and this world's (25 bits) is not the target's (32
+;;; on g2's machine), so the target computes them when the code runs.  the
+;;; other functions folded here do not depend on the width.
 (defun arith-opt-non-associative (form)
-  (if (loop for arg in (cdr form)
-	    always (constantp arg))
+  (if (and (loop for arg in (cdr form)
+		 always (constantp arg))
+	   (not (and *cross-target* (memq (car form) '(lsh rot)))))
       (fold-constants form)
     form))
 

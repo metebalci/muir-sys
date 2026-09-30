@@ -250,7 +250,7 @@ map (`:676-709`).
 | `INITIAL-STACK-GROUP` | `A-QISTKG` |
 
 The cold loader writes slot 0 as a locative to the function cell of
-`LISP-TOP-LEVEL` (`cold/coldut.lisp:954-956`), and the microcode reads through
+`LISP-TOP-LEVEL` (`cold/coldut.lisp:1124-1126`), and the microcode reads through
 it, marked `;INDIRECT` (`:751-759`), so a world runs whatever that cell holds
 now rather than whatever it held when the band was written.
 

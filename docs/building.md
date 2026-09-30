@@ -136,7 +136,100 @@ into the builder first, after `SYSDCL` and before `MAKE-SYSTEM`:
 
 The cold load itself is independent of the builder: `MAKE-COLD` reads
 `QCOM`, `QDEFS` and `DEFMIC` afresh into a package of its own
-(`cold/coldut.lisp:278-283`).
+(`cold/coldut.lisp:406-411`).
+
+### Cross-building for the 40-bit QUUX
+
+The first 40-bit band has no band of its own kind to compile it, so System
+2000's band builds it (contract G2, section 7): the builder's compiler
+compiles SYSTEM for the 40-bit machine, and `MAKE-COLD` writes that
+machine's cold load, both in the builder, with the tree to build served as
+`SYS:`. `SYS: COLD; CROSS` does it.
+
+A plain reference to a system constant compiles to a read of its value cell,
+which the target's cold load fills, so such code needs nothing. The
+builder's own values could reach the output only where it evaluates while it
+compiles: folding a constant expression, `#.`, the interpreter running a
+macro, an `EVAL-WHEN (COMPILE)` or a `COMPILER-LET`, and the compiler's own
+encodings. So:
+
+- **The target's table.** `cold:cross-begin` loads `QCOM`, `QDEFS` and
+  `DEFMIC` into the cold-load generator's package as `MAKE-COLD` does, with
+  `SYS: COLD; TARGET40` over them: the 40-bit word's fields and 1024-word
+  pages, until `QCOM` itself carries them. Each of the builder's system
+  constants takes the value these give it; one they do not define (the float
+  formats of `SYS2; NUMDEF`, the Chaosnet opcodes) takes the value of its
+  `DEFCONSTANT` in the tree being built; the fixnum limits follow the
+  target's pointer field.
+- **One evaluator hook.** While a file compiles, every interpreted
+  evaluation of one of those symbols takes the target's value. One with no
+  target value stops the file, and its QFASL is not written, also when the
+  evaluation was a fold, whose own error is only a warning.
+- **What the hook cannot see is checked once**, and `cross-begin` refuses to
+  start otherwise: every data type keeps its number (`TYPEP`'s and `EQ`'s
+  optimizers compile the builder's numbers in, from `TYPE-OF-ALIST`), the
+  compiler knows each of the target's misc instructions with the target's
+  opcode, and the FEF, FASL and character formats are the builder's.
+- **The compiler's own encodings** ask `compiler:target-value`: the fixnum
+  sign bit that marks a closure's local slots (`qcp1`), `LSH` and `ROT` left
+  for the target to compute (`qcopt`), floats as IEEE singles, float arrays
+  refused, and the attribute `:WORD-WIDTH 40` on every file (`qcfasd`). A
+  world's fasloader, and `MAKE-COLD`, refuse a file whose word is not
+  theirs; the files of a 32-bit world carry no mark. The QFASL's first
+  words stay as they are, since ozd and the file device tell a QFASL by
+  them.
+- **The builder never loads a 40-bit QFASL.** Where `MAKE-SYSTEM` loads
+  one (the definition files of what it compiles), the builder compiles the
+  same source for itself and loads that, so that the rest of the compile
+  sees the tree's definitions, as a native build's does. It tells a 40-bit
+  file by its first bytes: reading the attribute list as the fasloader
+  does, just before a load, was measured to change what the load does
+  (a later compile of `SYS: FILE; LMPARS` then lost `LM-PATHNAME`'s
+  combined `:SET` method).
+- **`MAKE-COLD`** writes pages of 1024 words packed 5 bytes a word (G1,
+  section 4), 5 disk blocks a page; data words (characters, instructions,
+  numeric array elements) carry the tag 005, bignums keep the CADR's
+  layout of 31-bit digits, and the band format is 2002.
+
+**Priming.** The compiler files this system changes and the readtable
+compiler are compiled and loaded into the builder first, as for any change
+the compiler depends on, with their QFASLs written apart from the tree's,
+which are the target's; then `SYSDCL`, the cold-load generator and the cross
+build:
+
+```lisp
+(qc-file "SYS: SYS; QCDEFS LISP" "HOST: //home//lispm//h-qcdefs.qfasl")
+(load "HOST: //home//lispm//h-qcdefs.qfasl")
+;; the same for SYS: SYS; QCFASD, QCP1, QCOPT, SYS: IO; RTC and SYS: SYS; SYSDCL
+(load "SYS: COLD; COLDPK LISP")
+(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//h-coldut.qfasl")
+(load "HOST: //home//lispm//h-coldut.qfasl")
+(cold:load-parameters)
+;; then compile and load SYS: COLD; COLDLD and SYS: COLD; CROSS the same way
+```
+
+**Then**, with `SI:INHIBIT-FDEFINE-WARNINGS` at `:JUST-WARN` for the loads:
+
+```lisp
+(cold:cross-begin :log-directory "HOST: //home//lispm//x-")
+(qc-file "SYS: SYS; SYSDCL LISP")	;and the six ALLDEFS files, as above
+(cold:cross-compile-system)
+(si:rtc-file "SYS: IO; RDTBL LISP")
+(si:rtc-file "SYS: IO; CRDTBL LISP")
+(cold:cross-redump-value-file "SYS: FONTS; CPTFON QFASL" 'fonts:cptfont)
+(cold:cross-make-cold "LOD3")
+(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold40.img")
+(cold:cross-end)
+```
+
+The tree's `CPTFON` is a 32-bit file: `cross-redump-value-file` loads it
+with `FONTS:CPTFONT` bound, so that the builder's own, larger font does not
+change, and writes it again for the target. The log directory gets
+`cross-NNNN.txt` for each file compiled: every read of a watched symbol at
+an interpreted point, with its target and builder values, every fold, every
+`#.` with its value, and every `LSH` or `ROT` left to the target; and
+`cross-write-table` writes the table. `cross-copy-partition` puts the cold
+load's pages in a file, for the host to read or to write into a GPT disk.
 
 ### The CADR route (fallback)
 
@@ -266,7 +359,7 @@ subnet. The band it builds can, so the last step moves it:
 - **A QFASL records the site of the band that compiled it.** `QC-FILE` puts
   `:SITE ,SI:SITE-NAME` in the file's `:COMPILE-DATA` (`sys/qcfile.lisp:179`),
   and `DUMP-FORMS-TO-FILE` does the same through `SHORT-SITE-NAME`
-  (`sys/qcfasd.lisp:454`); "these properties wind up on the GENERIC-PATHNAME",
+  (`sys/qcfasd.lisp:519`); "these properties wind up on the GENERIC-PATHNAME",
   so the built world carries them too. A build on a band of another site
   therefore writes that site's name into every QFASL. Give the build band the
   new site first, then compile:
@@ -382,7 +475,7 @@ The readtable compiler is in no system (`sys/sysdcl.lisp` does not name `IO; RTC
 (si:rtc-file "SYS: IO; CRDTBL LISP")
 ```
 
-The cold-load builder loads both QFASL files specially (`cold/coldut.lisp:1244-1247`), and `SYSTEM-INTERNALS` only loads them (`sys/sysdcl.lisp:122`, `:126`).
+The cold-load builder loads both QFASL files specially (`cold/coldut.lisp:1422-1425`), and `SYSTEM-INTERNALS` only loads them (`sys/sysdcl.lisp:122`, `:126`).
 
 ## 2. Compile the systems
 
@@ -465,7 +558,7 @@ overwrite question automatically without first checking its destination.
 
 **Keep typed forms short.** A cold load's console has a small wired keyboard buffer, and a long line is silently truncated: a 130-character form typed at about twelve characters a second stopped echoing after sixty characters, and the reader simply waited for the rest. Type short forms, or type slowly, and read back what the screen echoed before pressing Return.
 
-`MAKE-COLD` (`cold/coldut.lisp:1194-1218`) marks the partition "cold-incomplete", builds the areas, NIL and T, loads the files of `COLD-LOAD-FILE-LIST` (`sys/sysdcl.lisp:499-523`) and the readtables, and records the physical file names MINI will ask for (`cold/coldut.lisp:1249-1256`). It then sets the partition's comment to "cold" and the date. The partition must not be the one the running world was booted from.
+`MAKE-COLD` (`cold/coldut.lisp:1372-1396`) marks the partition "cold-incomplete", builds the areas, NIL and T, loads the files of `COLD-LOAD-FILE-LIST` (`sys/sysdcl.lisp:499-523`) and the readtables, and records the physical file names MINI will ask for (`cold/coldut.lisp:1427-1434`). It then sets the partition's comment to "cold" and the date. The partition must not be the one the running world was booted from.
 
 ## 5. Boot the cold load
 

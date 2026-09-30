@@ -740,3 +740,27 @@ the local variable in which the function definition actually lives.")
 or NIL if it is not defined *by* the environment."
   (with-stack-list (env fenv)
     (fsymeval-in-environment symbol env nil)))
+
+;;; the cross build (sys: cold; cross, contract g2 section 7) compiles, on
+;;; system 2000's band, for g2's 40-bit machine, whose word differs from this
+;;; world's.  while it runs, *cross-target* names a function of one symbol that
+;;; returns the target's value of that system constant.  the compiler's own code
+;;; asks it, through target-value, at the few places where it, not an
+;;; evaluation, puts a number that depends on the word into its output: the
+;;; boxed sign bit (qcp1), the widths lsh and rot work on (qcopt), and the float
+;;; and file formats fasd writes (qcfasd).  it is nil when compiling for this
+;;; world, and then target-value is this world's own value.
+(defvar *cross-target* nil
+  "Nil, or during a cross build a function returning a system constant's value in the target.")
+
+(defun target-value (symbol)
+  "SYMBOL's value in the world being compiled for: the cross build's target, else this one."
+  (if *cross-target*
+      (funcall *cross-target* symbol)
+    (symeval symbol)))
+
+(defun target-word-width ()
+  "The width in bits of a word of the world being compiled for: 32 today, 40 for g2's machine."
+  (+ (ldb (byte 6 0) (target-value '%%q-cdr-code))
+     (ldb (byte 6 0) (target-value '%%q-data-type))
+     (ldb (byte 6 0) (target-value '%%q-pointer))))

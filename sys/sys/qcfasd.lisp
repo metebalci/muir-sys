@@ -242,24 +242,30 @@
 	((ZEROP C))
       (FASD-NIBBLE (LDB (+ (LSH POS 6) 16.) ABS)))))
 
+;;; on g2's 40-bit machine every float is an ieee 754 single (contract g1
+;;; 2.4), so a file compiled for it holds each float as one (fasd-binary32).
 (DEFUN FASD-SINGLE-FLOAT (N)
+  (if (= (target-word-width) 40.)
+      (fasd-binary32 n)
   (FASD-START-GROUP NIL 3 FASL-OP-FLOAT)
   (FASD-NIBBLE (%P-LDB-OFFSET #o1013 N 0))
   (FASD-NIBBLE (DPB (%P-LDB-OFFSET #o0010 N 0) #o1010 (%P-LDB-OFFSET #o2010 N 1)))
   (FASD-NIBBLE (%P-LDB-OFFSET #o0020 N 1))
-  NIL)
+  NIL))
 
 ;; Can be replaced with %SHORT-FLOAT-EXPONENT once in system 99.
 ;(defsubst %QCFASD-short-float-exponent (short-float)
 ;  (ldb (byte 8 17.) (%pointer short-float)))
 
 (DEFUN FASD-SHORT-FLOAT (N)
+  (if (= (target-word-width) 40.)
+      (fasd-binary32 n)
   (LET ((EXP (- (SI:%SHORT-FLOAT-EXPONENT N) #o200)))
     ;; If exponent is in range for FASL-OP-FLOAT, use it.
     (IF (OR ( #o-100 EXP #o77)
 	    (ZEROP N))				;exp is #o-200 in this case.
 	(FASD-OLD-SMALL-FLOAT N)
-      (FASD-NEW-SMALL-FLOAT N))))
+      (FASD-NEW-SMALL-FLOAT N)))))
 
 (DEFUN FASD-OLD-SMALL-FLOAT (N)
   (SETQ N (%MAKE-POINTER DTP-FIX N))		;So that LDB's will work.
@@ -280,6 +286,48 @@
   (FASD-NIBBLE 17.)				;17 bits for mantissa, excluding sign
   (FASD-NIBBLE (LDB (BYTE 16. 0) FRACTION))
   (FASD-NIBBLE 1))				;implied leading digit
+
+;;; a float in a file compiled for g2's 40-bit machine: a fasl-op-float group
+;;; with its flag set, as today's short float, whose two nibbles are the
+;;; float's ieee 754 binary32 bits, high half first.  on that machine the field
+;;; of a dtp-small-flonum word is those 32 bits (contract g1 2.3, 2.4), so the
+;;; group is a word's field, as today's is (fasl-op-float-small-float).
+(defun fasd-binary32 (n)
+  (let ((bits (float-to-binary32 n)))
+    (fasd-start-group t 2 fasl-op-float)
+    (fasd-nibble (ldb (byte 16. 16.) bits))
+    (fasd-nibble (ldb (byte 16. 0) bits))
+    nil))
+
+(defun float-to-binary32 (x)
+  "The ieee 754 binary32 bits of the float X, rounded to nearest, ties to even:
+past the largest single an infinity, below the smallest normal one a subnormal
+or zero, as ieee 754 rounds."
+  (if (zerop x)
+      0
+    (multiple-value-bind (m e) (integer-decode-float x)	;|x| = m * 2^e
+      (let* ((sign (if (minusp x) (ash 1 31.) 0))
+	     ;; |x| is in [2^lead, 2^(lead+1)); the last bit kept is 2^lsb, 24
+	     ;; bits down for a normal single, never below 2^-149 (a subnormal)
+	     (lead (+ e (haulong m) -1))
+	     (lsb (max (- lead 23.) -149.))
+	     (shift (- lsb e))
+	     (q (if (plusp shift)
+		    (let* ((kept (ash m (- shift)))
+			   (rest (- m (ash kept shift)))
+			   (half (ash 1 (1- shift))))
+		      (if (or (> rest half) (and (= rest half) (oddp kept)))
+			  (1+ kept)
+			kept))
+		  (ash m (- shift)))))
+	;; |x| rounds to q * 2^lsb; rounding up may carry to 2^24
+	(when (= (haulong q) 25.)
+	  (setq q (ash q -1) lsb (1+ lsb)))
+	(cond ((< q (ash 1 23.))			;a subnormal, or zero
+	       (logior sign q))
+	      (( (+ lsb 150.) 255.)		;past the largest: infinity
+	       (logior sign (ash 255. 23.)))
+	      (t (logior sign (ash (+ lsb 150.) 23.) (- q (ash 1 23.)))))))))
 
 (DEFUN FASD-RATIONAL (RAT)
   (FASD-START-GROUP NIL 0 FASL-OP-RATIONAL)
@@ -345,6 +393,15 @@
 ;;; Does its own fasd-table adding since it has to be done in the middle
 ;;; of this function, after the fasl-op-array but before the initialization data.
 (DEFUN FASD-ARRAY (ARRAY &AUX SIZE OBJECTIVE-P FAKE-ARRAY RETVAL NSP DIMS)
+  ;; a numeric array is dumped as this world's storage, halfword by halfword.
+  ;; that is the target's too for the integer and character types, whose
+  ;; packing in a word's field does not change (contract g1 2.6), but not for
+  ;; floats, which a cross build would have to convert: refuse them.
+  (when (and *cross-target*
+	     (memq (array-type array) '(art-float art-fps-float art-complex-float
+					 art-complex art-complex-fps-float)))
+    (ferror nil "The cross build cannot dump ~S, an array of type ~S"
+	    array (array-type array)))
   (SETQ NSP (NAMED-STRUCTURE-P ARRAY)
 	DIMS (ARRAY-DIMENSIONS ARRAY)
 	SIZE (APPLY #'* DIMS)
@@ -441,7 +498,15 @@
   (FASD-ATTRIBUTES-LIST PLIST NIL))
 
 ;;; NOTE: This SETQ's FASD-PACKAGE if a package is specified in PLIST
+;;; a file compiled for a word other than 32 bits (g2's machine's, 40) says so
+;;; in its attribute list, :word-width 40., and a fasloader refuses a file whose
+;;; word is not its world's (fasload-internal, the cold-load generator's
+;;; q-fasl-op-file-property-list): neither world loads the other's files.
+;;; the files of a 32-bit world carry no mark, so they stay as they were.
 (DEFUN FASD-ATTRIBUTES-LIST (PLIST &OPTIONAL (ADD-FASD-DATA T))
+  (let ((width (target-word-width)))
+    (unless (= width 32.)
+      (setq plist (list* ':word-width width plist))))
   (WHEN ADD-FASD-DATA
     (MULTIPLE-VALUE-BIND (MAJOR MINOR)
 	(SI:GET-SYSTEM-VERSION "System")

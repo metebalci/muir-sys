@@ -15,6 +15,15 @@
 (defvar little-fixnum)
 (defvar q-typed-pointer-mask)	;Due to deficiencies in LDB and DPB
 (defvar q-pointer-mask)
+;;; the word of the cold load being made, from the parameters (load-parameters):
+;;; its width in bits, 32 today and 40 on g2's machine; the bytes a word takes
+;;; on disk, 4, or 5 in packed storage (contract g1 4.1, 4.3: word w of a page at
+;;; byte 5w, least significant first, the tag last); and the disk blocks (this
+;;; world's pages, 1 kbyte) a page takes: 1 for 256-word pages of 32-bit words,
+;;; 4 for 1024-word pages of them, 5 for 1024-word pages of 40-bit words.
+(defvar word-bits)
+(defvar word-bytes)
+(defvar blocks-per-page)
 
 ;;; The virtual memory
 
@@ -46,43 +55,113 @@
 	   (sys:return-disk-rqb rqb)
 	   (aset nil vmem-pages i 1)))))
 
+;(defun vmem-disk-io (rqb vpn writep)
+;  (and (or (minusp vpn) ( vpn vmem-part-size))
+;       (ferror nil "Disk I//O outside of partition"))
+;  (funcall (if writep #'sys:disk-write #'sys:disk-read) rqb 0 (+ vpn vmem-part-base)))
+;; a page is blocks-per-page blocks, and page vpn starts at block
+;; vpn * blocks-per-page of the partition.
 (defun vmem-disk-io (rqb vpn writep)
-  (and (or (minusp vpn) ( vpn vmem-part-size))
+  (and (or (minusp vpn) (> (* (1+ vpn) blocks-per-page) vmem-part-size))
        (ferror nil "Disk I//O outside of partition"))
-  (funcall (if writep #'sys:disk-write #'sys:disk-read) rqb 0 (+ vpn vmem-part-base)))
+  (funcall (if writep #'sys:disk-write #'sys:disk-read)
+	   rqb 0 (+ (* vpn blocks-per-page) vmem-part-base)))
 
-;Given address returns art-16b array containing that page.  With second arg of nil
-;initializes to dtp-free instead of reading in from disk.
+;;Given address returns art-16b array containing that page.  With second arg of nil
+;;initializes to dtp-free instead of reading in from disk.
+;(defun vmem-find-page (address &optional (get-from-disk-p t))
+;  (if (> (logand q-pointer-mask address) vmem-highest-address)
+;      (ferror nil "vmem-highest-address exceeded"))
+;  (do ((i 0 (1+ i))
+;       (vpn (truncate ;(ldb sym:%%q-pointer address)
+;	              (logand q-pointer-mask address)
+;		      sym:page-size))
+;       (rqb) (buf) (tem))
+;      (( i n-vmem-pages)
+;       (setq i vmem-page-reuse-pointer)
+;       (cond ((setq rqb (aref vmem-pages i 1))
+;	      (vmem-disk-io rqb (aref vmem-pages i 0) t))	;Swap this guy out
+;	     (t (setq rqb (sys:get-disk-rqb))
+;		(aset rqb vmem-pages i 1)))
+;       (aset vpn vmem-pages i 0)
+;       (setq buf (sys:rqb-buffer rqb))
+;       (cond (get-from-disk-p
+;	       (vmem-disk-io rqb vpn nil))
+;	     (t (setq tem (dpb sym:dtp-free sym:%%q-data-type (* vpn sym:page-size)))
+;		(do ((j 0 (1+ j))
+;		     (high (ldb #o2020 tem))
+;		     (low (ldb #o0020 tem)))
+;		    (( j sym:page-size))
+;		  (aset (+ low j) buf (+ j j))
+;		  (aset high buf (+ j j 1)))))
+;       buf)
+;    (cond ((eq (aref vmem-pages i 0) vpn)	;Already swapped in
+;	   (and (= vmem-page-reuse-pointer i)
+;		(setq vmem-page-reuse-pointer (\ (1+ i) n-vmem-pages)))
+;	   (return (sys:rqb-buffer (aref vmem-pages i 1)))))))
+;; a page is held in an rqb of blocks-per-page blocks and read and written
+;; through its 8-bit buffer, word w at bytes word-bytes * w on, least
+;; significant first (vbuf-read, vbuf-store): for 32-bit words that is the
+;; layout the 16-bit buffer gave, and for 40-bit words g2's packed storage.
 (defun vmem-find-page (address &optional (get-from-disk-p t))
   (if (> (logand q-pointer-mask address) vmem-highest-address)
       (ferror nil "vmem-highest-address exceeded"))
   (do ((i 0 (1+ i))
-       (vpn (truncate ;(ldb sym:%%q-pointer address)
-	              (logand q-pointer-mask address)
-		      sym:page-size))
-       (rqb) (buf) (tem))
+       (vpn (truncate (logand q-pointer-mask address) sym:page-size))
+       (rqb) (buf))
       (( i n-vmem-pages)
        (setq i vmem-page-reuse-pointer)
        (cond ((setq rqb (aref vmem-pages i 1))
 	      (vmem-disk-io rqb (aref vmem-pages i 0) t))	;Swap this guy out
-	     (t (setq rqb (sys:get-disk-rqb))
+	     (t (setq rqb (sys:get-disk-rqb blocks-per-page))
 		(aset rqb vmem-pages i 1)))
        (aset vpn vmem-pages i 0)
-       (setq buf (sys:rqb-buffer rqb))
-       (cond (get-from-disk-p
-	       (vmem-disk-io rqb vpn nil))
-	     (t (setq tem (dpb sym:dtp-free sym:%%q-data-type (* vpn sym:page-size)))
-		(do ((j 0 (1+ j))
-		     (high (ldb #o2020 tem))
-		     (low (ldb #o0020 tem)))
-		    (( j sym:page-size))
-		  (aset (+ low j) buf (+ j j))
-		  (aset high buf (+ j j 1)))))
+       (setq buf (si:rqb-8-bit-buffer rqb))
+       (if get-from-disk-p
+	   (vmem-disk-io rqb vpn nil)
+	 (vbuf-fill-free buf vpn))
        buf)
     (cond ((eq (aref vmem-pages i 0) vpn)	;Already swapped in
 	   (and (= vmem-page-reuse-pointer i)
 		(setq vmem-page-reuse-pointer (\ (1+ i) n-vmem-pages)))
-	   (return (sys:rqb-buffer (aref vmem-pages i 1)))))))
+	   (return (si:rqb-8-bit-buffer (aref vmem-pages i 1)))))))
+
+;; a fresh page: each word a dtp-free pointing at itself.  the tag and the
+;; address above bit 23 are the same for the whole page, since a cold load
+;; lies below address 2^24, so each word's low three bytes are all that change.
+(defun vbuf-fill-free (buf vpn)
+  (let* ((base (* vpn sym:page-size))
+	 (high (ash (dpb sym:dtp-free sym:%%q-data-type base) -24.)))
+    (or (< (+ base sym:page-size) (ash 1 24.))
+	(ferror nil "Page ~O is past address 2^24" vpn))
+    (dotimes (j sym:page-size)
+      (let ((a (+ base j))
+	    (i (* j word-bytes)))
+	(aset (ldb #o0010 a) buf i)
+	(aset (ldb #o1010 a) buf (+ i 1))
+	(aset (ldb #o2010 a) buf (+ i 2))
+	(do ((k 3 (1+ k))
+	     (h high (ash h -8.)))
+	    ((= k word-bytes))
+	  (aset (logand h #o377) buf (+ i k)))))))
+
+;; the word at byte i of a page's buffer, and storing one there.
+(defun vbuf-read (buf i)
+  (do ((k (1- word-bytes) (1- k))
+       (h 0 (+ (ash h 8.) (aref buf (+ i k)))))
+      ((< k 3)
+       (+ (aref buf i) (ash (aref buf (+ i 1)) 8.) (ash (aref buf (+ i 2)) 16.)
+	  (ash h 24.)))))
+
+(defun vbuf-store (buf i value)
+  (let ((low (ldb #o0030 value)))
+    (aset (ldb #o0010 low) buf i)
+    (aset (ldb #o1010 low) buf (+ i 1))
+    (aset (ldb #o2010 low) buf (+ i 2))
+    (do ((k 3 (1+ k))
+	 (h (ash value -24.) (ash h -8.)))
+	((= k word-bytes))
+      (aset (logand h #o377) buf (+ i k)))))
 
 (defun print-vmem-status ()
   (dotimes (i n-vmem-pages)
@@ -91,26 +170,72 @@
 	    (aref vmem-pages i 0)
 	    (aref vmem-pages i 1))))
 
+;(defun vread (address)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (dpb (aref buf (1+ i)) #o2020 (aref buf i))))
+;
+;(defun vwrite (address value)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (aset (ldb #o0020 value) buf i)
+;    (aset (ldb #o2020 value) buf (1+ i))))
+;
+;(defun vwrite-low (address value)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (aset value buf i)))
+;
+;(defun vwrite-high (address value)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (aset value buf (1+ i))))
+;
+;(defun vcontents (address)
+;  (logand q-typed-pointer-mask (vread address)))
+;
+;(defun vcdr-code (address)
+;  (ldb sym:%%q-cdr-code (vread address)))
+;
+;(defun vstore-contents (address value)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (aset (ldb #o0020 value) buf i)
+;    (aset (deposit-field (aref buf (1+ i))
+;			 (- sym:%%q-all-but-typed-pointer #o2000)
+;			 (ldb #o2020 value))
+;	  buf (1+ i))))
+;
+;(defun vstore-cdr-code (address value)
+;  (let ((buf (vmem-find-page address))
+;	(i (* 2 (\ address sym:page-size))))
+;    (aset (dpb value (- sym:%%q-cdr-code 2000) (aref buf (1+ i))) buf (1+ i))))
+;; words through the page buffers.  vwrite-low and vwrite-high store a 32-bit
+;; word's halves, for store-extended-number, which only a 32-bit cold load uses.
 (defun vread (address)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (dpb (aref buf (1+ i)) #o2020 (aref buf i))))
+  (vbuf-read (vmem-find-page address) (* word-bytes (\ address sym:page-size))))
 
 (defun vwrite (address value)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (aset (ldb #o0020 value) buf i)
-    (aset (ldb #o2020 value) buf (1+ i))))
+  (vbuf-store (vmem-find-page address) (* word-bytes (\ address sym:page-size)) value))
 
 (defun vwrite-low (address value)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (aset value buf i)))
+  (vwrite address (dpb (ldb #o2020 (vread address)) #o2020 (ldb #o0020 value))))
 
 (defun vwrite-high (address value)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (aset value buf (1+ i))))
+  (vwrite address (dpb value #o2020 (ldb #o0020 (vread address)))))
+
+;; a word of data rather than an object: a string's characters, a fef's
+;; instructions, a numeric array's elements.  in a 32-bit word its 32 bits are
+;; all data; in a 40-bit word the data is the field's 32 bits and the tag is
+;; 005, cdr normal and dtp-fix (contract g1 2.6).
+;; (logand, since this world's ldb takes no field wider than its fixnum)
+(defun vunboxed (value)
+  (if (= word-bits 32.)
+      value
+    (dpb sym:dtp-fix sym:%%q-data-type (logand value #o37777777777))))
+
+(defun vwrite-unboxed (address value)
+  (vwrite address (vunboxed value)))
 
 (defun vcontents (address)
   (logand q-typed-pointer-mask (vread address)))
@@ -118,19 +243,16 @@
 (defun vcdr-code (address)
   (ldb sym:%%q-cdr-code (vread address)))
 
+;; store VALUE's type and pointer, keeping the word's cdr code.  by ldb and dpb:
+;; deposit-field returns its third argument unchanged when the first is a
+;; bignum, as a word with its cdr code set is (measured on system 2000).
 (defun vstore-contents (address value)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (aset (ldb #o0020 value) buf i)
-    (aset (deposit-field (aref buf (1+ i))
-			 (- sym:%%q-all-but-typed-pointer #o2000)
-			 (ldb #o2020 value))
-	  buf (1+ i))))
+  (vwrite address (dpb (ldb sym:%%q-all-but-typed-pointer (vread address))
+		       sym:%%q-all-but-typed-pointer
+		       (logand q-typed-pointer-mask value))))
 
 (defun vstore-cdr-code (address value)
-  (let ((buf (vmem-find-page address))
-	(i (* 2 (\ address sym:page-size))))
-    (aset (dpb value (- sym:%%q-cdr-code 2000) (aref buf (1+ i))) buf (1+ i))))
+  (vwrite address (dpb value sym:%%q-cdr-code (vread address))))
 
 (defun vwrite-cdr (address cdr-code value)
   (vwrite address (dpb cdr-code sym:%%q-cdr-code value)))
@@ -274,6 +396,12 @@
 (defvar misc-function-list)
 (defvar misc-instruction-list)
 
+;;; files loaded into COLD-SYMBOLS after QCOM, QDEFS and DEFMIC, whose values
+;;; replace theirs: the cross build (sys: cold; cross) names the target's here,
+;;; as SYS: COLD; TARGET40 for g2's 40-bit machine.  none for a cold load of
+;;; this tree's own parameters.
+(defvar cold-load-overlays nil)
+
 ;;; Set up the sym: package by loading the appropriate files
 (defun load-parameters ()
   (load "SYS: COLD; QCOM LISP >" sym-package)
@@ -281,13 +409,23 @@
   (setq misc-function-list nil)
   (setq misc-instruction-list nil)
   (load "SYS: COLD; DEFMIC LISP >" sym-package)
+  (dolist (file cold-load-overlays)
+    (load file sym-package))
   (dolist (l sym:system-constant-lists)	;Make declarations so can compile self
     (dolist (s (symeval l))
       (putprop s t 'special)))
   (setq big-fixnum (1- (ash 1 (1- sym:%%q-pointer)))
 	little-fixnum (1- (- big-fixnum))
 	q-typed-pointer-mask (1- (ash 1 sym:%%q-typed-pointer))
-	q-pointer-mask (1- (ash 1 sym:%%q-pointer))))  
+	q-pointer-mask (1- (ash 1 sym:%%q-pointer)))
+  (setq word-bits (+ (ldb #o0006 sym:%%q-cdr-code)
+		     (ldb #o0006 sym:%%q-data-type)
+		     (ldb #o0006 sym:%%q-pointer))
+	word-bytes (ceiling word-bits 8.)
+	blocks-per-page (ceiling (* sym:page-size word-bytes) (* si:page-size 4)))
+  (or (= (* blocks-per-page si:page-size 4) (* sym:page-size word-bytes))
+      (ferror nil "A page of ~D words of ~D bytes is not a whole number of disk blocks"
+	      sym:page-size word-bytes)))
 
 ;;; These have to be explicitly declared special because they only exist in
 ;;; the cold-load generator, and are not sent over.
@@ -524,7 +662,9 @@
 (defun store-halfword (hwd)
   (if (oddp (setq store-halfwords-count (1- store-halfwords-count)))
       (setq store-halfwords-buffer hwd)
-      (vwrite store-halfwords-address (dpb hwd #o2020 store-halfwords-buffer))
+;      (vwrite store-halfwords-address (dpb hwd #o2020 store-halfwords-buffer))
+      ;; two instructions make a word of data, tagged as such in a 40-bit word
+      (vwrite-unboxed store-halfwords-address (dpb hwd #o2020 store-halfwords-buffer))
       (setq store-halfwords-address (1+ store-halfwords-address))))
 
 (defun end-store-halfwords ()
@@ -535,7 +675,11 @@
 ;;; and return a cold-load pointer to it.
 (defun make-q-list (area s-exp &aux bsize value)
   (cond ((numberp s-exp)
-	 (cond ((small-floatp s-exp) (make-small-flonum s-exp))
+	 (cond ;; on g2's 40-bit machine a float is an ieee single, the
+	       ;; binary32 bits in a dtp-small-flonum's field (contract g1 2.4)
+	       ((and (floatp s-exp) (> word-bits 32.))
+		(vmake-pointer sym:dtp-small-flonum (compiler:float-to-binary32 s-exp)))
+	       ((small-floatp s-exp) (make-small-flonum s-exp))
 	       ((floatp s-exp) (store-flonum 'sym:working-storage-area s-exp))
 	       ((and ( s-exp big-fixnum) ( s-exp little-fixnum)) (vfix s-exp))
 	       (t (store-bignum 'sym:working-storage-area s-exp))))
@@ -592,7 +736,9 @@
      (do ((i (if long-flag 2 1) (1+ i))
 	  (j 0 (+ j 4)))
 	 ((= i n-words))
-       (vwrite (+ adr i)
+;      (vwrite (+ adr i)
+       ;; four characters make a word of data, tagged as such in a 40-bit word
+       (vwrite-unboxed (+ adr i)
 	       (+ (magic-aref string j n-chars)
 		  (ash (magic-aref string (1+ j) n-chars) 8)
 		  (ash (magic-aref string (+ j 2) n-chars) 16.)
@@ -636,11 +782,35 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 (defun store-extended-number (area number)
   (and (memq area sym:list-structured-areas)
        (ferror nil "extended-number in list-structured area ~S" area))
+  ;; this copies this world's bignum or flonum word by word, which is right
+  ;; for a 32-bit cold load.  a 40-bit one has no flonums (its floats are
+  ;; singles, make-q-list), and gets a bignum in this world's layout, a header
+  ;; and digits of 31 bits, in 40-bit words (store-bignum-40): every file's
+  ;; creation date is one (set-file-loaded-id).
+  (if (= word-bits 32.)
   (let* ((size (%structure-total-size number))
 	 (adr (allocate-block area size)))
     (loop for i from 0 below size
 	  do (vwrite-low (+ adr i) (%p-ldb-offset 0020 number i))
 	     (vwrite-high (+ adr i) (%p-ldb-offset 2020 number i)))
+    (vmake-pointer sym:dtp-extended-number adr))
+    (store-bignum-40 area number)))
+
+;;; a bignum in a 40-bit cold load: the header a dtp-header word whose field is
+;;; this world's header (type, sign, length), and each digit, 31 bits as
+;;; today, a word of data (vunboxed).  this keeps the cadr's bignum layout in
+;;; the wider word; if g2's microcode changes it, this changes with it.
+;;; nothing else extended (rationals, complexes) goes into a 40-bit cold load.
+(defun store-bignum-40 (area number)
+  (or (bigp number)
+      (ferror nil "~S, a ~S, has no format in a ~D-bit cold load"
+	      number (type-of number) word-bits))
+  (let* ((size (%structure-total-size number))
+	 (adr (allocate-block area size)))
+    (vwrite adr (vmake-pointer sym:dtp-header (%p-ldb-offset %%q-pointer number 0)))
+    (loop for i from 1 below size
+	  do (vwrite-unboxed (+ adr i) (dpb (%p-ldb-offset #o2020 number i) #o2020
+					      (%p-ldb-offset #o0020 number i))))
     (vmake-pointer sym:dtp-extended-number adr)))
 
 ;;; New version of qintern.  Machine builds obarray when it first comes up (easy enough).
@@ -978,7 +1148,11 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
     (do name sym:m-memory-location-names (cdr name) (null name)
      (store-mem-location (car name) (get (car name) 'sym:forwarding-virtual-address)))
     (store-mem-location 'sym:%gc-generation-number
-			(+ #o400 sym:%sys-com-gc-generation-number))
+;			(+ #o400 sym:%sys-com-gc-generation-number))
+			;; the area's own origin: 400 with 256-word pages,
+			;; 2000 with 1024-word pages (appendix a1.9)
+			(+ (get-area-origin 'sym:system-communication-area)
+			   sym:%sys-com-gc-generation-number))
     )
 
 (defun store-mem-location (name locn)
@@ -1057,7 +1231,10 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   (vwrite (+ adr sym:%sys-com-ether-free-list) qnil)
   (vwrite (+ adr sym:%sys-com-ether-transmit-list) qnil)
   (vwrite (+ adr sym:%sys-com-ether-receive-list) qnil)
-  (vwrite (+ adr sym:%sys-com-band-format) (vfix 0))	;not compressed format
+;  (vwrite (+ adr sym:%sys-com-band-format) (vfix 0))	;not compressed format
+  ;; not compressed format.  a 40-bit cold load says so: format 2002, so that
+  ;; g2's microcode refuses a 32-bit one (appendix a1.12)
+  (vwrite (+ adr sym:%sys-com-band-format) (vfix (if (= word-bits 32.) 0 2002)))
   (vwrite (+ adr sym:%sys-com-gc-generation-number) (vfix 0))
   (vwrite (+ adr sym:%sys-com-unibus-interrupt-list) (vfix 0))
   (vwrite (+ adr sym:%sys-com-temporary) (vfix 0))
@@ -1160,7 +1337,8 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 		   do (aset area map q)))
     ;Now dump this into the cold load
     (loop for i from 0 below #o400 for j from 0 by 4
-	  do (vwrite (+ asm i)
+	  ;; four bytes of the map make a word of data (vunboxed)
+	  do (vwrite-unboxed (+ asm i)
 		     (dpb (aref map (+ j 3)) #o3010
 			  (dpb (aref map (+ j 2)) #o2010
 			       (dpb (aref map (+ j 1)) #o1010

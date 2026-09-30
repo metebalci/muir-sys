@@ -25,6 +25,9 @@
 
 (proclaim '(special qfasl-binary-file fdefine-file-pathname))
 
+;;; the word width the file being loaded was compiled for (cold-fasload)
+(proclaim '(special file-word-width))
+
 ;Each function defined has its name pushed on this list.
 ;Then we send the list over together with the package to make
 ;the DEFINITIONS property of the file.
@@ -77,8 +80,15 @@
     (or (and (= (qfasl-nibble) #o143150)
 	     (= (qfasl-nibble) #o71660))
 	(ferror nil "~A is not a QFASL file" filespec))
-    (let (this-file-definitions)
+    (let (this-file-definitions
+	  (file-word-width 32.))
       (do () ((eq (qfasl-whack) 'eof)))
+      ;; a file with no attribute list, which says nothing of its word, is a
+      ;; 32-bit one; refused in a 40-bit cold load, as one that names its
+      ;; width is when that is not the cold load's (q-fasl-op-file-property-list)
+      (or (= file-word-width word-bits)
+	  (ferror nil "~A was compiled for a ~D-bit word, and this cold load's is ~D bits"
+		  filespec file-word-width word-bits))
       (set-file-loaded-id qfasl-binary-file)
       (record-definitions this-file-definitions))))
 
@@ -375,15 +385,41 @@
   (cond (fasl-group-flag (q-fasl-op-small-float))
 	(t (q-fasl-op-float-float))))
 
+;;; in a file compiled for a 40-bit word the group is the float's ieee binary32
+;;; bits, high half first (compiler:fasd-binary32), which are the field of the
+;;; target's dtp-small-flonum word; the m object is this world's float of the
+;;; same value, which make-q-list turns back into the same bits.
 (defun q-fasl-op-small-float ()
+  (if (> word-bits 32.)
+      (let ((bits (dpb (qfasl-next-nibble) #o2020 (qfasl-next-nibble))))
+	(m-q-enter-fasl-table (binary32-to-float bits)
+			      (vmake-pointer sym::dtp-small-flonum bits)))
   (let ((as-fixnum (%logdpb (qfasl-next-nibble) #o2010 (qfasl-next-nibble))))
     ;; When running in systems after 98, we will want to
     ;; change exponent from excess #o100 to excess #o200.
     (setq as-fixnum (if (zerop as-fixnum) 0 (%pointer-plus as-fixnum #o40000000)))
     (let ((num (%make-pointer dtp-small-flonum as-fixnum)))
-      (m-q-enter-fasl-table num (make-small-flonum num)))))
+      (m-q-enter-fasl-table num (make-small-flonum num))))))
 
+;;; this world's float equal to the ieee binary32 BITS, which the cold load
+;;; turns back into the same bits (compiler:float-to-binary32): exact for a
+;;; normal or subnormal single, and for an infinity a float past the largest
+;;; single, 2^200.  not a nan, which fasd never writes.
+(defun binary32-to-float (bits)
+  (let ((exponent (ldb (byte 8. 23.) bits))
+	(fraction (ldb (byte 23. 0) bits))
+	(sign (if (ldb-test (byte 1 31.) bits) -1 1)))
+    (cond ((= exponent 255.)
+	   (or (zerop fraction) (ferror nil "~O is a nan" bits))
+	   (* sign (scale-float 1.0 200.)))
+	  ((zerop exponent)
+	   (* sign (scale-float (float fraction) -149.)))
+	  (t (* sign (scale-float (float (+ fraction (ash 1 23.))) (- exponent 150.)))))))
+
+;;; a file compiled for a 40-bit word has no such group: its floats are singles
 (defun q-fasl-op-float-float ()
+  (or (= word-bits 32.)
+      (ferror nil "A flonum in a file for a ~D-bit word" word-bits))
   (let ((x (m-fasl-op-float-float)))
     (q-arft x)
     x))
@@ -471,7 +507,9 @@
      (setq adr (allocate-block area data-length))
      (cond ((cdr (assq type-sym sym::array-bits-per-element)) ;numeric
 	    (dotimes (i data-length)
-	      (vwrite (+ adr i) 0)))
+;	      (vwrite (+ adr i) 0)))
+	      ;; numeric elements are words of data (vunboxed)
+	      (vwrite-unboxed (+ adr i) 0)))
 	   (t
 	    (cond ((and named-structure (not leader))
 		   (vwrite adr (qintern named-structure))
@@ -543,10 +581,12 @@
 	 ;; Order of data matches order in world being created, so it's easy.
 	 (progn
 	   (dotimes (n (truncate num 2))	;Initialize specified num of vals
-	     (vwrite ptr (+ (qfasl-nibble) (ash (qfasl-nibble) 16.)))
+;	     (vwrite ptr (+ (qfasl-nibble) (ash (qfasl-nibble) 16.)))
+	     (vwrite-unboxed ptr (+ (qfasl-nibble) (ash (qfasl-nibble) 16.)))
 	     (setq ptr (1+ ptr)))
 	   (cond ((oddp num)				;odd, catch last nibble
-		  (vwrite ptr (qfasl-nibble)))))
+;		  (vwrite ptr (qfasl-nibble)))))
+		  (vwrite-unboxed ptr (qfasl-nibble)))))
        (let ((temp1 (make-array last-array-dims ':type art-16b)) temp2)
 	 ;; Read in the values, then transpose them,
 	 (dotimes (n num)	;Initialize specified num of vals
@@ -554,10 +594,12 @@
 	 (setq temp2 (math:transpose-matrix temp1))
 	 ;; Then write them into the cold load in their new order.
 	 (dotimes (n (floor (array-length temp2) 2))
-	   (vwrite ptr (dpb (ar-1-force temp2 (+ n n 1)) 2020 (ar-1-force temp2 (+ n n))))
+;	   (vwrite ptr (dpb (ar-1-force temp2 (+ n n 1)) 2020 (ar-1-force temp2 (+ n n))))
+	   (vwrite-unboxed ptr (dpb (ar-1-force temp2 (+ n n 1)) 2020 (ar-1-force temp2 (+ n n))))
 	   (incf ptr))
 	 (if (oddp (array-length temp2))
-	     (vwrite ptr (ar-1-force temp2 (1- (array-length temp2)))))))
+;	     (vwrite ptr (ar-1-force temp2 (1- (array-length temp2)))))))
+	     (vwrite-unboxed ptr (ar-1-force temp2 (1- (array-length temp2)))))))
      (return hack)))
 
 (defun q-fasl-op-eval ()
@@ -829,9 +871,32 @@
     (aset (aref fasl-table from) fasl-table to)
     0))
 
+;(defun q-fasl-op-file-property-list ()
+;  (vstore-contents (+ file-property-list 1) (q-fasl-next-value))
+;  0)
+
+;;; a file compiled for a word other than 32 bits names its width in its
+;;; attribute list (compiler:fasd-attributes-list); one whose word is not this
+;;; cold load's is refused, as the fasloader refuses it (si:fasload-internal).
 (defun q-fasl-op-file-property-list ()
-  (vstore-contents (+ file-property-list 1) (q-fasl-next-value))
+  (multiple-value-bind (plist q) (m-q-fasl-next-value)
+    (let ((width (or (loop for (indicator value) on plist by 'cddr
+			   when (and (symbolp indicator)
+				     (string-word-width-p (symbol-name indicator)))
+			     return value)
+		     32.)))
+      (setq file-word-width width)
+      (or (eql width word-bits)
+	  (ferror nil "This file was compiled for a ~D-bit word, and this cold load's is ~D bits"
+		  width word-bits)))
+    (vstore-contents (+ file-property-list 1) q))
   0)
+
+;;; the m object of the keyword :word-width, interned here as a symbol of the
+;;; cold-load package with its package prefix in its name
+(defun string-word-width-p (name)
+  (let ((n (string-length name)))
+    (and ( n 10.) (string-equal name "WORD-WIDTH" (- n 10.)))))
 
 ;;; Pathnames are dumped out so as to turn into real ones when fasloaded,
 ;;; fake up a string instead.  fs:canonicalize-cold-load-pathames will fix it back.
