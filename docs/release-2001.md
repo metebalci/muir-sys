@@ -91,7 +91,7 @@ file carries a comment in that file saying why.
   copy of the forward's target, cdr code and all. The interpreter forwards a
   special variable's slot in its binding frame to the variable's value cell
   (`sys/sys/eval.lisp:1372-1375`, `:1187`), and a closed-over frame's words
-  to their copies (`sys/sys/eval.lisp:2118-2138`). After a process switch
+  to their copies (`sys/sys/eval.lisp:2123-2144`). After a process switch
   the slot was a copy of the cell: a `SETQ` wrote the stack and not the
   variable, and the frame's last slot took the cell's cdr code, cdr-next
   where it had cdr-nil, so `PARALLEL-BINDING-LIST`
@@ -115,6 +115,34 @@ file carries a comment in that file saying why.
   words that hold control-store addresses move with them. The number stays
   2001; `ucadr.mcr` is now `060a30b75c143d84fbfc1a6db37ced0b7141378380ebe4a7dab307b2e22dc753`.
   Boot PROM 2001 assembles to the same four files.
+- **An interpreted `LET` keeps its variables while a closure is made under
+  it with a temporary `DEFAULT-CONS-AREA`.** Making an interpreted closure
+  (`INTERPRETER-ENCLOSE`, `sys/sys/eval.lisp:2094`) copies every stack frame
+  of its environment, the frames of callers still running included, and
+  forwards the stack words to the copies (`UNSTACKIFY-ENVIRONMENT`,
+  `sys/sys/eval.lisp:2123-2144`). It consed the copies in `DEFAULT-CONS-AREA`,
+  which `QC-FILE` binds to the compiler's temporary area
+  (`sys/sys/qcfile.lisp:362`) and resets for every file
+  (`sys/sys/qcdefs.lisp:246`, `:253`). So a `MAKE-SYSTEM` typed inside a `LET`
+  at the listener lost that `LET`'s frame once compile-time code made a
+  closure and the area was reset: every interpreted variable reference then
+  failed ("The argument to CAR, ..., was of the wrong type"), the compiler's
+  own error recovery, an interpreted lambda, failed the same way, and the
+  errors nested until the region table was full and the machine halted in
+  `TRAP`'s recursive-error check. The copies are now consed in
+  `BACKGROUND-CONS-AREA` (`sys/sys/eval.lisp:2118-2124`), which MIT keeps for
+  functions "which want to update permanent data structures and may be
+  called even when DEFAULT-CONS-AREA is a temporary area"
+  (`sys/sys/qfctns.lisp:12-15`); the old code broke that rule. MIT's; the
+  CADR's line has the same fix. `docs/building.md` also says to call
+  `MAKE-SYSTEM` with no interpreted binding around it. The system's checks,
+  `tools/system-check/` (its `README.md`; `.gitignore` tracks it), hold the
+  case: `run interpreter-closure` fails two of its four cases on Y3's band
+  as it was and passes all four with `eval.lisp` compiled and loaded, and a
+  SYSTEM compile inside a `LET`, which halted in `TRAP` on System 2000's
+  band, compiles all its files with it. With the fix, Y3's page cases and
+  band 2000's 33 cases pass on Y3's band, and interpreted closures over
+  `LET`, `LET*`, `FLET`, `BLOCK` and `TAGBODY` give what they gave before.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

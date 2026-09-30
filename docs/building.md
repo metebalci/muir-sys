@@ -425,6 +425,7 @@ subnet. The band it builds can, so the last step moves it:
 
 - **Compile the readtables even when nothing else seems to need them.** `MAKE-COLD` reads `SYS: IO; RDTBL QFASL` and `CRDTBL QFASL`, which `si:rtc-file` makes and `MAKE-SYSTEM` does not; with compiled output cleared, the cold load stops at "File not found" for them.
 - **Nothing else may log in while a build runs.** A Lisp Machine has one user, and `LOGIN` logs out first, closing every file connection; a second TELNET session's login killed a SYSTEM compile mid-write.
+- **Call `MAKE-SYSTEM` with no interpreted binding around it.** Set variables such as `si:inhibit-fdefine-warnings` with `setq` first, or call it from a compiled function: a compile run inside an interpreted `LET` typed at the listener could leave that `LET`'s frame in the compiler's temporary area, after which every interpreted variable reference failed and the machine halted in `TRAP`'s recursive-error check (fixed in `UNSTACKIFY-ENVIRONMENT`, `sys/sys/eval.lisp`).
 - **A long compile can exhaust the band.** Near the end of SYSTEM, in the demos, the machine halted in `TRAP`'s recursive-error check. A reboot and `(make-system 'system :compile :noload :noconfirm :nowarn :no-increment-patch)` finished the rest, compiling only what was missing. Reboot again before `MAKE-COLD`, which also needs room.
 
 ### What the 2026-09-22 rebuild added

@@ -2115,7 +2115,13 @@ Encloses a lambda-expression in the current environment"
 ;;; and returning a pointer to the new one in case the first link was copied.
 ;;; NOTE: this function knows specially about frames made by BLOCK or TAGBODY
 ;;;  and copies them appropriately
-(defun unstackify-environment (env &aux (newenv env))
+;;; the copies are consed in BACKGROUND-CONS-AREA: the old words are forwarded
+;;; to them, and those old words include the frames of callers still running.
+;;; consed in DEFAULT-CONS-AREA, a temporary area (QC-FILE binds one) took the
+;;; copies with it when reset, and a caller's interpreted LET then read junk.
+;(defun unstackify-environment (env &aux (newenv env))
+(defun unstackify-environment (env &aux (newenv env)
+				      (default-cons-area background-cons-area))
   (when (consp env)
     (when (stack-list-p env)
       (setq newenv (cons (car env) (cdr env)))

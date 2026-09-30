@@ -1,0 +1,15 @@
+; An interpreted closure keeps the frames of the callers still running out of
+; a temporary area (sys/sys/eval.lisp, UNSTACKIFY-ENVIRONMENT).  Making a
+; closure copies every stack frame of its environment, the enclosing LETs'
+; included, and forwards the stack words to the copies; consed in a temporary
+; DEFAULT-CONS-AREA, as QC-FILE binds it, the copies went when the area was
+; reset, and a running LET's variables read what was consed there next.
+;
+; A temporary area for the cases.
+(defvar interpreter-closure-area (make-area :name 'interpreter-closure-area :gc :temporary)) => INTERPRETER-CLOSURE-AREA
+; The control: a closure made while DEFAULT-CONS-AREA is not a temporary area.
+(let ((x 3)) (let ((default-cons-area working-storage-area)) (function (lambda () x))) x) => 3
+; A closure made while it is: the enclosing LET's frame is not forwarded into it.
+(let ((x 3)) (let ((default-cons-area interpreter-closure-area)) (function (lambda () x))) (= (%area-number (%p-pointer si:*interpreter-variable-environment*)) interpreter-closure-area)) => NIL
+; The area reset and consed in again: the LET's variable keeps its value.
+(let ((x 3)) (let ((default-cons-area interpreter-closure-area)) (function (lambda () x))) (si:reset-temporary-area interpreter-closure-area) (let ((default-cons-area interpreter-closure-area)) (make-list 100 :initial-element 'junk)) x) => 3
