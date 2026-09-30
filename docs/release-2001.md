@@ -90,12 +90,12 @@ file carries a comment in that file saying why.
   followed a `DTP-ONE-Q-FORWARD`: the word came back into the buffer as a
   copy of the forward's target, cdr code and all. The interpreter forwards a
   special variable's slot in its binding frame to the variable's value cell
-  (`sys/sys/eval.lisp:1372-1375`, `:1187`), and a closed-over frame's words
-  to their copies (`sys/sys/eval.lisp:2123-2144`). After a process switch
+  (`sys/sys/eval.lisp:1397-1400`, `:1212`), and a closed-over frame's words
+  to their copies (`sys/sys/eval.lisp:2173-2194`). After a process switch
   the slot was a copy of the cell: a `SETQ` wrote the stack and not the
   variable, and the frame's last slot took the cell's cdr code, cdr-next
   where it had cdr-nil, so `PARALLEL-BINDING-LIST`
-  (`sys/sys/eval.lisp:1323-1383`) walked past the end of its frame, and an
+  (`sys/sys/eval.lisp:1348-1408`) walked past the end of its frame, and an
   interpreted `CONDITION-CASE` now and then signalled "The argument CONS was
   0, which is not a cons." `PB-TRANS` now dispatches on
   `TRANSPORT-NO-EVCP-KEEP-OQF`, the same dispatch with I-ARG bit 3, which
@@ -117,10 +117,10 @@ file carries a comment in that file saying why.
   Boot PROM 2001 assembles to the same four files.
 - **An interpreted `LET` keeps its variables while a closure is made under
   it with a temporary `DEFAULT-CONS-AREA`.** Making an interpreted closure
-  (`INTERPRETER-ENCLOSE`, `sys/sys/eval.lisp:2094`) copies every stack frame
+  (`INTERPRETER-ENCLOSE`, `sys/sys/eval.lisp:2144`) copies every stack frame
   of its environment, the frames of callers still running included, and
   forwards the stack words to the copies (`UNSTACKIFY-ENVIRONMENT`,
-  `sys/sys/eval.lisp:2123-2144`). It consed the copies in `DEFAULT-CONS-AREA`,
+  `sys/sys/eval.lisp:2173-2194`). It consed the copies in `DEFAULT-CONS-AREA`,
   which `QC-FILE` binds to the compiler's temporary area
   (`sys/sys/qcfile.lisp:362`) and resets for every file
   (`sys/sys/qcdefs.lisp:246`, `:253`). So a `MAKE-SYSTEM` typed inside a `LET`
@@ -130,7 +130,7 @@ file carries a comment in that file saying why.
   own error recovery, an interpreted lambda, failed the same way, and the
   errors nested until the region table was full and the machine halted in
   `TRAP`'s recursive-error check. The copies are now consed in
-  `BACKGROUND-CONS-AREA` (`sys/sys/eval.lisp:2118-2124`), which MIT keeps for
+  `BACKGROUND-CONS-AREA` (`sys/sys/eval.lisp:2168-2174`), which MIT keeps for
   functions "which want to update permanent data structures and may be
   called even when DEFAULT-CONS-AREA is a temporary area"
   (`sys/sys/qfctns.lisp:12-15`); the old code broke that rule. MIT's; the
@@ -143,6 +143,54 @@ file carries a comment in that file saying why.
   band, compiles all its files with it. With the fix, Y3's page cases and
   band 2000's 33 cases pass on Y3's band, and interpreted closures over
   `LET`, `LET*`, `FLET`, `BLOCK` and `TAGBODY` give what they gave before.
+- **Interpreted closures, and the code around them, see the variables in
+  scope.** Three faults in `sys/sys/eval.lisp`, all MIT's, on microcode 323
+  too, and in System 100's `eval.lisp` as well; the CADR's line has the same
+  fixes.
+  - `LET*` (`SERIAL-BINDING-LIST`, `sys/sys/eval.lisp:1409`) builds its frame
+    on the stack a variable at a time and, after each init form, stores the
+    frame into the link that holds it in the environment. A closure made in
+    an init form copies that link and the frame built so far out of the stack
+    and forwards the stack words to the copies (`UNSTACKIFY-ENVIRONMENT`), so
+    the link is the closure's; storing the stack frame back into it gave the
+    closure and the body a frame whose first words are forwarded.
+    `GET-LEXICAL-VALUE-CELL` compares the words of a frame in the PDL buffer
+    as they are and does not follow a forward
+    (`sys/ucadr/uc-fctns.lisp:1790-1803`), so
+    `(let* ((y 2) (f (function (lambda () y)))) (funcall f))` found `Y` free,
+    in the closure and in the body, and a closure made in the first init form
+    saw the variable it initializes. When the link was forwarded, the
+    variable and the ones after it are now bound in a new frame in the heap,
+    in front of the copies, as a `LET*` of more than 16 variables binds them
+    (`sys/sys/eval.lisp:1434-1445`, `:1477`, `:1489-1501`). `PROG*` and `DO*`
+    use the same macro.
+  - A lambda's `&optional`, `&key` and `&aux` variables
+    (`APPLY-LAMBDA-BINDVAR`) are bound the same way, the frame extended on
+    the stack after each init form. After a closure made in an init form had
+    taken the link, the words added later were seen by no one, so
+    `(funcall (function (lambda (y &aux (f (function (lambda () y)))) (funcall f))) 21)`
+    found `F` free in the body. When the link was forwarded, a new link is
+    now pushed in front of the closure's, and a new frame started in it
+    (`sys/sys/eval.lisp:2303-2319`).
+  - `EVAL1`, calling an interpreted closure, bound the closure's environment
+    before `EVAL-LAMBDA` evaluated the arguments, so they were evaluated in
+    the closure's environment and not where the call is:
+    `(flet ((g (x) x)) (let ((y 21)) (g y)))` found `Y` free, and a
+    recursive `LABELS` function did not see its own argument. An interpreted
+    closure over a lambda now goes to `EVAL-LAMBDA` whole, and `APPLY-LAMBDA`
+    binds its environment once the arguments are evaluated
+    (`sys/sys/eval.lisp:674-686`, `:709`, `:827`, `:917`). An applyhook, as
+    the stepper's, is still given the lambda with the closure's environment
+    bound and in its environment argument (`sys/sys/eval.lisp:905-910`).
+  - The system's checks hold all three: `tools/system-check/run
+    interpreter-closure-scope` fails fifteen of its 28 cases on Y3's band as
+    it was and passes all 28 with `eval.lisp` compiled and loaded; its
+    applyhook and evalhook cases see the same calls, functions, arguments
+    and forms with and without the fixes. With the fixes,
+    `interpreter-closure`, Y3's page cases and band 2000's 33 cases pass on
+    Y3's band, and interpreted closures over `LET`, `LET*`, `FLET`, `BLOCK`
+    and `TAGBODY` give what they gave before, but for the two that found `Y`
+    free, which now give `(1 2)` and `42`.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

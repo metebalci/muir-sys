@@ -656,7 +656,8 @@ lexical variables of the containing code.  Contrast with EVAL."
 	  ((atom form) form)
 	  ((eq (car form) 'quote)
 	   (cadr form))
-	  (t (let ((fctn (car form)) arg-desc num-args tem)
+;	  (t (let ((fctn (car form)) arg-desc num-args tem)
+	  (t (let ((fctn (car form)) arg-desc num-args tem interpreter-closure)
 	       ;; Trace FCTN through symbols and closures to get the ultimate function
 	       ;; which will tell us whether to evaluate the args.
 	       (tagbody				;don't use DO-FOREVER!
@@ -670,6 +671,19 @@ lexical variables of the containing code.  Contrast with EVAL."
 		      (go loop))
 		     ((or closure entity) 
 		      (setq tem (%make-pointer dtp-list fctn))
+		      ;; an interpreted closure over a lambda goes to EVAL-LAMBDA whole, and
+		      ;; APPLY-LAMBDA binds its environment once the arguments are evaluated.
+		      ;; bound here, the closure's environment was in place while EVAL-LAMBDA
+		      ;; evaluated the arguments, so they were evaluated there and not where
+		      ;; the call is: (flet ((g (x) x)) (let ((y 1)) (g y))) found Y free.
+		      (when (and (closurep fctn)
+				 (interpreter-environment-closure-p fctn)
+				 (consp (car tem))
+				 (memq (car (car tem))
+				       '(lambda subst cli:subst named-lambda named-subst)))
+			(setq interpreter-closure fctn
+			      fctn (car tem))
+			(go loop))
 		      (%using-binding-instances (cdr tem))
 		      ;;>> this grossness will be fixed when the format or interpreter envs
 		      ;;>> is fixed
@@ -691,7 +705,8 @@ lexical variables of the containing code.  Contrast with EVAL."
 		       (cons
 			(case (car fctn)
 			  ((lambda subst cli:subst named-lambda named-subst)
-			   (eval-lambda form fctn env))
+;			   (eval-lambda form fctn env))
+			   (eval-lambda form fctn env (or interpreter-closure fctn)))
 			  (macro (eval1 (error-restart (error "Retry macro expansion.")
 					  ;;>> UGH!!
 					  (let ((*macroexpand-environment* env))
@@ -806,7 +821,10 @@ lexical variables of the containing code.  Contrast with EVAL."
 			  (%push (eval1 (car argl))))))
 		 (%activate-open-call-block)))))))
 
-(defun eval-lambda (form fctn env)
+;;; APPLIED is what is applied: FCTN, or the interpreted closure over it (EVAL1).
+;;; an applyhook is still given FCTN.
+;(defun eval-lambda (form fctn env)
+(defun eval-lambda (form fctn env &optional (applied fctn))
   (let ((lambda-list (if (memq (car fctn) '(named-lambda named-subst))
 			 (caddr fctn)
 		         (cadr fctn)))
@@ -884,12 +902,19 @@ lexical variables of the containing code.  Contrast with EVAL."
 	     (%push (eval1 (car argl))))
 	    (t
 	     (%push (car argl)))))
+    ;; an applyhook is given the lambda, with the closure's environment bound
+    ;; and in ENV, as it was when EVAL1 bound it: the stepper shows the lambda
+    ;; and applies it in ENV.  only the arguments, evaluated above, have moved.
+    (when (and *applyhook* (neq applied fctn))
+      (%using-binding-instances (cdr (%make-pointer dtp-list applied)))
+      (bash-to-current-interpreter-environment env))
     (if *applyhook*
 	(let ((*evalhook* nil)
 	      (*applyhook* nil)
 	      (tem *applyhook*))
 	  (funcall tem fctn args env))
-      (apply-lambda fctn args env))))
+;      (apply-lambda fctn args env))))
+      (apply-lambda applied args env))))
 
 
 (defprop invalid-function t :error-reporter)
@@ -1406,7 +1431,18 @@ If no clause's predicate evaluates non-NIL, the COND returns NIL."
 	   (setq this-specialp (interpreter-variable-special-in-frame-p
 				 (locf (symbol-value thisvar)) ,vars-env))
 	   (%push (locf (symbol-value thisvar)))
-	   (%push (if (consp (car vars-left)) (eval1 (cadar vars-left))))
+;	   (%push (if (consp (car vars-left)) (eval1 (cadar vars-left))))
+	   (setq thisval (if (consp (car vars-left)) (eval1 (cadar vars-left))))
+	   ;; a closure made in that init form copied the frame built so far, and the
+	   ;; link that holds it, out of the stack and forwarded the stack words to
+	   ;; the copies (UNSTACKIFY-ENVIRONMENT).  the link is the closure's now:
+	   ;; storing the stack frame back into it, as below, gave the closure and the
+	   ;; body a frame whose first words are forwarded, which GET-LEXICAL-VALUE-CELL
+	   ;; does not follow, so a variable bound before the closure read as free.
+	   ;; bind this variable and the rest in a new frame in front of the copies.
+	   (when (= (%p-data-type *interpreter-variable-environment*) dtp-one-q-forward)
+	     (go captured))
+	   (%push thisval)
 	   (setf (car *interpreter-variable-environment*) bindframe)
 	   ;; Modify cdr-code of last word pushed, to terminate the list.
 	   (with-stack-list (tem nil)
@@ -1438,6 +1474,7 @@ If no clause's predicate evaluates non-NIL, the COND returns NIL."
 	   (setf (car vals-left) (locf (symbol-value thisvar)))
 	   (setf (cadr vals-left)
 		 (if (consp (car vars-left)) (eval1 (cadar vars-left))))
+	long-bindvar
 	   ;; Bind the variable as special, if appropriate.
 	   (unless thisvar (ferror nil "Attempt to bind NIL"))
 	   (when this-specialp
@@ -1449,6 +1486,19 @@ If no clause's predicate evaluates non-NIL, the COND returns NIL."
 	   (pop vars-left)
 	   (setq vals-left (cddr vals-left))
 	   (go long-nextvar)
+	captured
+	   ;; the new link and frame are consed where UNSTACKIFY-ENVIRONMENT conses
+	   ;; the copies, out of a temporary DEFAULT-CONS-AREA.
+	   (setq *interpreter-variable-environment*
+		 (list*-in-area background-cons-area
+				nil (car *interpreter-variable-environment*)
+				(cdr *interpreter-variable-environment*)))
+	   (setq bindframe (make-list (* 2 (length vars-left)) :area background-cons-area))
+	   (setf (car *interpreter-variable-environment*) bindframe)
+	   (setq vals-left bindframe)
+	   (setf (car vals-left) (locf (symbol-value thisvar)))
+	   (setf (cadr vals-left) thisval)
+	   (go long-bindvar)
 
 	varsdone
 	trivial
@@ -2250,6 +2300,23 @@ Encloses a lambda-expression in the current environment"
 
 (defmacro apply-lambda-bindvar (var value vars-env &optional (specialf nil defaultp))
   `(progn
+     ;; a closure made in an &optional, &key or &aux init form copied the frame
+     ;; built so far, and the link that holds it, out of the stack and forwarded
+     ;; the stack words to the copies (UNSTACKIFY-ENVIRONMENT).  the link is the
+     ;; closure's now: extending its frame on the stack, as below, added words
+     ;; that no one sees through the copy, so the body found a variable bound
+     ;; after the closure free, and a closure made before the first variable
+     ;; saw that variable.  push a new link, in front of the closure's, and
+     ;; start a new frame in it.
+     (when (= (%p-data-type *interpreter-variable-environment*) dtp-one-q-forward)
+       (%push nil)
+       (%push (cons-in-area (car *interpreter-variable-environment*)
+			    (cdr *interpreter-variable-environment*)
+			    background-cons-area))
+       (with-stack-list (tem1 nil)
+	 (%p-dpb-offset cdr-normal %%q-cdr-code tem1 -2)
+	 (%p-dpb-offset cdr-error %%q-cdr-code tem1 -1)
+	 (setq *interpreter-variable-environment* (%make-pointer-offset dtp-list tem1 -2))))
      (with-stack-list (tem1 nil)
        (setq thisval tem1)
        (if (null (car *interpreter-variable-environment*))
