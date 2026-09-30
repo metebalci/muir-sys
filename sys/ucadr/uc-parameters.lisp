@@ -324,6 +324,13 @@
 (ASSIGN TRANSPORT-NO-EVCP-READ-WRITE
 	(PLUS (I-ARG 60) Q-DATA-TYPE-PLUS-ONE-BIT DISPATCH-ON-MAP-19
 	DISPATCH-PUSH-OWN-ADDRESS D-TRANSPORT-NO-EVCP))
+;The PDL buffer refill's: as TRANSPORT-NO-EVCP, but a DTP-ONE-Q-FORWARD stays as it is
+;(I-ARG bit 3), so a word comes back into the PDL buffer as it was written out.  The
+;interpreter forwards a binding frame's slot to a special variable's value cell, and
+;its closures forward stack slots to their copies; followed here, the slot became a
+;copy of the cell, with the cell's cdr code, whenever a refill brought it back.
+(assign transport-no-evcp-keep-oqf (plus (i-arg 30) q-data-type-plus-one-bit dispatch-on-map-19
+			dispatch-push-own-address d-transport-no-evcp))
 
 	;I-ARG BIT 0 => MAKE DTP-EXTERNAL-VALUE-CELL-POINTER INVISIBLE
 	;I-ARG BIT 1 => DON'T TRANSPORT (WRITING OVER THIS Q ANYWAY, OR ONLY CHECKING CDR CODE)

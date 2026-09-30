@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# tools/microcode-check/run [CHECK...] [-- LISPM-CHECK-ARGS...]: the microcode's
+# checks (tools/microcode-check/README.md).  Each CHECK runs cases/CHECK.cases
+# through tools/lispm-check, with lisp/CHECK.lisp loaded first when there is
+# one; with no CHECK, every case file runs.  Arguments after -- go to every
+# lispm-check run (--band, --ubin, --engine and so on).  Exit status 0 when
+# every check passes, else the first failing run's status.
+here=$(cd "$(dirname "$0")" && pwd)
+tool=$here/../lispm-check
+checks=() args=()
+while [ $# -gt 0 ]; do
+    [ "$1" = -- ] && { shift; args=("$@"); break; }
+    checks+=("$1"); shift
+done
+if [ ${#checks[@]} -eq 0 ]; then
+    for f in "$here"/cases/*.cases; do checks+=("$(basename "$f" .cases)"); done
+fi
+status=0
+for c in "${checks[@]}"; do
+    cases=$here/cases/$c.cases
+    [ -f "$cases" ] || { echo "microcode-check: no $cases" >&2; exit 2; }
+    files=()
+    [ -f "$here/lisp/$c.lisp" ] && files=(--files "$here/lisp/$c.lisp")
+    echo "##### $c"
+    python3 "$tool" "${files[@]}" "${args[@]}" "$cases"
+    s=$?
+    [ $s -ne 0 ] && [ $status -eq 0 ] && status=$s
+done
+exit $status

@@ -1,0 +1,13 @@
+; The PDL buffer refill keeps a one-q-forward as it was written
+; (sys/ucadr/uc-page-fault.lisp PB-TRANS, docs/release-1003.md).  Load
+; lisp/pdl-refill.lisp first.  A special variable bound by an interpreted LET
+; has a forward to its value cell in its binding frame's slot; a process switch
+; empties the PDL buffer and the refill brings the slot back.
+;
+; The control: no process switch, so no refill of the frame.
+(let ((pdl-refill-v 7)) (declare (special pdl-refill-v)) (pdl-refill-slot)) => (DTP-ONE-Q-FORWARD 2)
+; After a switch the slot is still the forward, and still ends the frame.
+(let ((pdl-refill-v 7)) (declare (special pdl-refill-v)) (process-allow-schedule) (pdl-refill-slot)) => (DTP-ONE-Q-FORWARD 2)
+; A SETQ after a switch reaches the variable itself.
+(let ((pdl-refill-v 7)) (declare (special pdl-refill-v)) (process-sleep 2) (setq pdl-refill-v 8) (list pdl-refill-v (symbol-value 'pdl-refill-v))) => (8 8)
+(let ((pdl-refill-v 7)) (declare (special pdl-refill-v)) (process-allow-schedule) (setq pdl-refill-v 8) (list pdl-refill-v (symbol-value 'pdl-refill-v))) => (8 8)

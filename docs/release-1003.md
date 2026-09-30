@@ -24,15 +24,15 @@ Every change to a source file carries a comment in that file saying why.
   (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
   FAIL line it planted.
 - **The microcode changes, and keeps the number 1000 until it is released**
-  (it becomes 1001 then). It is microcode 1000 with the two fixes below,
+  (it becomes 1001 then). It is microcode 1000 with the three fixes below,
   assembled from `sys/ucadr/` as `docs/building.md` describes; the same
   sources without them assemble to System 1002's `ucadr.mcr`, `.tbl`,
-  `.locs` and `.sym` byte for byte. The fixes change six control-store
+  `.locs` and `.sym` byte for byte. The fixes change seven control-store
   words and add four after `GCDBB-LONG`, so every word from `GCDBB-NO-LUCK`
   on is four locations later; every other word, every dispatch entry and
   every symbol is the same once moved, and three A-memory words that hold
   control-store addresses move with them. The outputs (sha256):
-  - `ucadr.mcr` `66126d29de19391f57cf375a487e12b07af3b78f8d1d827bf126be0601c45921`
+  - `ucadr.mcr` `ec7263ea988da1ba6300953b7266f2c032f9242e3be432e47392f4bcea6f56a0`
   - `ucadr.tbl` `01f20b6f9a22778f3bfed34acf7d151da82251b218908c302cb8f7145dffa201`
   - `ucadr.locs` `4b19782bcdb715f68c8541590e28cc7b2a2e988b951bada707455689669ee22b`
   - `ucadr.sym` `99b50807fcb3bb32a6f91b4b8e62abb3a3aae0718acfb5ebc5eb2b441ec2282e`
@@ -63,15 +63,27 @@ Every change to a source file carries a comment in that file saying why.
   forward, and resumed halted at `SWAPIN+12` (PC 24155) on microcode 1000
   as released, micro and rtl engines alike, and returns 7 with the fix; the
   same store of a fixnum resumes on both.
-
-## Known faults found, not yet fixed
-
-- **An interpreted `CONDITION-CASE` now and then signals "The argument CONS
-  was 0, which is not a cons."** In a loop of 100,000 interpreted
-  `(condition-case (c) (+ a b) (error ...))` at the listener, one to three
-  iterations signal it from the interpreter's own binding code: `LET-IF`'s
-  `PARALLEL-BINDING-LIST` (`sys/eval.lisp:1323-1370`), which builds its
-  binding frame as a list on the stack, finds that list broken. It happens
-  on microcode 1000 as released too, before the stack-group halt fixed
-  above, and never in the same loop compiled (1,000,000 iterations). Not
-  yet found; a process switch while the frame is built is the suspect.
+- **An interpreted special binding survives a process switch.** When the
+  PDL buffer is refilled from memory (`PDL-BUFFER-REFILL`,
+  `ucadr/uc-page-fault.lisp:1509`), a word that needs the transporter goes
+  through `PB-TRANS`, which dispatched on `TRANSPORT-NO-EVCP` and so followed
+  a `DTP-ONE-Q-FORWARD`: the word came back into the buffer as a copy of the
+  forward's target, cdr code and all. The interpreter forwards a special
+  variable's slot in its binding frame to the variable's value cell
+  (`sys/eval.lisp:1372-1375`, `:1187`), and a closed-over frame's words to
+  their copies (`sys/eval.lisp:2118-2138`). After a process switch the slot
+  was a copy of the cell: a `SETQ` wrote the stack and not the variable, and
+  the frame's last slot took the cell's cdr code, cdr-next where it had
+  cdr-nil, so `PARALLEL-BINDING-LIST` (`sys/eval.lisp:1323-1383`) walked past
+  the end of its frame, and an interpreted `CONDITION-CASE` now and then
+  signalled "The argument CONS was 0, which is not a cons." `PB-TRANS` now
+  dispatches on `TRANSPORT-NO-EVCP-KEEP-OQF`, the same dispatch with I-ARG
+  bit 3, which leaves a one-Q forward as it is
+  (`ucadr/uc-parameters.lisp:327-333`, `ucadr/uc-page-fault.lisp:1576-1581`):
+  one control-store word, `PB-TRANS+12`, changes, and nothing moves. MIT's,
+  in microcode 323 as well. `tools/microcode-check/run pdl-refill` fails
+  three of its four cases on microcode 1000 without the fix, on the micro
+  and rtl engines and on muir-fpga's CADR, and passes all four with it. In
+  loops of 100,000 iterations of the `CONDITION-CASE` the error came 17
+  times in 600,000 iterations on micro, 3 in 400,000 on rtl and 1 in 230,000
+  on muir-fpga's CADR without the fix, and not in 400,000 on micro with it.

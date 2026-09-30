@@ -1573,7 +1573,12 @@ PB-TRANS((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Minus number of Q's move
   ;This used to be just TRANSPORT.  Changed to allow EVCPs on PDL.  There is some loss of
   ;error checking (for DTP-NULL, etc) involved in this, so we may eventually want another
   ;dispatch table.
-	(DISPATCH TRANSPORT-NO-EVCP MD)		;Now invoke the transporter
+;	(DISPATCH TRANSPORT-NO-EVCP MD)		;Now invoke the transporter
+	;Transport, but keep a one-q-forward: following it replaced an interpreter binding
+	;frame's forwarded slot with the value cell's word, so after a process switch a SETQ
+	;no longer reached the special variable, and the frame's list, given the cell's
+	;cdr code, ran on past its end ("The argument CONS was 0, which is not a cons.").
+	(dispatch transport-no-evcp-keep-oqf md)	;Now invoke the transporter
 	((A-PDLB-TEM) C-PDL-BUFFER-POINTER-POP)	;Restore A-PDLB-TEM, lost by transporter
 	((PDL-BUFFER-INDEX) A-PDL-BUFFER-HEAD)
 	(JUMP-XCT-NEXT P-R-0)			;Now re-start fast loop for next word
