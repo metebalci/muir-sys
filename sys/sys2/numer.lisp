@@ -596,6 +596,13 @@ if that is specified; else SIGN-FLONUM."
 (defconst most-negative-short-float (single-float-from-bits #xFF7FFFFF)
   "No short float can be less than this number.")
 
+;;; quux revision 13: the single's infinities, which a result past the largest
+;;; single is, and as which the printer writes them (sys: io; print)
+(defconst single-float-positive-infinity (single-float-from-bits #x7F800000)
+  "The single float's positive infinity.")
+(defconst single-float-negative-infinity (single-float-from-bits #xFF800000)
+  "The single float's negative infinity.")
+
 (defconst most-positive-single-float most-positive-short-float
   "No float can be greater than this number.")
 (defconst most-negative-single-float most-negative-short-float

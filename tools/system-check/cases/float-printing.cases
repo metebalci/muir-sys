@@ -1,0 +1,16 @@
+; An IEEE single's infinity prints as the constant that reads back as it
+; (sys/io/print.lisp, PRINT-FLONUM; sys/sys2/numer.lisp,
+; SI:SINGLE-FLOAT-POSITIVE-INFINITY and -NEGATIVE-INFINITY): past the largest
+; single a result is an infinity, and the printer, scaling it by powers of
+; ten, printed "1.0e153".  Run with the tree's two files compiled first:
+; --compile --files sys/io/print.lisp,sys/sys2/numer.lisp.  The first four
+; cases are controls, finite floats printing as before.
+(format nil "~S" 0.1) => "0.1"
+(format nil "~S" 1.5e38) => "1.5e38"
+(format nil "~S" 3.0) => "3.0"
+(format nil "~S" -2.5e-5) => "-2.5e-5"
+(format nil "~S" (* 1.0e38 10.0)) => "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(format nil "~S" (* -1.0e38 10.0)) => "#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY"
+(%pointer (read-from-string (format nil "~S" (* 1.0e38 10.0)))) => 2139095040
+(%pointer (read-from-string (format nil "~S" (* -1.0e38 10.0)))) => -8388608
+(let ((x 1s10)) (%pointer (* x x x x x))) => 2139095040

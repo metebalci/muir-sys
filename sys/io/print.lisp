@@ -621,7 +621,15 @@ Pathnames, editor buffers, host objects, and many other hairy things
 		     &OPTIONAL MAX-DIGITS (FORCE-E-FORMAT NIL)
 		     &AUX EXPT)
   FASTP		;ignored, don't care if the stream can string-out fast
-  (COND ((ZEROP X)
+  (COND ((and (= (%data-type x) dtp-small-flonum)
+	      (= (ldb #o2710 (%pointer x)) #o377))
+	 ;; quux revision 13 (contract g1 2.4): an ieee single's infinity (or a
+	 ;; nan, which arithmetic takes as one) has no digits; it prints as the
+	 ;; constant that reads back as it.
+	 (send stream :string-out (if (minusp x)
+				      "#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY"
+				    "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY")))
+	((ZEROP X)
 	 (SEND STREAM :STRING-OUT "0.0")
 	 (IF (NEQ (NULL SMALL)
 		  (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))

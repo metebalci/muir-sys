@@ -594,7 +594,14 @@ file carries a comment in that file saying why.
       (`FLOAT-A-BIGNUM`), and the reader divides or multiplies by a power of
       ten as floats, so a number read can be an ulp off.
     - A result past the largest single is an infinity of its sign, not an
-      error. One below the smallest normal single underflows as on the CADR:
+      error: there is no `FLOATING-EXPONENT-OVERFLOW` trap, by design, so a
+      case that expects one (System 2000's `(* 1s10 1s10 1s10 1s10 1s10)`,
+      and proceeding from the trap with a new value) does not apply. An
+      infinity prints as `#.SI:SINGLE-FLOAT-POSITIVE-INFINITY` or
+      `#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY` (`PRINT-FLONUM`,
+      `sys/io/print.lisp`; the constants in `sys/sys2/numer.lisp`), which read
+      back as it; it printed as 1.0e153, the scaling by powers of ten having
+      run past the table. `FORMAT`'s `~F` and `~E` do not handle it. One below the smallest normal single underflows as on the CADR:
       `FLOATING-EXPONENT-UNDERFLOW`, or 0.0 under `ZUNDERFLOW`; no subnormal
       is made. A subnormal operand is read as its value, an infinity or a
       NaN as an infinity (an exponent past any single's, so that it stays one
