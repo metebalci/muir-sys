@@ -637,6 +637,13 @@ file carries a comment in that file saying why.
     again for 40 bits, the site files, and a placeholder for `UCINIT`
     (`docs/building.md`, "Loading the 40-bit cold load"); the microcompiler's
     initialisation is open.
+  - **A full garbage collection completes.** `PHT1-ALL-BUT-SWAP-STATUS-CODE`
+    and `PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE` reach `<39>`
+    (`uc-page-fault.lisp`), so the selective deposits into a page hash table
+    entry (`PGF-AG`, `AGER2`, `AGER4`, `XCPGS3`) keep its tag; stopping at
+    `<31>` they left tag 000, and `DEALLOCATE-PAGES` (`sys/sys2/gc.lisp`),
+    which reads the entry as a fixnum, trapped in `SI:FULL-GC` and
+    `SI:GC-IMMEDIATELY`. `tools/microcode-check/cases/full-gc.cases`.
   - **`NAMED-STRUCTURE-P`** reads element 0 of a structure with no leader by
     index 0 rather than -1, which the unsigned bounds check now refuses
     (`uc-fctns.lisp`).

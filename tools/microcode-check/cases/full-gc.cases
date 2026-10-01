@@ -1,0 +1,18 @@
+; A full garbage collection and GC-IMMEDIATELY complete on the 40-bit band
+; (microcode 2001), and the system still works after them: a sample of the
+; other checks follows.  The garbage collector reads the page hash table's
+; first words as fixnums (DEALLOCATE-PAGES, sys2/gc.lisp), and the microcode's
+; selective deposits into them (PGF-AG, AGER2, AGER4, XCPGS) must keep their
+; tag: PHT1-ALL-BUT-SWAP-STATUS-CODE and PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE
+; reach <39> (sys/ucadr/uc-page-fault.lisp).
+(progn (si:gc-immediately) t) => T
+(progn (si:full-gc) t) => T
+(+ 1.0 2.0) => 3.0
+(%pointer 0.1) => 1036831949
+(1+ most-positive-fixnum) => 2147483648
+(gcd most-negative-fixnum 0) => 2147483648
+(let ((a (make-array 4 :initial-contents '(a b c d)))) (aref a 3)) => D
+(array-in-bounds-p (make-array 4) -1) => NIL
+(let ((x (make-instance 'si:property-list-mixin))) (send x :putprop 'blue 'color) (get x 'color)) => BLUE
+(let ((a (make-array 3 :type 'art-float))) (aset 2.5 a 1) (list (aref a 0) (aref a 1))) => (0.0 2.5)
+(let ((l (list 1 2 3))) (si:gc-immediately) (equal l '(1 2 3))) => T

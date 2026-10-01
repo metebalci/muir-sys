@@ -101,9 +101,15 @@
 ;; quux revision 13 (appendix a1.7): the 28-bit address's page, vma<27:10>
 (def-data-field pht1-virtual-page-number 18. 10.)	;aligned same as vma
 (DEF-DATA-FIELD PHT1-SWAP-STATUS-CODE 3 0)
- (DEF-DATA-FIELD PHT1-ALL-BUT-SWAP-STATUS-CODE 29. 3)
+;(DEF-DATA-FIELD PHT1-ALL-BUT-SWAP-STATUS-CODE 29. 3)
+;; quux revision 13 (contract g1 2.1): "all but" reaches the word's top, <39>,
+;; so that a selective deposit keeps pht1's tag (dtp-fix), as lisp reads the
+;; word as a fixnum (sys2; gc, deallocate-pages); stopping at <31> took the
+;; tag from the background, 000.
+ (def-data-field pht1-all-but-swap-status-code 37. 3)
 (DEF-DATA-FIELD PHT1-AGE 2 3)
- (DEF-DATA-FIELD PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE 27. 5)
+;(DEF-DATA-FIELD PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE 27. 5)
+ (def-data-field pht1-all-but-age-and-swap-status-code 35. 5)	;quux revision 13: to <39>
 (DEF-DATA-FIELD PHT1-MODIFIED-BIT 1 5)		;SET IF PAGE MODIFIED
 (DEF-DATA-FIELD PHT1-VALID-BIT 1 6)
  ;WORD 2  THESE ARE NOW THE SAME BIT POSITIONS AS IN THE SECOND LEVEL MAP
