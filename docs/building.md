@@ -255,6 +255,42 @@ changes must have given the target's value, and every function whose QFASL
 differs from System 2000's must have an explanation. Run it when a change
 could reach what the compiler evaluates.
 
+### Loading the 40-bit cold load
+
+`QLD` on revision 13 (`MUIR_QUUX_REVISION=13`, PROM 2001) loads SYSTEM from a
+tree that check 2 compiled, with these besides, all written by the builder in
+the cross build (between `cold:cross-begin` and `cold:cross-end`):
+
+- **The cold load's own files' QFASLs**, as check 3 compiled them for the cold
+  load. With other compiles of the same sources, whose dates differ, `QLD`
+  loads them again, and `QIO` stops to ask whether `*IOLST` may be defined
+  again.
+- **The site files**, `(make-system 'site :compile :noload :noconfirm :nowarn)`.
+- **The readtables**, `SYS: IO; RDTBL QFASL` and `CRDTBL QFASL`, which check 3
+  writes with `si:rtc-file`.
+- **The fonts and the demos' data**, which have no source and are 32-bit
+  files: each is loaded here and written again for the target. A font sets a
+  symbol in `FONTS`, which must be special while it loads:
+
+  ```lisp
+  (progn (defvar fonts:tvfont)
+         (progv '(fonts:tvfont) '(nil)
+           (load "SYS: FONTS; TVFONT QFASL" (pkg-find-package "FONTS"))
+           (cold::cross-dump-symbol-value "SYS: FONTS; TVFONT QFASL" 'fonts:tvfont)))
+  ```
+
+  for each font of the `FONTS` system (`sys/sys/sysdcl.lisp`), and the same
+  for `SYS: DEMO; TVBGAR` (`hacks::*tvbug-arrays*`, already special); WORMCH
+  is made from its AST source as below, with `compiler:dump-forms-to-file`.
+- **`SYS: SYS; UCINIT`**, the microcompiler's initialisation, is compiled code
+  with no source and cannot be written again for 40 bits; a file that sets a
+  placeholder variable stands in for it, so the microcompiler is not ready.
+- **The microcode's error table**, `SYS: UBIN; UCADR TBL`, of the microcode
+  that runs.
+
+`QLD` then loads the inner system over MINI and the rest over FILE, as on
+revision 12, and `(si:disk-save "LOD4" t)` saves a band of format 2000.
+
 ### A band of 1024-word pages for revision 12
 
 Contract G2's option (w): revision 12 runs 1024-word pages in software, each

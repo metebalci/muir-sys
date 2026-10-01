@@ -1,0 +1,70 @@
+; G2 Y4: the 40-bit word's numbers (contract G1 section 2.4; G2 section 6.1).
+; Written before the change; each marked "fails on 2000" must fail on System
+; 2000's band and pass on the 40-bit band.
+; --- fixnums near +-2^31 (fails on 2000: 25-bit fixnums)
+most-positive-fixnum => 2147483647
+most-negative-fixnum => -2147483648
+(fixnump (1- (expt 2 31))) => T
+(fixnump (- (expt 2 31))) => T
+(fixnump (expt 2 31)) => NIL
+(fixnump (- -1 (expt 2 31))) => NIL
+(let ((x (1- (expt 2 31)))) (list (1+ x) (fixnump (1+ x)) (typep (1+ x) 'bignum))) => (2147483648 NIL T)
+(let ((x (- (expt 2 31)))) (list (1- x) (fixnump (1- x)))) => (-2147483649 NIL)
+(let ((x 2147483000)) (list (+ x 647) (fixnump (+ x 647)) (+ x 648) (fixnump (+ x 648)))) => (2147483647 T 2147483648 NIL)
+(let ((x -2147483000)) (list (- x 648) (fixnump (- x 648)) (- x 649) (fixnump (- x 649)))) => (-2147483648 T -2147483649 NIL)
+(let ((x 65536)) (list (* x 32767) (fixnump (* x 32767)) (* x 32768) (fixnump (* x 32768)))) => (2147418112 T 2147483648 NIL)
+(- (1+ most-positive-fixnum) 1) => 2147483647
+(fixnump (- (1+ most-positive-fixnum) 1)) => T
+(ash 1 30) => 1073741824
+(fixnump (ash 1 30)) => T
+(ash 1 31) => 2147483648
+(fixnump (ash 1 31)) => NIL
+(- most-negative-fixnum) => 2147483648
+(abs most-negative-fixnum) => 2147483648
+(floor most-negative-fixnum -1) => 2147483648
+(logand -1 (1- (expt 2 31))) => 2147483647
+(< most-negative-fixnum 0 most-positive-fixnum) => T
+(> 2147483647 -2147483648) => T
+(%data-type 2147483647) => 5
+; --- IEEE singles (fails on 2000: small and boxed flonums)
+(+ 1.0 2.0) => 3.0
+(%data-type (+ 1.0 2.0)) => 21
+(multiple-value-list (integer-decode-float 0.1)) => (13421773 -27 1.0)
+(= 0.1 (quotient 1.0 10.0)) => T
+(float 16777217) => 1.6777216e7
+(= (float 16777217) (float 16777216)) => T
+(= (float 16777217) (float 16777218)) => NIL
+(float 16777219) => 1.677722e7
+(let ((x 1.0)) (%p-ldb #o0040 (locf x))) => 1065353216
+; --- ART-32B: 32 bits, read signed (fails on 2000: 24 bits)
+(let ((a (make-array 3 :type 'art-32b))) (aset (1- (expt 2 31)) a 0) (aset (- (expt 2 31)) a 1) (aset -1 a 2) (list (aref a 0) (aref a 1) (aref a 2))) => (2147483647 -2147483648 -1)
+(let ((a (make-array 1 :type 'art-32b))) (aset 16777216 a 0) (aref a 0)) => 16777216
+; --- characters round-tripped (today's layout, G2 section 7.1)
+(char-code #\A) => 65
+(char-code (code-char 65)) => 65
+(%data-type (int-char 65)) => 28
+(let ((c (make-char 65 3))) (list (char-code c) (char-bits c) (eq (int-char (char-int c)) c) (%data-type c))) => (65 3 T 28)
+(let ((c (make-char 255 15))) (list (char-code c) (char-bits c) (eq (int-char (char-int c)) c))) => (255 15 T)
+(let ((s (make-string 4))) (aset 97 s 0) (aset 90 s 1) (aset 128 s 2) (aset 255 s 3) (list (aref s 0) (aref s 1) (aref s 2) (aref s 3))) => (97 90 128 255)
+(let ((s (make-string 4))) (aset 97 s 0) (aset 90 s 1) (aset 128 s 2) (aset 255 s 3) (list (%p-ldb #o0040 (%make-pointer-offset 13 s 1)) (%p-data-type (%make-pointer-offset 13 s 1)))) => (-8365471 5)
+(string-equal (string-upcase "abc") "ABC") => T
+; --- negative subscripts at 40 bits (review 2, finding 1; M4 class 7)
+(let ((a (make-array 4))) (aref a -1)) =>!
+(let ((a (make-array 4))) (aset 1 a -1)) =>!
+(let ((a (make-array 4 :type 'art-8b))) (aref a -1)) =>!
+(let ((a (make-string 4))) (aref a -1)) =>!
+(array-in-bounds-p (make-array 4) -1) => NIL
+(let ((a (make-array 4 :leader-list '(0)))) (store-array-leader -1 a 0) (array-push a 1)) => NIL
+(let ((a (make-array 4 :leader-list '(0)))) (store-array-leader -1 a 0) (array-push a 1) (array-leader a 0)) => -1
+(let ((a (make-array 4 :type 'art-8b)) (b (make-array 4 :type 'art-8b))) (fillarray a '(1 2 3 4)) (copy-array-portion a -1 2 b 0 3) (listarray b)) =>!
+(let ((a (make-array 4 :type 'art-8b)) (b (make-array 4 :type 'art-8b))) (fillarray a '(1 2 3 4)) (copy-array-portion a 0 2 b -1 3) (listarray b)) =>!
+(let ((a (make-array 4 :type 'art-8b))) (aset 7 a 3) (ar-1 a -1)) =>!
+; --- bignum digits carry tag 000: a cold-load bignum (a cold-loaded file's
+; creation date, stored by store-bignum-40) and bignums of the same value made
+; by the microcode (arithmetic) and by the reader compare equal
+(let ((d (loop for e in si:*cold-loaded-file-property-lists* for id = (cadr (memq 'si:file-id-package-alist (cdr e))) when (and id (typep (cdr (cadr (car id))) 'bignum)) return (cdr (cadr (car id)))))) (list (typep d 'bignum) (= d (1+ (1- d))) (eql d (1+ (1- d))) (equal d (+ d 0)) (eq d (1+ (1- d))) (= d (read-from-string (format nil "~D." d))))) => (T T T T NIL T)
+(let* ((a (expt 2 40)) (b (* (expt 2 20) (expt 2 20)))) (list (= a b) (eql a b) (zerop (- a b)) (= (logand a (1- (expt 2 31))) 0))) => (T T T T)
+(gcd most-negative-fixnum 0) => 2147483648
+(gcd 0 most-negative-fixnum) => 2147483648
+(gcd most-negative-fixnum most-negative-fixnum) => 2147483648
+(gcd most-negative-fixnum 6) => 2

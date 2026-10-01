@@ -45,3 +45,22 @@
 	  (global:set cold (world-translate (global:symbol-value here)))))))
   (global:pkg-find-package "COLD-SYMBOLS")
   nil)
+
+;;; The system constants that QCOM, QDEFS and DEFMIC do not define, such as
+;;; SINGLE-FLOAT-EXPONENT-OFFSET in SYS: SYS2; NUMDEF, would otherwise be read
+;;; from their defining files in the tree, whose values may not be this
+;;; world's: each gets a cold symbol with this world's value, which the cross
+;;; build then takes (cross-cold-symbol) instead of reading the file.
+(global:dolist (pkg global:*all-packages*)
+  (global:mapatoms
+    (global:function
+      (global:lambda (here)
+	(global:when (global:and (global:eq (global:symbol-package here) pkg)
+				 (global:get here 'si:system-constant)
+				 (global:boundp here)
+				 (global:not (global:memq here '(t nil))))
+	  (global:let ((cold (global:intern (global:symbol-name here)
+					    (global:pkg-find-package "COLD-SYMBOLS"))))
+	    (global:unless (global:boundp cold)
+	      (global:set cold (world-translate (global:symbol-value here))))))))
+    pkg nil))

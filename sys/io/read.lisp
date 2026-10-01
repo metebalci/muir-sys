@@ -1181,9 +1181,19 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
 (DEFUN XR-FLONUM-CONS (HIGH LOW POWER-10 &AUX FLOAT-NUMBER)
   (SETQ FLOAT-NUMBER (%FLOAT-DOUBLE (LSH HIGH -1)
 				    (LOGIOR (ROT (LOGAND HIGH 1) -1) LOW)))
-  (COND ((< POWER-10 0) (* FLOAT-NUMBER (XR-GET-POWER-10 (- POWER-10))))
-	((> POWER-10 0) (// FLOAT-NUMBER (XR-GET-POWER-10 POWER-10)))
-	(T FLOAT-NUMBER)))
+;  (COND ((< POWER-10 0) (* FLOAT-NUMBER (XR-GET-POWER-10 (- POWER-10))))
+;	((> POWER-10 0) (// FLOAT-NUMBER (XR-GET-POWER-10 POWER-10)))
+;	(T FLOAT-NUMBER)))
+  ;; quux revision 13 (contract g1 2.4): a single's powers of ten stop at 1e38
+  ;; (the table's larger ones are infinities), so a number written with more
+  ;; than 38 digits after the point, as 1.1754944e-38 is, is divided in steps.
+  (cond ((< power-10 0) (* float-number (xr-get-power-10 (- power-10))))
+	((> power-10 0)
+	 (do () ((<= power-10 38.))
+	   (setq float-number (// float-number (xr-get-power-10 38.))
+		 power-10 (- power-10 38.)))
+	 (// float-number (xr-get-power-10 power-10)))
+	(t float-number)))
 
 (DEFUN XR-GET-POWER-10 (POWER)
   ;; This check detects things grossly out of range.  Numbers almost out of range
@@ -1214,7 +1224,10 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
 
 (XR-TABLE-SETUP)
 
-(DEFVAR *READ-DEFAULT-FLOAT-FORMAT* 'SINGLE-FLOAT
+;(DEFVAR *READ-DEFAULT-FLOAT-FORMAT* 'SINGLE-FLOAT
+;; quux revision 13 (contract g1 2.3): the one float is the short float, an
+;; ieee single, so it is read's default and prints with no exponent marker.
+(defvar *read-default-float-format* 'short-float
   "Default floating point type for READ to create.
 This is the type of flonum that READ makes when there is no exponent
 or when the exponent is introduced with /"E/".  If the input being read

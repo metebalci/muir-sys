@@ -1,0 +1,8 @@
+; GET, GETL and GET-LOCATION-OR-NIL of an instance send it the message
+; (microcode 2001): PLGET marks an instance by setting M-T's cdr code, now
+; <39:38>, and the callers test that bit, not <30>.  With the old bit the
+; instance was taken for a property list and sent :CAR.  A symbol's property
+; is the control.
+(progn (setf (get 'instance-get-symbol 'color) 'red) (get 'instance-get-symbol 'color)) => RED
+(let ((x (make-instance 'si:property-list-mixin))) (send x :putprop 'blue 'color) (list (get x 'color) (not (null (si:get-location-or-nil x 'color))) (getl x '(size color)))) => (BLUE T (COLOR BLUE))
+(let ((x (make-instance 'si:property-list-mixin))) (list (get x 'color) (si:get-location-or-nil x 'color))) => (NIL NIL)

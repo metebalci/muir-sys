@@ -1022,7 +1022,10 @@ XAAIA1	((WRITE-MEMORY-DATA-START-WRITE) M-2)	;STORE HEADER
 					  (EVAL (LDB %%ARRAY-TYPE-FIELD ART-COMPLEX))))
 	      XAAIA2)
 	;; This is a numeric or string array, fill with zeros.
-       ((WRITE-MEMORY-DATA) M-ZERO)
+;       ((WRITE-MEMORY-DATA) M-ZERO)
+	;; quux revision 13 (contract g1 2.6): a word of data carries tag 005, so
+	;; the zeros are fixnum zeros (an art-float element reads as 0.0, qfary)
+       ((write-memory-data) (a-constant (byte-value q-data-type dtp-fix)))
 	;; This is a complex array; init all words to boxed zeros.
 	((MD) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 XAAIA2	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
@@ -1609,10 +1612,12 @@ D-SINFSA
 	(SINF-BNDPDL)				;BINDING-PDL
 	(INHIBIT-XCT-NEXT-BIT SINFSA-16B)	;HALF-FIX
 	(SINF-REGPDL)				;REG-PDL
-	(INHIBIT-XCT-NEXT-BIT SINFSA-FLOAT)	;FLOAT
+;	(INHIBIT-XCT-NEXT-BIT SINFSA-FLOAT)	;FLOAT
+	(inhibit-xct-next-bit sinfsa-32b)	;float: quux revision 13, a single a word
 	(INHIBIT-XCT-NEXT-BIT SINFSA-32B)	;FPS-FLOAT
 	(INHIBIT-XCT-NEXT-BIT SINFSA-16B)	;FAT-STRING
-	(INHIBIT-XCT-NEXT-BIT SINFSA-CPLXFL)	;COMPLEX-FLOAT
+;	(INHIBIT-XCT-NEXT-BIT SINFSA-CPLXFL)	;COMPLEX-FLOAT
+	(inhibit-xct-next-bit sinfsa-float)	;complex-float: quux revision 13, two singles
 	(INHIBIT-XCT-NEXT-BIT SINFSA-CPLX)	;COMPLEX
 	(INHIBIT-XCT-NEXT-BIT SINFSA-CPLX-FPSFL)	;COMPLEX-FPS-FLOAT
  (REPEAT NATUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))

@@ -65,21 +65,35 @@ Result is a short-float or complex short-float according to type of NUMBER"
 		  (%complex-cons (- n n) (sqrt (- n))))
 		 ((= n 0.0)
 		  0.0)
+;		 (t
+;		  (let ((f (+ n 0.0f0))
+;			(i2 (%float-double 0 1))	;cons up a new one -- gets munged
+;			(exp (- (%single-float-exponent n) single-float-exponent-offset
+;				-2)))
+;                    (setf (%single-float-exponent f) single-float-exponent-offset)
+;                    (setf (%single-float-exponent i2)                            
+;                          (+ single-float-exponent-offset
+;			     (if (oddp exp)
+;				 (1+ (dpb (ldb #o0127 exp) #o0027 exp))
+;			         (dpb (ldb #o0127 exp) #o0027 exp))))
+;		    (do ((i 0 (1+ i))
+;			 (an (* i2 (+ 0.4826004 f (if (oddp exp) -0.25 0.0)))))
+;			((= i 4) an)
+;		      (setq an (* 0.5 (+ an (// n an))))))))))
+		 ;; quux revision 13: a float is an immediate ieee single, whose
+		 ;; exponent cannot be set in place as a boxed flonum's was: n is
+		 ;; f * 2^exp with f in [1/4, 1) and exp even (float-exponent,
+		 ;; scale-float), sqrt(f) by newton's method from a linear first
+		 ;; guess (within 1%), then scaled by 2^(exp/2).
 		 (t
-		  (let ((f (+ n 0.0f0))
-			(i2 (%float-double 0 1))	;cons up a new one -- gets munged
-			(exp (- (%single-float-exponent n) single-float-exponent-offset
-				-2)))
-                    (setf (%single-float-exponent f) single-float-exponent-offset)
-                    (setf (%single-float-exponent i2)                            
-                          (+ single-float-exponent-offset
-			     (if (oddp exp)
-				 (1+ (dpb (ldb #o0127 exp) #o0027 exp))
-			         (dpb (ldb #o0127 exp) #o0027 exp))))
+		  (let* ((exp (float-exponent n))
+			 (f (scale-float n (- exp))))
+		    (when (oddp exp)
+		      (setq f (* f 0.5) exp (1+ exp)))
 		    (do ((i 0 (1+ i))
-			 (an (* i2 (+ 0.4826004 f (if (oddp exp) -0.25 0.0)))))
-			((= i 4) an)
-		      (setq an (* 0.5 (+ an (// n an))))))))))
+			 (an (+ 0.41731 (* 0.59016 f))))
+			((= i 4) (scale-float an (ash exp -1)))
+		      (setq an (* 0.5 (+ an (// f an))))))))))
     (if (complexp number)
 	(if (typep (%complex-real-part number) 'short-float)
 	    (%complex-cons (float (%complex-real-part val) 0s0)
@@ -113,7 +127,9 @@ Result is a short-float or complex short-float according to type of NUMBER"
 	 (let* ((f (float n 0f0))
 		(i (1- (float-exponent f))))   	;i gets the base 2 exponent
 	   ;; f gets the mantissa (1.0 to 2.0) ie 2x(float-fraction f)
-	   (setf (%single-float-exponent f) (1+ single-float-exponent-offset))
+;	   (setf (%single-float-exponent f) (1+ single-float-exponent-offset))
+	   ;; quux revision 13: f is an immediate single; scaled, not set in place
+	   (setq f (scale-float f (- 1 (float-exponent f))))
 	   (setq f (// (- f 1.414213562374)
 		       (+ f 1.414213562374)))
 	   (setq f (+ .5
@@ -313,6 +329,8 @@ If STATE is T, a new state object is created and initialized based on the micros
 ;	       (24. '(#o1414 #o0014))		;no more...
 	       (25. '(#o1414 #o0014 #o3001))
 	       (31. '(#o1414 #o0014 #o3011))
+	       ;; quux revision 13 (contract g1 2.4): a 32-bit fixnum's <31:24>
+	       (32. '(#o1414 #o0014 #o3010))
 	       (T (FERROR NIL "Bug in RANDOM-INITIALIZE"))))
      (DO ((I 0 (1+ I))) ((= I SIZE))
        (SETQ X (%POINTER-TIMES X 4093.))			;4093. is a prime number.
@@ -481,45 +499,111 @@ if that is specified; else SIGN-FLONUM."
 ;(defconst most-positive-fixnum (%logdpb 0 %%q-boxed-sign-bit -1)
 ;  "Any integer larger than this must be a bignum.")
 
-(defconst most-positive-short-float (%make-pointer dtp-small-flonum -1)
+;(defconst most-positive-short-float (%make-pointer dtp-small-flonum -1)
+;  "No short float can be greater than this number.")
+
+;(defconst least-positive-short-float (%make-pointer dtp-small-flonum #o600000)
+;  "No positive short float can be closer to zero than this number.")
+
+;(defconst least-negative-short-float (%make-pointer dtp-small-flonum #o577777)
+;  "No negative short float can be closer to zero than this (unnormalized) number.")
+
+;(defconst most-negative-short-float (%make-pointer dtp-small-flonum
+;						   (lognot #o377777))
+;  "No short float can be less than this number.")
+
+;(defconst most-positive-single-float (%float-double (%logdpb 0 %%q-boxed-sign-bit -1)
+;						    (%logdpb 0 %%q-boxed-sign-bit -1))
+;  "No float can be greater than this number.")
+
+;(%p-dpb #o77777 (xbyte 11. 8) most-positive-single-float)
+;(%p-store-contents-offset -1 most-positive-single-float 1)
+
+;(defconst most-negative-single-float (- 1.0 1.0)
+;  "No float can be less than this number.")
+
+;(%p-dpb #o77777 (xbyte 12. 7) most-negative-single-float)
+
+;(defconst least-positive-single-float (- 1.0 1.0)
+;  "No positive float can be between zero and this number.")
+
+;(%p-dpb 1 (xbyte 11. 8) least-positive-single-float)
+;(%p-dpb 1 (xbyte 1 6) least-positive-single-float)
+
+
+;(defconst least-negative-single-float (- 1.0 1.0)
+;  "No negative float can be between zero and this number.")
+
+;(%p-dpb 1 (xbyte 11. 8) least-negative-single-float)
+;(%p-dpb 1 (xbyte 1 7) least-negative-single-float)
+;(%p-dpb #o777 (xbyte 5 0) least-negative-single-float)
+;(%p-store-contents-offset -1 least-negative-single-float 1)
+
+;(defconst most-positive-long-float most-positive-single-float)
+;(defconst most-negative-long-float most-negative-single-float)
+;(defconst least-positive-long-float least-positive-single-float)
+;(defconst least-negative-long-float least-negative-single-float)
+
+;(defconst most-positive-double-float most-positive-single-float)
+;(defconst most-negative-double-float most-negative-single-float)
+;(defconst least-positive-double-float least-positive-single-float)
+;(defconst least-negative-double-float least-negative-single-float)
+
+;(defconst short-float-epsilon
+;	  (+ (small-float (scale-float 1.0s0 -17.))
+;	     (small-float (scale-float 1.0s0 -31.))
+;	     (small-float (scale-float 1.0s0 -33.)))
+;  "Smallest positive short float which can be added to 1.0s0 and make a difference.")
+
+;(defconst single-float-epsilon (+ (scale-float 1.0 -37) (scale-float 1.0 -75))
+;  "Smallest positive float which can be added to 1.0 and make a difference.")
+
+;(defconst long-float-epsilon single-float-epsilon)
+;(defconst double-float-epsilon single-float-epsilon)
+
+;(defconst short-float-negative-epsilon
+;	  (+ (small-float (scale-float 1.0s0 -18.))
+;	     (small-float (scale-float 1.0s0 -32.))
+;	     (small-float (scale-float 1.0s0 -34.)))
+;  "Smallest positive short float which can be subtracted from 1.0s0 and make a difference.")
+
+;(defconst single-float-negative-epsilon (scale-float 1.0 -31.)
+;  "Smallest positive float which can be subtracted from 1.0 and make a difference.")
+
+;(defconst long-float-negative-epsilon single-float-negative-epsilon)
+;(defconst double-float-negative-epsilon single-float-negative-epsilon)
+
+;;; quux revision 13 (contract g1 2.3, 2.4): the one float is the ieee single,
+;;; dtp-small-flonum; there is no boxed flonum, so the single, long and double
+;;; floats' limits are the short float's.  the least positive is the smallest
+;;; normal single: arithmetic makes no subnormal (an underflow is an error, or
+;;; 0.0 under zunderflow).  an epsilon is the smallest that changes 1.0 when
+;;; rounded to nearest, ties to even: 2^-24 and 2^-25, each plus an ulp.
+(defun single-float-from-bits (bits)
+  "The single float whose ieee 754 binary32 bits are BITS, 0 to 2^32 - 1."
+  (%make-pointer dtp-small-flonum (%logdpb (ldb (xbyte 1 31.) bits) (xbyte 1 31.)
+					   (ldb (xbyte 31. 0) bits))))
+
+(defconst most-positive-short-float (single-float-from-bits #x7F7FFFFF)
   "No short float can be greater than this number.")
 
-(defconst least-positive-short-float (%make-pointer dtp-small-flonum #o600000)
+(defconst least-positive-short-float (single-float-from-bits #x00800000)
   "No positive short float can be closer to zero than this number.")
 
-(defconst least-negative-short-float (%make-pointer dtp-small-flonum #o577777)
-  "No negative short float can be closer to zero than this (unnormalized) number.")
+(defconst least-negative-short-float (single-float-from-bits #x80800000)
+  "No negative short float can be closer to zero than this number.")
 
-(defconst most-negative-short-float (%make-pointer dtp-small-flonum
-						   (lognot #o377777))
+(defconst most-negative-short-float (single-float-from-bits #xFF7FFFFF)
   "No short float can be less than this number.")
 
-(defconst most-positive-single-float (%float-double (%logdpb 0 %%q-boxed-sign-bit -1)
-						    (%logdpb 0 %%q-boxed-sign-bit -1))
+(defconst most-positive-single-float most-positive-short-float
   "No float can be greater than this number.")
-
-(%p-dpb #o77777 (xbyte 11. 8) most-positive-single-float)
-(%p-store-contents-offset -1 most-positive-single-float 1)
-
-(defconst most-negative-single-float (- 1.0 1.0)
+(defconst most-negative-single-float most-negative-short-float
   "No float can be less than this number.")
-
-(%p-dpb #o77777 (xbyte 12. 7) most-negative-single-float)
-
-(defconst least-positive-single-float (- 1.0 1.0)
+(defconst least-positive-single-float least-positive-short-float
   "No positive float can be between zero and this number.")
-
-(%p-dpb 1 (xbyte 11. 8) least-positive-single-float)
-(%p-dpb 1 (xbyte 1 6) least-positive-single-float)
-
-
-(defconst least-negative-single-float (- 1.0 1.0)
+(defconst least-negative-single-float least-negative-short-float
   "No negative float can be between zero and this number.")
-
-(%p-dpb 1 (xbyte 11. 8) least-negative-single-float)
-(%p-dpb 1 (xbyte 1 7) least-negative-single-float)
-(%p-dpb #o777 (xbyte 5 0) least-negative-single-float)
-(%p-store-contents-offset -1 least-negative-single-float 1)
 
 (defconst most-positive-long-float most-positive-single-float)
 (defconst most-negative-long-float most-negative-single-float)
@@ -531,27 +615,17 @@ if that is specified; else SIGN-FLONUM."
 (defconst least-positive-double-float least-positive-single-float)
 (defconst least-negative-double-float least-negative-single-float)
 
-(defconst short-float-epsilon
-	  (+ (small-float (scale-float 1.0s0 -17.))
-	     (small-float (scale-float 1.0s0 -31.))
-	     (small-float (scale-float 1.0s0 -33.)))
+(defconst short-float-epsilon (single-float-from-bits #x33800001)
   "Smallest positive short float which can be added to 1.0s0 and make a difference.")
-
-(defconst single-float-epsilon (+ (scale-float 1.0 -37) (scale-float 1.0 -75))
+(defconst single-float-epsilon short-float-epsilon
   "Smallest positive float which can be added to 1.0 and make a difference.")
-
 (defconst long-float-epsilon single-float-epsilon)
 (defconst double-float-epsilon single-float-epsilon)
 
-(defconst short-float-negative-epsilon
-	  (+ (small-float (scale-float 1.0s0 -18.))
-	     (small-float (scale-float 1.0s0 -32.))
-	     (small-float (scale-float 1.0s0 -34.)))
+(defconst short-float-negative-epsilon (single-float-from-bits #x33000001)
   "Smallest positive short float which can be subtracted from 1.0s0 and make a difference.")
-
-(defconst single-float-negative-epsilon (scale-float 1.0 -31.)
+(defconst single-float-negative-epsilon short-float-negative-epsilon
   "Smallest positive float which can be subtracted from 1.0 and make a difference.")
-
 (defconst long-float-negative-epsilon single-float-negative-epsilon)
 (defconst double-float-negative-epsilon single-float-negative-epsilon)
 

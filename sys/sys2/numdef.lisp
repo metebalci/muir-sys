@@ -1,33 +1,61 @@
 ;;; -*- Mode:LISP; Package:SYSTEM-INTERNALS; Base:10; Lowercase:T -*-
 
 ;;; Floating-point cruftiness
-(defconstant single-float-exponent-offset #o2000)
+;(defconstant single-float-exponent-offset #o2000)
 
-(defconstant single-float-mantissa-length 31.)
+;(defconstant single-float-mantissa-length 31.)
 
-(defconstant single-float-exponent-length 11.)
+;(defconstant single-float-exponent-length 11.)
+
+;(defconstant single-float-implicit-sign-bit-p nil)
+;;; quux revision 13 (contract g1 2.3): there is no boxed flonum; a single
+;;; float is the short float below, and has its parameters.
+(defconstant single-float-exponent-offset 127.)
+
+(defconstant single-float-mantissa-length 24.)
+
+(defconstant single-float-exponent-length 8)
 
 (defconstant single-float-implicit-sign-bit-p nil)
 
-(defconstant short-float-exponent-offset #o200)	;was #o100 in 98.
+;(defconstant short-float-exponent-offset #o200)	;was #o100 in 98.
 
-(defconstant short-float-mantissa-length 17.)
+;(defconstant short-float-mantissa-length 17.)
 
-(defconstant short-float-exponent-length 7)	;was 6 in 98.
+;(defconstant short-float-exponent-length 7)	;was 6 in 98.
 
-(defconstant short-float-implicit-sign-bit-p t)
+;(defconstant short-float-implicit-sign-bit-p t)
+
+;(defsubst %short-float-exponent (short-float)
+;  "Extracts the 8-bit exponent of short-floats as a fixnum, including the sign bit."
+;  (ldb (byte 8 17.) (%pointer short-float)))	;was (byte 7 17) in 98.
+;;; quux revision 13 (contract g1 2.3, 2.4): the short float, dtp-small-flonum,
+;;; is an ieee 754 single, the field's sign <31>, biased exponent <30:23> and
+;;; fraction <22:0>; there is no other float.  the significand is 24 bits with
+;;; the hidden one.
+(defconstant short-float-exponent-offset 127.)
+
+(defconstant short-float-mantissa-length 24.)
+
+(defconstant short-float-exponent-length 8)
+
+(defconstant short-float-implicit-sign-bit-p nil)
 
 (defsubst %short-float-exponent (short-float)
-  "Extracts the 8-bit exponent of short-floats as a fixnum, including the sign bit."
-  (ldb (byte 8 17.) (%pointer short-float)))	;was (byte 7 17) in 98.
+  "Extracts the 8-bit biased exponent of short-floats as a fixnum."
+  (ldb (byte 8 23.) (%pointer short-float)))
 
 (defsubst %single-float-exponent (single-float)
   "Extracts the 11-bit exponent of single-floats as a fixnum, including the sign bit."
   (%p-ldb (byte 11. 8) single-float))
 
+;(defsubst %short-float-mantissa (short-float)
+;  "Extracts the 17-bit mantissa of short-floats as a fixnum, including the implied sign bit."
+;  (ldb (byte 17. 0) (%pointer short-float)))
+;; quux revision 13: the 23-bit fraction, without the hidden bit
 (defsubst %short-float-mantissa (short-float)
-  "Extracts the 17-bit mantissa of short-floats as a fixnum, including the implied sign bit."
-  (ldb (byte 17. 0) (%pointer short-float)))
+  "Extracts the 23-bit fraction of short-floats as a fixnum."
+  (ldb (byte 23. 0) (%pointer short-float)))
 
 (defsubst %single-float-mantissa (single-float)
   "Extracts the 32-bit mantissa of short-floats as a fixnum, including the sign bit."
@@ -225,9 +253,14 @@ Both ANS and INFLUENCER are assumed to be of type '(OR FLOAT (COMPLEX FLOAT))"
 This exponent, if used to scale the integer which FLONUM-MANTISSA returns,
 will produce the original argument.  This is not the same as FLOAT-EXPONENT!"
   (etypecase float
+;    (short-float
+;     (- (%short-float-exponent float)
+;	short-float-mantissa-length short-float-exponent-offset))
+    ;; quux revision 13: an ieee single is (fraction + 2^23) * 2^(e - 150), or a
+    ;; subnormal's fraction * 2^-149
     (short-float
-     (- (%short-float-exponent float)
-	short-float-mantissa-length short-float-exponent-offset))
+     (let ((e (%short-float-exponent float)))
+       (- (if (zerop e) 1 e) (1- short-float-mantissa-length) short-float-exponent-offset)))
     (float
      (- (%single-float-exponent float)
 	single-float-mantissa-length single-float-exponent-offset))))
@@ -236,7 +269,11 @@ will produce the original argument.  This is not the same as FLOAT-EXPONENT!"
   "Return the mantissa of FLOAT as an integer."
   (if (zerop float) 0
     (etypecase float
-      (short-float
-       (%short-float-mantissa float))
+;      (short-float
+;       (%short-float-mantissa float))
+      (short-float				;quux revision 13: the hidden bit
+       (if (zerop (%short-float-exponent float))
+	   (%short-float-mantissa float)
+	 (dpb 1 (byte 1 (1- short-float-mantissa-length)) (%short-float-mantissa float))))
       (float
        (%single-float-mantissa float)))))

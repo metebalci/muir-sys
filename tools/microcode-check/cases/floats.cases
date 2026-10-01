@@ -1,0 +1,51 @@
+; Floats are IEEE 754 singles (microcode 2001; contract G1 sections 2.3, 2.4):
+; DTP-SMALL-FLONUM's field is the binary32, arithmetic rounds to nearest, ties
+; to even, a result past the largest single is an infinity, and ART-FLOAT holds
+; one single a word.  Bits are compared as the field's integer (%POINTER).  The
+; contract's checks: (+ 1.0 2.0), the rounding of 0.1, (float 16777217).
+(+ 1.0 2.0) => 3.0
+(%pointer (+ 1.0 2.0)) => 1077936128
+(%pointer 0.1) => 1036831949
+(%pointer (// 1.0 10.0)) => 1036831949
+(= 0.1 (// 1.0 10.0)) => T
+0.1 => 0.1
+(float 16777217) => 1.6777216e7
+(%pointer (float 16777217)) => 1266679808
+(%pointer (float 16777219)) => 1266679810
+(= (float 16777217) (float 16777216)) => T
+(%pointer 1.0) => 1065353216
+(%pointer (- 1.0)) => -1082130432
+(%pointer (* (- 1.0) 2.0)) => -1073741824
+(%pointer (// 1.0 3.0)) => 1051372203
+(%pointer (- 0.3 0.1)) => 1045220558
+(%pointer (* 1.0e38 10.0)) => 2139095040
+(%pointer (* -1.0e38 10.0)) => -8388608
+(%pointer (* (* 1.0e38 10.0) 1.0e-30)) => 2139095040
+(%pointer most-positive-single-float) => 2139095039
+(%pointer (scale-float 1.0 -126)) => 8388608
+(%pointer (scale-float (%make-pointer dtp-small-flonum #x00400000) 1)) => 8388608
+(%pointer (* 4.0 (%make-pointer dtp-small-flonum #x00400000))) => 16777216
+(list (fix 2.5) (round 2.5) (round 3.5) (truncate -2.5) (ceiling 2.1) (floor -2.1)) => (2 2 4 -2 3 -3)
+(ceiling (// 10 0.8)) => 13
+(list (< 1.0 2.0) (> -1.0 -2.0) (< 2.0 1.0)) => (T T NIL)
+(list (si:float-exponent 1.0) (%pointer (scale-float 1.0 3))) => (1 1090519040)
+(%pointer (float 2147483647)) => 1325400064
+(fix 2147483520.0) => 2147483520
+(fix 4294967296.0) => 4294967296
+(%pointer (float (expt 2 32))) => 1333788672
+(%pointer (float (* 3 (expt 2 32)))) => 1346371584
+(let ((a (make-array 3 :type 'art-float))) (aset 2.5 a 1) (aset 3 a 2) (list (aref a 0) (aref a 1) (aref a 2) (%pointer (aref a 1)))) => (0.0 2.5 3.0 1075838976)
+(%pointer 1.5e-5) => 930850946
+(%pointer 123456.78) => 1206984804
+(<= 0 (- (%pointer 1.1754944e-38) 8388608) 1) => T
+(sqrt 16.0) => 4.0
+(sqrt 2.0) => 1.4142135
+(list (float-digits 1.0) (float-precision 1.0) (float-radix 1.0)) => (24 24 2)
+(multiple-value-list (integer-decode-float 1.0)) => (8388608 -23 1.0)
+(multiple-value-list (decode-float 6.0)) => (0.75 3 1.0)
+(%pointer (+ 1.0 short-float-epsilon)) => 1065353217
+(= (+ 1.0 (// short-float-epsilon 2)) 1.0) => T
+; an ART-FLOAT array is its header and a word an element (STRUCTURE-INFO,
+; which the garbage collector copies by), ART-COMPLEX-FLOAT two words
+(%structure-total-size (make-array 10 :type 'art-float)) => 11
+(%structure-total-size (make-array 10 :type 'art-complex-float)) => 21

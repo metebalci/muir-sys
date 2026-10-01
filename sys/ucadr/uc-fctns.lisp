@@ -1785,7 +1785,10 @@ XGET3
 	((M-A) M-D)		;Arg must go here as well, for INSTANCE-INVOKE.
 XGET2	(CALL-XCT-NEXT PLGET)
        ((M-B) M-T)		;Save copy of arg in M-B.
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGET-INSTANCE)
+;	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGET-INSTANCE)
+;; quux revision 13 (contract g1 2.1): plget1 marks an instance by setting the
+;; cdr code, <39:38> now, not <31:30>
+	(jump-if-bit-set (byte-field 1 38.) m-t xget-instance)
 XGET1	(JUMP-EQUAL M-T A-V-NIL XGET-NOT-FOUND)
 	(CALL CARCDR)
 ;; If the car matches desired property,
@@ -1834,7 +1837,10 @@ XGETI (MISC-INST-ENTRY GET-LOCATION-OR-NIL)
 	((M-A) M-D)		;Arg must go here as well, for INSTANCE-INVOKE.
 	(CALL-XCT-NEXT PLGET)
        ((M-B) M-T)		;Save copy of arg in M-B.
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGETI-INSTANCE)
+;	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGETI-INSTANCE)
+;; quux revision 13 (contract g1 2.1): plget1 marks an instance by setting the
+;; cdr code, <39:38> now, not <31:30>
+	(jump-if-bit-set (byte-field 1 38.) m-t xgeti-instance)
 XGETI1	(POPJ-EQUAL M-T A-V-NIL)		;END OF PLIST REACHED
 	(CALL CARCDR)
 	(JUMP-EQUAL M-A A-D XGETI2)
@@ -1859,7 +1865,10 @@ XGETL (MISC-INST-ENTRY GETL)
 	((M-B) Q-TYPED-POINTER PDL-POP)	;ARG1, THING TO GET FROM
 	(CALL-XCT-NEXT PLGET)
        ((M-T) M-B)
-	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGETL-INSTANCE)
+;	(JUMP-IF-BIT-SET (BYTE-FIELD 1 36) M-T XGETL-INSTANCE)
+;; quux revision 13 (contract g1 2.1): plget1 marks an instance by setting the
+;; cdr code, <39:38> now, not <31:30>
+	(jump-if-bit-set (byte-field 1 38.) m-t xgetl-instance)
 	((M-S) M-A)
 XGETL1	(POPJ-EQUAL M-T A-V-NIL)		;EXHAUSTED THE PLIST
 	(CALL-XCT-NEXT QCAR)			;GET NEXT INDICATOR
@@ -1881,7 +1890,11 @@ XGETL3	(CALL-XCT-NEXT QCDR-SB)
 
 XGETL-INSTANCE
 	((ARG-CALL INSTANCE-INVOKE-1) (I-ARG INSTANCE-INVOKE-GETL))
-	((PDL-PUSH) M-D Q-TYPED-POINTER (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NIL)))
+;	((PDL-PUSH) M-D Q-TYPED-POINTER (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NIL)))
+;; quux revision 13: the argument is the list of properties, which xgetl keeps
+;; in m-a; m-d is xget's register and holds nothing here.  (on the cadr this
+;; path was reached as well, and sent the instance :getl with whatever m-d held.)
+	((pdl-push) m-a q-typed-pointer (a-constant (byte-value q-cdr-code cdr-nil)))
 	((ARG-CALL MMCALL) (I-ARG 2))	;Call, kwd plus 1 args  Value comes back in M-T.
 	(POPJ)
 
@@ -2372,7 +2385,11 @@ XNAMED-STRUCTURE-P-0
 	(JUMP XNAMED-STRUCTURE-P-CHECK-CLOSURE)
 
 XNAMED-STRUCTURE-P-1		;Array has no leader.  Fetch element 0.
-	((M-Q) M-MINUS-ONE)	;Prevent any subscript-oob error.
+;	((M-Q) M-MINUS-ONE)	;Prevent any subscript-oob error.
+;; quux revision 13 (appendix a1.3): the decode's bounds check is unsigned, and
+;; -1 no longer passes it; element 0 is the one read, and a named structure
+;; with no leader holds its type there, so it has one.
+	((m-q) a-zero)		;element 0
 	(CALL ARRAY-DECODE-1-FORCE-A-Q)
 	(JUMP-EQUAL M-S A-ZERO XFALSE)  ;Now check the subscript, but don't err, just ret NIL.
 	((VMA-START-READ) M-E)	;It checks; get the first element of the array.

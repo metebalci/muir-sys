@@ -99,12 +99,16 @@ TOLERANCE specifies how much precision of X to regard as valid:
   ;; It also assumes only loss of precision is in the subtraction, and one in
   ;; the division. This seems to be a good assumption - BEE
   (loop with terms = ()
-	with pow2 = (%single-float-exponent x)
+;	with pow2 = (%single-float-exponent x)
+	;; quux revision 13: a float is an immediate single with no boxed
+	;; exponent to read; float-exponent differs from it by a constant
+	with pow2 = (float-exponent x)
 	as int-part = (fix x)
 	do (progn (push int-part terms)
 		  (decf precision (1+ (haulong int-part)))
 		  (decf x int-part))
-	when (or (zerop x) (> (- pow2 (%single-float-exponent x)) precision))
+;	when (or (zerop x) (> (- pow2 (%single-float-exponent x)) precision))
+	when (or (zerop x) (> (- pow2 (float-exponent x)) precision))
 	do (loop for term in terms
 		 with num = 1 and den = 0
 		 do (psetq num (+ (* term num) den)

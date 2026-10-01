@@ -581,6 +581,65 @@ file carries a comment in that file saying why.
     `sys/cold/coldut.lisp`) now write the digit as it is rather than
     `vunboxed`. Read as an object, a digit is `DTP-TRAP`, and the transporter
     signals an error.
+  - **Floats are IEEE singles** (contract G1 sections 2.3, 2.4; G2 section
+    6.1). `DTP-SMALL-FLONUM` is the one float, its field an IEEE 754
+    binary32; there is no boxed flonum. Its behaviour:
+    - Arithmetic keeps the CADR's internal form, a 32-bit significand and an
+      exponent excess 2000 (`uc-arith.lisp`), and packs the result to 24 bits
+      rounded to nearest, ties to even (`SFLPACK-P`). The internal routines
+      no longer round to 32 bits first: an inexact sum, product or quotient
+      keeps its low bit set (`FRND`, `FDIV`), so a single is rounded once;
+      rounded twice, 1.0 plus `SHORT-FLOAT-EPSILON` gave 1.0. A bignum's
+      conversion still rounds at 32 bits on the next digit alone
+      (`FLOAT-A-BIGNUM`), and the reader divides or multiplies by a power of
+      ten as floats, so a number read can be an ulp off.
+    - A result past the largest single is an infinity of its sign, not an
+      error. One below the smallest normal single underflows as on the CADR:
+      `FLOATING-EXPONENT-UNDERFLOW`, or 0.0 under `ZUNDERFLOW`; no subnormal
+      is made. A subnormal operand is read as its value, an infinity or a
+      NaN as an infinity (an exponent past any single's, so that it stays one
+      through multiplication), and -0.0 as 0.0.
+    - The boxed packers (`FLOPACK`) pack a single; `%FLOAT-DOUBLE` takes its
+      low word's 32 bits unsigned; `ART-FLOAT` holds one single a word and
+      `ART-COMPLEX-FLOAT` two (`uc-array.lisp`, `QFARY`, `QSFARY`;
+      `sys/cold/qcom.lisp`), and a never-stored element reads as 0.0.
+    - The shifts that align and truncate significands (`FADD`,
+      `FLONUM-FIX-FLOOR`, `FLONUM-BIGFIX`, `FLOAT-A-BIGNUM`) rotate on the
+      40-bit ring (appendix A1.2).
+    - Lisp: the short float is the float, and `*READ-DEFAULT-FLOAT-FORMAT*`
+      is `SHORT-FLOAT`, so floats read without and print without an exponent
+      marker (`sys/io/read.lisp`); the reader divides by powers of ten above
+      1e38 in steps. `FASL-OP-FLOAT` loads a 40-bit file's binary32
+      (`sys/sys/qfasl.lisp`). The float accessors, `FLONUM-MANTISSA` and
+      `FLONUM-EXPONENT`, the limits and epsilons (`sys/sys2/numdef.lisp`,
+      `numer.lisp`) are the single's; single, long and double floats share
+      them. `SQRT`, `LOG` and `RATIONALIZE` no longer set a boxed flonum's
+      exponent in place (`numer.lisp`, `rat.lisp`).
+  - **A numeric array's words start as fixnum zeros**, tag 005 (contract G1
+    section 2.6; `XAAIA`, `uc-storage-allocation.lisp`); they started as tag
+    000, and a string's words stayed so after `ASET`. `STRUCTURE-INFO` sizes
+    `ART-FLOAT` at a word an element and `ART-COMPLEX-FLOAT` at two, as the
+    garbage collector copies them.
+  - **`GET`, `GETL` and `GET-LOCATION-OR-NIL` of an instance** send it the
+    message again: `PLGET` marks an instance by setting the cdr code, now
+    `<39:38>`, and its callers tested `<30>` (`uc-fctns.lisp`). The login's
+    `FILE-LOGIN` sent a host `:CAR`. `GETL`'s message now carries the list of
+    properties (`XGETL-INSTANCE` pushed `M-D`, which holds nothing there; the
+    CADR's microcode did the same).
+  - **`COPY-ARRAY-PORTION`** checks each start against its array's length
+    (`XCAP`, `uc-array.lisp`): a negative start signals
+    `SUBSCRIPT-OUT-OF-BOUNDS`, where the unsigned checks had taken it as an
+    exhausted source.
+  - **`RANDOM-INITIALIZE`** fills a 32-bit fixnum's `<31:24>` (`numer.lisp`); it
+    knew 25- and 31-bit pointers only, and stopped `QLD` at "Bug in
+    RANDOM-INITIALIZE".
+  - **`QLD` of the 40-bit cold load** needs the fonts and demo data written
+    again for 40 bits, the site files, and a placeholder for `UCINIT`
+    (`docs/building.md`, "Loading the 40-bit cold load"); the microcompiler's
+    initialisation is open.
+  - **`NAMED-STRUCTURE-P`** reads element 0 of a structure with no leader by
+    index 0 rather than -1, which the unsigned bounds check now refuses
+    (`uc-fctns.lisp`).
   - **Incremental bands are open.** Revision 13 keeps them, converted to
     5-block pages; until that is done, microcode 2001 halts at
     `INCREMENTAL-BAND-NOT-SUPPORTED` on an incremental save or restore, and

@@ -660,11 +660,17 @@ Usually DEFINITION-TYPE is DEFUN and OBJECT-DEFINED is a function spec."
       (FASL-OP-FLOAT-SMALL-FLOAT)
     (FASL-OP-FLOAT-FLOAT)))
 
-(DEFUN FASL-OP-FLOAT-SMALL-FLOAT NIL
-  (LET ((AS-FIXNUM (%LOGDPB (FASL-NEXT-NIBBLE) #o2010 (FASL-NEXT-NIBBLE))))
-    ;; Change exponent from excess #o100 to excess #o200.
-    (SETQ AS-FIXNUM (IF (ZEROP AS-FIXNUM) 0 (%POINTER-PLUS AS-FIXNUM #o40000000)))
-    (ENTER-FASL-TABLE (%MAKE-POINTER DTP-SMALL-FLONUM AS-FIXNUM))))
+;(DEFUN FASL-OP-FLOAT-SMALL-FLOAT NIL
+;  (LET ((AS-FIXNUM (%LOGDPB (FASL-NEXT-NIBBLE) #o2010 (FASL-NEXT-NIBBLE))))
+;    ;; Change exponent from excess #o100 to excess #o200.
+;    (SETQ AS-FIXNUM (IF (ZEROP AS-FIXNUM) 0 (%POINTER-PLUS AS-FIXNUM #o40000000)))
+;    (ENTER-FASL-TABLE (%MAKE-POINTER DTP-SMALL-FLONUM AS-FIXNUM))))
+;;; quux revision 13 (contract g1 2.4): a 40-bit file's float is its ieee
+;;; binary32 bits, high half first (compiler:fasd-binary32), which are the
+;;; field of the dtp-small-flonum word.
+(defun fasl-op-float-small-float nil
+  (let ((as-fixnum (%logdpb (fasl-next-nibble) #o2020 (fasl-next-nibble))))
+    (enter-fasl-table (%make-pointer dtp-small-flonum as-fixnum))))
 
 (DEFUN FASL-OP-FLOAT-FLOAT ()
   (LET ((ANS (FLOAT 0))

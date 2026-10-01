@@ -839,56 +839,123 @@ OVERFLOW-BIGNUM-CREATE-1
 
 ;;; Packing and unpacking small flonums.
 
-;Unpack from C-PDL-BUFFER-POINTER-POP into M-1 and M-I.
-SFLUNPK-P-1
-	((M-I) SMALL-FLONUM-EXPONENT C-PDL-BUFFER-POINTER)
-	(POPJ-EQUAL-XCT-NEXT M-I A-ZERO FLZERO)		;zero exponent => this is 0.0
-       ((M-1) DPB C-PDL-BUFFER-POINTER-POP FLONUM-SMALL-MANTISSA-FIELD A-ZERO)
-	((M-I) ADD M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
-	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET MANTISSA-HIGH-BIT M-1)
-       ((M-1) DPB (M-CONSTANT -1) FLONUM-SIGN-BIT A-1)  ;negative => set sign bit
+;;Unpack from C-PDL-BUFFER-POINTER-POP into M-1 and M-I.
+;SFLUNPK-P-1
+;	((M-I) SMALL-FLONUM-EXPONENT C-PDL-BUFFER-POINTER)
+;	(POPJ-EQUAL-XCT-NEXT M-I A-ZERO FLZERO)		;zero exponent => this is 0.0
+;       ((M-1) DPB C-PDL-BUFFER-POINTER-POP FLONUM-SMALL-MANTISSA-FIELD A-ZERO)
+;	((M-I) ADD M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
+;	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET MANTISSA-HIGH-BIT M-1)
+;       ((M-1) DPB (M-CONSTANT -1) FLONUM-SIGN-BIT A-1)  ;negative => set sign bit
 
-;Unpack from M-T into M-2 and M-J.
-SFLUNPK-T-2
-	((M-J) SMALL-FLONUM-EXPONENT M-T)
-	(POPJ-EQUAL-XCT-NEXT M-J A-ZERO)	;zero exponent => this is 0.0
-       ((M-2) DPB M-T FLONUM-SMALL-MANTISSA-FIELD A-ZERO)
-	((M-J) ADD M-J (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
-	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET SMALL-FLONUM-MANTISSA-HIGH-BIT M-T)
-       ((M-2) DPB (M-CONSTANT -1) FLONUM-SIGN-BIT A-2)
+;;Unpack from M-T into M-2 and M-J.
+;SFLUNPK-T-2
+;	((M-J) SMALL-FLONUM-EXPONENT M-T)
+;	(POPJ-EQUAL-XCT-NEXT M-J A-ZERO)	;zero exponent => this is 0.0
+;       ((M-2) DPB M-T FLONUM-SMALL-MANTISSA-FIELD A-ZERO)
+;	((M-J) ADD M-J (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
+;	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET SMALL-FLONUM-MANTISSA-HIGH-BIT M-T)
+;       ((M-2) DPB (M-CONSTANT -1) FLONUM-SIGN-BIT A-2)
 
-;Pack from M-1 and M-I into C-PDL-BUFFER-POINTER-PUSH and M-T, rounding.
-SFLPACK-P
-	(JUMP-IF-BIT-CLEAR FLONUM-SMALL-ROUND-BIT M-1 SFLPCK1)	;Jump if no rounding required
-	((M-T) FLONUM-SMALL-GUARD-BITS M-1)	;Discarded fraction exactly 1/2 lsb?
-	(JUMP-NOT-EQUAL M-T A-ZERO SFLPCK0)	;No, round.
-	(JUMP-IF-BIT-CLEAR FLONUM-SMALL-MANTISSA-LOW-BIT M-1 SFLPCK1) ;Yes, round towards even.
-SFLPCK0	(CALL-XCT-NEXT FRND1)			;Round and renormalize (may bring in two
-       ((M-1) ADD M-1 (A-CONSTANT (BYTE-MASK FLONUM-SMALL-ROUND-BIT))	; garbage bits from Q)
-		OUTPUT-SELECTOR-RIGHTSHIFT-1)
-SFLPCK1	((M-1) DPB M-ZERO FLONUM-SMALL-USELESS-BITS A-1) ;clear low-order bits so can test zero
-	(POPJ-EQUAL-XCT-NEXT M-1 A-ZERO)	;Special case 0.0, which has 0 in exponent
-       ((M-T C-PDL-BUFFER-POINTER-PUSH) 	;Store mantissa and data-type fields
-		FLONUM-SMALL-MANTISSA-FIELD M-1
-		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-SMALL-FLONUM)
-				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
-	((M-I) SUB M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
-	(JUMP-LESS-OR-EQUAL M-I A-ZERO SFL-E-UND)	;Underflow.  ZUNDERFLOW?
-;	(POPJ-AFTER-NEXT
-;	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
-;       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
-	;; quux revision 12 (contract h8a section 3.3): no call in the
-	;; microinstruction after a return, where a fused return has chosen the
-	;; next handler (see xfxflp in uc-fctns).  the return is conditional on
-	;; the exponent instead, with the store in its xct-next, and an overflow
-	;; jumps to sfl-e-ov: the same microcycles and results with no overflow.
-	;; on an overflow the trap now finds the return not yet made, as at any
-	;; other trap, so the error names the instruction that overflowed rather
-	;; than the next one, and proceeding with a new value works (it stopped
-	;; the machine before).
-	(popj-less-or-equal-xct-next m-i (a-constant small-flonum-max-exponent))
-       ((m-t c-pdl-buffer-pointer) dpb m-i small-flonum-exponent a-t)
-	(jump sfl-e-ov)					;overflow
+;; quux revision 13 (contract g1 2.3, 2.4): dtp-small-flonum is the single
+;; float, its field an ieee 754 binary32: sign <31>, biased exponent <30:23>,
+;; fraction <22:0>.  unpacked into the internal form above: the 24-bit
+;; significand, hidden bit at <30>, in <30:7>, and the exponent excess 2000
+;; (ieee exponent e is internal e + 1602, since 1.f * 2^(e-127) is
+;; 0.1f * 2^(e-126)); a negative one negated by fneg1 or fneg2.  a subnormal
+;; is normalized; an infinity or a nan is taken as an infinity, exponent
+;; 3000, which packs back to one (see sflpack-p).
+(assign ieee-single-exponent-offset 1602)
+(assign ieee-single-infinity-exponent 3000)
+
+;unpack from c-pdl-buffer-pointer-pop into m-1 and m-i.
+sflunpk-p-1
+	((m-i) (byte-field 8 23.) c-pdl-buffer-pointer)
+	(jump-equal m-i a-zero sflunpk-p-subnormal)
+	(jump-equal m-i (a-constant 377) sflunpk-p-infinity)
+	((m-i) add m-i (a-constant ieee-single-exponent-offset))
+	((m-1) dpb c-pdl-buffer-pointer (byte-field 23. 7)
+		(a-constant (byte-mask mantissa-high-bit)))
+sflunpk-p-sign
+	(jump-if-bit-set (byte-field 1 31.) c-pdl-buffer-pointer sflunpk-p-negative)
+	(popj-after-next (m-garbage) c-pdl-buffer-pointer-pop)
+       (no-op)
+sflunpk-p-negative
+	(jump-xct-next fneg1)
+       ((m-garbage) c-pdl-buffer-pointer-pop)
+sflunpk-p-infinity
+	((m-i) (a-constant ieee-single-infinity-exponent))
+	(jump-xct-next sflunpk-p-sign)
+       ((m-1) (a-constant (byte-mask mantissa-high-bit)))
+sflunpk-p-subnormal
+	((m-1) dpb c-pdl-buffer-pointer (byte-field 23. 7) a-zero)
+	(jump-equal m-1 a-zero sflunpk-p-zero)
+	((m-i) (a-constant (plus ieee-single-exponent-offset 1)))
+sflunpk-p-normalize
+	(jump-if-bit-set mantissa-high-bit m-1 sflunpk-p-sign)
+	((m-1) add m-1 a-1)			;shift left one
+	(jump-xct-next sflunpk-p-normalize)
+       ((m-i) sub m-i (a-constant 1))
+sflunpk-p-zero					;+0.0 or -0.0
+	(jump-xct-next flzero)
+       ((m-garbage) c-pdl-buffer-pointer-pop)
+
+;unpack from m-t into m-2 and m-j.
+sflunpk-t-2
+	((m-j) (byte-field 8 23.) m-t)
+	(jump-equal m-j a-zero sflunpk-t-subnormal)
+	(jump-equal m-j (a-constant 377) sflunpk-t-infinity)
+	((m-j) add m-j (a-constant ieee-single-exponent-offset))
+	((m-2) dpb m-t (byte-field 23. 7) (a-constant (byte-mask mantissa-high-bit)))
+sflunpk-t-sign
+	(popj-if-bit-clear (byte-field 1 31.) m-t)
+	(jump fneg2)
+sflunpk-t-infinity
+	((m-j) (a-constant ieee-single-infinity-exponent))
+	(jump-xct-next sflunpk-t-sign)
+       ((m-2) (a-constant (byte-mask mantissa-high-bit)))
+sflunpk-t-subnormal
+	((m-2) dpb m-t (byte-field 23. 7) a-zero)
+	(popj-equal m-2 a-zero)			;0.0: m-j and m-2 zero
+	((m-j) (a-constant (plus ieee-single-exponent-offset 1)))
+sflunpk-t-normalize
+	(jump-if-bit-set mantissa-high-bit m-2 sflunpk-t-sign)
+	((m-2) add m-2 a-2)			;shift left one
+	(jump-xct-next sflunpk-t-normalize)
+       ((m-j) sub m-j (a-constant 1))
+
+;;Pack from M-1 and M-I into C-PDL-BUFFER-POINTER-PUSH and M-T, rounding.
+;SFLPACK-P
+;	(JUMP-IF-BIT-CLEAR FLONUM-SMALL-ROUND-BIT M-1 SFLPCK1)	;Jump if no rounding required
+;	((M-T) FLONUM-SMALL-GUARD-BITS M-1)	;Discarded fraction exactly 1/2 lsb?
+;	(JUMP-NOT-EQUAL M-T A-ZERO SFLPCK0)	;No, round.
+;	(JUMP-IF-BIT-CLEAR FLONUM-SMALL-MANTISSA-LOW-BIT M-1 SFLPCK1) ;Yes, round towards even.
+;SFLPCK0	(CALL-XCT-NEXT FRND1)			;Round and renormalize (may bring in two
+;       ((M-1) ADD M-1 (A-CONSTANT (BYTE-MASK FLONUM-SMALL-ROUND-BIT))	; garbage bits from Q)
+;		OUTPUT-SELECTOR-RIGHTSHIFT-1)
+;SFLPCK1	((M-1) DPB M-ZERO FLONUM-SMALL-USELESS-BITS A-1) ;clear low-order bits so can test zero
+;	(POPJ-EQUAL-XCT-NEXT M-1 A-ZERO)	;Special case 0.0, which has 0 in exponent
+;       ((M-T C-PDL-BUFFER-POINTER-PUSH) 	;Store mantissa and data-type fields
+;		FLONUM-SMALL-MANTISSA-FIELD M-1
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-SMALL-FLONUM)
+;				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
+;	((M-I) SUB M-I (A-CONSTANT SMALL-FLONUM-EXPONENT-OFFSET))
+;	(JUMP-LESS-OR-EQUAL M-I A-ZERO SFL-E-UND)	;Underflow.  ZUNDERFLOW?
+;;	(POPJ-AFTER-NEXT
+;;	 (M-T C-PDL-BUFFER-POINTER) DPB M-I SMALL-FLONUM-EXPONENT A-T)
+;;       (CALL-GREATER-THAN M-I (A-CONSTANT SMALL-FLONUM-MAX-EXPONENT) SFL-E-OV) ;Overflow
+;	;; quux revision 12 (contract h8a section 3.3): no call in the
+;	;; microinstruction after a return, where a fused return has chosen the
+;	;; next handler (see xfxflp in uc-fctns).  the return is conditional on
+;	;; the exponent instead, with the store in its xct-next, and an overflow
+;	;; jumps to sfl-e-ov: the same microcycles and results with no overflow.
+;	;; on an overflow the trap now finds the return not yet made, as at any
+;	;; other trap, so the error names the instruction that overflowed rather
+;	;; than the next one, and proceeding with a new value works (it stopped
+;	;; the machine before).
+;	(popj-less-or-equal-xct-next m-i (a-constant small-flonum-max-exponent))
+;       ((m-t c-pdl-buffer-pointer) dpb m-i small-flonum-exponent a-t)
+;	(jump sfl-e-ov)					;overflow
 
 SFL-E-UND
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-ZUNDERFLOW)
@@ -900,8 +967,61 @@ SFL-E-UND
 				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT))))
        (NO-OP)
 
-SFL-E-OV (CALL TRAP)
-   (ERROR-TABLE FLOATING-EXPONENT-OVERFLOW SFL)
+;SFL-E-OV (CALL TRAP)
+;   (ERROR-TABLE FLOATING-EXPONENT-OVERFLOW SFL)
+
+;; quux revision 13: pack m-1 and m-i as an ieee single, rounding the 32-bit
+;; significand to 24 bits to nearest, ties to even (after the internal
+;; routines' own rounding to 32 bits).  the result is pushed and in m-t.  an
+;; exponent past the single's largest gives an infinity of the result's
+;; sign (no trap); one below the smallest normal one underflows as before
+;; (sfl-e-und: an error unless zunderflow, then 0.0); no subnormal is made.
+;; clobbers m-1, m-i, m-tem and q-r.
+sflpack-p
+	(jump-equal m-1 a-zero sflpack-zero)
+	(jump-greater-or-equal-xct-next m-1 a-zero sflpack-rnd)
+       ((m-tem) (a-constant (plus (byte-value q-data-type dtp-small-flonum)
+				  (byte-value q-cdr-code cdr-next))))
+	((m-1) sub m-zero a-1)			;magnitude; -1 gives 2^31
+	((m-tem) (a-constant (plus (byte-value q-data-type dtp-small-flonum)
+				   (byte-value q-cdr-code cdr-next)
+				   1_31.)))
+	(jump-if-bit-clear (byte-field 1 31.) m-1 sflpack-rnd)
+	((m-1) (byte-field 31. 1) m-1)		;2^31 is 1/2 at one more exponent
+	((m-i) add m-i (a-constant 1))
+sflpack-rnd
+	(jump-if-bit-clear (byte-field 1 6) m-1 sflpack-exp)	;below 1/2 lsb
+	((q-r) and m-1 (a-constant 77))	;the bits below 1/2 lsb
+	(jump-not-equal q-r a-zero sflpack-up)			;above 1/2 lsb
+	(jump-if-bit-clear (byte-field 1 7) m-1 sflpack-exp)	;1/2 lsb, even
+sflpack-up
+	((m-1) add m-1 (a-constant 200))	;one lsb, <7>
+	(jump-if-bit-clear (byte-field 1 31.) m-1 sflpack-exp)
+	((m-1) (byte-field 31. 1) m-1)		;carried to 2^31
+	((m-i) add m-i (a-constant 1))
+sflpack-exp
+	((m-i) sub m-i (a-constant ieee-single-exponent-offset))
+	(jump-less-or-equal m-i a-zero sflpack-underflow)
+	(jump-greater-or-equal m-i (a-constant 377) sflpack-infinity)
+	((m-tem) dpb m-i (byte-field 8 23.) a-tem)
+	(popj-after-next
+	 (m-t c-pdl-buffer-pointer-push) (byte-field 23. 7) m-1 a-tem)
+       (no-op)
+sflpack-infinity
+	(popj-after-next
+	 (m-t c-pdl-buffer-pointer-push) ior m-tem (a-constant 17740000000))
+       (no-op)
+sflpack-zero
+	(popj-after-next
+	 (m-t c-pdl-buffer-pointer-push)
+		(a-constant (plus (byte-value q-data-type dtp-small-flonum)
+				  (byte-value q-cdr-code cdr-next))))
+       (no-op)
+sflpack-underflow				;0.0 pushed, then as before
+	(jump-xct-next sfl-e-und)
+       ((m-t c-pdl-buffer-pointer-push)
+		(a-constant (plus (byte-value q-data-type dtp-small-flonum)
+				  (byte-value q-cdr-code cdr-next))))
 
 ;Pack from M-1 and M-I into M-T, rounding.
 SFLPACK-T
@@ -916,33 +1036,42 @@ POP-PP-J
 ;;; and ARITH-ANY-FLO, and is written there.  There is also GET-FLONUM,
 ;;; a general routine which is not used by the normal arithmetic path. 
 
-;;; Take a flonum in M-1/M-I, and return a DTP-EXTENDED-NUMBER to it.
-FLOPACK-T
-	(CALL FLOPACK)
-	(POPJ)  ;May be returning to main loop, can't popj and start-write together
+;;;; Take a flonum in M-1/M-I, and return a DTP-EXTENDED-NUMBER to it.
+;FLOPACK-T
+;	(CALL FLOPACK)
+;	(POPJ)  ;May be returning to main loop, can't popj and start-write together
 
-FLOPACK-P
-	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC M-T-TO-STACK)))
-FLOPACK	(CALL-LESS-OR-EQUAL M-I A-ZERO FLOPACK-UNDERFLOW)
- 	(CALL-GREATER-OR-EQUAL M-I (A-CONSTANT 4000) TRAP)
-	    (ERROR-TABLE FLOATING-EXPONENT-OVERFLOW FLO)
-	(CALL-XCT-NEXT SCONS-T)
-       ((M-B) (A-CONSTANT 2))
-	((VMA) ADD M-T (A-CONSTANT 1))		;Write the second word
-	((MD-START-WRITE)
-		FLONUM-HEADER-LOW-MANTISSA M-1
-		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-				  (BYTE-VALUE Q-CDR-CODE CDR-NIL))))
-	(CHECK-PAGE-WRITE)
-	((M-TEM) FLONUM-HEADER-HIGH-MANTISSA M-1
-		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
-				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT)
-				  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-FLONUM))))
-	((VMA M-T) Q-POINTER M-T
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
-	(POPJ-AFTER-NEXT (MD-START-WRITE) DPB M-I HEADER-FLONUM-EXPONENT A-TEM)
-       (CHECK-PAGE-WRITE)
+;FLOPACK-P
+;	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC M-T-TO-STACK)))
+;FLOPACK	(CALL-LESS-OR-EQUAL M-I A-ZERO FLOPACK-UNDERFLOW)
+; 	(CALL-GREATER-OR-EQUAL M-I (A-CONSTANT 4000) TRAP)
+;	    (ERROR-TABLE FLOATING-EXPONENT-OVERFLOW FLO)
+;	(CALL-XCT-NEXT SCONS-T)
+;       ((M-B) (A-CONSTANT 2))
+;	((VMA) ADD M-T (A-CONSTANT 1))		;Write the second word
+;	((MD-START-WRITE)
+;		FLONUM-HEADER-LOW-MANTISSA M-1
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;				  (BYTE-VALUE Q-CDR-CODE CDR-NIL))))
+;	(CHECK-PAGE-WRITE)
+;	((M-TEM) FLONUM-HEADER-HIGH-MANTISSA M-1
+;		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER)
+;				  (BYTE-VALUE Q-CDR-CODE CDR-NEXT)
+;				  (BYTE-VALUE HEADER-TYPE-FIELD %HEADER-TYPE-FLONUM))))
+;	((VMA M-T) Q-POINTER M-T
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-EXTENDED-NUMBER)))
+;	(POPJ-AFTER-NEXT (MD-START-WRITE) DPB M-I HEADER-FLONUM-EXPONENT A-TEM)
+;       (CHECK-PAGE-WRITE)
 	
+;; quux revision 13 (contract g1 2.3): there is no boxed flonum; every float
+;; is a single, so the flonum packers pack one.
+flopack-t
+	(jump sflpack-t)
+flopack-p
+	(jump sflpack-p)
+flopack
+	(jump sflpack-t)
+
 FLOPACK-UNDERFLOW
 	(POPJ-EQUAL M-1 A-ZERO)		;0.0 case: M-I has zero, don't trap
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-ZUNDERFLOW)
@@ -1946,7 +2075,10 @@ FLONUM-FIX-FLOOR
 	(JUMP-GREATER-OR-EQUAL M-I (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH)) FLONUM-BIGFIX)
 		 ;jump if big enough to be bignum
 	((M-A) M-A-1 M-I (A-CONSTANT 2000))	;Byte length - 1 (maximum byte length 23.)
-	((M-B) ADD M-A (A-CONSTANT 2))		;Leftward rotation of M-1.
+;	((M-B) ADD M-A (A-CONSTANT 2))		;Leftward rotation of M-1.
+;; quux revision 13 (appendix a1.2): the rotator's ring is 40 bits, so a right
+;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
+	((m-b) add m-a (a-constant 12))		;leftward rotation of m-1
 	(POPJ-AFTER-NEXT (OA-REG-LOW) DPB M-A OAL-BYTL-1 A-B)
        ((M-T) (BYTE-FIELD 0 0) M-1 A-T)		;A boxed signed fixnum!
 
@@ -1970,9 +2102,13 @@ FLONUM-BIGFIX0
 	(JUMP-GREATER-THAN-XCT-NEXT M-3 (A-CONSTANT 1) FLONUM-BIGFIX0)
        ((M-3) SUB M-3 (A-CONSTANT 1))
 FLONUM-BIGFIX1
-	((M-3) ADD M-1 (A-CONSTANT 2))		;Get high-order word of result
+;	((M-3) ADD M-1 (A-CONSTANT 2))		;Get high-order word of result
+;; quux revision 13 (appendix a1.2): the rotator's ring is 40 bits, so a right
+;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
+	((m-3) add m-1 (a-constant 12))		;get high-order word of result
 	((OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-3)	;[Right-justify high (M-1)+1 bits of 31.]
 	((WRITE-MEMORY-DATA) (BYTE-FIELD 0 0) M-2)
+	((m-3) sub m-3 (a-constant 10))		;quux revision 13: as 32 bits had it, below
 	((VMA-START-WRITE) ADD M-T A-I)
 	(CHECK-PAGE-WRITE)
 	(JUMP-LESS-THAN M-I (A-CONSTANT 2) BIGNUM-DPB-CLEANUP)	;No low-order word
@@ -2313,6 +2449,9 @@ FADD	(JUMP-EQUAL-XCT-NEXT M-I A-J FADD2)	;Jump if exponents equal, no shifting
        ((A-TEM2) DPB M-2 (BYTE-FIELD 0 0) A-ZERO) ;Get bits shifted off right end of M-2
 	((Q-R) A-TEM2)				;Put them in Q-R where they belong
 	((M-TEM) SUB M-J (A-CONSTANT 1))	;Byte length minus one
+;; quux revision 13 (appendix a1.2): the rotator's ring is 40 bits, so a right
+;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
+	((m-j) add m-j (a-constant 10))		;the rotation, 40 - exponent difference
 	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-J)
        ((M-2) (BYTE-FIELD 0 0) M-2 A-TEM1)	;Arithmetically shift M-2 right
 FADD2	((M-1) ADD M-1 A-2 OUTPUT-SELECTOR-RIGHTSHIFT-1	;Do the add, collect
@@ -2377,9 +2516,19 @@ FNORM1	((M-1) M-1 OUTPUT-SELECTOR-LEFTSHIFT-1 SHIFT-Q-LEFT)
 ;After rounding, we renormalize with a 3-bit normalize since the rounding
 ;can make a positive number slightly bigger and a negative number slightly smaller,
 ;requiring a shift of 0, 1 right, or 1 left.
-FRND	(POPJ-GREATER-OR-EQUAL Q-R A-ZERO)	;Return if discarded bits < 1/2 lsb, no rounding required.
-	(JUMP-NOT-EQUAL Q-R (A-CONSTANT 1_31.) FRND2)	;If discarded bits = 1/2 lsb exactly,
-	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 0) M-1) ; then round to even
+;FRND	(POPJ-GREATER-OR-EQUAL Q-R A-ZERO)	;Return if discarded bits < 1/2 lsb, no rounding required.
+;	(JUMP-NOT-EQUAL Q-R (A-CONSTANT 1_31.) FRND2)	;If discarded bits = 1/2 lsb exactly,
+;	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 0) M-1) ; then round to even
+;; quux revision 13: every result is packed to a single (sflpack-p), which
+;; rounds the 32-bit significand to 24 bits.  rounding here first would round
+;; twice, and a result just above a single's tie could come out as the tie,
+;; rounded to even the wrong way: 1.0 plus a little more than 2^-24 gave 1.0.
+;; an inexact result keeps its low bit set instead (jammed), which the single's
+;; rounding reads as the bits below it not all zero; this holds for a negative
+;; one too, since the 24-bit rounding works on the magnitude.
+FRND	(POPJ-EQUAL Q-R A-ZERO)			;exact
+	(POPJ-AFTER-NEXT (M-1) IOR M-1 (A-CONSTANT 1))	;inexact: jam the low bit
+       (NO-OP)
 FRND2	((M-1) ADD M-1 (A-CONSTANT 1)		;Add 1 lsb to mantissa, and
 		OUTPUT-SELECTOR-RIGHTSHIFT-1 SHIFT-Q-RIGHT) ; capture overflow
 FRND1	(DISPATCH SIGN-BIT-AND-MANTISSA-HIGH-TWO M-1 D-FRND) ;Renormalize & popj
@@ -2477,11 +2626,17 @@ FDIV2	((Q-R) M-ZERO)				;Low bits of dividend
 	;At this point, the normalized positive quotient is in Q-R, remainder is in M-TEM
 	;We'd like to shift the remainder left and do an unsigned compare, but that
 	;operation isn't available so we shift the divisor right and lose a bit.
-	((A-TEM1) (BYTE-FIELD 31. 1) M-2)
-	(POPJ-LESS-THAN-XCT-NEXT M-TEM A-TEM1)	;Round down if remainder < 1/2 divisor
-       ((M-1) Q-R)
-	(JUMP-GREATER-THAN M-TEM A-TEM1 FDIV6)	;Round up if remainder > 1/2 divisor
-	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 0) M-1);Round to even lsb if remainder = 1/2 divisor
+;	((A-TEM1) (BYTE-FIELD 31. 1) M-2)
+;	(POPJ-LESS-THAN-XCT-NEXT M-TEM A-TEM1)	;Round down if remainder < 1/2 divisor
+;       ((M-1) Q-R)
+;	(JUMP-GREATER-THAN M-TEM A-TEM1 FDIV6)	;Round up if remainder > 1/2 divisor
+;	(POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 0) M-1);Round to even lsb if remainder = 1/2 divisor
+;; quux revision 13: an inexact quotient keeps its low bit set, as at frnd,
+;; for the single's one rounding (sflpack-p)
+	(popj-equal-xct-next m-tem a-zero)	;exact
+       ((m-1) q-r)
+	(popj-after-next (m-1) ior m-1 (a-constant 1))	;inexact: jam the low bit
+       (no-op)
 FDIV6	(JUMP-XCT-NEXT FRND1)			;Duplicate instruction at FRND2 for speed
        ((M-1) ADD M-1 (A-CONSTANT 1)		;Add 1 lsb to mantissa, and
 		OUTPUT-SELECTOR-RIGHTSHIFT-1 SHIFT-Q-RIGHT) ; capture overflow
@@ -2580,40 +2735,60 @@ FMIN	(CALL FGRP)
 	(JUMP-XCT-NEXT FIX-FMAX-FMIN-RETURN-ADDRESS)
        ((M-I) M-J)
 
-XFLOAT-DOUBLE (MISC-INST-ENTRY %FLOAT-DOUBLE)
-	(CALL FXGTPP)
-	((M-1) DPB M-1
-	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 0)
-		     (DIFFERENCE 31. Q-POINTER-WIDTH))
-	 A-ZERO)
-	((M-1)
-	 (BYTE-FIELD (DIFFERENCE 31. Q-POINTER-WIDTH)
-		     (DIFFERENCE Q-POINTER-WIDTH
-				 (DIFFERENCE 31. Q-POINTER-WIDTH)))
-	 M-2 A-1)
-	(JUMP-EQUAL M-1 A-ZERO FLOAT-DOUBLE-2)
-	((M-TEM) DPB M-2
-	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH
-				 (DIFFERENCE 31. Q-POINTER-WIDTH))
-		     (DIFFERENCE 32.
-				 (DIFFERENCE Q-POINTER-WIDTH
-					     (DIFFERENCE 31. Q-POINTER-WIDTH))))
-	 A-ZERO)
-	((Q-R) M-TEM)
-	((M-I) (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH Q-POINTER-WIDTH -1)))
-FLOAT-DOUBLE-1
-	(JUMP-XCT-NEXT FLOPACK-T)
-       (CALL FNORM)
+;XFLOAT-DOUBLE (MISC-INST-ENTRY %FLOAT-DOUBLE)
+;	(CALL FXGTPP)
+;	((M-1) DPB M-1
+;	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 0)
+;		     (DIFFERENCE 31. Q-POINTER-WIDTH))
+;	 A-ZERO)
+;	((M-1)
+;	 (BYTE-FIELD (DIFFERENCE 31. Q-POINTER-WIDTH)
+;		     (DIFFERENCE Q-POINTER-WIDTH
+;				 (DIFFERENCE 31. Q-POINTER-WIDTH)))
+;	 M-2 A-1)
+;	(JUMP-EQUAL M-1 A-ZERO FLOAT-DOUBLE-2)
+;	((M-TEM) DPB M-2
+;	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH
+;				 (DIFFERENCE 31. Q-POINTER-WIDTH))
+;		     (DIFFERENCE 32.
+;				 (DIFFERENCE Q-POINTER-WIDTH
+;					     (DIFFERENCE 31. Q-POINTER-WIDTH))))
+;	 A-ZERO)
+;	((Q-R) M-TEM)
+;	((M-I) (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH Q-POINTER-WIDTH -1)))
+;FLOAT-DOUBLE-1
+;	(JUMP-XCT-NEXT FLOPACK-T)
+;       (CALL FNORM)
 
-FLOAT-DOUBLE-2
-	((M-1) DPB M-2
-	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 0)
-		     (DIFFERENCE 31. Q-POINTER-WIDTH))
-	 A-ZERO)
-	((Q-R) A-ZERO)
-	(JUMP-XCT-NEXT FLOAT-DOUBLE-1)
-       ((M-I) (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH -1)))
+;FLOAT-DOUBLE-2
+;	((M-1) DPB M-2
+;	 (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 0)
+;		     (DIFFERENCE 31. Q-POINTER-WIDTH))
+;	 A-ZERO)
+;	((Q-R) A-ZERO)
+;	(JUMP-XCT-NEXT FLOAT-DOUBLE-1)
+;       ((M-I) (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH -1)))
 
+;; quux revision 13: (%float-double high low) is the float of high * 2^32 +
+;; low, low's 32 bits unsigned (the reader's xr-flonum-cons).  the 64 bits go
+;; to m-1 and q-r, normalized by fnorm (whose exponent convention xfloat's
+;; 2036 shows: 2036 + 32 = 2076); with high zero, low's top 31 bits go to m-1
+;; and its lsb to q-r, so that m-1 is positive and not all shifted in from q.
+xfloat-double (misc-inst-entry %float-double)
+	(call fxgtpp)				;m-1 high, m-2 low
+	(jump-equal m-1 a-zero float-double-2)
+	((q-r) m-2)
+	((m-i) (a-constant 2076))
+float-double-1
+	(jump-xct-next flopack-t)
+       (call fnorm)
+float-double-2
+	((m-1) (byte-field 31. 1) m-2)
+	((m-tem) dpb m-2 (byte-field 1 31.) a-zero)
+	((q-r) m-tem)
+	(jump-xct-next float-double-1)
+       ((m-i) (a-constant 2037))
+
 ;;;  Bignum arithmetic.
 
 (DEF-DATA-FIELD BIGNUM-HEADER-SIGN 1 18.)
@@ -2858,8 +3033,14 @@ FLOAT-A-BIGNUM-X
 	;;		BYTL-1 = (M-T - 1)	MROT = (31. - M-T)
 	((M-TEM) SUB (M-CONSTANT 32.) A-T)
 	((M-4) SUB M-TEM (A-CONSTANT 2))
+;; quux revision 13 (appendix a1.2): the rotator's ring is 40 bits, so a right
+;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
+;; the ldb from m-3 rotates by 40 - m-t; the dropped bit's rotation below
+;; stays 32 - m-t, which moves bit m-t - 1 to 31 on either ring.
+	((m-tem) add m-tem (a-constant 10))
 	((OA-REG-LOW) DPB M-4 OAL-BYTL-1 A-TEM)
 	((M-1) (BYTE-FIELD 0 0) M-3 A-ZERO)
+	((m-tem) sub m-tem (a-constant 10))
 	((OA-REG-LOW) M-TEM)			;Rotate first dropped bit into sign of M-3
 	((M-3) (BYTE-FIELD 32. 0) M-3)
 	((M-K) SUB M-T (A-CONSTANT 1))

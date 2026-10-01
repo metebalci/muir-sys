@@ -1294,19 +1294,30 @@ QQARY	((VMA-START-READ) ADD A-Q M-E)		;Q ARRAY
 	(POPJ-AFTER-NEXT DISPATCH TRANSPORT READ-MEMORY-DATA)
        ((M-T) Q-TYPED-POINTER READ-MEMORY-DATA)
 
-QFARY	((M-TEM) ADD M-Q A-Q)			;FLOAT
-	((VMA-START-READ) ADD M-E A-TEM)
-	(CHECK-PAGE-READ)
-	((C-PDL-BUFFER-POINTER-PUSH) M-B)
-	((C-PDL-BUFFER-POINTER-PUSH) M-E)
-	((C-PDL-BUFFER-POINTER-PUSH) M-I)
-	((M-I) READ-MEMORY-DATA)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(CHECK-PAGE-READ)
-	((C-PDL-BUFFER-POINTER-PUSH) M-K)
-	((C-PDL-BUFFER-POINTER-PUSH) M-S)
-	(CALL-XCT-NEXT FLOPACK)
-       ((M-1) READ-MEMORY-DATA)
+;QFARY	((M-TEM) ADD M-Q A-Q)			;FLOAT
+;	((VMA-START-READ) ADD M-E A-TEM)
+;	(CHECK-PAGE-READ)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-B)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-E)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-I)
+;	((M-I) READ-MEMORY-DATA)
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
+;	(CHECK-PAGE-READ)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-K)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-S)
+;	(CALL-XCT-NEXT FLOPACK)
+;       ((M-1) READ-MEMORY-DATA)
+;; quux revision 13 (contract g1 2.6): an art-float element is one word, the
+;; single itself, at the data origin plus m-q (art-complex-float's two words
+;; are its real part at 2i and its imaginary part at 2i+1, qcfary).  the
+;; single-float tag is given on the way out, since a numeric array's words
+;; start as zeros with tag 000 (xaaia), which read as 0.0.
+qfary	((vma-start-read) add m-q a-e)		;float
+	(check-page-read)
+	(popj-after-next (m-t) dpb md q-pointer
+		(a-constant (byte-value q-data-type dtp-small-flonum)))
+       (no-op)
+
 QFARY1	((M-S) C-PDL-BUFFER-POINTER-POP)
 	((M-K) C-PDL-BUFFER-POINTER-POP)
 	((M-I) C-PDL-BUFFER-POINTER-POP)
@@ -1528,18 +1539,29 @@ QSLQRY	((VMA-START-READ) ADD A-Q M-E)		;Q-LIST ARRAY
 	(POPJ-AFTER-NEXT GC-WRITE-TEST)
        (NO-OP)
 
-QSFARY	((M-J) M-I)				;Save M-I
-	((C-PDL-BUFFER-POINTER-PUSH) M-T)	;Value being stored
-	(CALL GET-FLONUM)
-	((M-TEM) ADD M-Q A-Q)
-	((WRITE-MEMORY-DATA) M-I)
-	((VMA-START-WRITE) ADD M-E A-TEM)
-	(CHECK-PAGE-WRITE)
-	((M-I) M-J)				;Restore M-I
-	((WRITE-MEMORY-DATA) M-1)
-	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
-	(CHECK-PAGE-WRITE)
-	(POPJ)
+;QSFARY	((M-J) M-I)				;Save M-I
+;	((C-PDL-BUFFER-POINTER-PUSH) M-T)	;Value being stored
+;	(CALL GET-FLONUM)
+;	((M-TEM) ADD M-Q A-Q)
+;	((WRITE-MEMORY-DATA) M-I)
+;	((VMA-START-WRITE) ADD M-E A-TEM)
+;	(CHECK-PAGE-WRITE)
+;	((M-I) M-J)				;Restore M-I
+;	((WRITE-MEMORY-DATA) M-1)
+;	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
+;	(CHECK-PAGE-WRITE)
+;	(POPJ)
+;; quux revision 13: the value as a single (get-flonum coerces any number, and
+;; sflpack-t packs it), stored in the element's one word (see qfary).
+qsfary	((m-j) m-i)				;save m-i
+	((c-pdl-buffer-pointer-push) m-t)	;value being stored
+	(call get-flonum)
+	(call sflpack-t)
+	((write-memory-data) q-typed-pointer m-t)
+	((vma-start-write) add m-q a-e)
+	(check-page-write)
+	(popj-after-next (m-i) m-j)		;restore m-i
+       (no-op)
 
 ;Store into ART-COMPLEX-FLOAT.
 QSCFARY (CALL-XCT-NEXT QSCARY-DECODE)
@@ -1836,6 +1858,11 @@ XCAP (MISC-INST-ENTRY COPY-ARRAY-PORTION)
 ;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
 	(call-less-than-unsigned m-s a-r trap)		;TO-LENGTH IN M-R MUST BE IN-BOUNDS
   (ERROR-TABLE SUBSCRIPT-OOB M-R M-S)
+;; quux revision 13 (appendix a1.3): the start must not be past the length, so
+;; that a negative one, past it unsigned, signals rather than being taken as
+;; an exhausted source or a full destination.
+	(call-less-than-unsigned m-s a-q trap)		;to-start in m-q must be in bounds
+  (error-table subscript-oob m-q m-s)
 	((M-C) M-E)					;TO-ADDRESS
 	((M-K) M-B)					;TO-ARRAY-HEADER
 	((M-T) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;FROM-END
@@ -1849,6 +1876,8 @@ XCAP (MISC-INST-ENTRY COPY-ARRAY-PORTION)
 ;; quux revision 13 (appendix a1.3): unsigned, so a negative index traps
 	(call-less-than-unsigned m-s a-t trap)		;FROM-LENGTH IN M-T MUST BE IN-BOUNDS
   (ERROR-TABLE SUBSCRIPT-OOB M-T M-S)
+	(call-less-than-unsigned m-s a-q trap)		;from-start in m-q must be in bounds
+  (error-table subscript-oob m-q m-s)
 	(JUMP-XCT-NEXT XCARC1)
        ((M-S) M-T)
 

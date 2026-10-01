@@ -63,7 +63,9 @@ addresses), a function at each of the five points. It is compiled:
   the page, the fixnum's limits) must show the target's value;
 - **with this world's own parameters** (the identity control): the tree's
   `QCOM`, which describes the 40-bit machine, with every parameter this world
-  also has given this world's value (`lisp/world.lisp`). The QFASL must equal
+  also has given this world's value, and so every system constant the tree's
+  other files define, such as `SINGLE-FLOAT-EXPONENT-OFFSET`
+  (`lisp/world.lisp`). The QFASL must equal
   the native compile's function for function, but for `XC-LSH`, since a
   cross build folds no `LSH`;
 - **for a 32-bit target of 1024-word pages** (contract G2, option (w)):
