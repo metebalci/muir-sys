@@ -390,6 +390,38 @@ file carries a comment in that file saying why.
     compiler compiles `(and x t)` as `x` (a compiled
     `(defun f (x) (and (car x) t))` returns 5 for `'(5)`). Its one caller
     tests it for `NIL` only.
+- **The cold boot unmaps the physical-page-data table's unused tail.**
+  `REGION-ORIGIN` lies below `PAGE-TABLE-AREA` (`cold/qcom.lisp`,
+  `AREA-LIST`), at 4096 against the table at 8192 and physical-page-data
+  at 139264, so `COLD-REINIT-PPD-0`'s fill of the table with -1 and
+  `BEGCM1`'s loop that takes the table's unused pages out of the map, both
+  bounded by it, never ran. The fill wrote -1 into the word below
+  `REGION-ORIGIN`, the last of `MICRO-CODE-SYMBOL-AREA`, where the area
+  holds its fill word, and stopped. With less memory than the table's 32
+  M words, the table's entries past the memory's pages kept the band's
+  words and its pages past them stayed mapped to their own frames, while
+  `COLD-REINIT-PPD` gave those frames to paging: each such frame was
+  reachable at two virtual addresses. Both loops are now bounded by
+  `ADDRESS-SPACE-MAP`'s origin, the table's end
+  (`sys/ucadr/uc-cold-disk.lisp:1293-1299`, `:1417`, `:1422`), and the
+  unmap starts at the table's valid end rounded up to a page
+  (`:1402-1409`): MIT's "its page plus one" skipped the end's own page
+  when the end fell on a page boundary, as it does with any multiple of
+  16 boards. MIT's, in microcode 323 as well; the CADR's line has the same
+  fix.
+  - Measured on Y5's band at 256 boards (16 M words), before: all 16384
+    entries past the memory's kept the band's words, none -1; all 16 pages
+    from 152 on were mapped to their own frames, each frame holding a page
+    paged in; a word written through page 152 was read changed through
+    virtual page 2905, the page in frame 152. At 300 boards the same for
+    the 14 pages from 154. At 512 (32 M words, the default) the table is
+    full and has no tail. With the two comparisons alone, 15 of the 16
+    pages at 256 boards left the map and page 152 stayed mapped, the alias
+    still there; with the start rounded up as well, none stays, the write
+    through page 152 is not seen through page 2905, and at 300 boards page
+    154, which holds valid entries, stays mapped and the 13 above it do
+    not. The word below `REGION-ORIGIN` keeps its fill word. The paging
+    and full-GC workload of the next entry passes at 256 and 512 boards.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
