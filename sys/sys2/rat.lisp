@@ -139,7 +139,11 @@ For a positive real, this is 0; for a negative real, this is . For 0, it is zer
 	(cli:atan (%complex-imag-part number) (%complex-real-part number)))
     (if (minusp number)
 	(typecase number
-	  (short-float #.(coerce pi 'short-float))
+;	  (short-float #.(coerce pi 'short-float))
+	  ;; pi read as a constant: on quux revision 13 pi is already the short
+	  ;; float, and in a cross build (coerce pi 'short-float) made system
+	  ;; 2000's short float of 17 bits (#x40491000, not #x40490FDB)
+	  (short-float #.pi)
 	  (t pi))
       (- number number))))
 

@@ -260,10 +260,20 @@ accumulators from the error."
   (SETQ PP (1+ NEW-AP))
   (DOTIMES (I (1+ SG-PDL-PHASE))
     (SETQ P (AP-LEADER SG I))
-    (SETF (AREF RP PP)
-	  (IF (%P-POINTERP P)
-	      (%P-CONTENTS-AS-LOCATIVE P)
-	    (%P-POINTER P)))
+;    (SETF (AREF RP PP)
+;	  (IF (%P-POINTERP P)
+;	      (%P-CONTENTS-AS-LOCATIVE P)
+;	    (%P-POINTER P)))
+    ;; quux revision 13 (contract g2 2.6): a saved register may hold a pointer
+    ;; past the 28-bit space (<31:28> set), as %p-contents-offset's m-c holds
+    ;; the address its error is about.  %p-contents-as-locative transports it,
+    ;; which signals address-past-28-bits again, here in the error handler, so
+    ;; the condition's handler never ran.  such a word is saved as its field,
+    ;; as a non-pointer is; sg-restore-state puts the field and the tag back.
+    (setf (aref rp pp)
+	  (if (and (%p-pointerp p) (not (ldb-test #o3404 (%p-pointer p))))
+	      (%p-contents-as-locative p)
+	    (%p-pointer p)))
     (SETF (AREF RP (1+ PP))
 	  (%P-LDB %%Q-ALL-BUT-POINTER P))
     (SETQ PP (+ PP 2)))

@@ -25,6 +25,16 @@
 ;Enter here if either the MD is a pointer to old-space or we have a map miss
 TRANS-OLD
 	(JUMP-IF-BIT-SET (BYTE-FIELD 1 1) READ-I-ARG TRANS-DROP-THROUGH);Ignore if no-transport
+	;; quux revision 13 (contract g2 2.6): a pointer whose address has <31:28>
+	;; set is past the 28-bit space, in no region, so in no oldspace.  its map
+	;; is the invalid block's, whose meta bits stay 0 (appendix a1.7), and
+	;; asking get-map-bits for them signals address-past-28-bits, which halted
+	;; where a trap cannot be taken (a stack group switch, the scavenger):
+	;; such a pointer drops through, as a pointer to a memory or i/o does once
+	;; get-map-bits has marked its map neither oldspace nor extra pdl.  only
+	;; using it as an address signals the error.
+	((m-tem) (byte-field 4 28.) md)
+	(jump-not-equal m-tem a-zero trans-drop-through)
 TRANS-OLD0	;Enter here if forwarding-pointer, mustn't ever drop-through
 	((A-TRANS-VMA) VMA)			;Save where MD came from
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;Ensure validity of meta bits
@@ -454,6 +464,14 @@ EXTRA-PDL-TRAP
 		(BYTE-FIELD 1 0) READ-I-ARG EXTRA-PDL-TRAP-0)
        ((A-TRANS-VMA) VMA)			;SAVE ADDRESS WRITTEN INTO
 EXTRA-PDL-TRAP-1
+	;; quux revision 13 (contract g2 2.6): a pointer past the 28-bit space is
+	;; not into the extra pdl, as trans-old above: the write barrier's false
+	;; alarm, without asking the map, whose bits for it stay 0.  storing or
+	;; saving such a pointer (sglv dumping the pdl buffer at every process
+	;; switch) halted the machine.
+	((m-tem) (byte-field 4 28.) md)
+	(jump-not-equal-xct-next m-tem a-zero trans-drop-through)
+       ((vma) a-trans-vma)			;restore vma, as the false alarm below
 ;Only if MD points at the extra pdl area do we need to copy it.
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;ENSURE VALIDITY OF META BITS
 	(POPJ-IF-BIT-SET-XCT-NEXT		;RETURN IF FALSE ALARM

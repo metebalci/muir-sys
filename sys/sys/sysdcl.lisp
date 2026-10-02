@@ -190,7 +190,11 @@
   (:COMPILE-LOAD MAIN (:FASLOAD DEFS))
   (:READFILE ("SYS: COLD; DEFMIC"
 	      "SYS: COLD; DOCMIC"))
-  (:FASLOAD ("SYS: SYS; UCINIT")))
+  ;; quux revision 13: UCINIT is compiled from its source (sys; ucinit), which
+  ;; records no microcompiled function; system 100's binary-only QFASL held
+  ;; EQUAL's MCLAP for the CADR's 32-bit microinstructions.
+;  (:FASLOAD ("SYS: SYS; UCINIT")))
+  (:compile-load ("SYS: SYS; UCINIT")))
 
 (DEFSYSTEM COLOR
   (:PACKAGE COLOR)

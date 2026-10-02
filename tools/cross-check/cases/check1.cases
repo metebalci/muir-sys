@@ -39,16 +39,33 @@
 (qc-file "SYS: CROSS-CHECK; UNCOVERED-FOLD LISP" "HOST: //home//lispm//synth-uncovered-fold.qfasl") =>! no target value
 (probe-file "HOST: //home//lispm//synth-uncovered-fold.qfasl") => NIL
 (cold:cross-end)
-; the 40-bit machine
-(cold:cross-begin :log-directory "HOST: //home//lispm//t40-")
+; the 40-bit machine, with the tree's compile-time definitions that
+; SYS: COLD; CROSSDEFS lists, each declared, and each checked
+(let ((r (cold:cross-begin :log-directory "HOST: //home//lispm//t40-"))) (and (plusp (getf r :definitions)) (= (getf r :definitions) (getf r :checked) (length cold:*cross-definitions*)))) => T
 (cold:cross-write-table)
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//t40-family.qfasl")
 (qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//t40-planted.qfasl")
+(qc-file "SYS: CROSS-CHECK; DEFS LISP" "HOST: //home//lispm//t40-defs.qfasl")
+; SYS2; NUMDEF compiled for the target and loaded, as make-system loads it: the
+; builder does not load it (cold:*cross-unloaded-files*), and its floats stay
+; its own, so a fold of (sqrt 2) after it is still right (t40-defs2)
+(qc-file "SYS: SYS2; NUMDEF LISP")
+(progn (setq cold:*cross-replaced-loads* nil) (load "SYS: SYS2; NUMDEF QFASL") (mapcar #'cdr cold:*cross-replaced-loads*)) => (:NOT-LOADED)
+(qc-file "SYS: CROSS-CHECK; DEFS LISP" "HOST: //home//lispm//t40-defs2.qfasl")
+; fail-closed: a short float of the builder is not dumped for the target
+(qc-file "SYS: CROSS-CHECK; SHORTFLOAT LISP" "HOST: //home//lispm//t40-shortfloat.qfasl") =>! short float of this world
+(probe-file "HOST: //home//lispm//t40-shortfloat.qfasl") => NIL
+(cold:cross-end)
+; the check's control: NUMDEF's definitions not given, still checked.  QFASL
+; open-codes %SHORT-FLOAT-EXPONENT, so its compile stops and no QFASL is written
+(let ((r (cold:cross-begin :log-directory "HOST: //home//lispm//omit-" :definitions '(:omit "SYS: SYS2; NUMDEF"))) (n (loop for d in cold:*cross-definitions* count (string-equal (car d) "SYS: SYS2; NUMDEF")))) (and (plusp n) (= (- (getf r :checked) (getf r :definitions)) n))) => T
+(qc-file "SYS: SYS; QFASL LISP" "HOST: //home//lispm//omit-qfasl.qfasl") =>! this world's definition
+(probe-file "HOST: //home//lispm//omit-qfasl.qfasl") => NIL
 (cold:cross-end)
 ; the identity control: this world's parameters.  The tree's QCOM describes
 ; the 40-bit machine of 1024-word pages (contract G2), so WORLD puts back every
 ; parameter this world has over it
-(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP") :log-directory "HOST: //home//lispm//id-")
+(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP") :log-directory "HOST: //home//lispm//id-" :definitions nil)
 (list cold:word-bits cold:blocks-per-page cold-symbols:page-size) => (32 1 256)
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//id-family.qfasl")
 (cold:cross-end)
@@ -58,10 +75,17 @@
 ; (cold:cross-foreign-file-p).  FAMILY compiled for it beside its source and
 ; then loaded: the load must be replaced by this world's compile of the
 ; source.  A font, which has no source, is data and is not replaced.
-(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP" "SYS: CROSS-CHECK; PAGES32 LISP") :log-directory "HOST: //home//lispm//pg-")
+(cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP" "SYS: CROSS-CHECK; PAGES32 LISP") :log-directory "HOST: //home//lispm//pg-" :definitions nil)
 (list cold:word-bits cold:blocks-per-page cold-symbols:page-size) => (32 4 1024)
 (progn (qc-file "SYS: CROSS-CHECK; FAMILY LISP") t) => T
 (not (null (cold:cross-foreign-file-p (probe-file "SYS: CROSS-CHECK; FAMILY QFASL")))) => T
 (cold:cross-foreign-file-p (probe-file "SYS: FONTS; CPTFON QFASL")) => NIL
 (progn (setq cold:*cross-replaced-loads* nil) (load "SYS: CROSS-CHECK; FAMILY QFASL") (length cold:*cross-replaced-loads*)) => 1
+; floats are encoded from this world's own bits, so the encodings stay right
+; once the builder has loaded the tree's SYS2; NUMDEF, whose IEEE single's
+; parameters replace its own, as cross-compile-system loads it
+(list (compiler:float-to-binary32 1.3) (compiler:float-to-binary32 0.25) (compiler:float-to-binary32 0.7s0) (compiler:float-to-binary32 -2.5)) => (1067869798 1048576000 1060320000 3223322624)
+(qc-file "SYS: SYS2; NUMDEF LISP" "HOST: //home//lispm//h-numdef.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-numdef.qfasl"))
+(list (compiler:float-to-binary32 1.3) (compiler:float-to-binary32 0.25) (compiler:float-to-binary32 0.7s0) (compiler:float-to-binary32 -2.5)) => (1067869798 1048576000 1060320000 3223322624)
 (cold:cross-end)

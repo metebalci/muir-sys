@@ -175,8 +175,15 @@ It runs in the scheduler stack group and keeps no stack state between runs."))
 (DEFMACRO FIXNUM-READ-METER-FOR-SCHEDULER (NAME)
    (LET ((A-OFF (OR (FIND-POSITION-IN-LIST NAME A-MEMORY-COUNTER-BLOCK-NAMES)
 		    (FERROR NIL "~S is not a valid counter name" NAME))))
-     `(%P-LDB #,(1- %%Q-POINTER)
-	      (+ %COUNTER-BLOCK-A-MEM-ADDRESS A-MEMORY-VIRTUAL-ADDRESS ,A-OFF))))
+;     `(%P-LDB #,(1- %%Q-POINTER)
+;	      (+ %COUNTER-BLOCK-A-MEM-ADDRESS A-MEMORY-VIRTUAL-ADDRESS ,A-OFF))))
+     ;; the byte, one bit narrower than the pointer field so that the value is a
+     ;; positive fixnum, is left in the expansion for the compiler to fold: #,
+     ;; put in the value %%q-pointer had where this macro was loaded, which in
+     ;; a cross build is the builder's (#o0030 on system 2000) and not the
+     ;; target's (#o0037 on quux revision 13)
+     `(%p-ldb (1- %%q-pointer)
+	      (+ %counter-block-a-mem-address a-memory-virtual-address ,a-off))))
 
 (DEFSUBST RUN-LIGHT-FOR-CADR ()
   (NOT (ZEROP (%XBUS-READ TV:WHO-LINE-RUN-LIGHT-LOC))))

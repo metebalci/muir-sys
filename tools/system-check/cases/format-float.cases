@@ -1,0 +1,29 @@
+; FORMAT's float directives (sys/io/format.lisp).  ~E, and ~G when it
+; chooses ~E, called SI::SCALE-FLONUM with a positive number, which it takes
+; negative (sys/io/print.lisp), and stopped with a subscript or overflow
+; error for every float, on System 2000 too; ~G with no width compared the
+; exponent with NIL.  An IEEE single's infinity has no digits: ~F printed the
+; largest single's 39 digits, ~$ too (a single's 1e50 is an infinity), and ~E
+; and ~G stopped; each now prints it as the printer does, the constant that
+; reads back as it, right-justified in the width, or the width's overflow
+; characters when it does not fit.  Run with the tree's files compiled first:
+; --compile --files sys/sys2/numer.lisp,sys/io/print.lisp,sys/io/format.lisp.
+; The first three cases are controls, which pass without the changes.
+(format nil "~F" 1.5) => "1.5"
+(format nil "~8,3F" -2.25) => " -2.250"
+(format nil "~$" 3.14159) => "3.14"
+(format nil "~E" 1.5) => "1.5e+0"
+(format nil "~E" 1.5e10) => "1.5e+10"
+(format nil "~E" -2.5e-5) => "-2.5e-5"
+(format nil "~G" 100.0) => "100.0    "
+(format nil "~F" (* 1e30 1e30)) => "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(format nil "~F" (* -1e30 1e30)) => "#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY"
+(format nil "~E" (* 1e30 1e30)) => "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(format nil "~E" (* -1e30 1e30)) => "#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY"
+(format nil "~G" (* 1e30 1e30)) => "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(format nil "~$" (* 1e30 1e30)) => "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(format nil "~40F" (* 1e30 1e30)) => "     #.SI:SINGLE-FLOAT-POSITIVE-INFINITY"
+(length (format nil "~40F" (* 1e30 1e30))) => 40
+(format nil "~10,2,,'*F" (* 1e30 1e30)) => "**********"
+(format nil "~10,2,,,'*E" (* -1e30 1e30)) => "**********"
+(%pointer (read-from-string (format nil "~F" (* 1e30 1e30)))) => 2139095040

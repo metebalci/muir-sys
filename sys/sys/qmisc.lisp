@@ -1698,9 +1698,11 @@ with the microcode that is running."
 		    NAME BASE-BAND))
 	  ;; quux revision 13: microcode 2001 restores no incremental band (its
 	  ;; %disk-restore halts at incremental-band-not-supported)
-	  (when base-band
-	    (ferror nil "Band ~A is incremental; microcode ~D restores no incremental band."
-		    name %microcode-version-number)))
+;	  (when base-band
+;	    (ferror nil "Band ~A is incremental; microcode ~D restores no incremental band."
+;		    name %microcode-version-number))
+	  ;; it does now, its pages being 5 blocks (io1; inc)
+	  )
 	(SETQ DESIRED-UCODE (GET-UCODE-VERSION-OF-BAND NAME)))
       (RETURN-DISK-RQB RQB))
     (AND ( DESIRED-UCODE %MICROCODE-VERSION-NUMBER)
@@ -1734,8 +1736,9 @@ INCREMENTAL means to write out only those parts of the world which have changed
     ;; quux revision 13: microcode 2001 has no incremental save (its
     ;; %disk-save halts at incremental-band-not-supported), so it is refused
     ;; here, with an error, before anything is changed.
-    (when incremental
-      (ferror nil "Incremental bands are not supported by microcode ~D." %microcode-version-number))
+;    (when incremental
+;      (ferror nil "Incremental bands are not supported by microcode ~D." %microcode-version-number))
+    ;; it has now, its pages being 5 blocks (io1; inc)
     (OR (MULTIPLE-VALUE (PART-BASE PART-SIZE)
 	  (IF NO-QUERY
 	      (FIND-DISK-PARTITION-FOR-READ PART-NAME)

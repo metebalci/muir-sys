@@ -38,6 +38,8 @@
 (defvar vmem-part-base)
 (defvar vmem-part-size)
 (defvar vmem-highest-address nil)
+(defvar vmem-packed-rqb nil
+  "The one-page rqb of the native cold-load generator's packed transfers (vmem-disk-io).")
 
 (defun vmem-initialize (part-name)
   (setq vmem-page-reuse-pointer 0)
@@ -53,7 +55,11 @@
     (cond ((setq rqb (aref vmem-pages i 1))
 	   (vmem-disk-io rqb (aref vmem-pages i 0) t)
 	   (sys:return-disk-rqb rqb)
-	   (aset nil vmem-pages i 1)))))
+	   (aset nil vmem-pages i 1))))
+  ;; the native generator's packed rqb (vmem-native-packed-io)
+  (when vmem-packed-rqb
+    (sys:return-disk-rqb vmem-packed-rqb)
+    (setq vmem-packed-rqb nil)))
 
 ;(defun vmem-disk-io (rqb vpn writep)
 ;  (and (or (minusp vpn) ( vpn vmem-part-size))
@@ -61,11 +67,76 @@
 ;  (funcall (if writep #'sys:disk-write #'sys:disk-read) rqb 0 (+ vpn vmem-part-base)))
 ;; a page is blocks-per-page blocks, and page vpn starts at block
 ;; vpn * blocks-per-page of the partition.
+;(defun vmem-disk-io (rqb vpn writep)
+;  (and (or (minusp vpn) (> (* (1+ vpn) blocks-per-page) vmem-part-size))
+;       (ferror nil "Disk I//O outside of partition"))
+;  (funcall (if writep #'sys:disk-write #'sys:disk-read)
+;	   rqb 0 (+ (* vpn blocks-per-page) vmem-part-base)))
+;; a 40-bit world making a 40-bit cold load (contract g2 section 7, step 5, the
+;; native rebuild) transfers whole pages only, 4 blocks a page in the 4-byte
+;; transfer: an rqb of blocks-per-page, 5, blocks would move 20, over the next
+;; pages.  so the page goes through a one-page rqb by a packed transfer, its 5
+;; blocks exactly, the 8-bit buffer's bytes, 5 a word, least significant
+;; first, put into and taken from that page's words (vmem-native-packed-io),
+;; which is how a packed transfer lays them on the disk.  a world of 256-word
+;; pages, as the cross build's builder, transfers blocks as before.
 (defun vmem-disk-io (rqb vpn writep)
   (and (or (minusp vpn) (> (* (1+ vpn) blocks-per-page) vmem-part-size))
        (ferror nil "Disk I//O outside of partition"))
-  (funcall (if writep #'sys:disk-write #'sys:disk-read)
-	   rqb 0 (+ (* vpn blocks-per-page) vmem-part-base)))
+  (if (vmem-native-packed-p)
+      (vmem-native-packed-io rqb (+ (* vpn blocks-per-page) vmem-part-base) writep)
+    (funcall (if writep #'sys:disk-write #'sys:disk-read)
+	     rqb 0 (+ (* vpn blocks-per-page) vmem-part-base))))
+
+;; true when this world's own words and packed pages are the cold load's: its
+;; disk code has the packed transfer, its page is the cold load's, and a
+;; packed page is the cold load's blocks-per-page blocks.
+(defun vmem-native-packed-p ()
+  (and (boundp 'si:disk-blocks-per-packed-page)
+       (= (symeval 'si:disk-blocks-per-packed-page) blocks-per-page)
+       (= si:page-size sym:page-size)
+       (= word-bytes 5)))
+
+;; the rqbs of a page's buffer: blocks-per-page blocks of this world's pages,
+;; whose 8-bit buffer holds a page of the cold load's bytes.
+(defun vmem-rqb-pages ()
+  (if (vmem-native-packed-p)
+      (ceiling (* blocks-per-page 1024.) (* si:page-size 4))
+    blocks-per-page))
+
+;; the first word of rqb's data, its second page (si:get-disk-rqb,
+;; si:wire-disk-rqb).
+(defun vmem-rqb-data (rqb)
+  (%make-pointer dtp-locative
+		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- si:page-size))
+		    si:page-size)))
+
+;; block is the page's first block.  the words are reached by %p-ldb and
+;; %p-dpb, which neither look at a word's data type nor transport it.
+(defun vmem-native-packed-io (rqb block writep)
+  (let* ((buf (si:rqb-8-bit-buffer rqb))
+	 (prqb (or vmem-packed-rqb (setq vmem-packed-rqb (sys:get-disk-rqb 1))))
+	 (data (vmem-rqb-data prqb)))
+    (when writep
+      (dotimes (w sym:page-size)
+	(let ((q (%make-pointer-offset dtp-locative data w))
+	      (i (* w 5)))
+	  (%p-dpb (+ (aref buf i) (ash (aref buf (+ i 1)) 8.)) #o0020 q)
+	  (%p-dpb (+ (aref buf (+ i 2)) (ash (aref buf (+ i 3)) 8.)) #o2020 q)
+	  (%p-dpb (aref buf (+ i 4)) #o4010 q))))
+    (progv '(si:*disk-transfer-packed*) '(t)
+      (funcall (if writep #'sys:disk-write #'sys:disk-read) prqb 0 block))
+    (unless writep
+      (dotimes (w sym:page-size)
+	(let ((q (%make-pointer-offset dtp-locative data w))
+	      (i (* w 5)))
+	  (let ((lo (%p-ldb #o0020 q))
+		(hi (%p-ldb #o2020 q)))
+	    (aset (logand lo #o377) buf i)
+	    (aset (ash lo -8.) buf (+ i 1))
+	    (aset (logand hi #o377) buf (+ i 2))
+	    (aset (ash hi -8.) buf (+ i 3))
+	    (aset (%p-ldb #o4010 q) buf (+ i 4))))))))
 
 ;;Given address returns art-16b array containing that page.  With second arg of nil
 ;;initializes to dtp-free instead of reading in from disk.
@@ -113,7 +184,9 @@
        (setq i vmem-page-reuse-pointer)
        (cond ((setq rqb (aref vmem-pages i 1))
 	      (vmem-disk-io rqb (aref vmem-pages i 0) t))	;Swap this guy out
-	     (t (setq rqb (sys:get-disk-rqb blocks-per-page))
+;	     (t (setq rqb (sys:get-disk-rqb blocks-per-page))
+	     ;; a 40-bit world's pages are 4 blocks (vmem-rqb-pages)
+	     (t (setq rqb (sys:get-disk-rqb (vmem-rqb-pages)))
 		(aset rqb vmem-pages i 1)))
        (aset vpn vmem-pages i 0)
        (setq buf (si:rqb-8-bit-buffer rqb))

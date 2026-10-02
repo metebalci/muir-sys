@@ -764,3 +764,44 @@ or NIL if it is not defined *by* the environment."
   (+ (ldb (byte 6 0) (target-value '%%q-cdr-code))
      (ldb (byte 6 0) (target-value '%%q-data-type))
      (ldb (byte 6 0) (target-value '%%q-pointer))))
+
+;;; lsh and rot of constants, folded as the target computes them: on a fixnum
+;;; of the target's pointer field, its bits shifted or rotated within the field
+;;; and the result read as a fixnum of the field.  a cross build folds them so,
+;;; where it once left them for the target to compute (qcopt,
+;;; arith-opt-non-associative), so that its code is a native compile's.
+(defun target-fixnum-bits ()
+  (ldb (byte 6 0) (target-value '%%q-pointer)))
+
+(defun target-fixnum (bits width)
+  (if (zerop (logand bits (ash 1 (1- width)))) bits (- bits (ash 1 width))))
+
+;;; with logand and ash, not ldb: this world's ldb takes no byte wider than its
+;;; own fixnum, and the target's field is 32 bits
+(defun target-lsh (n count)
+  (let* ((w (target-fixnum-bits))
+	 (mask (1- (ash 1 w))))
+    (target-fixnum (logand (ash (logand n mask) count) mask) w)))
+
+(defun target-rot (n count)
+  (let* ((w (target-fixnum-bits))
+	 (mask (1- (ash 1 w)))
+	 (x (logand n mask))
+	 (c (mod count w)))
+    (target-fixnum (logand (logior (ash x c) (ash x (- c w))) mask) w)))
+
+;;; a float read in a cross build is this world's, but it is dumped as the
+;;; target's (fasd, float-to-binary32), and g2's machine has one float, the
+;;; short float: so the compiler takes any float as short where it chooses code
+;;; by a literal's type (qcopt, float-optimizer).  a float that system 2000's
+;;; small-float would make holds 17 bits of significand where the target's
+;;; holds 24, so such a constant is made with float and rounded when dumped.
+(defun target-one-float-p ()
+  "True when compiling for a target whose one float is the ieee single: g2's 40-bit machine."
+  (and *cross-target* (= (target-word-width) 40.)))
+
+(defun target-small-floatp (x)
+  (if (target-one-float-p) (floatp x) (small-floatp x)))
+
+(defun target-small-float (x)
+  (if (target-one-float-p) (float x) (small-float x)))

@@ -591,8 +591,9 @@ file carries a comment in that file saying why.
       keeps its low bit set (`FRND`, `FDIV`), so a single is rounded once;
       rounded twice, 1.0 plus `SHORT-FLOAT-EPSILON` gave 1.0. A bignum's
       conversion still rounds at 32 bits on the next digit alone
-      (`FLOAT-A-BIGNUM`), and the reader divides or multiplies by a power of
-      ten as floats, so a number read can be an ulp off.
+      (`FLOAT-A-BIGNUM`). The reader read a number as floats too, scaled by
+      a power of ten, and could be an ulp off; it now reads exactly (below,
+      the float reader).
     - A result past the largest single is an infinity of its sign, not an
       error: there is no `FLOATING-EXPONENT-OVERFLOW` trap, by design, so a
       case that expects one (System 2000's `(* 1s10 1s10 1s10 1s10 1s10)`,
@@ -601,7 +602,8 @@ file carries a comment in that file saying why.
       `#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY` (`PRINT-FLONUM`,
       `sys/io/print.lisp`; the constants in `sys/sys2/numer.lisp`), which read
       back as it; it printed as 1.0e153, the scaling by powers of ten having
-      run past the table. `FORMAT`'s `~F` and `~E` do not handle it. One below the smallest normal single underflows as on the CADR:
+      run past the table. `FORMAT`'s `~F`, `~E`, `~G` and `~$` print it as the
+      printer does (below). One below the smallest normal single underflows as on the CADR:
       `FLOATING-EXPONENT-UNDERFLOW`, or 0.0 under `ZUNDERFLOW`; no subnormal
       is made. A subnormal operand is read as its value, an infinity or a
       NaN as an infinity (an exponent past any single's, so that it stays one
@@ -641,9 +643,18 @@ file carries a comment in that file saying why.
     knew 25- and 31-bit pointers only, and stopped `QLD` at "Bug in
     RANDOM-INITIALIZE".
   - **`QLD` of the 40-bit cold load** needs the fonts and demo data written
-    again for 40 bits, the site files, and a placeholder for `UCINIT`
-    (`docs/building.md`, "Loading the 40-bit cold load"); the microcompiler's
-    initialisation is open.
+    again for 40 bits and the site files (`docs/building.md`, "Loading the
+    40-bit cold load").
+  - **`UCINIT` is compiled from a source** (`sys/sys/ucinit.lisp`, new;
+    `sys/sys/sysdcl.lisp:193-197`, `COMPILER`'s `:COMPILE-LOAD` in place of
+    its `:FASLOAD`). System 100's binary-only `SYS: SYS; UCINIT QFASL`, whose
+    writer has no caller, held one thing: `EQUAL`'s `MCLAP`, microinstructions
+    of the CADR's 32-bit word, and `(setq *initially-microcompiled-functions*
+    '(equal))`. Microcode 2001 has no microcompiled function (its `EQUAL` is
+    hand-written, `XEQUAL`), nothing reads the variable, and `MCLAP-LOAD`
+    reads a function's `MCLAP` only when asked to load that function, so the
+    source records none and the system needs nothing else; the CADR's
+    microcode, and its microcompiler, keep System 100's file.
   - **A full garbage collection completes.** `PHT1-ALL-BUT-SWAP-STATUS-CODE`
     and `PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE` reach `<39>`
     (`uc-page-fault.lisp`), so the selective deposits into a page hash table
@@ -654,15 +665,207 @@ file carries a comment in that file saying why.
   - **`NAMED-STRUCTURE-P`** reads element 0 of a structure with no leader by
     index 0 rather than -1, which the unsigned bounds check now refuses
     (`uc-fctns.lisp`).
-  - **Incremental bands are open.** Revision 13 keeps them, converted to
-    5-block pages; until that is done, microcode 2001 halts at
-    `INCREMENTAL-BAND-NOT-SUPPORTED` on an incremental save or restore, and
-    `DISK-SAVE` and `DISK-RESTORE` refuse one first with an error
-    (`sys/sys/qmisc.lisp`).
-  - **Two halts stay where G2 section 2.6 says errors:** an address with
-    `<31:28>` set halts at `ADDRESS-PAST-28-BITS`, and the incremental save
-    and restore halt as above. Each is to become a trap with an error-table
-    entry before acceptance.
+  - **Incremental bands are saved and restored**, in pages of 5 blocks, packed,
+    as a whole band's (`DISK-SAVE` with its third argument; decided on 30
+    September). An incremental band is MIT's layout again in those pages:
+    pages 0-2 the low pages, page 3 the base band's name and the mask's length,
+    page 4 the base band's `REGION-FREE-POINTER` page, from page 5 the mask, a
+    bit a page of virtual memory, then the pages that changed
+    (`sys/io1/inc.lisp`, `INC-BAND-BASE-DATA-PAGE` and its kin, written and read
+    packed; `uc-cold-disk.lisp`, `INC-BAND-BASE-DATA-PAGE` 17, `-FREE-POINTERS-PAGE`
+    24 and `-BITMAP-PAGE` 31, their first blocks). The microcode's save and
+    restore count the bitmap in pages again, keep a region's page numbers apart
+    from its disk blocks, which are 5 a page (`DISK-SAVE-REGION`,
+    `DISK-RESTORE-REGION`, `DISK-SR-1`, `DISK-RR-1`), and take the format 2001 to
+    `DISK-RESTORE-INCREMENTAL`; `INCREMENTAL-BAND-NOT-SUPPORTED` and
+    `DISK-SAVE`'s and `DISK-RESTORE`'s refusals are commented out
+    (`sys/sys/qmisc.lisp`). A page is compared with the base band's whole,
+    tags included (`COMPARE-RANGE`, `PAGE-TAGS-EQUAL`): the 16-bit view sees
+    only `<31:0>`, and a page whose words changed only in their tags was taken
+    as unchanged and lost. The pages of the region tables, which the restore
+    reads before the bitmap, are always saved: omitted, the restore took the
+    next page saved for them.
+  - **A reference past the 28-bit space signals an error** (G2 section 2.6),
+    and a pointer past it can be held, stored and saved. `ADDRESS-PAST-28-BITS`
+    (`uc-page-fault.lisp:526-552`) traps from the page-fault level, as
+    `WRITE-IN-READ-ONLY` does, with the error-table entry of that name; it
+    halted. The address goes to the error handler in `M-T`, a fixnum of its
+    field, and `VMA` is set to `NIL`, since a stack group's resume reads
+    memory at its saved `VMA` to restore `MD` (`SGENT`), which would trap again
+    inside the switch: with the address in `VMA`, the case
+    `(car (%make-pointer dtp-list -1))` filled the region table and halted. The
+    error holds the address as a locative, in its `:ADDRESS` property and its
+    message alike: "There was a reference to #<DTP-LOCATIVE -1>, which is
+    past the 28-bit address space." (`sys/eh/ehf.lisp:2337-2348`). The
+    garbage collector's tests take such a pointer as neither oldspace nor
+    extra PDL before they read the map, whose bits for it stay 0 (A1.7):
+    `TRANS-OLD` and `EXTRA-PDL-TRAP-1` (`uc-transporter.lisp`) leave by
+    `TRANS-DROP-THROUGH`, as for the A memory and I/O addresses that
+    `GET-MAP-BITS` marks so. Without them a past-28 locative in a local halted
+    the machine at the next process switch, one in a special halted it when
+    stored or at the next full GC, and so did the trap's own state save;
+    with them the four cases pass, and without either test, planted, all four
+    halt again. `EH::SG-SAVE-STATE` (`sys/eh/eh.lisp`) saves a
+    register holding such a pointer as its field, as a non-pointer, rather than
+    transport it (`%P-CONTENTS-AS-LOCATIVE` signals the error, and did so in
+    the error handler, where the condition's handler then never ran). Still
+    halting, as on the CADR for free space: a forged forwarding pointer past
+    the space met by the scavenger or in a switch. On System 1001 a reference
+    through a pointer into free space halts at `SWAPIN` and the same pointer
+    held across a process switch halts in `GET-MAP-BITS`.
+    `tools/microcode-check/cases/address-past-28-bits.cases`.
+  - **`%WRITE-INTERNAL-PROCESSOR-MEMORIES` writes an A or M location's 40
+    bits** (`XWIPM`, `uc-cadr.lisp:224`): `D-HI`'s bits 15:8, which its callers
+    fill from the word's bits 39:32 (`COMPILER:MA-LOAD-A-MEM`, the microcode
+    loader in `sys/sys2/usymld.lisp`), are the tag; every location it wrote
+    got tag 000. Its arguments keep their 24-bit pieces, which 32-bit fixnums
+    hold as 25-bit ones did. `tools/microcode-check/cases/write-a-memory.cases`.
+  - **`FORMAT`'s float directives** (`sys/io/format.lisp`): `~E`, and `~G`
+    when it chooses `~E`, called `SI::SCALE-FLONUM` with a positive number,
+    which it takes negative, and stopped with a subscript or overflow error
+    for every float, on System 2000 too (`:826`, `:944`); `~G` with no width
+    compared the exponent with `NIL`. An infinity under `~F`, `~E`, `~G` and
+    `~$` prints as the printer prints it, right-justified in the width, or as
+    the overflow characters when it does not fit (`FORMAT-INFINITY-P`,
+    `FORMAT-CTL-INFINITY`, `:743-760`); `~F` printed the largest single's 39
+    digits. `tools/system-check/cases/format-float.cases`.
+  - **A process interrupt no longer halts the machine**
+    (`SI:%POINTER-TYPE-P`, `sys/sys2/lmmac.lisp:301`): a code past
+    `DTP-CHARACTER` is no data type and points nowhere. A register the
+    microcode set to all ones (`SETO`: `M-K` in `%DRAW-CHAR` and the
+    transporter, `M-E`) is saved so in a stack group's leader, data type 77,
+    and `EH::SG-SAVE-STATE`, run by a process interrupt, followed it to
+    address 37777777777 and halted: the end of every TELNET session but the
+    last did so on the first 40-bit band. The defsubst is compiled into its
+    callers. `tools/system-check/cases/process-interrupt.cases`.
+  - **The cross build dumps a character as its field's bits, unsigned**
+    (`FASD-CHARACTER`, `sys/sys/qcfasd.lisp:236-254`): System 2000's builder,
+    of 25-bit fields, took a character with bit 24 set, a mouse character's,
+    as negative and dumped it so, and the 40-bit target's character had
+    `<31:25>` set (ZWEI's `*ILLEGAL-COMMAND-BARF-STRING-ALIST*` held
+    -16777184 where a native compile holds 16777248).
+    `tools/cross-check/` check 1 (`XC-CHAR`, `lisp/family.lisp`).
+  - **The cross build encodes floats from the builder's own bits**
+    (`HOST-INTEGER-DECODE-FLOAT`, `sys/sys/qcfasd.lisp:313-342`, used by
+    `FLOAT-TO-BINARY32` in a builder of 25-bit fields). `cross-compile-system`
+    loads the tree's `SYS2; NUMDEF`, a definitions file of SYSTEM, whose IEEE
+    single's parameters and accessors then replace System 2000's own (now
+    `CROSS-BEGIN` loads it, below), and
+    `INTEGER-DECODE-FLOAT` misread every float of the files compiled after it:
+    `SYS2; HASH`'s rehash size 1.3 was dumped as an infinity, 0.25 as
+    `#x03FE0000`, and `QLD` of the cross build's cold load looped in
+    `PUTHASH-BOOTSTRAP`. `tools/cross-check/` check 1 encodes four floats
+    before and after loading the tree's `NUMDEF`.
+  - **The cross build gives every compile for the target the tree's
+    compile-time definitions** (`sys/cold/cross.lisp:67-97`, `:701-818`).
+    A file compiled for the target expanded a macro, or open-coded a
+    defsubst, with the builder's definition, System 2000's: `QFASL`'s
+    `FASL-OP-NEW-FLOAT` took `%SHORT-FLOAT-EXPONENT` as `(byte 8 17.)` where
+    the tree has `(byte 8 23.)`, since `MAKE-SYSTEM` loads the tree's
+    `NUMDEF` only after the cold load's files are compiled.
+    `sys/cold/crossdefs.lisp` (new) lists every compile-time definition of the
+    tree whose text is not System 2000's (and the macros and defsubsts that
+    hold a float literal, below), written from the sources by
+    `tools/cross-check/crossdefs.py` (new), which the cross-check driver runs
+    first to check that the list is current. `CROSS-BEGIN` reads each listed
+    definition and evaluates it as the compiler does inside a file, which
+    declares it and defines nothing; `CROSS-COMPILE-STREAM` (`:422`) starts
+    every file with those declarations, and `CROSS-DECLARED-DEFINITION`, over
+    `SI:DECLARED-DEFINITION`, stops a file that expands a listed name without
+    one. Macros and defsubsts are given so; a changed structure or setf method,
+    which would still change the builder when evaluated, makes `CROSS-BEGIN`
+    refuse (`CROSS-CHECKED-KIND-P`, `:769`). `tools/cross-check/` check 1
+    (`XC-SHORT-EXPONENT`, `lisp/defs.lisp`, and the control with `NUMDEF`'s
+    definitions left out, under which `SYS: SYS; QFASL` does not compile).
+  - **`FIXNUM-READ-METER-FOR-SCHEDULER` leaves its byte for the compiler to
+    fold** (`sys/sys2/prodef.lisp:175-186`): `#,(1- %%Q-POINTER)` put in the
+    value of the world that loaded the macro, which in a cross build is the
+    builder's, `#o30`, and the scheduler's disk meters lost their top bits in
+    the target, whose byte is `#o37`. `crossdefs.py --census` refuses a `#,`
+    inside a compile-time definition. `tools/cross-check/` check 1
+    (`XC-METER`).
+  - **The cross build makes the target's system constants constants**
+    (`CROSS-DECLARE-TARGET-CONSTANTS`, `sys/cold/cross.lisp:209-224`; undone
+    by `CROSS-END`, `:819`): a symbol of the target's system-constant lists
+    that System 2000 does not have, as `DISK-BLOCKS-PER-PAGE`, was compiled as
+    a variable where a native compile folds it. Check 1 (`XC-TABLE-CONSTANT`).
+  - **The compiler folds `LSH`, `ROT` and `SMALL-FLOAT` of constants as the
+    target computes them** in a cross build (`TARGET-LSH`, `TARGET-ROT`,
+    `TARGET-SMALL-FLOAT`, `sys/sys/qcdefs.lisp:768-807`; used by
+    `ARITH-OPT-NON-ASSOCIATIVE`, `sys/sys/qcopt.lisp:301-315`): `LSH` and `ROT`
+    were left for the target to compute, and `SMALL-FLOAT` made System 2000's
+    short float, of 17 bits of significand. `FLOAT-OPTIMIZER`
+    (`sys/sys/qcopt.lisp:360-380`) takes a float prototype as the target
+    does, as its one float, the short float: `(float n 0f0)` in `LOG` compiled
+    to `INTERNAL-FLOAT`, not `SMALL-FLOAT`. Check 1 (`XC-LSH`, `XC-ROT`,
+    `XC-SMALL-FLOAT`, `XC-FLOAT-PROTO`).
+  - **The cross build holds its floats as the target does**
+    (`CROSS-READ-FLONUM`, `CROSS-TARGET-FLOAT`, `sys/cold/cross.lisp:481-541`),
+    when the target's one float is the IEEE single (`TARGET-ONE-FLOAT-P`,
+    `sys/sys/qcdefs.lisp:799`): a literal, also a short one, is read as the
+    target reads it (the float reader, below), and the values of a fold and
+    of `#.` are rounded to the target's single. Read as System 2000's short float, `HASH`'s
+    `1.3s0` was dumped as `#x3FA66680` where a native compile has
+    `#x3FA66666`; and two literals that are one float in the target
+    (`1.442695s0` and `1.44269504` in `EXP`) were two constants.
+    `FASD-SHORT-FLOAT` (`sys/sys/qcfasd.lisp:271-279`) stops a file that would
+    dump a short float of the builder, of 17 bits. A macro or defsubst whose
+    text is System 2000's but holds a float literal is in
+    `sys/cold/crossdefs.lisp` too (`:floats`), since the builder read it with
+    its own floats: `HASH-TABLE-MAXIMAL-FULLNESS`'s `0.7s0` was `#x3F333300`
+    in `HASHFL`. Check 1 (`XC-SHORT-LITERAL`, `XC-DEDUP`, `XC-FULLNESS`, and
+    `lisp/shortfloat.lisp`, which must not compile).
+  - **Two constants no longer depend on the compiling world's floats**:
+    `PHASE` (`sys/sys2/rat.lisp:142-146`) returns `#.pi` for a short float,
+    where `#.(coerce pi 'short-float)` made System 2000's short float in a cross
+    build; `SCALE-FLONUM` (`sys/io/print.lisp:677-681`) divides by `log2 10`
+    written as a literal, where the fold of `(log 10s0 2s0)` gave the
+    compiling world's `LOG`, `#x40549A7A` on revision 13, two units in the last
+    place from the correctly rounded `#x40549A78`.
+  - **The reader reads a float literal as the correctly rounded single**
+    (`XR-READ-FLONUM`, `XR-FLOAT-BITS`, `XR-DECIMAL-TO-SINGLE-BITS`,
+    `sys/io/read.lisp:1157-1241`; the old reader commented out at
+    `:1108-1155`): every digit is kept in an integer, and the ratio of it and
+    a power of ten is rounded once, to nearest, ties to even. Past the
+    largest single a literal is an infinity; below the smallest normal one it
+    underflows as arithmetic does, `FLOATING-EXPONENT-UNDERFLOW` or 0.0 under
+    `ZUNDERFLOW`. The old reader took 12 digits into a float and scaled it
+    by a power of ten, rounding twice: `1.570796326` was `#x3FC90FDA`, not
+    `#x3FC90FDB`, `3.4028236e38` was the largest single, not an infinity, and
+    `1.0000000596046447753906249999` was a unit too high. Reading a float takes
+    2 to 5 ms more on the microcode simulator; the cold load reads none.
+    The cross build reads its literals with the same functions
+    (`CROSS-READ-FLONUM`, `CROSS-DEFINE-READER`,
+    `sys/cold/cross.lisp:488-528`), so a native compile and a cross compile
+    hold the same constants: `NUMER`'s `SIN-AUX`, whose `1.570796326` and
+    `1.5707963185` are one single, and `LOG-AUX`, `COS`, `COSD` and `ATAN`,
+    whose literals were an ulp apart. `tools/system-check/cases/float-reading.cases`
+    (new); check 1 (`XC-LONG-LITERAL`, `XC-PI2`).
+  - **The cross build does not load `SYS2; NUMDEF` into the builder**
+    (`*CROSS-UNLOADED-FILES*`, `sys/cold/cross.lisp:564-594`): it redefines
+    the builder's float functions for the target's floats, and a fold after
+    it went wrong: `COLORHACK`'s `(sqrt 2)` was dumped as an infinity. Check 1
+    (`XC-SQRT`, compiled after the load).
+  - **G2 section 7 check (a) compares word by word**
+    (`tools/cross-check/same40.py`): a float may differ from its counterpart
+    by one unit in the last place, and each such float is listed; every other
+    word of its function must be equal. Before, a function that held a float
+    was accepted whatever else differed in it. In a FEF's local map the
+    numbers that end `GENTEMP`'s names, a counter of the session, and in the
+    file's record of the macros it expanded the hashes of their definitions,
+    which depend on the compiling world's floats, are normalised.
+    `tools/cross-check/plant_a.py` (new) plants a change for each rule and
+    checks the verdict.
+  - **The cold load is made in a 40-bit world too** (the native rebuild, G2
+    section 7 step 5; `sys/cold/coldut.lisp:83-140`): a page goes to and from
+    the disk through a one-page RQB by a packed transfer, its 5 blocks, the
+    page buffer's bytes put into and taken from the page's words, since such a
+    world transfers whole pages of 4 blocks (`VMEM-NATIVE-PACKED-P`,
+    `VMEM-NATIVE-PACKED-IO`); a world of 256-word pages, as the cross build's
+    builder, transfers blocks as before. `COLD:CROSS-COPY-PARTITION`
+    (`sys/cold/cross.lisp:608`) reads 4 blocks a transfer there. Made on the
+    first 40-bit band from the QFASLs of the cross build's check 3, the cold
+    load is byte for byte the cross build's.
   - **The cross build's controls** (`tools/cross-check/`): the tree's `QCOM`
     now describes the 40-bit machine, so check 1's identity control and its
     32-bit target of 1024-word pages take this world's parameters over it

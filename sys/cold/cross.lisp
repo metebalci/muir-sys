@@ -64,6 +64,40 @@
 (defvar *cross-host-fasls* nil
   "Hash table: a source file -> this world's QFASL of it, compiled in this session.")
 
+;;; the tree's compile-time definitions.  a file compiled for the target expands
+;;; a macro, or open-codes a defsubst, with the definition in force where it is
+;;; compiled, and here that is this world's, system 2000's, unless the compile
+;;; is given the tree's: so did qfasl's FASL-OP-NEW-FLOAT open-code system
+;;; 2000's %short-float-exponent, (byte 8 17.), where the tree's is (byte 8
+;;; 23.), since make-system loads the tree's NUMDEF only after the cold load's
+;;; files are compiled.  SYS: COLD; CROSSDEFS, which
+;;; tools/cross-check/crossdefs.py writes from the sources, lists every
+;;; compile-time definition of the tree whose text is not system 2000's.
+;;; cross-begin reads each from its file and evaluates it as the compiler does
+;;; while it compiles a file, which declares it and defines nothing
+;;; (undo-declarations-flag: a DEF entry of file-local-declarations); every file
+;;; compiled for the target starts with those declarations, which the compiler
+;;; consults before this world's definitions (si:declared-definition), and this
+;;; world's function cells do not change.  an expansion of a listed name that
+;;; finds no such declaration stops the file (cross-declared-definition).
+(defvar *cross-definitions* nil
+  "(file kind name status) for each compile-time definition of the tree that is not system 2000's.")
+
+(defvar *cross-definition-names* nil
+  "Hash table: each name in *cross-definitions* -> its status (:new, :changed, :gone).")
+
+(defvar *cross-declarations* nil
+  "The DEF declarations of the tree's definitions given to every compile for the target.")
+
+(defvar *cross-compiling* nil
+  "True while a file compiles for the target (cross-compile-stream).")
+
+(defvar *cross-reading* nil
+  "True while cross-begin reads the tree's definitions, which are read as for the target.")
+
+(defvar *cross-made-constant* nil
+  "The symbols cross-begin made system constants, which cross-end makes plain again.")
+
 ;;; Per compiled file.
 (defvar *cross-file* nil)
 (defvar *cross-lines* nil "This file's log lines, newest first.")
@@ -168,7 +202,25 @@ since the target's are the cold-load generator's own."
 	(unless (gethash s *cross-watch*) (cross-watch-only s))))
     ;; the constants the parameters do not define, from their defining files in
     ;; the tree being built
-    (cross-read-defining-files pending)))
+    (cross-read-defining-files pending)
+    ;; the target's system constants that are not this world's
+    (cross-declare-target-constants)))
+
+;;; every symbol of the target's system-constant lists (qdefs) is a system
+;;; constant in the target, which a native compile folds; one that is not
+;;; this world's (disk-blocks-per-page, which this tree adds) was compiled as a
+;;; variable.  each is given its target value and made a system constant here
+;;; until cross-end (*cross-made-constant*).
+(defun cross-declare-target-constants ()
+  (dolist (l sym:system-constant-lists)
+    (dolist (cold (symeval l))
+      (when (and (symbolp cold) (boundp cold) (not (memq cold '(t nil))))
+	(let ((s (intern (symbol-name cold) (pkg-find-package "SI"))))
+	  (unless (gethash s *cross-watch*)
+	    (cross-set s (symeval cold)))
+	  (unless (get s 'si:system-constant)
+	    (putprop s t 'si:system-constant)
+	    (push s *cross-made-constant*)))))))
 
 ;;; for each constant, the DEFCONSTANT of it in the file this world recorded it
 ;;; from, read from the tree being built and evaluated under the hook, so that
@@ -369,16 +421,33 @@ since the target's are the cold-load generator's own."
 ;;; refused (its qfasl aborted) if a watched symbol had no target value
 (defun cross-compile-stream (input-stream generic-pathname &rest more)
   (if *cross-native*
-      (apply (cross-original 'compiler:compile-stream) input-stream generic-pathname more)
+;      (apply (cross-original 'compiler:compile-stream) input-stream generic-pathname more)
+      ;; a compile for this world, also one inside a compile for the target, is
+      ;; not checked against the tree's definitions
+      (let ((*cross-compiling* nil))
+	(apply (cross-original 'compiler:compile-stream) input-stream generic-pathname more))
   (let ((*cross-file* (or (send input-stream :send-if-handles :truename) generic-pathname))
 	(*cross-lines* nil)
 	(*cross-misses* nil)
 	(status :aborted))
     (unwind-protect
+;	(prog1 (let ((compiler:warn-on-errors nil)
+;		     (*evalhook* 'cross-evalhook))
+;		 (apply (cross-original 'compiler:compile-stream)
+;			input-stream generic-pathname more))
+	;; the file starts with the tree's definitions declared
+	;; (*cross-declarations*): compile-stream's sixth optional argument,
+	;; after fasd-flag, process-fn, qc-file-load-flag, qc-file-in-core-flag
+	;; and package-spec, is file-local-declarations' initial value
 	(prog1 (let ((compiler:warn-on-errors nil)
-		     (*evalhook* 'cross-evalhook))
+		     (*evalhook* 'cross-evalhook)
+		     (*cross-compiling* t)
+		     (args (copy-list more)))
+		 (when *cross-declarations*
+		   (loop while (< (length args) 6) do (setq args (nconc args (list nil))))
+		   (rplaca (nthcdr 5 args) (append (nth 5 args) *cross-declarations*)))
 		 (apply (cross-original 'compiler:compile-stream)
-			input-stream generic-pathname more))
+			input-stream generic-pathname args))
 	       (when *cross-misses*
 		 (setq status :no-target-value)
 		 (ferror nil "~A: no target value for ~S" *cross-file*
@@ -391,6 +460,9 @@ since the target's are the cold-load generator's own."
       (funcall (cross-original 'compiler:fold-constants) form)
     (let ((value (let ((*cross-context* :fold))
 		   (funcall (cross-original 'compiler:fold-constants) form))))
+      ;; its floats as the target holds them (cross-target-float)
+      (when (compiler:target-one-float-p)
+	(setq value (cross-target-float value)))
       (cross-note "X" (cross-function) form value)
       value)))
 
@@ -406,6 +478,67 @@ since the target's are the cold-load generator's own."
       (cross-note "L" (cross-function) form))
     new))
 
+;;; a float literal read for the target is this world's full single, which is
+;;; dumped rounded to the target's ieee single (compiler:float-to-binary32).
+;;; read as this world's short float, system 2000's small flonum, a literal such
+;;; as 1.3s0 kept 17 bits of significand: hash's was dumped as #x3FA66680, where
+;;; a native compile has #x3FA66666.
+;;; a target whose floats are this world's (check 1's identity control) reads
+;;; them as this world does (compiler:target-one-float-p)
+;;; the literal is read as the target reads it: the tree's own exact reading,
+;;; si:xr-float-bits (sys: io; read), which cross-begin defines here
+;;; (cross-define-reader), gives the single's bits.  through this world's reader,
+;;; 12 digits and its own rounding, then rounded again to the target's single,
+;;; 1.00000005960464477539062500001 was #x3F800000, not #x3F800001.
+(defun cross-read-flonum (string sfl-p)
+  (if (and (not *cross-native*) (or *cross-compiling* *cross-reading*)
+	   (compiler:target-one-float-p))
+;      (cross-target-float (funcall (cross-original 'si:xr-read-flonum) string nil))
+      (multiple-value-bind (bits negative) (si:xr-float-bits string)
+	(when (eq bits :underflow)
+	  (ferror nil "~A is below the smallest normal single: it underflows in the target" string))
+	(let ((x (binary32-to-float bits)))
+	  (if negative (- x) x)))
+    (funcall (cross-original 'si:xr-read-flonum) string sfl-p)))
+
+;;; the tree's exact float reading, si:xr-float-bits and the function it calls,
+;;; read from SYS: IO; READ and compiled here (new names in this world, which
+;;; change nothing of its own reader)
+(defvar *cross-reader-functions* '(si:xr-float-bits si:xr-decimal-to-single-bits))
+
+(defun cross-define-reader ()
+  (with-open-file (s "SYS: IO; READ LISP")
+    (multiple-value-bind (vars vals) (fs:extract-attribute-bindings s)
+      (progv vars vals
+	(loop with eof = s
+	      ;; zetalisp's read: the second argument is what end of file returns
+	      for form = (read s eof)
+	      until (eq form eof)
+	      when (and (consp form) (eq (car form) 'defun)
+			(memq (cadr form) *cross-reader-functions*))
+		do (let ((si:inhibit-fdefine-warnings :just-warn)
+			 ;; compiled for this world, as cross-host-fasl compiles
+			 (*cross-native* t)
+			 (compiler:*cross-target* nil))
+		     (eval form)
+		     (compile (cadr form)))))))
+  (dolist (f *cross-reader-functions*)
+    (unless (fboundp f)
+      (ferror nil "SYS: IO; READ defines no ~S" f)))
+  t)
+
+;;; X with each float rounded to the target's ieee single, kept as this world's
+;;; full single: two literals that are one float in the target (1.442695s0 and
+;;; 1.44269504) are then one constant here too, as the compiler shares them in a
+;;; native compile, and a fold or a #. gives the value the target holds.
+(defun cross-target-float (x)
+  (cond ((and (floatp x) (not (small-floatp x)))
+	 (binary32-to-float (compiler:float-to-binary32 x)))
+	((consp x)
+	 (let ((a (cross-target-float (car x))) (d (cross-target-float (cdr x))))
+	   (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+	(t x)))
+
 ;;; #., as si:xr-#.-macro reads it, with the form and its value logged
 (defun cross-sharp-dot (stream ignore &optional ignore)
   (values (if *read-suppress*
@@ -413,6 +546,9 @@ since the target's are the cold-load generator's own."
 	    (let* ((form (si:internal-read stream t nil t))
 		   (value (let ((*cross-context* :sharp-dot))
 			    (si:eval1 form))))
+	      ;; its floats as the target holds them (cross-target-float)
+	      (when (and *cross-compiling* (compiler:target-one-float-p))
+		(setq value (cross-target-float value)))
 	      (unless *cross-native*
 		(cross-note "S" form value))
 	      value))))
@@ -424,11 +560,32 @@ since the target's are the cold-load generator's own."
 ;;; native build's would: the definitions of the tree being built, with this
 ;;; world's values, and not this world's own, which would keep a macro or a
 ;;; structure the tree has changed.
+;;;
+;;; but a file of *cross-unloaded-files* is not loaded at all: SYS2; NUMDEF
+;;; redefines this world's float functions for the target's floats, and the
+;;; compile's own evaluations then went wrong (colorhack's (sqrt 2), folded
+;;; after it was loaded, became an infinity).  its defsubsts reach the compile
+;;; as declarations (cross-declare-definitions) and its constants through the
+;;; table, as the target's.
+(defvar *cross-unloaded-files* '("SYS: SYS2; NUMDEF")
+  "The tree's files make-system would load that the cross build does not load into this world.")
+
+(defun cross-unloaded-file-p (pathname)
+  (dolist (f *cross-unloaded-files*)
+    (let ((u (fs:parse-pathname f)))
+      (when (and (string-equal (send u :name) (send pathname :name))
+		 (equal (send u :directory) (send pathname :directory))
+		 (eq (send u :host) (send pathname :host)))
+	(return t)))))
+
 (defun cross-fasload-internal (fasl-stream pkg no-msg-p)
   (let ((file (send fasl-stream :truename)))
 ;    (cond ((not (cross-marked-file-p file))
     (cond ((not (cross-foreign-file-p file))
 	   (funcall (cross-original 'si:fasload-internal) fasl-stream pkg no-msg-p))
+	  ((cross-unloaded-file-p (send fasl-stream :pathname))
+	   (push (cons file :not-loaded) *cross-replaced-loads*)
+	   (send fasl-stream :pathname))
 	  (t (let ((host (cross-host-fasl (send fasl-stream :pathname))))
 	       (push (cons file host) *cross-replaced-loads*)
 	       (let ((si:inhibit-fdefine-warnings :just-warn))
@@ -488,11 +645,21 @@ since the target's are the cold-load generator's own."
 
 ;;;; Beginning and end
 
+;(defun cross-begin (&key (overlays '("SYS: COLD; TARGET40 LISP"))
+;		    (check-data-types t) (check-misc-instructions t) (check-formats t)
+;		    (log-directory *cross-log-directory*))
+;  "Load the target's parameters, check what the hook cannot see, and turn the cross build on.
+;OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own parameters."
+;;; definitions: the tree's compile-time definitions (cross-declare-definitions)
 (defun cross-begin (&key (overlays '("SYS: COLD; TARGET40 LISP"))
 		    (check-data-types t) (check-misc-instructions t) (check-formats t)
-		    (log-directory *cross-log-directory*))
+		    (log-directory *cross-log-directory*)
+		    (definitions t))
   "Load the target's parameters, check what the hook cannot see, and turn the cross build on.
-OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own parameters."
+OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own parameters.
+DEFINITIONS: T gives every compile for the target the tree's compile-time definitions
+that SYS: COLD; CROSSDEFS lists, NIL none (this world's own target), (:OMIT FILE...)
+all but FILEs'."
   (when *cross-active* (cross-end))
   (setq *cross-log-directory* log-directory)
   ;; the parameters afresh: a value an earlier overlay or cold load left in the
@@ -513,15 +680,148 @@ OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own param
   (cross-wrap 'compiler:arith-opt-non-associative #'cross-arith-opt-non-associative)
   (cross-wrap 'si:xr-#.-macro #'cross-sharp-dot)
   (cross-wrap 'si:fasload-internal #'cross-fasload-internal)
+  (cross-wrap 'si:declared-definition #'cross-declared-definition)
+  (cross-wrap 'si:xr-read-flonum #'cross-read-flonum)
   (setq compiler:*cross-target* 'cross-target-value
 	*cross-active* t)
+  ;; the tree's exact float reading, for a target whose float is the single
+  (when (compiler:target-one-float-p)
+    (cross-define-reader))
+  ;; the tree's compile-time definitions, as declarations (*cross-definitions*)
+  (cross-declare-definitions definitions)
+;  (list :word-bits word-bits :page-size sym:page-size
+;	:watched (cross-count *cross-watch*) :changed (length *cross-changed*)
+;	:without-value (length *cross-unset*)))
   (list :word-bits word-bits :page-size sym:page-size
 	:watched (cross-count *cross-watch*) :changed (length *cross-changed*)
-	:without-value (length *cross-unset*)))
+	:without-value (length *cross-unset*)
+	:definitions (length *cross-declarations*)
+	:checked (if *cross-definition-names* (cross-count *cross-definition-names*) 0)))
+
+;;; DEFINITIONS: t, every definition SYS: COLD; CROSSDEFS lists; nil, none and
+;;; no check (this world's own target, the identity control); or (:omit FILE...),
+;;; every one but those of FILEs, all still checked (the check's control)
+(defun cross-declare-definitions (definitions)
+  (setq *cross-declarations* nil
+	*cross-definition-names* nil)
+  (when definitions
+    (let ((si:inhibit-fdefine-warnings :just-warn))
+      (load "SYS: COLD; CROSSDEFS LISP" "COLD"))
+    (setq *cross-definition-names* (make-hash-table :test 'eq))
+    (let ((omit (and (consp definitions) (eq (car definitions) :omit) (cdr definitions)))
+	  (files nil))
+      ;; a structure or a setf method evaluated so still changes this world
+      ;; (DEFSTRUCT redefines the structure here): such a changed definition
+      ;; stops the cross build until it is given another way
+      (dolist (d *cross-definitions*)
+	(unless (or (eq (fourth d) :gone) (cross-checked-kind-p (second d)))
+	  (ferror nil "The cross build cannot give the tree's ~A ~A (~A) without changing this world"
+		  (second d) (third d) (first d))))
+      (dolist (d *cross-definitions*)
+	(let* ((file (first d)) (name (third d)) (status (fourth d))
+	       (wanted (and (neq status :gone)
+			    (not (mem #'string-equal file omit))))
+	       (entry (ass #'string-equal file files)))
+	  (unless entry
+	    (push (setq entry (list file)) files))
+	  (push (list name wanted (second d)) (cdr entry))))
+      (dolist (entry files)
+	(cross-declare-file (car entry) (cdr entry)))))
+  (length *cross-declarations*))
+
+;;; FILE's definitions named in NAMES ((name-string wanted kind) ...): each read with
+;;; the file's attributes; a wanted one evaluated as the compiler evaluates it,
+;;; into a declaration; every one's symbol put in *cross-definition-names*
+(defun cross-declare-file (file names)
+  (with-open-file (s file)
+    (multiple-value-bind (vars vals) (fs:extract-attribute-bindings s)
+      (progv vars vals
+	(loop with eof = s
+	      ;; zetalisp's read: the second argument is what end of file returns
+	      for form = (let ((*cross-reading* t)) (read s eof))
+	      until (eq form eof)
+	      do (dolist (def (cross-definition-forms form))
+		   (let* ((name (cross-definition-name def))
+			  (entry (and name (ass #'string= (symbol-name name) names))))
+		     (when entry
+		       (when (cross-checked-kind-p (third entry))
+			 (puthash name t *cross-definition-names*))
+		       (when (second entry)
+			 ;; as inside a compile: functions-referenced is what macro and
+			 ;; defsubst-1 look at when undo-declarations-flag is set
+			 (let ((sys:undo-declarations-flag t)
+			       (sys:file-local-declarations nil)
+			       (compiler:functions-referenced nil)
+			       (si:inhibit-fdefine-warnings :just-warn))
+			   (eval def)
+			   (setq *cross-declarations*
+				 (append sys:file-local-declarations *cross-declarations*))))))))))
+    ;; a listed name the file no longer defines, or that is gone, is checked too
+    (dolist (entry names)
+      (let ((sym (and (cross-checked-kind-p (third entry))
+		      (cross-definition-symbol file (car entry)))))
+	(when sym (puthash sym t *cross-definition-names*))))))
+
+;;; the kinds of definition that define a symbol's own function, which the
+;;; compiler finds through si:declared-definition: a defsetf or a setf method
+;;; defines the setf of its name, and a structure's accessors are its own
+;;; definitions, so neither is checked by its name
+(defun cross-checked-kind-p (kind)
+  (memq kind '(defmacro defsubst macro deff-macro deflambda-macro defmacro-displace)))
+
+;;; the definitions in a top-level FORM, through the forms that hold others
+(defun cross-definition-forms (form)
+  (cond ((atom form) nil)
+	((memq (car form) '(defmacro defsubst defsetf define-setf-method defstruct deff-macro
+			    deflambda-macro macro define-modify-macro defmacro-displace))
+	 (list form))
+	((memq (car form) '(eval-when local-declare compiler-let))
+	 (mapcan #'cross-definition-forms (cddr form)))
+	((memq (car form) '(progn si:loop-macro-progn))
+	 (mapcan #'cross-definition-forms (cdr form)))))
+
+;;; a symbol, or a structure's name; a function spec such as (and
+;;; alternate-macro-definition) names no symbol's own definition: nil
+(defun cross-definition-name (form)
+  (let ((x (cadr form)))
+    (cond ((symbolp x) x)
+	  ((eq (car form) 'defstruct) (car x)))))
+
+;;; the symbol NAME names in FILE's package, if it exists
+(defun cross-definition-symbol (file name)
+  (let ((pkg (with-open-file (s file)
+	       (let ((attrs (fs:extract-attribute-list s)))
+		 (getf attrs :package)))))
+    (and pkg (pkg-find-package pkg :find)
+	 (intern-soft name (pkg-find-package pkg)))))
+
+;;; si:declared-definition, checked: while a file compiles for the target, a name
+;;; the tree defines (*cross-definition-names*) must be declared, by the tree's
+;;; definition given at cross-begin or by the file's own; else it would expand,
+;;; or be compiled as a call, by this world's definition, and the file stops
+(defun cross-declared-definition (function-spec)
+  (when (and *cross-compiling* *cross-definition-names*
+	     (symbolp function-spec)
+	     (gethash function-spec *cross-definition-names*)
+	     (not (cross-declared-p function-spec)))
+    (cross-note "D" (cross-function) function-spec)
+    ;; also refused after the compile (cross-compile-stream), should a handler
+    ;; of the compiler's take this error
+    (push (cons function-spec :definition) *cross-misses*)
+    (ferror nil "~S would expand with this world's definition, not the tree's" function-spec))
+  (funcall (cross-original 'si:declared-definition) function-spec))
+
+(defun cross-declared-p (function-spec)
+  (flet ((has (list) (dolist (l list) (and (eq (car-safe l) 'def) (equal (cadr l) function-spec)
+					     (return t)))))
+    (or (has local-declarations) (has sys:file-local-declarations))))
 
 (defun cross-end ()
   "Turn the cross build off: this world's own values again."
   (dolist (s *cross-saved*) (fset (car s) (cdr s)))
+  ;; the target's system constants that are not this world's
+  (dolist (s *cross-made-constant*) (remprop s 'si:system-constant))
+  (setq *cross-made-constant* nil)
   (setq *cross-saved* nil
 	compiler:*cross-target* nil
 	*cross-active* nil)
@@ -612,11 +912,23 @@ as bytes, for a program on the host to read."
     (or base (ferror nil "No partition ~A" part-name))
     (let ((n (min size (or n-blocks
 			   (* blocks-per-page (ceiling vmem-highest-address sym:page-size)))))
-	  (rqb (si:get-disk-rqb 1)))
+	  (rqb (si:get-disk-rqb 1))
+	  ;; the blocks a page of this world's rqb takes: 1 in a world of 256-word
+	  ;; pages, as the cross build's builder; 4 in a 40-bit world (a native
+	  ;; build, contract g2 section 7, step 5), whose 4-byte transfer of a
+	  ;; page reads 4 blocks, and of whose last transfer only the blocks asked
+	  ;; for are written.  a block a transfer there would read 4 and write
+	  ;; each block four times over.
+	  (step (if (boundp 'si:disk-blocks-per-packed-page)
+		    (symeval 'si:disk-blocks-per-page)
+		  1)))
       (unwind-protect
 	  (with-open-file (out file :direction :output :characters nil :byte-size 8)
-	    (dotimes (i n)
+;	    (dotimes (i n)
+;	      (si:disk-read rqb 0 (+ base i))
+;	      (send out :string-out (si:rqb-8-bit-buffer rqb))))
+	    (do ((i 0 (+ i step))) ((>= i n))
 	      (si:disk-read rqb 0 (+ base i))
-	      (send out :string-out (si:rqb-8-bit-buffer rqb))))
+	      (send out :string-out (si:rqb-8-bit-buffer rqb) 0 (* 1024. (min step (- n i))))))
 	(si:return-disk-rqb rqb))
       (list :blocks n :base base))))

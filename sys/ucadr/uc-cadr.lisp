@@ -217,6 +217,11 @@ XWIPM (MISC-INST-ENTRY %WRITE-INTERNAL-PROCESSOR-MEMORIES)
 	(JUMP-EQUAL M-B (A-CONSTANT 2) XWIPM-D)
 	(CALL-NOT-EQUAL M-B (A-CONSTANT 4) TRAP)
    (ERROR-TABLE BAD-INTERNAL-MEMORY-SELECTOR-ARG M-B)
+	;; quux revision 13: an a or m location is 40 bits.  d-hi's bits 15:8, which
+	;; the callers (ma-load-a-mem, sys; mlap; the ucode loader, sys2; usymld)
+	;; fill from the word's bits 39:32, are its tag, <39:32>; m-1 held only the
+	;; 32 bits below, so every location written got tag 000.
+	((m-1) dpb m-2 q-all-but-pointer a-1)
 	(JUMP-LESS-THAN M-A (A-CONSTANT 40) XWIPM-M)
 	((OA-REG-LOW) DPB M-A OAL-A-DEST A-ZERO)
 	((A-GARBAGE) M-1)

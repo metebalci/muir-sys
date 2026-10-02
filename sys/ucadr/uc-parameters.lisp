@@ -225,7 +225,9 @@
 ;; the same in blocks, 15, for revision 12's incremental save and restore,
 ;; which stay in the source but are not reached: an incremental band halts at
 ;; incremental-band-not-supported (uc-cold-disk).
-(assign low-pages-blocks 15.)	;low-pages times blocks-per-page
+;(assign low-pages-blocks 15.)	;low-pages times blocks-per-page
+;; quux revision 13: no longer used; the incremental save and restore count
+;; low-pages, pages, as the rest of the save and restore do.
 
 ;Page number of first page after MICRO-CODE-SYMBOL-AREA.
 ;This is used in DISK-RESTORE and DISK-SAVE.

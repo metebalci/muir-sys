@@ -527,8 +527,29 @@ ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER
 ;; has <31:28> set, past the 28-bit space (contract g2 2.6); it is placed past
 ;; advance-second-level-map-reuse-pointer's return, so that nothing falls into
 ;; it.  the halt shows this location, and a-pgf-vma the address.
+;address-past-28-bits
+;	(call illop)
+;; lisp can make such an address now that a pointer field is 32 bits:
+;; (%p-contents-offset (%make-pointer dtp-locative -1) 0) halted the machine.
+;; it signals the error address-past-28-bits (eh; ehf) instead (contract g2
+;; 2.6), from the page-fault level as write-in-read-only does, but with the
+;; address in m-t, a fixnum of its field, and vma nil: a stack group's resume
+;; reads memory at its saved vma to restore md (sgent), and at this address that
+;; read would trap again, inside the switch.  the other registers stay as they
+;; were: a pointer past the space held in a register, on the stack or in memory
+;; never reaches here from the garbage collector's tests, which take it as
+;; neither oldspace nor extra pdl (trans-old, extra-pdl-trap-1, uc-transporter),
+;; so the trap's own state save and the reload pass it.  the call into
+;; level-1-map-miss is popped, as write-in-read-only's stack has none, and m-a,
+;; m-b and m-t are as at the reference before m-t takes the address.
 address-past-28-bits
-	(call illop)
+	((m-garbage) micro-stack-data-pop)	;the call into level-1-map-miss
+	(call pgf-restore)
+	((m-t) dpb m-zero q-all-but-pointer a-pgf-vma)	;the address's field
+	((m-t) q-pointer m-t (a-constant (byte-value q-data-type dtp-fix)))
+	((vma) a-v-nil)
+	(call trap)
+    (error-table address-past-28-bits m-t)
 
 ;MAP MISS COMES HERE.  ADDRESS IN VMA AND MD BOTH.
 ;SET UP FIRST-LEVEL MAP IF NECESSARY.  THEN DEAL WITH PAGE-FAULT.

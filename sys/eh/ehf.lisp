@@ -2334,6 +2334,18 @@ The width, times the number of bits per pixel, must be a multiple of 32.")
   :format-string "There was an attempt to write into ~S, which is a read-only address."
   :format-args (list (sg-contents sg (second ete))))
 
+;; quux revision 13 (contract g2 2.6): a reference to an address with <31:28>
+;; set, past the 28-bit space, which a 32-bit pointer field can hold.  the
+;; microcode (address-past-28-bits, uc-page-fault) passes the address's field in
+;; m-t, a fixnum (vma, as write-in-read-only passes it, would be read again when
+;; the stack group resumes); the error holds it as a locative, in its :address
+;; property and in its message alike, as write-in-read-only's does.  not
+;; continuable.
+(def-ucode-error address-past-28-bits error
+  :property-list `(:address ,(%make-pointer dtp-locative (sg-contents sg (second ete))))
+  :format-string "There was a reference to ~S, which is past the 28-bit address space."
+  :format-args (list (%make-pointer dtp-locative (sg-contents sg (second ete)))))
+
 (def-ucode-error turd-alert (turd-alert-error draw-on-unprepared-sheet)
   :sheet (sg-contents sg (second ete))
   :format-string "There was an attempt to draw on the sheet ~S without preparing it first.~%"

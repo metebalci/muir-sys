@@ -1,0 +1,11 @@
+; %WRITE-INTERNAL-PROCESSOR-MEMORIES writes an A memory location's 40 bits:
+; D-HI's bits 15:8 are its tag, <39:32> (sys/ucadr/uc-cadr.lisp, XWIPM), as
+; its callers fill them (COMPILER:MA-LOAD-A-MEM, sys/sys/mlap.lisp; the
+; microcode loader, sys/sys2/usymld.lisp); every location written got tag 000.
+; Location 1777, the last, past the microcode's names and constants, is read
+; through A memory's window, written, read, and written back.  The first case
+; is a control: its <31:0> are written.
+(progn (defvar *wam-a* (%make-pointer dtp-locative (+ sys:a-memory-virtual-address #o1777))) (defvar *wam-old* (list (%p-ldb #o4010 *wam-a*) (%p-ldb #o2020 *wam-a*) (%p-ldb #o0020 *wam-a*))) (si:%write-internal-processor-memories 4 #o1777 (+ (ash #o205 8) #o123) #o45670123) (list (%p-ldb #o2020 *wam-a*) (%p-ldb #o0020 *wam-a*))) => (21399 28755)
+(%p-ldb #o4010 *wam-a*) => 133
+(progn (compiler:ma-load-a-mem #o1777 (+ (ash #o144 32.) #o7654321)) (list (%p-ldb #o4010 *wam-a*) (%p-ldb #o0040 *wam-a*))) => (100 2054353)
+(progn (si:%write-internal-processor-memories 4 #o1777 (+ (ash (first *wam-old*) 8) (ldb #o1010 (second *wam-old*))) (dpb (ldb #o0010 (second *wam-old*)) #o2010 (third *wam-old*))) (equal *wam-old* (list (%p-ldb #o4010 *wam-a*) (%p-ldb #o2020 *wam-a*) (%p-ldb #o0020 *wam-a*)))) => T

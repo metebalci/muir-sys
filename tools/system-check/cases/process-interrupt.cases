@@ -1,0 +1,18 @@
+; Interrupting a waiting process whose stack group holds a register of all
+; ones.  The microcode sets a register to all ones (SETO: M-K in %DRAW-CHAR
+; and the transporter, M-E), and a stack group switch saves it so in the
+; stack group's leader: data type 77, no data type.  EH::SG-SAVE-STATE, run by
+; a process interrupt (sys/sys2/proces.lisp), took every code but a few as a
+; pointer (SI:%POINTER-TYPE-P, sys/sys2/lmmac.lisp) and followed this one to
+; address 37777777777, past the 28-bit space: the machine halted, as when a
+; TELNET session ended.  A code past DTP-CHARACTER is now no pointer.  Run with
+; --compile --files sys/sys2/lmmac.lisp,sys/eh/eh.lisp (the defsubst is
+; compiled into SG-SAVE-STATE).  The first three cases are controls.
+(si:%pointer-type-p dtp-list) => T
+(si:%pointer-type-p dtp-fix) => NIL
+(progn (defvar *pi-p* nil) (setq *pi-p* (process-run-function "pi wait" #'(lambda () (process-wait "Forever" #'false)))) (process-sleep 30) (process-whostate *pi-p*)) => "Forever"
+(si:%pointer-type-p #o77) => NIL
+(si:%pointer-type-p (1+ dtp-character)) => NIL
+(progn (%p-store-tag-and-pointer (locf (si:sg-ac-k (process-stack-group *pi-p*))) #o377 -1) (%p-ldb #o4010 (locf (si:sg-ac-k (process-stack-group *pi-p*))))) => 255
+(progn (defvar *pi-ran* nil) (send *pi-p* :interrupt #'(lambda () (setq *pi-ran* t))) (process-sleep 60) *pi-ran*) => T
+(progn (send *pi-p* :kill) t) => T

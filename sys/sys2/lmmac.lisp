@@ -300,9 +300,21 @@ done in macros being expanded will see this property."
 
 (DEFSUBST %POINTER-TYPE-P (DATA-TYPE-CODE)
   "T if DATA-TYPE-CODE is a the code for a data type that points to storage."
-  (NOT (MEMQ DATA-TYPE-CODE
-	     '(#.DTP-FIX #.DTP-SMALL-FLONUM #.DTP-U-ENTRY #.DTP-CHARACTER
-	       #.DTP-TRAP #.DTP-SELF-REF-POINTER #.DTP-HEADER #.DTP-ARRAY-HEADER))))
+;  (NOT (MEMQ DATA-TYPE-CODE
+;	     '(#.DTP-FIX #.DTP-SMALL-FLONUM #.DTP-U-ENTRY #.DTP-CHARACTER
+;	       #.DTP-TRAP #.DTP-SELF-REF-POINTER #.DTP-HEADER #.DTP-ARRAY-HEADER))))
+  ;; quux revision 13: a code past the last data type, dtp-character, is no
+  ;; data type and points nowhere.  the type field is 6 bits, and a register
+  ;; the microcode set to all ones (seto: m-k in %draw-char and the
+  ;; transporter, m-e) is saved so in a stack group's leader; taken as a
+  ;; pointer, sg-save-state followed it to address 37777777777, past the
+  ;; 28-bit space, and the machine halted when a waiting process was
+  ;; interrupted (a telnet session's end).  the cadr's 5-bit field made it a
+  ;; 25-bit address, which the 24-bit map took.
+  (and (<= data-type-code #.dtp-character)
+       (not (memq data-type-code
+		  '(#.dtp-fix #.dtp-small-flonum #.dtp-u-entry #.dtp-character
+		    #.dtp-trap #.dtp-self-ref-pointer #.dtp-header #.dtp-array-header)))))
 
 (DEFSUBST %P-POINTERP (POINTER)
   "T if the word POINTER points to contains a data type that points to some storage.

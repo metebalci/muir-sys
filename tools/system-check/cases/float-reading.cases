@@ -1,0 +1,36 @@
+; The reader's floats (sys/io/read.lisp, XR-READ-FLONUM): a decimal literal is
+; read as the correctly rounded IEEE single, to nearest, ties to even; past the
+; largest single it is an infinity, and below the smallest normal single it
+; underflows as arithmetic does (FLOATING-EXPONENT-UNDERFLOW, or 0.0 under
+; ZUNDERFLOW; no subnormal is made), read from a string so that the error is
+; the case's.  Each case gives the single's bits, %POINTER of the float, with the
+; sign apart.  The reader rounded twice (12 digits made a float, then a power
+; of ten scaled it), and was a unit in the last place off for some literals:
+; 1.570796326 was #x3FC90FDA.  The first three cases are controls, exact
+; either way.  Run with --compile --files sys/io/read.lisp.
+(%pointer 1.5) => 1069547520
+(%pointer 0.5) => 1056964608
+(%pointer 1e10) => 1343554297
+(%pointer 1.570796326) => 1070141403
+(%pointer 1.5707963185) => 1070141403
+(%pointer 0.1) => 1036831949
+(%pointer 0.7) => 1060320051
+(%pointer 1.3) => 1067869798
+(%pointer 1.5e38) => 2128720358
+(%pointer 3.4028235e38) => 2139095039
+(%pointer 3.4028236e38) => 2139095040
+(%pointer 16777217.0) => 1266679808
+(%pointer 16777219.0) => 1266679810
+(%pointer 1.00000005960464477539062500001) => 1065353217
+(%pointer 1.0000000596046447753906249999) => 1065353216
+(%pointer 123456789012345678901234567890.0) => 1875342472
+(let ((x -1.570796326)) (list (minusp x) (%pointer (- x)))) => (T 1070141403)
+(let ((x -0.1)) (list (minusp x) (%pointer (- x)))) => (T 1036831949)
+(let ((x -3.4028236e38)) (list (minusp x) (%pointer (- x)))) => (T 2139095040)
+(%pointer 1.1754944e-38) => 8388608
+(%pointer (read-from-string "1e-40")) =>! too small
+(%pointer (read-from-string "1.1754942e-38")) =>! too small
+(let ((zunderflow t)) (%pointer (read-from-string "1e-40"))) => 0
+(%pointer 0.0) => 0
+(%pointer 1.442695s0) => 1069066811
+(%pointer 1.44269504) => 1069066811

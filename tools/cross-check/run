@@ -4,7 +4,8 @@ builder band (tools/cross-check/README.md).
 
 Usage:
   tools/cross-check/run [--out DIR] [--tree-2000 TARBALL] [--system NAME]
-                        [--fresh] CHECK... [-- LISPM-CHECK-ARGS...]
+                        [--fresh] [--skip-definitions-check] CHECK...
+                        [-- LISPM-CHECK-ARGS...]
 CHECK is check1, check3, native or check2; all is check1, check3 and native.
 The checks given run at once, each in its own lispm-check run with its own
 ports.  Each gets a copy of this tree's sys/ and site/ (native: System 2000's
@@ -17,6 +18,12 @@ result.txt.  Exit status 0 when every check given passes.
 check2 compiles SYSTEM (--system another, for a shorter run of the same steps)
 and keeps its tree copy between runs, with the QFASLs each run made, so that a
 run after one that stopped goes on where it stopped (--fresh starts again).
+
+Before a check that cross-builds, crossdefs.py checks that sys/cold/crossdefs.lisp
+is the list of the tree's compile-time definitions the sources give, against
+System 2000's tree (TARBALL), and that no #, sits in a macro's or defsubst's
+body; either failing fails the check before the machine runs.
+--skip-definitions-check leaves that out, for a planted tree.
 
 lispm-check's band, ubin/, quux and ozd are this tree's defaults
 (run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
@@ -43,7 +50,8 @@ TRACKED_QFASLS = ('sys/fonts/*.qfasl', 'sys/demo/tvbgar.qfasl', 'sys/sys/ucinit.
 SERVED = 'sys/cross-check'
 FIXTURES = {
     'check1': ['family.lisp', 'synth.lisp', 'planted.lisp', 'uncovered-sharp.lisp',
-               'uncovered-fold.lisp', 'world.lisp', 'pages32.lisp'],
+               'uncovered-fold.lisp', 'world.lisp', 'pages32.lisp', 'defs.lisp',
+               'shortfloat.lisp'],
     'check3': [],
     'check2': ['planted.lisp', 'uncovered-sharp.lisp'],
     'native': ['copy-partition.lisp', 'pages32.lisp'],
@@ -52,7 +60,8 @@ TIMEOUT = {'check1': 1800, 'check3': 7200, 'native': 3600, 'check2': 40000}
 # the files of the cross build whose digests each run records
 SOURCES = ['sys/cold/cross.lisp', 'sys/cold/target40.lisp', 'sys/cold/coldut.lisp',
            'sys/cold/coldld.lisp', 'sys/sys/qcdefs.lisp', 'sys/sys/qcfasd.lisp',
-           'sys/sys/qcp1.lisp', 'sys/sys/qcopt.lisp', 'sys/sys/qfasl.lisp']
+           'sys/sys/qcp1.lisp', 'sys/sys/qcopt.lisp', 'sys/sys/qfasl.lisp',
+           'sys/cold/crossdefs.lisp']
 
 
 def sha256(path):
@@ -176,6 +185,17 @@ def run_check(check, out, args, extra):
         for p in glob.glob(os.path.join(out, 'part*')):
             shutil.rmtree(p)
     tree = prepare(check, out, source, all_qfasls)
+    # a cross build takes the tree's compile-time definitions from
+    # sys/cold/crossdefs.lisp, which must be what the sources give, and no #,
+    # may sit in a macro's or defsubst's body (crossdefs.py)
+    if check != 'native' and not args['skip_definitions_check']:
+        base = tree_2000(os.path.dirname(out), args['tree_2000'])
+        cd = os.path.join(HERE, 'crossdefs.py')
+        if not (analyse([cd, tree, base, '--check', os.path.join(tree, 'sys', 'cold', 'crossdefs.lisp')],
+                        lines) and analyse([cd, tree, base, '--census'], lines)):
+            lines.append('%s FAIL (the tree\'s definitions, crossdefs.py)' % check)
+            open(os.path.join(out, 'result.txt'), 'w').write('\n'.join(lines) + '\n')
+            return False, lines
     body = open(os.path.join(HERE, 'cases', check + '.cases')).read()
     where = out
     if check == 'check2':
@@ -259,7 +279,7 @@ def main():
             'tree_2000': os.environ.get('CROSS_CHECK_TREE_2000',
                                         os.path.join(TREE, '..', 'muir-sim', 'ref', 'band-2000',
                                                      'tree-2000.tar.gz')),
-            'system': 'system', 'fresh': False}
+            'system': 'system', 'fresh': False, 'skip_definitions_check': False}
     checks = []
     while argv:
         a = argv.pop(0)
@@ -267,6 +287,10 @@ def main():
             args[a[2:].replace('-', '_')] = argv.pop(0)
         elif a == '--fresh':
             args['fresh'] = True
+        elif a == '--skip-definitions-check':
+            # for a planted tree only: the machine's checks run even though
+            # crossdefs.py would stop them first
+            args['skip_definitions_check'] = True
         elif a == 'all':
             checks += ['check1', 'check3', 'native']
         elif a in TIMEOUT:
@@ -277,8 +301,7 @@ def main():
         raise SystemExit(__doc__)
     args['out'] = os.path.abspath(args['out'])
     os.makedirs(args['out'], exist_ok=True)
-    if {'check3', 'native', 'check2'} & set(checks):
-        tree_2000(args['out'], args['tree_2000'])      # once, before the checks share it
+    tree_2000(args['out'], args['tree_2000'])      # once, before the checks share it
     results = {}
     threads = [threading.Thread(target=lambda c=c: results.__setitem__(
         c, run_check(c, args['out'], args, extra))) for c in dict.fromkeys(checks)]

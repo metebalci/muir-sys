@@ -292,12 +292,25 @@
 ;;; on the width of a fixnum, and this world's (25 bits) is not the target's (32
 ;;; on g2's machine), so the target computes them when the code runs.  the
 ;;; other functions folded here do not depend on the width.
+;(defun arith-opt-non-associative (form)
+;  (if (and (loop for arg in (cdr form)
+;		 always (constantp arg))
+;	   (not (and *cross-target* (memq (car form) '(lsh rot)))))
+;      (fold-constants form)
+;    form))
+;;; a cross build folds lsh and rot with the target's fixnum (target-lsh,
+;;; target-rot), and small-float with float (target-small-float): left to the
+;;; target, or folded as this world computes them, their code was not a native
+;;; compile's (g2 section 7, check (a)).
 (defun arith-opt-non-associative (form)
-  (if (and (loop for arg in (cdr form)
-		 always (constantp arg))
-	   (not (and *cross-target* (memq (car form) '(lsh rot)))))
-      (fold-constants form)
-    form))
+  (cond ((not (loop for arg in (cdr form)
+		    always (constantp arg)))
+	 form)
+	((and *cross-target* (memq (car form) '(lsh rot)))
+	 (fold-constants `(,(if (eq (car form) 'lsh) 'target-lsh 'target-rot) . ,(cdr form))))
+	((and *cross-target* (eq (car form) 'small-float))
+	 (fold-constants `(target-small-float . ,(cdr form))))
+	(t (fold-constants form))))
 
 
 (defoptimizer boole-expand boole (*boole) (x)
@@ -348,9 +361,16 @@
   (cond ((null (cddr form))			;One arg
 	 `(internal-float ,(cadr form)))
 	((numberp (caddr form))			;Second arg a number
-	 (if (small-floatp (caddr form))
+;	 (if (small-floatp (caddr form))
+;	     (if (numberp (cadr form))
+;		 (small-float (cadr form))
+;	       `(small-float ,(cadr form)))
+	 ;; the prototype's type as the target has it (target-small-floatp): a
+	 ;; cross build's 0f0 is this world's boxed float, the target's short
+	 ;; float, and (float x 0f0) compiled to internal-float, not small-float
+	 (if (target-small-floatp (caddr form))
 	     (if (numberp (cadr form))
-		 (small-float (cadr form))
+		 (target-small-float (cadr form))
 	       `(small-float ,(cadr form)))
 	   (if (numberp (cadr form))
 	       (float (cadr form))

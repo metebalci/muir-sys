@@ -1105,54 +1105,140 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
   "Vector which indexed by i contains (- (^ 10. I)) as a single-float.")
 (DEFVAR POWERS-OF-10f0-TABLE-LENGTH 308.)
 
-(DEFUN XR-READ-FLONUM (STRING SFL-P &AUX (POWER-10 0) (INDEX 0) (POSITIVE T)
-                                         (HIGH-PART 0) (LOW-PART 0) (NDIGITS 12.)
-                                         COUNT CHAR STRING-LENGTH)
-  (DECLARE (SPECIAL HIGH-PART LOW-PART NDIGITS INDEX COUNT POWER-10))
-  (SETQ COUNT (LENGTH STRING)
-	STRING-LENGTH COUNT)
-  (SETQ CHAR (CHAR STRING INDEX))
-  ;; CHECK FOR PLUS OR MINUS
-  (WHEN (OR (= CHAR #/+) (= CHAR #/-))
-    (SKIP-CHAR)
-    (SETQ POSITIVE (= CHAR #/+)))
-  ;; skip leading zeros
-  (DO ()
-      (( (CHAR STRING INDEX) #/0))
-    (SKIP-CHAR))
-  (COND ((= (CHAR STRING INDEX) #/.)		;If we hit a point, keep stripping 0's
-	 (SKIP-CHAR)
-	 (DO ()
-	     ((OR (< COUNT 2)			;Leave one digit at least
-		  (NOT (= (CHAR STRING INDEX) #/0))))	;Or non-zero digit
-	   (SKIP-CHAR)
-	   (INCF POWER-10))
-	 (XR-ACCUMULATE-DIGITS STRING T))
-	;; Accumulate digits up to the point or exponent (these are free)
-	(T (XR-ACCUMULATE-DIGITS STRING NIL)
-	   (WHEN (= (CHAR STRING INDEX) #/. )
-	     (SKIP-CHAR)
-	     ;; Skip trailing zeros after the point.  This avoids having a
-	     ;; one in the lsb of 2.0 due to dividing 20. by 10.
-	     (LET ((IDX (STRING-SEARCH-NOT-SET '(#/0) STRING INDEX)))
-	       (COND ((NULL IDX) (SETQ COUNT 0))	;Nothing but zeros there
-		     ((NOT (MEMQ (CHAR STRING IDX) '(#/1 #/2 #/3 #/4 #/5
-						     #/6 #/7 #/8 #/9)))
-		      (SETQ INDEX IDX		;Not digits there except zeros
-			    COUNT (- STRING-LENGTH INDEX)))
-		     (T				;Real digits present, scan normally
-		      (XR-ACCUMULATE-DIGITS STRING T)))))))
-  ;; Here we have read something up to exponent if it exists, or end of string
-  (WHEN (> COUNT 0)
-    (SKIP-CHAR)					;Skip the exponent character
-    (SETQ POWER-10 (- POWER-10
-		      (XR-READ-FIXNUM-INTERNAL STRING
-					       INDEX
-					       STRING-LENGTH
-					       10.))))
-  (LET ((NUM (IF SFL-P (SMALL-FLOAT (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))
-	       (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))))
-    (IF POSITIVE NUM (- NUM))))
+;(DEFUN XR-READ-FLONUM (STRING SFL-P &AUX (POWER-10 0) (INDEX 0) (POSITIVE T)
+;                                         (HIGH-PART 0) (LOW-PART 0) (NDIGITS 12.)
+;                                         COUNT CHAR STRING-LENGTH)
+;  (DECLARE (SPECIAL HIGH-PART LOW-PART NDIGITS INDEX COUNT POWER-10))
+;  (SETQ COUNT (LENGTH STRING)
+;	STRING-LENGTH COUNT)
+;  (SETQ CHAR (CHAR STRING INDEX))
+;  ;; CHECK FOR PLUS OR MINUS
+;  (WHEN (OR (= CHAR #/+) (= CHAR #/-))
+;    (SKIP-CHAR)
+;    (SETQ POSITIVE (= CHAR #/+)))
+;  ;; skip leading zeros
+;  (DO ()
+;      (( (CHAR STRING INDEX) #/0))
+;    (SKIP-CHAR))
+;  (COND ((= (CHAR STRING INDEX) #/.)		;If we hit a point, keep stripping 0's
+;	 (SKIP-CHAR)
+;	 (DO ()
+;	     ((OR (< COUNT 2)			;Leave one digit at least
+;		  (NOT (= (CHAR STRING INDEX) #/0))))	;Or non-zero digit
+;	   (SKIP-CHAR)
+;	   (INCF POWER-10))
+;	 (XR-ACCUMULATE-DIGITS STRING T))
+;	;; Accumulate digits up to the point or exponent (these are free)
+;	(T (XR-ACCUMULATE-DIGITS STRING NIL)
+;	   (WHEN (= (CHAR STRING INDEX) #/. )
+;	     (SKIP-CHAR)
+;	     ;; Skip trailing zeros after the point.  This avoids having a
+;	     ;; one in the lsb of 2.0 due to dividing 20. by 10.
+;	     (LET ((IDX (STRING-SEARCH-NOT-SET '(#/0) STRING INDEX)))
+;	       (COND ((NULL IDX) (SETQ COUNT 0))	;Nothing but zeros there
+;		     ((NOT (MEMQ (CHAR STRING IDX) '(#/1 #/2 #/3 #/4 #/5
+;						     #/6 #/7 #/8 #/9)))
+;		      (SETQ INDEX IDX		;Not digits there except zeros
+;			    COUNT (- STRING-LENGTH INDEX)))
+;		     (T				;Real digits present, scan normally
+;		      (XR-ACCUMULATE-DIGITS STRING T)))))))
+;  ;; Here we have read something up to exponent if it exists, or end of string
+;  (WHEN (> COUNT 0)
+;    (SKIP-CHAR)					;Skip the exponent character
+;    (SETQ POWER-10 (- POWER-10
+;		      (XR-READ-FIXNUM-INTERNAL STRING
+;					       INDEX
+;					       STRING-LENGTH
+;					       10.))))
+;  (LET ((NUM (IF SFL-P (SMALL-FLOAT (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))
+;	       (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))))
+;    (IF POSITIVE NUM (- NUM))))
+
+;;; quux revision 13: a float literal is read as the correctly rounded ieee
+;;; single, to nearest, ties to even (xr-float-bits).  the reader above took 12
+;;; digits into a float and scaled it by a power of ten, rounding twice, and
+;;; read some literals a unit in the last place off (1.570796326 as #x3FC90FDA,
+;;; not #x3FC90FDB); a native compile is the cross build's reference, and the
+;;; cross build reads its floats with xr-float-bits too (sys: cold; cross).
+;;; past the largest single a literal is an infinity; below the smallest normal
+;;; one it underflows as arithmetic does: floating-exponent-underflow, or 0.0
+;;; under zunderflow.  sfl-p is no matter: the single is the one float.
+(defun xr-read-flonum (string sfl-p)
+  sfl-p
+  (multiple-value-bind (bits negative) (xr-float-bits string)
+    (let ((num (if (eq bits :underflow)
+		   ;; the smallest normal single halved: the arithmetic's own underflow
+		   (* (%make-pointer dtp-small-flonum 8388608.) 0.5)
+		 (%make-pointer dtp-small-flonum bits))))
+      (if negative (- num) num))))
+
+;;; the float token STRING (an optional sign, digits with or without a point,
+;;; then optionally an exponent marker and a signed exponent) as an ieee single:
+;;; its bits without the sign, an integer, or :underflow; and whether it is
+;;; negative.  exact: the digits are an integer and the value the ratio of it
+;;; and a power of ten, rounded once.  it uses no state of the reader, so that
+;;; the cross build can run it as it is (cold:cross-read-flonum).
+(defun xr-float-bits (string &aux (len (string-length string)) (i 0) (mantissa 0)
+		      (power-10 0) (point nil) (negative nil) (exponent 0) (exponent-sign 1))
+  ;; char=, not memq: #/+ may read as a code, and char gives a character
+  (when (and (< i len) (or (char= (char string i) #/+) (char= (char string i) #/-)))
+    (setq negative (char= (char string i) #/-))
+    (incf i))
+  ;; the digits, with the point: power-10 counts the digits after it
+  (loop while (< i len)
+	do (let ((c (char string i)))
+	     (cond ((digit-char-p c 10.)
+		    (setq mantissa (+ (* mantissa 10.) (digit-char-p c 10.)))
+		    (when point (incf power-10)))
+		   ((char= c #/.) (setq point t))
+		   (t (return))))
+	   (incf i))
+  ;; the exponent, after its marker
+  (when (< i len)
+    (incf i)
+    (when (and (< i len) (or (char= (char string i) #/+) (char= (char string i) #/-)))
+      (when (char= (char string i) #/-) (setq exponent-sign -1))
+      (incf i))
+    (loop while (< i len)
+	  do (setq exponent (+ (* exponent 10.) (digit-char-p (char string i) 10.)))
+	     (incf i)))
+  (setq power-10 (- power-10 (* exponent-sign exponent)))
+  (values (xr-decimal-to-single-bits mantissa power-10) negative))
+
+;;; the bits of the ieee single nearest MANTISSA / 10^POWER-10 (non-negative
+;;; integers and an integer), ties to even; #x7F800000 past the largest single,
+;;; :underflow below the smallest normal one.  the value is q * 2^e with q of
+;;; 24 bits, found from the exact quotient and its remainder.
+(defun xr-decimal-to-single-bits (mantissa power-10 &aux (digits 0))
+  (do ((m mantissa (floor m 10.))) ((zerop m)) (incf digits))
+  (cond ((zerop mantissa) 0)
+	;; at least 10^39, past any single; below 10^-46, under any normal one
+	((> (- digits power-10) 40.) 2139095040.)
+	((< (- digits power-10) -46.) :underflow)
+	(t
+	 (let ((num mantissa) (den 1))
+	   (if (minusp power-10)
+	       (dotimes (k (- power-10)) (setq num (* num 10.)))
+	     (dotimes (k power-10) (setq den (* den 10.))))
+	   (do ((e (- (haulong num) (haulong den) 24.)))
+	       (nil)
+	     (let ((n (if (minusp e) (ash num (- e)) num))
+		   (d (if (plusp e) (ash den e) den)))
+	       (multiple-value-bind (q r) (floor n d)
+		 (cond ((>= q 16777216.) (incf e))
+		       ((< q 8388608.) (decf e))
+		       (t
+			(let ((r2 (* r 2)))
+			  (when (or (> r2 d) (and (= r2 d) (oddp q)))
+			    (incf q)))
+			(when (= q 16777216.)
+			  (setq q 8388608. e (1+ e)))
+			(return
+			  (cond ((> (+ e 23.) 127.) 2139095040.)
+				((< (+ e 23.) -126.) :underflow)
+				;; by arithmetic, not dpb: the cross build's world has a fixnum
+				;; narrower than these 31 bits
+				(t (+ (ash (+ e 150.) 23.) (- q 8388608.))))))))))))))
 
 (DEFUN XR-ACCUMULATE-DIGITS (STRING POST-DECIMAL &AUX CHAR)
   (DECLARE (SPECIAL HIGH-PART LOW-PART NDIGITS INDEX COUNT POWER-10))

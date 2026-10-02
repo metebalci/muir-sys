@@ -674,7 +674,11 @@ Pathnames, editor buffers, host objects, and many other hairy things
 
 ;;; Note: X is -ve on entry, +ve on exit
 (defun scale-flonum (x &aux (short (typep X 'short-float)) tem expt wastoobig)
-  (setq expt (truncate (// (float-exponent x) (log 10s0 2s0))))
+;  (setq expt (truncate (// (float-exponent x) (log 10s0 2s0))))
+  ;; log2 10 as a literal, correctly rounded: folded, (log 10s0 2s0) was what
+  ;; the compiling world's LOG gives, #x40549A7A on quux revision 13, two units
+  ;; in the last place from #x40549A78, and the builder's in a cross build
+  (setq expt (truncate (// (float-exponent x) 3.321928s0)))
   (tagbody
       again
 	 (if (minusp expt)

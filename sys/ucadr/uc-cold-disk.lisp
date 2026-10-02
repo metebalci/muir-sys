@@ -465,11 +465,11 @@ DISK-SAVE (MISC-INST-ENTRY %DISK-SAVE)
 	;; pages (1000, 1001), or the other way round
 ;	((md) (a-constant 1100))    ;store code so this band known to be in compressed format
 	;; quux revision 13 (appendix a1.12): a saved 40-bit band is 2000, stored
-	;; as a fixnum; 2001, an incremental one, is refused (incremental bands are
-	;; not made in 40-bit pages: disk-save-incremental halts).
+	;; as a fixnum, and an incremental one 2001 (disk-save-incremental, 5-block
+	;; pages); the sum keeps md's fixnum tag.
 	((md) (a-constant (plus (byte-value q-data-type dtp-fix) 2000)))
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT M-S DISK-SAVE-1)
-	(jump incremental-band-not-supported)
+;	(jump incremental-band-not-supported)
 	((MD) ADD MD (A-CONSTANT 1))	;or incremental format, whichever it is
 	((M-S) SUB M-ZERO A-S)
 	((M-S) Q-POINTER M-S)
@@ -490,12 +490,13 @@ DISK-SAVE-1
 	((M-Q) M-I)
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT PDL-POP DISK-SAVE-REGIONWISE)
 
-;; quux revision 13: incremental bands are not converted to 5-block pages;
+;; quux revision 13: incremental bands were not converted to 5-block pages;
 ;; %disk-save of an incremental band and %disk-restore of one (format 2001)
-;; halt at incremental-band-not-supported.  the code below is revision 12's,
-;; unreached.
-incremental-band-not-supported
-	(call illop)
+;; halted at incremental-band-not-supported.  they are now: the band's pages
+;; are 5 blocks, packed, as a whole band's, and the bitmap has a bit a page
+;; (the inc-band- constants, io1; inc).
+;incremental-band-not-supported
+;	(call illop)
 
 DISK-SAVE-INCREMENTAL
 	((M-B) (A-CONSTANT INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN))
@@ -504,13 +505,17 @@ DISK-SAVE-INCREMENTAL
 ;Read length in bits of page bit table of this incremental band.
 	(CALL-XCT-NEXT PHYS-MEM-READ)
        ((VMA) (A-CONSTANT (PLUS INC-BAND-BITMAP-BUFFER-ORIGIN INC-BAND-BITMAP-SIZE-INDEX)))
-	((M-K) MD)
+;	((M-K) MD)
+	((m-k) q-pointer md)		;quux revision 13: the count, without lisp's tag
 ;Get number of pages the bit map occupies.
 ;	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
 	;; 1024-word pages (contract g2, option (w)): blocks of 256 words, not
 	;; pages: the bitmap has a bit a block, and is read and skipped by blocks
-	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
-	((M-2) LDB (BYTE-FIELD 13 15) M-2)
+;	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
+;	((M-2) LDB (BYTE-FIELD 13 15) M-2)
+	;; quux revision 13: a bit a page again, 32 bits a word, 32768 a page
+	((m-2) add m-k (a-constant (eval (plus (times page-size 32.) -1))))
+	((m-2) ldb (byte-field 13 17) m-2)
 	((M-R) M-2)
 ;Read in the bit map.
 	((M-1) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
@@ -520,14 +525,20 @@ DISK-SAVE-INCREMENTAL
 ;Save the first three pages into the band.
 	((M-1) M-I)
 ;	((M-2) (A-CONSTANT 3))
-	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+;	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+	((m-2) (a-constant low-pages))		;quux revision 13: 3 pages
 	((M-B) A-ZERO)
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN))
 	(CALL COLD-DISK-WRITE)
 ;Now save the remaining regions regionwise
 ;starting after the bitmap pages.
-	((M-Q) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
-	((M-Q) ADD M-Q A-R)
+;	((M-Q) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
+;	((M-Q) ADD M-Q A-R)
+	;; quux revision 13: m-q a block, the bitmap's m-r pages 5 blocks each
+	((m-tem) dpb m-r (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-r)
+	((m-q) add m-i a-tem)
+	((m-q) add m-q (a-constant inc-band-bitmap-page))
 	((M-AP) (A-CONSTANT 3))			;region to hack.
 DISK-SAVE-REGIONWISE
 	(CALL DISK-SAVE-REGIONWISE-SUBR)
@@ -577,6 +588,7 @@ DISK-SR-1
 	;; end of the page its free pointer is in; disk-copy-section copies pages
 	;; and advances the disk addresses 5 blocks a page.
 	((m-i) ldb vma-page-addr-part md)
+	((m-1) m-i)				;its first page, for disk-save-region
 	((m-tem) dpb m-i (byte-field 30. 2) a-zero)
 	((m-i) add m-i a-tem)			;times 5
 	((M-I) ADD M-I A-DISK-OFFSET)
@@ -656,26 +668,53 @@ DISK-SAVE-REGION
 ;Each page copied comes from the PAGE partition according to its page number.
 ;Thus, the pages not copied do take up space in PAGE.
 ;But only the copied pages are present in the dumped band.
-	((M-1) SUB M-I A-DISK-OFFSET)
+;	((M-1) SUB M-I A-DISK-OFFSET)
+;	((M-R) ADD M-J A-1)
+;DISK-SAVE-REGION-LOOP
+;;M-1 gets virt mem page number of first page to think about.
+;	((M-1) SUB M-I A-DISK-OFFSET)
+;	((M-2) (A-CONSTANT 0))
+;;Search for next page with a 0 in the bit map.  Increment M-1 up to that page number.
+;	(CALL DISK-RESTORE-BITMAP-SEARCH)
+;	((M-I) ADD M-1 A-DISK-OFFSET)
+;;Return now if no page found within this region.
+;	(POPJ-EQUAL M-1 A-R)
+;;Find next following page we should not copy.
+;	((M-2) (A-CONSTANT 1))
+;	(CALL DISK-RESTORE-BITMAP-SEARCH)
+;;M-J gets number of consec pages to be copied.
+;	((M-J) ADD M-1 A-DISK-OFFSET)
+;	((M-J) SUB M-J A-I)
+;;Copy them.  Updates M-Q to point at place to copy next page to,
+;;and M-I to next page to think about.
+;	(CALL DISK-SAVE-SECTION)
+;	(JUMP DISK-SAVE-REGION-LOOP)
+	;; quux revision 13: m-i is a block of the paging partition, 5 a page, and
+	;; no longer the page number plus the offset, so the page numbers are kept
+	;; apart: m-1 the region's first page (disk-sr-1), m-r past its last, and
+	;; the next page to think about on the pdl across disk-save-section, which
+	;; clobbers m-1.
 	((M-R) ADD M-J A-1)
 DISK-SAVE-REGION-LOOP
-;M-1 gets virt mem page number of first page to think about.
-	((M-1) SUB M-I A-DISK-OFFSET)
 	((M-2) (A-CONSTANT 0))
 ;Search for next page with a 0 in the bit map.  Increment M-1 up to that page number.
 	(CALL DISK-RESTORE-BITMAP-SEARCH)
-	((M-I) ADD M-1 A-DISK-OFFSET)
+	((m-tem) dpb m-1 (byte-field 30. 2) a-zero)	;m-i its block
+	((m-i) add m-1 a-tem)
+	((m-i) add m-i a-disk-offset)
 ;Return now if no page found within this region.
 	(POPJ-EQUAL M-1 A-R)
+	((pdl-push) m-1)
 ;Find next following page we should not copy.
 	((M-2) (A-CONSTANT 1))
 	(CALL DISK-RESTORE-BITMAP-SEARCH)
 ;M-J gets number of consec pages to be copied.
-	((M-J) ADD M-1 A-DISK-OFFSET)
-	((M-J) SUB M-J A-I)
-;Copy them.  Updates M-Q to point at place to copy next page to,
-;and M-I to next page to think about.
+	((m-2) pdl-pop)
+	((m-j) sub m-1 a-2)
+;Copy them.  Updates M-Q to point at place to copy next page to.
+	((pdl-push) m-1)
 	(CALL DISK-SAVE-SECTION)
+	((m-1) pdl-pop)
 	(JUMP DISK-SAVE-REGION-LOOP)
 
 DISK-SAVE-SECTION
@@ -833,14 +872,14 @@ MEM-SIZE-LOOP
 ;	(jump-not-equal m-tem (a-constant 1102) band-not-1024-word-pages)
 	;; quux revision 13 (contract g2 2.8; appendix a1.12): a 40-bit band's
 	;; format is a fixnum, compared whole with fixnum constants: 2000 saved,
-	;; 2002 a cold load.  2001, incremental, halts at
-	;; incremental-band-not-supported, and anything else, a 32-bit band's
-	;; 1000-1102 among them, at band-not-40-bit, rather than be taken for a
-	;; cold load.
+	;; 2002 a cold load, 2001 incremental (it halted at
+	;; incremental-band-not-supported until incremental bands were converted
+	;; to 5-block pages), and anything else, a 32-bit band's 1000-1102 among
+	;; them, halts at band-not-40-bit, rather than be taken for a cold load.
 	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2000))
 		disk-restore-regionwise)  ;compressed partition.
 	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2001))
-		incremental-band-not-supported) ;incremental partition.
+		disk-restore-incremental) ;incremental partition.
 	(jump-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2002))
 		band-not-40-bit)
 ;Non-compressed band (must be a cold-load band, I think).
@@ -940,6 +979,7 @@ DISK-RR-1
 	;; quux revision 13, as disk-sr-1: the region's first block in the paging
 	;; partition, 5 a page, and its pages
 	((m-q) ldb vma-page-addr-part md)
+	((m-1) m-q)				;its first page, for disk-restore-region
 	((m-tem) dpb m-q (byte-field 30. 2) a-zero)
 	((m-q) add m-q a-tem)			;times 5
 	((M-Q) ADD M-Q A-DISK-OFFSET)
@@ -978,25 +1018,49 @@ DISK-RESTORE-REGION
 ;Each page copied goes into the PAGE partition according to its page number.
 ;Thus, the pages not copied do take up space in PAGE.
 ;But only the copied pages are present in the source partition.
-	((M-1) SUB M-Q A-DISK-OFFSET)
+;	((M-1) SUB M-Q A-DISK-OFFSET)
+;	((M-R) ADD M-J A-1)
+;DISK-RESTORE-REGION-LOOP
+;;M-1 gets virt mem page number of start of this region.
+;	((M-1) SUB M-Q A-DISK-OFFSET)
+;	((M-2) (A-CONSTANT 0))
+;;Search for next page with a 0 in the bit map.  Increment M-1 up to that page number.
+;	(CALL DISK-RESTORE-BITMAP-SEARCH)
+;	((M-Q) ADD M-1 A-DISK-OFFSET)
+;;Return now if no page found within this region.
+;	(POPJ-EQUAL M-1 A-R)
+;;Find next following page we should not copy.
+;	((M-2) (A-CONSTANT 1))
+;	(CALL DISK-RESTORE-BITMAP-SEARCH)
+;;M-J gets number of consec pages to be copied.
+;	((M-J) ADD M-1 A-DISK-OFFSET)
+;	((M-J) SUB M-J A-Q)
+;;Copy them.  Updates M-I to point at place to copy next page from.
+;	(CALL DISK-COPY-SECTION)
+;	(JUMP DISK-RESTORE-REGION-LOOP)
+	;; quux revision 13: as disk-save-region, with m-q the paging partition's
+	;; block; m-1 the region's first page (disk-rr-1).
 	((M-R) ADD M-J A-1)
 DISK-RESTORE-REGION-LOOP
-;M-1 gets virt mem page number of start of this region.
-	((M-1) SUB M-Q A-DISK-OFFSET)
 	((M-2) (A-CONSTANT 0))
 ;Search for next page with a 0 in the bit map.  Increment M-1 up to that page number.
 	(CALL DISK-RESTORE-BITMAP-SEARCH)
-	((M-Q) ADD M-1 A-DISK-OFFSET)
+	((m-tem) dpb m-1 (byte-field 30. 2) a-zero)	;m-q its block
+	((m-q) add m-1 a-tem)
+	((m-q) add m-q a-disk-offset)
 ;Return now if no page found within this region.
 	(POPJ-EQUAL M-1 A-R)
+	((pdl-push) m-1)
 ;Find next following page we should not copy.
 	((M-2) (A-CONSTANT 1))
 	(CALL DISK-RESTORE-BITMAP-SEARCH)
 ;M-J gets number of consec pages to be copied.
-	((M-J) ADD M-1 A-DISK-OFFSET)
-	((M-J) SUB M-J A-Q)
+	((m-2) pdl-pop)
+	((m-j) sub m-1 a-2)
 ;Copy them.  Updates M-I to point at place to copy next page from.
+	((pdl-push) m-1)
 	(CALL DISK-COPY-SECTION)
+	((m-1) pdl-pop)
 	(JUMP DISK-RESTORE-REGION-LOOP)
 
 ;Search for a page whose entry in the inc band bitmap in core matches M-2 (zero or one).
@@ -1027,15 +1091,20 @@ DISK-RESTORE-BITMAP-SEARCH-2
 ;; 1024-word pages (contract g2, option (w)): these are blocks of the band,
 ;; after its first three pages, fourteen blocks, as io1; inc writes them.
 ;(ASSIGN INC-BAND-BASE-DATA-PAGE 3)
-(assign inc-band-base-data-page 14)
+;(assign inc-band-base-data-page 14)
+;; quux revision 13: pages of 5 blocks, mit's pages 3, 4 and 5 again: the
+;; constants are their first blocks, 15, 20 and 25 (io1; inc writes them)
+(assign inc-band-base-data-page 17)
 ;Index in that page of the bitmap size.
 (ASSIGN INC-BAND-BITMAP-SIZE-INDEX 10)
 ;Index of page in incremental band that has a copy of the base band's REGION-FREE-POINTER
 ;(ASSIGN INC-BAND-BASE-FREE-POINTERS-PAGE 4)
-(assign inc-band-base-free-pointers-page 15)
+;(assign inc-band-base-free-pointers-page 15)
+(assign inc-band-base-free-pointers-page 24)
 ;Index of page in incremental band that has start of the band's bitmap.
 ;(ASSIGN INC-BAND-BITMAP-PAGE 5)
-(assign inc-band-bitmap-page 16)
+;(assign inc-band-bitmap-page 16)
+(assign inc-band-bitmap-page 31)
 
 ;Address and page number of buffer in core used to hold the bitmap.
 ;(ASSIGN INC-BAND-BITMAP-BUFFER-PAGE-ORIGIN 20)
@@ -1055,18 +1124,24 @@ DISK-RESTORE-INCREMENTAL
 ;Read length in bits of page bit table of this incremental band.
 	(CALL-XCT-NEXT PHYS-MEM-READ)
        ((VMA) (A-CONSTANT (PLUS INC-BAND-BITMAP-BUFFER-ORIGIN INC-BAND-BITMAP-SIZE-INDEX)))
-	((PDL-PUSH) MD)
+;	((PDL-PUSH) MD)
+	((pdl-push) q-pointer md)	;quux revision 13: the count, without lisp's tag
 ;Read the name of the base partition.
 	(CALL-XCT-NEXT PHYS-MEM-READ)
        ((VMA) (A-CONSTANT INC-BAND-BITMAP-BUFFER-ORIGIN))
-	((M-4) MD)
+;	((M-4) MD)
+	;; quux revision 13: its four characters, without the tag lisp's array
+	;; gave the word, as disk-restore takes its argument (cold-read-gpt
+	;; compares the gpt's untagged names)
+	((m-4) q-pointer md)
 	((PDL-PUSH) M-I)
 	((PDL-PUSH) M-J)
 ;Restore the base partition of this partition.
 	(call cold-read-gpt-page-0)		;Find PAGE partition and specified partition.
 	((M-1) M-I)				;From start of source band.
 ;	((M-2) (A-CONSTANT 3))			;Core pages 0, 1, and 2
-	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
+;	((m-2) (a-constant low-pages-blocks))	;core pages 0, 1, and 2: 14 blocks
+	((m-2) (a-constant low-pages))		;quux revision 13: core pages 0, 1, and 2
 	((M-B) (A-CONSTANT 0))			;..
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN)) ;CCW list after MICRO-CODE-SYMBOL-AREA
 	(CALL COLD-DISK-READ)
@@ -1078,9 +1153,14 @@ DISK-RESTORE-INCREMENTAL
 	;; 1024-word pages (contract g2, option (w)): the area at 2000, 1100 for
 	;; compressed, and three pages of fourteen blocks
        ((vma) (a-constant (plus 2000 (eval %sys-com-band-format))))
-	(call-not-equal md (a-constant 1100) illop)  ;must be a compressed partition.
-	((m-i) add m-i (a-constant low-pages-blocks))    ;see disk-restore-regionwise for this insn.
-	((m-j) sub m-j (a-constant low-pages-blocks))
+;	(call-not-equal md (a-constant 1100) illop)  ;must be a compressed partition.
+;	((m-i) add m-i (a-constant low-pages-blocks))    ;see disk-restore-regionwise for this insn.
+;	((m-j) sub m-j (a-constant low-pages-blocks))
+	;; quux revision 13: the base band's format the fixnum 2000, and three
+	;; pages of 5 blocks, as disk-restore-regionwise
+	(call-not-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2000)) illop)
+	((m-i) add m-i (a-constant (eval (* 3 5))))
+	((m-j) sub m-j (a-constant (eval (* 3 5))))
 	((M-K) A-ZERO)		;Make sure restore as a non-compressed band!
 	(CALL DISK-RESTORE-REGIONWISE-SUBR)
 ;Now check that page 4 of incremental load
@@ -1111,8 +1191,11 @@ DISK-RESTORE-INCREMENTAL-CHECK
 ;	((M-2) ADD M-K (A-CONSTANT (EVAL (PLUS (TIMES PAGE-SIZE 32.) -1))))
 	;; 1024-word pages (contract g2, option (w)): blocks of 256 words, not
 	;; pages: the bitmap has a bit a block, and is read and skipped by blocks
-	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
-	((M-2) LDB (BYTE-FIELD 13 15) M-2)
+;	((m-2) add m-k (a-constant (eval (plus (times 400 32.) -1))))
+;	((M-2) LDB (BYTE-FIELD 13 15) M-2)
+	;; quux revision 13: a bit a page again, as disk-save-incremental
+	((m-2) add m-k (a-constant (eval (plus (times page-size 32.) -1))))
+	((m-2) ldb (byte-field 13 17) m-2)
 	((M-R) M-2)
 ;Read in the bit map.
 	((M-1) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
@@ -1123,14 +1206,21 @@ DISK-RESTORE-INCREMENTAL-CHECK
 	((M-1) M-I)
 	((M-B) A-ZERO)
 ;	((M-2) (A-CONSTANT 3))
-	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+;	((m-2) (a-constant low-pages-blocks))	;1024-word pages: 3 pages, 14 blocks
+	((m-2) (a-constant low-pages))		;quux revision 13: 3 pages
 	((M-C) (A-CONSTANT COPY-BUFFER-CCW-ORIGIN))
 	(CALL COLD-DISK-READ)
 ;Adjust M-I and M-J so that DISK-RESTORE-REGIONWISE will skip the bitmap & base band pages.
-	((M-I) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
-	((M-I) ADD M-I A-R)
-	((M-J) SUB M-J (A-CONSTANT INC-BAND-BITMAP-PAGE))
-	((M-J) SUB M-J A-R)
+;	((M-I) ADD M-I (A-CONSTANT INC-BAND-BITMAP-PAGE))
+;	((M-I) ADD M-I A-R)
+;	((M-J) SUB M-J (A-CONSTANT INC-BAND-BITMAP-PAGE))
+;	((M-J) SUB M-J A-R)
+	;; quux revision 13: in blocks, the bitmap's m-r pages 5 blocks each
+	((m-tem) dpb m-r (byte-field 30. 2) a-zero)
+	((m-tem) add m-tem a-r)
+	((m-tem) add m-tem (a-constant inc-band-bitmap-page))
+	((m-i) add m-i a-tem)
+	((m-j) sub m-j a-tem)
 ;Go restore the inc band.  M-K still has length in bits of bit map.
 	(JUMP DISK-RESTORE-REGIONWISE-INC)
 

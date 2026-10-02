@@ -8,7 +8,10 @@ CROSS-TREE and NATIVE-TREE each hold sys/ with sources and QFASLs (the cross
 build's served copy, and System 2000's release tree).  The LOG-DIRs hold the
 cross compile's logs, P*cross-NNNN.txt and P*cross-table.txt (check2.py).
 
-A FEF that differs is explained, word by word, when:
+A FEF that differs is explained as a whole function, not word by word, when
+the function shows one of these (this compares with System 2000's 32-bit
+QFASLs; G2 section 7's check (a), against a native build of the 40-bit
+machine, is same40.py, word by word):
   constant       the log shows a changing constant read or folded in its function
   float          it holds a float (IEEE single against this world's formats)
   lsh or rot     the log shows an LSH or ROT left to the target in its function

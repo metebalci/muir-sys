@@ -162,6 +162,29 @@ encodings. So:
   formats of `SYS2; NUMDEF`, the Chaosnet opcodes) takes the value of its
   `DEFCONSTANT` in the tree being built; the fixnum limits follow the
   target's pointer field.
+- **The tree's compile-time definitions.** A file compiled for the target
+  expands a macro, or open-codes a defsubst, with the definition in force where
+  it is compiled, which in the builder is System 2000's. `SYS: COLD; CROSSDEFS`
+  lists every compile-time definition of the tree whose text is not System
+  2000's; `tools/cross-check/crossdefs.py` writes it from the sources and
+  checks it before a cross build (`tools/cross-check/README.md`, "The tree's
+  definitions"). `cold:cross-begin` reads each listed definition from its file
+  and evaluates it as the compiler does inside a file it compiles, which
+  declares it and defines nothing; every compile for the target starts with
+  those declarations, which the compiler consults before the builder's own
+  definitions, and a listed name expanded without one stops the file
+  (`:DEFINITIONS`: check 1's identity control and 32-bit target pass `NIL`).
+  The list also holds every macro or defsubst of System 2000's text that
+  holds a float literal, which the builder read with its own floats.
+  Macros and defsubsts are given so; a changed structure or setf method
+  would still change the builder when evaluated, so `cross-begin` refuses
+  one until it is given another way.
+  No `#,` may sit in a compile-time definition: it puts in the value of the
+  world that reads it.
+- **The target's system constants.** Every symbol of the target's
+  system-constant lists (`QDEFS`) is a system constant while the cross build
+  runs, with its target value, so that the compiler folds it as a native
+  compile does (`DISK-BLOCKS-PER-PAGE`, which System 2000 does not have).
 - **One evaluator hook.** While a file compiles, every interpreted
   evaluation of one of those symbols takes the target's value. One with no
   target value stops the file, and its QFASL is not written, also when the
@@ -172,17 +195,32 @@ encodings. So:
   compiler knows each of the target's misc instructions with the target's
   opcode, and the FEF, FASL and character formats are the builder's.
 - **The compiler's own encodings** ask `compiler:target-value`: the fixnum
-  sign bit that marks a closure's local slots (`qcp1`), `LSH` and `ROT` left
-  for the target to compute (`qcopt`), floats as IEEE singles, float arrays
+  sign bit that marks a closure's local slots (`qcp1`), `LSH` and `ROT` of
+  constants folded on the target's fixnum, `SMALL-FLOAT` of a constant made
+  as the target's single, and a float prototype taken as the target's one
+  float, the short float (`qcopt`), floats as IEEE singles, float arrays
   refused, and the attribute `:WORD-WIDTH 40` on every file (`qcfasd`). A
   world's fasloader, and `MAKE-COLD`, refuse a file whose word is not
   theirs; the files of a 32-bit world carry no mark. The QFASL's first
   words stay as they are, since ozd and the file device tell a QFASL by
   them.
+- **Floats as the target holds them.** For a target whose one float is the
+  IEEE single (`compiler:target-one-float-p`), a float literal, also a short
+  one (`1.3s0`), is read with the tree's own exact reader
+  (`si:xr-float-bits`, which `cross-begin` compiles in the builder) as the
+  target reads it, and the value of a fold or of `#.` is rounded to the
+  target's single: System 2000's
+  short float has 17 bits of significand, and two literals that are one
+  float in the target must be one constant. A short float of the builder
+  that would still be dumped stops the file. A 32-bit target reads its floats
+  as the builder does.
 - **The builder never loads a 40-bit QFASL.** Where `MAKE-SYSTEM` loads
   one (the definition files of what it compiles), the builder compiles the
   same source for itself and loads that, so that the rest of the compile
-  sees the tree's definitions, as a native build's does. It tells a 40-bit
+  sees the tree's definitions, as a native build's does. `SYS2; NUMDEF` is
+  not loaded at all (`cold:*cross-unloaded-files*`): it redefines the
+  builder's float functions for the target's floats, and the compile's own
+  evaluations went wrong after it (a fold of `(sqrt 2)` gave an infinity). It tells a 40-bit
   file by its first bytes: reading the attribute list as the fasloader
   does, just before a load, was measured to change what the load does
   (a later compile of `SYS: FILE; LMPARS` then lost `LM-PATHNAME`'s
@@ -228,9 +266,25 @@ with `FONTS:CPTFONT` bound, so that the builder's own, larger font does not
 change, and writes it again for the target. The log directory gets
 `cross-NNNN.txt` for each file compiled: every read of a watched symbol at
 an interpreted point, with its target and builder values, every fold, every
-`#.` with its value, and every `LSH` or `ROT` left to the target; and
+`#.` with its value, and every expansion of a listed definition without
+its declaration (`D`); and
 `cross-write-table` writes the table. `cross-copy-partition` puts the cold
 load's pages in a file, for the host to read or to write into a GPT disk.
+
+**Open: the builder's definitions, in full.** The cross build gives a
+compile only the tree's definitions that differ from System 2000's or hold a
+float, and `MAKE-SYSTEM` still loads the builder's own compile of the
+tree's definition files (`SYS2; NUMDEF` apart), which replaces the
+builder's functions. The full fix gives every compile all of the tree's
+compile-time definitions as declarations, read from source and kept
+interpreted, and loads none. Measured on the cross build's builder: the
+tree has 1276 compile-time definitions, and declaring them all took 47
+minutes; `DEFSTRUCT`, evaluated as the compiler does, still redefines its
+structure in the builder; some definitions are not a symbol's own (setf
+methods, `CLMAC`'s alternate macros) and must be told apart; and the loads
+also give `DEFVAR`, `DEFFLAVOR` and package declarations, which would need
+their own way in. Several days of work; it is left for the next contract
+that needs a cross build, as it was decided to do it now only if cheap.
 
 ### Checking the cross build
 
@@ -282,14 +336,49 @@ the cross build (between `cold:cross-begin` and `cold:cross-end`):
   for each font of the `FONTS` system (`sys/sys/sysdcl.lisp`), and the same
   for `SYS: DEMO; TVBGAR` (`hacks::*tvbug-arrays*`, already special); WORMCH
   is made from its AST source as below, with `compiler:dump-forms-to-file`.
-- **`SYS: SYS; UCINIT`**, the microcompiler's initialisation, is compiled code
-  with no source and cannot be written again for 40 bits; a file that sets a
-  placeholder variable stands in for it, so the microcompiler is not ready.
+- **`SYS: SYS; UCINIT`** is compiled from its source like any other file
+  (`sys/sys/ucinit.lisp`, which records no microcompiled function); the
+  tracked `ucinit.qfasl` is System 100's 32-bit file and is not used here.
 - **The microcode's error table**, `SYS: UBIN; UCADR TBL`, of the microcode
   that runs.
 
 `QLD` then loads the inner system over MINI and the rest over FILE, as on
 revision 12, and `(si:disk-save "LOD4" t)` saves a band of format 2000.
+
+`MAKE-COLD` runs in a fresh session of the builder, primed again, after the
+whole cross compile: in the same session it stopped with "Unable to create a
+new region because the region tables are full" (1 October 2026).
+
+### The native rebuild on revision 13
+
+Once a 40-bit band exists, it builds the next one as System 2000's band built
+2000's, by the route at the top of this section ("Building a band on QUUX"),
+on `quux` at revision 13 (`MUIR_QUUX_REVISION=13`, PROM 2001 given with
+`--prom`, 32 M words), with microcode 2001's `ucadr.mcr` in MCR1 and its four
+files served in `SYS: UBIN;`. Contract G2's section 7 calls it step 5, and
+step 6 is the same again from step 5's band. What differs from 2000's:
+
+- **The served tree** is the sources with the 40-bit files that have no
+  source: the 35 fonts of the `FONTS` system, `CPTFON` and `SYS: DEMO;
+  TVBGAR`, as the cross build wrote them ("Loading the 40-bit cold load");
+  the tree's own are 32-bit files, which a 40-bit world's fasloader refuses.
+- **The whole compile** is 2000's (`SYSDCL`, the `ALLDEFS` files, the site,
+  the readtables, `WORMCH` from its AST, then `MAKE-SYSTEM` with
+  `:RECOMPILE`), and `MAKE-COLD` runs in the 40-bit world: it moves a page
+  through a one-page RQB by the packed transfer, 5 blocks
+  (`sys/cold/coldut.lisp`, `VMEM-NATIVE-PACKED-IO`).
+- **One TELNET session for each boot of the builder.** The first 40-bit
+  band halted at the end of a session, whose process is interrupted:
+  `EH::SG-SAVE-STATE` took a register of all ones in a stack group's leader
+  for a pointer (`SI:%POINTER-TYPE-P`, fixed in `sys/sys2/lmmac.lisp`). A
+  builder made before that fix gets a fixed `SG-SAVE-STATE` typed into the
+  session first, in package `EH`, and compiled, before it logs in.
+
+Measured on 1 October 2026 (`micro`; the builder the first 40-bit band, Y4's,
+on microcode 2001): the whole compile 1 h 40 min (218 files), `MAKE-COLD`
+10 min 50 s, the cold boot's `QLD` 12 min 41 s, the save 1 min; the saved
+band, 23,430 blocks, boots as "Experimental System 2001, Microcode 2001,
+Machine Type QUUX".
 
 ### A band of 1024-word pages for revision 12
 

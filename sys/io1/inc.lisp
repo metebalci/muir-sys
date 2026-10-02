@@ -10,6 +10,29 @@
 ;;; the pages are compared a page at a time and their mask bits set four at a
 ;;; time; the three special blocks and the mask are written in one transfer,
 ;;; since a transfer is whole pages.
+;;; quux revision 13: a band's page is disk-blocks-per-packed-page (5) blocks,
+;;; whole 40-bit words, as the microcode saves and restores it, so mit's page
+;;; layout comes back in pages of 5 blocks: page 3 (block 15) the base band's
+;;; name and the mask's length in bits, page 4 (block 20) the base band's
+;;; region-free-pointer page, page 5 (block 25) on the mask, a bit a page
+;;; (uc-cold-disk's inc-band- constants).  these pages are written and read
+;;; packed, and a page is compared whole, tags included: the 16-bit view sees
+;;; only <31:0>, so a page whose words changed only in their tags was taken as
+;;; unchanged and not saved (compare-range).
+(defconst inc-band-base-data-page 3 "The incremental band's page with the base band's name and the mask's length.")
+(defconst inc-band-base-free-pointers-page 4 "The incremental band's page with the base band's region-free-pointer page.")
+(defconst inc-band-bitmap-page 5 "The incremental band's first page of the mask.")
+
+(defun rqb-data-pointer (rqb &optional (page 0))
+  "A locative to the first word of page PAGE of RQB's data (as wire-disk-rqb finds it)."
+  (%make-pointer dtp-locative
+		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- page-size))
+		    (* (1+ page) page-size))))
+
+(defun band-page-block (part-base page)
+  "The first disk block of page PAGE of the 40-bit band at PART-BASE."
+  (+ part-base (* page disk-blocks-per-packed-page)))
+
 (defun disk-save-incremental (dumped-partition-base
 			      &aux
 			      (booted-band-name
@@ -34,14 +57,16 @@
     (unwind-protect
 	(progn
 	  (setq system-communication-area-rqb (get-disk-rqb))
-	  (disk-read system-communication-area-rqb 0
-		     ;; Disk address of partition's SYSTEM-COMMUNICATION-AREA
+;	  (disk-read system-communication-area-rqb 0
+;		     ;; Disk address of partition's SYSTEM-COMMUNICATION-AREA
+;;		     (+ booted-partition-base
+;;			(floor (region-origin system-communication-area)
+;;			       page-size)))
 ;		     (+ booted-partition-base
-;			(floor (region-origin system-communication-area)
-;			       page-size)))
-		     (+ booted-partition-base
-			(* disk-blocks-per-page
-			   (floor (region-origin system-communication-area) page-size))))
+;			(* disk-blocks-per-page
+;			   (floor (region-origin system-communication-area) page-size))))
+	  ;; quux revision 13: the band's page 1, read packed
+	  (read-band-sys-com system-communication-area-rqb 0 booted-partition-base)
 ;	  (unless (= 1000 (aref (rqb-buffer system-communication-area-rqb)
 ;				(* 2 %sys-com-band-format)))
 	  (unless (= band-format-compressed (aref (rqb-buffer system-communication-area-rqb)
@@ -110,55 +135,102 @@
 ;      (and mask-rqb (return-disk-rqb mask-rqb))
 ;      (and base-band-data-rqb (return-disk-rqb base-band-data-rqb))
 ;      (and region-free-pointer-rqb (return-disk-rqb region-free-pointer-rqb)))))
-  ;; 1024-word pages (contract g2, option (w)): see above.  the mask has a bit
-  ;; for each block of virtual memory; one rqb holds block 14, block 15 and
-  ;; the mask, written at block 14 of the new band.
-  (let* ((block-words (disk-block-words))
-	 (n-mask-bits (* (ceiling virtual-memory-size page-size) disk-blocks-per-page))
-	 (n-mask-blocks (ceiling n-mask-bits (* 32. block-words)))
+;  ;; 1024-word pages (contract g2, option (w)): see above.  the mask has a bit
+;  ;; for each block of virtual memory; one rqb holds block 14, block 15 and
+;  ;; the mask, written at block 14 of the new band.
+;  (let* ((block-words (disk-block-words))
+;	 (n-mask-bits (* (ceiling virtual-memory-size page-size) disk-blocks-per-page))
+;	 (n-mask-blocks (ceiling n-mask-bits (* 32. block-words)))
+;	 (rqb nil)
+;	 (region-free-pointer-rqb nil))
+;    (unwind-protect
+;	(progn
+;	  (setq rqb (get-disk-rqb (ceiling (+ 2 n-mask-blocks) disk-blocks-per-page)))
+;	  (setq region-free-pointer-rqb (get-disk-rqb 1))
+;	  (let* ((page-mask (compare-memory-with-partition booted-band-name))
+;		 (mask (make-array n-mask-bits ':type art-1b))
+;		 (mask-indirect-array
+;		   (make-array (ceiling n-mask-bits 16.) ':type art-16b
+;			       ':displaced-to mask)))
+;	    ;; a page's bit to each of its blocks'
+;	    (dotimes (page (array-length page-mask))
+;	      (unless (zerop (aref page-mask page))
+;		(dotimes (k disk-blocks-per-page)
+;		  (setf (aref mask (+ (* page disk-blocks-per-page) k)) 1))))
+;	    (array-initialize (rqb-buffer rqb) 0)
+;	    ;; block 14: the base band's name and the mask's length in bits.
+;	    (put-disk-string rqb booted-band-name 0 4)
+;	    (put-disk-fixnum rqb (array-length mask) 10)
+;	    ;; block 15: the first block of the base band's region-free-pointer,
+;	    ;; for use in error checking when this new band gets loaded.
+;	    (disk-read region-free-pointer-rqb 0
+;		       ;; disk address of partition's region-free-pointer area
+;		       (+ booted-partition-base
+;			  (* disk-blocks-per-page
+;			     (floor (- (region-origin region-free-pointer)
+;				       (region-length micro-code-symbol-area))
+;				    page-size))))
+;	    (copy-array-portion (rqb-buffer region-free-pointer-rqb) 0 (* 2 block-words)
+;				(rqb-buffer rqb) (* 2 block-words) (* 4 block-words))
+;	    ;; block 16 on: the mask.
+;	    (copy-array-portion mask-indirect-array 0 (array-length mask-indirect-array)
+;				(rqb-buffer rqb) (* 4 block-words)
+;				(+ (* 4 block-words) (array-length mask-indirect-array)))
+;	    (disk-write rqb 0 (+ dumped-partition-base 14))
+;	    ;; Return the number of blocks we DON'T have to put in the dumped band.
+;	    (multiple-value-bind (nil tem)
+;		(count-changed-pages page-mask)
+;	      (- (* tem disk-blocks-per-page) n-mask-blocks 2))))
+;      (and rqb (return-disk-rqb rqb))
+;      (and region-free-pointer-rqb (return-disk-rqb region-free-pointer-rqb)))))
+
+  ;; quux revision 13: pages of 5 blocks, packed (see the top of the file).
+  ;; the mask has a bit a page of virtual memory; one rqb holds pages 3 and 4
+  ;; and the mask, written packed at page 3 of the new band.  the pages of the
+  ;; region tables, which the microcode's restore reads before it reads the
+  ;; bitmap (disk-restore-regionwise-subr), are always saved: omitted, the
+  ;; restore would take the next page saved for them.
+  (let* ((n-mask-bits (ceiling virtual-memory-size page-size))
+	 (n-mask-pages (ceiling n-mask-bits (* 32. page-size)))
 	 (rqb nil)
 	 (region-free-pointer-rqb nil))
     (unwind-protect
 	(progn
-	  (setq rqb (get-disk-rqb (ceiling (+ 2 n-mask-blocks) disk-blocks-per-page)))
+	  (setq rqb (get-disk-rqb (+ 2 n-mask-pages)))
 	  (setq region-free-pointer-rqb (get-disk-rqb 1))
-	  (let* ((page-mask (compare-memory-with-partition booted-band-name))
-		 (mask (make-array n-mask-bits ':type art-1b))
+	  (let* ((mask (compare-memory-with-partition booted-band-name))
 		 (mask-indirect-array
-		   (make-array (ceiling n-mask-bits 16.) ':type art-16b
+		   (make-array (ceiling (array-length mask) 16.) ':type art-16b
 			       ':displaced-to mask)))
-	    ;; a page's bit to each of its blocks'
-	    (dotimes (page (array-length page-mask))
-	      (unless (zerop (aref page-mask page))
-		(dotimes (k disk-blocks-per-page)
-		  (setf (aref mask (+ (* page disk-blocks-per-page) k)) 1))))
+	    (dolist (area (list region-origin region-length region-bits region-free-pointer))
+	      (setf (aref mask (floor (region-origin area) page-size)) 0))
 	    (array-initialize (rqb-buffer rqb) 0)
-	    ;; block 14: the base band's name and the mask's length in bits.
+	    ;; page 3: the base band's name and the mask's length in bits.
 	    (put-disk-string rqb booted-band-name 0 4)
 	    (put-disk-fixnum rqb (array-length mask) 10)
-	    ;; block 15: the first block of the base band's region-free-pointer,
+	    ;; page 4: the base band's region-free-pointer page, whole words,
 	    ;; for use in error checking when this new band gets loaded.
-	    (disk-read region-free-pointer-rqb 0
-		       ;; disk address of partition's region-free-pointer area
-		       (+ booted-partition-base
-			  (* disk-blocks-per-page
-			     (floor (- (region-origin region-free-pointer)
-				       (region-length micro-code-symbol-area))
-				    page-size))))
-	    (copy-array-portion (rqb-buffer region-free-pointer-rqb) 0 (* 2 block-words)
-				(rqb-buffer rqb) (* 2 block-words) (* 4 block-words))
-	    ;; block 16 on: the mask.
+	    (let ((*disk-transfer-packed* t))
+	      (disk-read region-free-pointer-rqb 0
+			 (band-page-block booted-partition-base
+					  (floor (- (region-origin region-free-pointer)
+						    (region-length micro-code-symbol-area))
+						 page-size))))
+	    (%blt (rqb-data-pointer region-free-pointer-rqb) (rqb-data-pointer rqb 1)
+		  page-size 1)
+	    ;; page 5 on: the mask.
 	    (copy-array-portion mask-indirect-array 0 (array-length mask-indirect-array)
-				(rqb-buffer rqb) (* 4 block-words)
-				(+ (* 4 block-words) (array-length mask-indirect-array)))
-	    (disk-write rqb 0 (+ dumped-partition-base 14))
+				(rqb-buffer rqb) (* 4 page-size)
+				(+ (* 4 page-size) (array-length mask-indirect-array)))
+	    (let ((*disk-transfer-packed* t))
+	      (disk-write rqb 0 (band-page-block dumped-partition-base inc-band-base-data-page)))
 	    ;; Return the number of blocks we DON'T have to put in the dumped band.
 	    (multiple-value-bind (nil tem)
-		(count-changed-pages page-mask)
-	      (- (* tem disk-blocks-per-page) n-mask-blocks 2))))
+		(count-changed-pages mask)
+	      (* disk-blocks-per-packed-page (- tem n-mask-pages 2)))))
       (and rqb (return-disk-rqb rqb))
       (and region-free-pointer-rqb (return-disk-rqb region-free-pointer-rqb)))))
-
+
 (defun inc-band-base-band (band unit)
   "Find and check base band of an incremental band named BAND on UNIT (a decoded unit arg).
 First value is name of base band, a string.
@@ -183,7 +255,10 @@ Both values are NIL if the specified band doesn't appear
 	  ;; incremental-band-not-supported), so the rest is revision 12's.
 	  (read-band-sys-com rqb1 unit part-base)
 	  (when (= (get-disk-fixnum rqb1 %sys-com-band-format) band-format-incremental)
-	    (disk-read rqb1 unit (+ part-base 14))
+;	    (disk-read rqb1 unit (+ part-base 14))
+	    ;; quux revision 13: the band's page 3, packed (top of the file)
+	    (let ((*disk-transfer-packed* t))
+	      (disk-read rqb1 unit (band-page-block part-base inc-band-base-data-page)))
 	    (setq base-band-name (get-disk-string rqb1 0 4))
 	    (multiple-value (base-band-base base-band-size)
 	      (find-disk-partition base-band-name nil unit))
@@ -195,16 +270,28 @@ Both values are NIL if the specified band doesn't appear
 ;							(region-length micro-code-symbol-area))
 ;						     page-size)))
 ;		      (string-equal (rqb-8-bit-buffer rqb1) (rqb-8-bit-buffer rqb2))))))
-		      ;; the copy is one block, the 256 regions' free pointers
-		      (disk-read rqb1 unit (+ part-base 15))
-		      (disk-read rqb2 unit (+ base-band-base
-					      (* disk-blocks-per-page
-						 (floor (- (region-origin region-free-pointer)
-							   (region-length micro-code-symbol-area))
-							page-size))))
-		      (let ((bytes (* 4 (disk-block-words))))
-			(string-equal (rqb-8-bit-buffer rqb1) (rqb-8-bit-buffer rqb2)
-				      0 0 bytes bytes))))))
+;		      ;; the copy is one block, the 256 regions' free pointers
+;		      (disk-read rqb1 unit (+ part-base 15))
+;		      (disk-read rqb2 unit (+ base-band-base
+;					      (* disk-blocks-per-page
+;						 (floor (- (region-origin region-free-pointer)
+;							   (region-length micro-code-symbol-area))
+;							page-size))))
+;		      (let ((bytes (* 4 (disk-block-words))))
+;			(string-equal (rqb-8-bit-buffer rqb1) (rqb-8-bit-buffer rqb2)
+;				      0 0 bytes bytes))))))
+		      ;; quux revision 13: the copy is the band's page 4, the base
+		      ;; band's region-free-pointer page whole; both read packed, and
+		      ;; their <31:0>, the free pointers, compared
+		      (let ((*disk-transfer-packed* t))
+			(disk-read rqb1 unit (band-page-block part-base inc-band-base-free-pointers-page))
+			(disk-read rqb2 unit (band-page-block
+					       base-band-base
+					       (floor (- (region-origin region-free-pointer)
+							 (region-length micro-code-symbol-area))
+						      page-size))))
+		      (string-equal (rqb-8-bit-buffer rqb1) (rqb-8-bit-buffer rqb2)
+				    0 0 (* 4 page-size) (* 4 page-size))))))
       (and rqb1 (return-disk-rqb rqb1))
       (and rqb2 (return-disk-rqb rqb2)))))
 
@@ -255,20 +342,32 @@ pages not currently in use, and pages which have no data in the disk partition."
 ;			       page-size)))
 	  ;; 1024-word pages (contract g2, option (w)): a band's page n is at
 	  ;; block n * disk-blocks-per-page
-	  (disk-read region-free-pointer-rqb unit
-		     ;; disk address of partition's region-free-pointer area
-		     (+ part-base
-			(* disk-blocks-per-page
-			   (floor (- (region-origin region-free-pointer)
-				     (region-length micro-code-symbol-area))
-				  page-size))))
-	  (disk-read region-bits-rqb unit
-		     ;; disk address of partition's region-bits area
-		     (+ part-base
-			(* disk-blocks-per-page
-			   (floor (- (region-origin region-bits)
-				     (region-length micro-code-symbol-area))
-				  page-size))))
+;	  (disk-read region-free-pointer-rqb unit
+;		     ;; disk address of partition's region-free-pointer area
+;		     (+ part-base
+;			(* disk-blocks-per-page
+;			   (floor (- (region-origin region-free-pointer)
+;				     (region-length micro-code-symbol-area))
+;				  page-size))))
+;	  (disk-read region-bits-rqb unit
+;		     ;; disk address of partition's region-bits area
+;		     (+ part-base
+;			(* disk-blocks-per-page
+;			   (floor (- (region-origin region-bits)
+;				     (region-length micro-code-symbol-area))
+;				  page-size))))
+	  ;; quux revision 13: pages of 5 blocks, read packed (band-page-block)
+	  (let ((*disk-transfer-packed* t))
+	    (disk-read region-free-pointer-rqb unit
+		       (band-page-block part-base
+					(floor (- (region-origin region-free-pointer)
+						  (region-length micro-code-symbol-area))
+					       page-size)))
+	    (disk-read region-bits-rqb unit
+		       (band-page-block part-base
+					(floor (- (region-origin region-bits)
+						  (region-length micro-code-symbol-area))
+					       page-size))))
 	  (do ((region-number 0 (1+ region-number))
 	       (region-page-on-disk part-base))
 	      ((= region-number (array-length #'region-origin)))
@@ -317,8 +416,11 @@ pages not currently in use, and pages which have no data in the disk partition."
 ;		      (+ region-page-on-disk region-disk-pages)))))
 		;; 1024-word pages (contract g2, option (w)): its pages' blocks;
 		;; region-page-on-disk is a block
+;		(setq region-page-on-disk
+;		      (+ region-page-on-disk (* region-disk-pages disk-blocks-per-page))))))
+		;; quux revision 13: 5 blocks a page, packed
 		(setq region-page-on-disk
-		      (+ region-page-on-disk (* region-disk-pages disk-blocks-per-page))))))
+		      (+ region-page-on-disk (* region-disk-pages disk-blocks-per-packed-page))))))
 	  mask)
       ;; Return all our RQBs that we succeeded in getting.
       (and region-free-pointer-rqb
@@ -336,23 +438,54 @@ pages not currently in use, and pages which have no data in the disk partition."
 ;RQB is an rqb COMPARISON-PAGE-QUANTUM pages long, used to read disk data into.
 ;All pages that match are marked by storing a 1 into the array MASK
 ;at an index equal to the page number in memory.
+;(defun compare-range (rqb unit address page stop-page mask)
+;  (do ((page-number page (+ page-number comparison-page-quantum)))
+;      ((>= page-number stop-page))
+;;    (disk-read rqb unit (+ address (- page-number page)))
+;    ;; 1024-word pages (contract g2, option (w)): address is a block, and a
+;    ;; page disk-blocks-per-page blocks
+;    (disk-read rqb unit (+ address (* disk-blocks-per-page (- page-number page))))
+;    (do ((i 0 (1+ i))) ((or (= i comparison-page-quantum) (= (+ page-number i) stop-page)))
+;      ;; Redirect compare-page-indirect-array to point at this page of virtual memory.
+;      (%p-dpb-offset (lsh (+ i page-number) page-size-bits)
+;		     %%q-pointer compare-page-indirect-array
+;		     (%p-ldb-offset %%array-number-dimensions compare-page-indirect-array 0))
+;      (if (%string-equal (rqb-buffer rqb)
+;			 (lsh i (1+ page-size-bits))  ;(* i page-size 2)
+;			 compare-page-indirect-array 0
+;			 (lsh page-size 1))
+;	  (setf (aref mask (+ i page-number)) 1)))))
+;; quux revision 13: the band's pages are read packed, 5 blocks each, whole
+;; words, and a page is the same only if its words' tags are too: the 16-bit
+;; view compares <31:0>, and the tags, <39:32>, are compared word by word
+;; (page-tags-equal).
 (defun compare-range (rqb unit address page stop-page mask)
-  (do ((page-number page (+ page-number comparison-page-quantum)))
-      ((>= page-number stop-page))
-;    (disk-read rqb unit (+ address (- page-number page)))
-    ;; 1024-word pages (contract g2, option (w)): address is a block, and a
-    ;; page disk-blocks-per-page blocks
-    (disk-read rqb unit (+ address (* disk-blocks-per-page (- page-number page))))
-    (do ((i 0 (1+ i))) ((or (= i comparison-page-quantum) (= (+ page-number i) stop-page)))
-      ;; Redirect compare-page-indirect-array to point at this page of virtual memory.
-      (%p-dpb-offset (lsh (+ i page-number) page-size-bits)
-		     %%q-pointer compare-page-indirect-array
-		     (%p-ldb-offset %%array-number-dimensions compare-page-indirect-array 0))
-      (if (%string-equal (rqb-buffer rqb)
-			 (lsh i (1+ page-size-bits))  ;(* i page-size 2)
-			 compare-page-indirect-array 0
-			 (lsh page-size 1))
-	  (setf (aref mask (+ i page-number)) 1)))))
+  (let ((data (rqb-data-pointer rqb)))
+    (do ((page-number page (+ page-number comparison-page-quantum)))
+	((>= page-number stop-page))
+      (let ((*disk-transfer-packed* t))
+	(disk-read rqb unit (+ address (* disk-blocks-per-packed-page (- page-number page)))))
+      (do ((i 0 (1+ i))) ((or (= i comparison-page-quantum) (= (+ page-number i) stop-page)))
+	;; Redirect compare-page-indirect-array to point at this page of virtual memory.
+	(%p-dpb-offset (lsh (+ i page-number) page-size-bits)
+		       %%q-pointer compare-page-indirect-array
+		       (%p-ldb-offset %%array-number-dimensions compare-page-indirect-array 0))
+	(if (and (%string-equal (rqb-buffer rqb)
+				(lsh i (1+ page-size-bits))  ;(* i page-size 2)
+				compare-page-indirect-array 0
+				(lsh page-size 1))
+		 (page-tags-equal (%make-pointer-offset dtp-locative data (lsh i page-size-bits))
+				  (%make-pointer dtp-locative (lsh (+ i page-number) page-size-bits))))
+	    (setf (aref mask (+ i page-number)) 1))))))
+
+(defun page-tags-equal (a b)
+  "T if the page of words at A and the one at B have the same tags, <39:32>, word for word.
+Neither word is looked at as an object (%p-ldb, not %p-ldb-offset, which reads
+the word at its pointer as a header and transports it)."
+  (dotimes (w page-size t)
+    (unless (= (%p-ldb #o4010 (%make-pointer-offset dtp-locative a w))
+	       (%p-ldb #o4010 (%make-pointer-offset dtp-locative b w)))
+      (return nil))))
 
 (defun count-changed-pages (mask)
   "Return number of pages in use and marked with zero in MASK.

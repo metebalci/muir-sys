@@ -734,10 +734,33 @@ the name of a command, and remaining elements are parameters."
 
 ;(DEFPROP F FORMAT-CTL-HAIRY-F-FORMAT FORMAT-CTL-COMMON-LISP-ONE-ARG)
 (DEFPROP F FORMAT-CTL-HAIRY-F-FORMAT FORMAT-CTL-ONE-ARG)
+;; quux revision 13 (contract g1 2.4): an ieee single's infinity (or a nan,
+;; which arithmetic takes as one) has no digits for ~f, ~e or ~g to lay out:
+;; si::scale-flonum ran past its table of powers of ten, and ~f printed a
+;; string of digits, ~e a wrong number.  it is printed as print-flonum prints
+;; it, the constant that reads back as it, right-justified in the field's width,
+;; or as the field's overflow characters when it does not fit and they are given.
+(defun format-infinity-p (arg)
+  ;; the single is the one float (contract g1 2.4): its field holds the bits
+  (and (floatp arg)
+       (= (ldb #o2710 (%pointer arg)) #o377)))
+
+(defun format-ctl-infinity (arg width overflowchar padchar)
+  (let ((length (flatsize arg)))
+    (cond ((and width overflowchar (> length width))
+	   (dotimes (i width)
+	     (send *standard-output* :tyo overflowchar)))
+	  (t (when width
+	       (dotimes (i (- width length))
+		 (send *standard-output* :tyo (or padchar #/space))))
+	     (prin1 arg)))))
+
 (DEFUN FORMAT-CTL-HAIRY-F-FORMAT (ARG PARAMS)
   (AND (RATIONALP ARG) (SETQ ARG (FLOAT ARG)))
   (IF (NOT (FLOATP ARG))
       (FORMAT-CTL-DECIMAL ARG (LIST (CAR PARAMS)))
+   (if (format-infinity-p arg)		;quux revision 13, above
+       (format-ctl-infinity arg (car params) (fourth params) (fifth params))
     (PROG* ((WIDTH (CAR PARAMS))
 	    (AFTER-DECIMAL (CADR PARAMS))
 	    (SCALE (CADDR PARAMS))
@@ -765,7 +788,7 @@ the name of a command, and remaining elements are parameters."
 	    (COND ((MINUSP ARG) (SEND *STANDARD-OUTPUT* :TYO #/-))
 		  (ATSIGN-FLAG (SEND *STANDARD-OUTPUT* :TYO #/+)))
 	    (SEND *STANDARD-OUTPUT* :STRING-OUT BUFFER)
-	    (RETURN-ARRAY (PROG1 BUFFER (SETQ BUFFER NIL)))))))
+	    (RETURN-ARRAY (PROG1 BUFFER (SETQ BUFFER NIL))))))))
 
 ;(DEFPROP F FORMAT-CTL-F-FORMAT FORMAT-CTL-ONE-ARG)
 ;(DEFUN FORMAT-CTL-F-FORMAT (ARG PARAMS)
@@ -781,6 +804,8 @@ the name of a command, and remaining elements are parameters."
   (AND (RATIONALP ORIGINAL-ARG) (SETQ ORIGINAL-ARG (FLOAT ORIGINAL-ARG)))
   (IF (NOT (FLOATP ORIGINAL-ARG))
       (FORMAT-CTL-DECIMAL ORIGINAL-ARG (LIST (CAR PARAMS)))
+   (if (format-infinity-p original-arg)	;quux revision 13 (format-infinity-p)
+       (format-ctl-infinity original-arg (car params) (fifth params) (sixth params))
     (PROG* ((WIDTH (CAR PARAMS))
 	    (AFTER-DECIMAL (CADR PARAMS))
 	    (EXPONENT-DIGITS (THIRD PARAMS))
@@ -794,7 +819,11 @@ the name of a command, and remaining elements are parameters."
 	    EXTRA-ZERO
 	    ARG)
 	RETRY
-	   (SETF (VALUES ARG EXPONENT) (SI::SCALE-FLONUM (ABS ORIGINAL-ARG)))
+	   ;; si::scale-flonum takes a negative number (its comment, sys; io; print):
+	   ;; given the positive one, it scaled up past its table of powers of ten,
+	   ;; so ~e of any float stopped with a subscript or overflow error.
+;	   (SETF (VALUES ARG EXPONENT) (SI::SCALE-FLONUM (ABS ORIGINAL-ARG)))
+	   (setf (values arg exponent) (si::scale-flonum (- (abs original-arg))))
 	   ;; If user does not specify number of exponent digits, guess.
 	   (UNLESS EXPONENT-DIGITS
 	     (SETQ EXPONENT-DIGITS
@@ -874,7 +903,7 @@ the name of a command, and remaining elements are parameters."
 		   (IF (MINUSP EXPONENT) #/- #/+))
 	     (LET (ATSIGN-FLAG COLON-FLAG)
 	       (FORMAT-CTL-DECIMAL (ABS EXPONENT) (LIST EXPONENT-DIGITS #/0)))
-	     (RETURN-ARRAY (PROG1 BUFFER (SETQ BUFFER NIL)))))))
+	     (RETURN-ARRAY (PROG1 BUFFER (SETQ BUFFER NIL))))))))
 
 ;(DEFPROP E FORMAT-CTL-E-FORMAT FORMAT-CTL-ONE-ARG)
 ;(DEFUN FORMAT-CTL-E-FORMAT (ARG PARAMS)
@@ -895,6 +924,8 @@ the name of a command, and remaining elements are parameters."
     (AND (RATIONALP ARG) (SETQ ARG (FLOAT ARG)))
     (IF (NOT (FLOATP ARG))
 	(FORMAT-CTL-DECIMAL ARG (LIST (CAR PARAMS)))
+     (if (format-infinity-p arg)		;quux revision 13 (format-infinity-p)
+	 (format-ctl-infinity arg (car params) (fifth params) (sixth params))
       (PROG* ((WIDTH (CAR PARAMS))
 	      (AFTER-DECIMAL (CADR PARAMS))
 	      (EXPONENT-DIGITS (OR (THIRD PARAMS) 2))
@@ -908,10 +939,14 @@ the name of a command, and remaining elements are parameters."
 	      DECIMALS-NEEDED-IF-FIXED
 	      (NEGATIVE (MINUSP ARG))
 	      )
-	     (MULTIPLE-VALUE (NIL EXPONENT) (SI::SCALE-FLONUM (ABS ARG)))
+	     ;; si::scale-flonum takes a negative number, as in ~e above
+;	     (MULTIPLE-VALUE (NIL EXPONENT) (SI::SCALE-FLONUM (ABS ARG)))
+	     (multiple-value (nil exponent) (si::scale-flonum (- (abs arg))))
 	     (UNLESS AFTER-DECIMAL
 	       ;; If number of sig figs not specified, compute # digits needed for fixed format.
-	       (IF (> (ABS EXPONENT) WIDTH)
+	       ;; with no width given, width is nil and > stopped on it
+;	       (IF (> (ABS EXPONENT) WIDTH)
+	       (if (and width (> (abs exponent) width))
 		   ;; If it's going to be gross, don't bother.
 		   ;; We know that E format will be used, so go use it.
 		   (RETURN (FORMAT-CTL-HAIRY-E-FORMAT ARG PARAMS)))
@@ -933,7 +968,7 @@ the name of a command, and remaining elements are parameters."
 			   NIL OVERFLOWCHAR PADCHAR))
 		   (DOTIMES (I EXPONENT-WIDTH)
 		     (SEND *STANDARD-OUTPUT* :TYO #/SPACE)))
-	       (FORMAT-CTL-HAIRY-E-FORMAT ARG PARAMS))))
+	       (FORMAT-CTL-HAIRY-E-FORMAT ARG PARAMS)))))
     (CDR ARGS)))
 
 ;;; This doesn't support RDIG being 0.  That would be nice, but is complicated.
@@ -943,7 +978,11 @@ the name of a command, and remaining elements are parameters."
 	(LDIG (OR (SECOND PARAMS) 1))		;At least this many to left of decimal
 	(FIELD (THIRD PARAMS))			;Right-justify in field this wide
 	(PADCHAR (OR (FOURTH PARAMS) #/SPACE)))	;Padding with this
-    (COND ((OR (NOT (NUMBERP ARG)) (> (ABS ARG) 1e50))
+    ;; quux revision 13: an infinity is printed as the printer prints it
+    ;; (format-infinity-p); a single's 1e50 is itself an infinity, which no
+    ;; float exceeds, so the test below no longer caught it.
+;    (COND ((OR (NOT (NUMBERP ARG)) (> (ABS ARG) 1e50))
+    (cond ((or (not (numberp arg)) (format-infinity-p arg) (> (abs arg) 1e50))
 	   (FORMAT-CTL-JUSTIFY FIELD (FLATC ARG) PADCHAR)
 	   (PRINC ARG))
 	  (T (OR (FLOATP ARG) (SETQ ARG (FLOAT ARG)))

@@ -88,9 +88,58 @@ And the controls and encodings:
   - floats are IEEE singles, and the cases check IEEE 754's rounding at its
     edges and back;
   - integers up to 2^31 are kept;
+  - floats keep their encodings after the builder loads the tree's
+    `SYS2; NUMDEF`, as `cross-begin` does (the encoder reads the
+    builder's floats from their bits, not through `INTEGER-DECODE-FLOAT`,
+    which that file redefines for IEEE singles);
+  - a character is its field's bits, unsigned: a mouse character, bit 24 set,
+    is 16777248 in the 40-bit file, not this world's negative field;
   - `LSH` is left unfolded and `ASH` folded;
   - the file carries the mark `:WORD-WIDTH 40`, and a 32-bit file none.
 - **The planted fold** (`lisp/planted.lisp`) holds 1048576 and 32.
+- **The tree's definitions** (`lisp/defs.lisp`), compiled for the 40-bit
+  machine: `%SHORT-FLOAT-EXPONENT`, a defsubst of `SYS2; NUMDEF`, is
+  open-coded with the tree's byte, `#o2710`, not System 2000's, `#o2110`; and
+  the macro `FIXNUM-READ-METER-FOR-SCHEDULER` pushes the target's byte,
+  `#o37`, not the builder's, `#o30`; and what the compiler decides by the
+  target's values (a table constant folded, `LSH` and `ROT` folded on the
+  target's fixnum, `SMALL-FLOAT` folded and a float prototype taken as the
+  target's single), its floats (short literals, a listed defsubst's float,
+  two literals of one target float as one constant, a long literal read
+  exactly, as the tree's reader reads it, and `1.570796326` and
+  `1.5707963185` as one constant, `(sqrt 2)` after
+  `NUMDEF` was met), and `lisp/shortfloat.lisp`, whose short float of the
+  builder stops it. A copy of the tree with these fixes undone fails each.
+- **The fail-closed check of the definitions**: with `NUMDEF`'s definitions
+  left out (`:definitions '(:omit "SYS: SYS2; NUMDEF")`) but still checked,
+  the compile of `SYS: SYS; QFASL` stops, and no QFASL is written.
+
+## The tree's definitions
+
+A file compiled for the target expands a macro, or open-codes a defsubst, with
+the definition in force where it is compiled, which in the builder is System
+2000's unless the compile is given the tree's. `crossdefs.py TREE BASE --lisp
+sys/cold/crossdefs.lisp` lists every compile-time definition of the tree
+(`DEFMACRO`, `DEFSUBST`, `DEFSETF`, `DEFINE-SETF-METHOD`, `DEFSTRUCT`,
+`DEFF-MACRO` and the like, at top level or inside `EVAL-WHEN` and `PROGN`) whose
+text is not System 2000's (BASE: muir-sim's `ref/band-2000/tree-2000.tar.gz`
+unpacked): new, changed, or gone; and every macro or defsubst of System 2000's
+text that holds a float literal (`:floats`), which the builder read with its
+own floats. The text is compared as tokens, comments
+dropped, case folded outside strings, and a file that does not parse into whole
+forms stops the script. `cold:cross-begin` reads each listed definition from
+its file and evaluates it as the compiler does inside a file it compiles, which
+declares it and defines nothing; every compile for the target starts with
+those declarations, and the builder's own definitions do not change. A listed
+name that expands without such a declaration stops the file.
+
+Before a check that cross-builds, `run` checks with `--check` that
+`sys/cold/crossdefs.lisp` is what the sources give, and runs `--census`: no
+`#,` may sit inside a compile-time definition, since `#,` puts in the value of
+the world that reads it, the builder's; it also lists the new or changed
+constants (`--table` the cross table: those whose form reads a constant the
+target changes). A copy of the tree with `PRODEF`'s old macro, which used
+`#,(1- %%Q-POINTER)`, is listed and fails.
 
 ## Check 3: the 40-bit cold load
 
@@ -166,3 +215,30 @@ them alone into a band built before the cross build (System 2000's), give
 sys/sys/qcdefs.lisp,sys/sys/qcopt.lisp ...`. Without it, a constant fold in
 the patched band signals that `*CROSS-TARGET*` is unbound, and with `qcfasd`
 alone every `QC-FILE` fails.
+
+## Comparing two builds of the 40-bit machine: `same40.py`
+
+`same40.py [--floats] [--sources] TREE-A TREE-B` decodes each QFASL of one
+tree's `sys/` and `site/` with its counterpart in the other (`qfasl.py`) and
+compares them word by word, with the attribute list's compile data (time,
+version, user, machine, site) dropped and its order ignored, and generated
+symbols' numbers, `EXPR-SXHASH` values, in a FEF's local map the numbers
+that end `GENTEMP`'s names (a counter of the session), and in the file's
+record of the macros it expanded the hashes of their definitions normalised; every FEF's words and
+instructions, every array and every evaluation must be equal, floats by their
+binary32 bits. With `--floats` a float may differ from its counterpart by one
+unit in the last place, as the cross build's literals, rounded through the
+builder's floats, may; each such float is listed (`FLOAT` lines), and every
+other word of its item must still be equal. With `--sources` a file whose
+source differs between the trees is listed apart (`SOURCE`). Contract G2
+section 7 uses it for check (a), the cross build's QFASLs against the native
+rebuild's, and check (d), two native rebuilds'.
+
+`plant_a.py TREE` is its control (G2 section 7, check (c)): on a copy of one
+QFASL of TREE at a time it plants, for each rule, a change the rule must
+report and one it must not: an instruction of a function that holds a float
+(also `HASH-TABLE-MAXIMAL-FULLNESS`'s), a float one and two units in the last
+place apart, the compile time, a generated symbol's number and the same symbol
+made a plain one, an `EXPR-SXHASH` value and a fixnum beside it, a
+`GENTEMP` name's number in a local map and the same name's stem, and a
+definition's hash in the macros-expanded record.

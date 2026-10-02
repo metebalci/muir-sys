@@ -6,7 +6,8 @@ this world's; and the controls (cases/check1.cases).
 
 Usage: check1.py HOME-DIR
 HOME-DIR holds what check1.cases left in HOST's home: native-family.qfasl,
-id-family.qfasl, synth-family.qfasl, t40-family.qfasl, t40-planted.qfasl and
+id-family.qfasl, synth-family.qfasl, t40-family.qfasl, t40-planted.qfasl,
+t40-defs.qfasl and
 the tables synth-cross-table.txt and t40-cross-table.txt
 (cold:cross-write-table).  Prints one table per target and exits 1 on a
 failure.
@@ -125,10 +126,11 @@ def main():
     differ = [n for n in nat if not (n in idf and [qfasl.show(x) for x in nat[n].qs[1:]] ==
                                      [qfasl.show(x) for x in idf[n].qs[1:]] and
                                      nat[n].halfwords == idf[n].halfwords)]
+    # a cross build folds lsh with the target's fixnum (compiler:target-lsh),
+    # here this world's, so every fef is the native compile's
     out.append('identity: %d of %d fefs identical (boxed words after the header, instructions);'
-               ' differ: %s (XC-LSH by design: a cross build does not fold lsh)'
-               % (len(nat) - len(differ), len(nat), differ))
-    if differ != ['XC-LSH']:
+               ' differ: %s' % (len(nat) - len(differ), len(nat), differ))
+    if differ:
         fails += 1
 
     for label, fam_file, tab in (('synthetic target', 'synth-family.qfasl', 'synth-cross-table.txt'),
@@ -153,7 +155,7 @@ def main():
     fl = [c for c in consts(f40['XC-FLOATS']) if isinstance(c, list)]
     got = fl[0] if fl else []
     bits = ['%08X' % x.bits if isinstance(x, Float32) else repr(x) for x in got]
-    exp = ['3FC00000', 'C0200000', '3DCCCCCD', '40490FDB', '3FC00000', None, '60AD78EC']
+    exp = ['3FC00000', 'C0200000', '3DCCCCCD', '40490FDB', '3FC00000', '3DCCCCCD', '60AD78EC']
     ok = len(bits) == 7 and all(e is None or e == b for e, b in zip(exp, bits))
     out.append('  floats (binary32): %s  %s' % (bits, 'ok' if ok else 'FAIL'))
     fails += 0 if ok else 1
@@ -161,11 +163,15 @@ def main():
     ok = bool(big) and big[0] == [2147483647, -2147483648, 16777216, 2147483648]
     out.append('  integers: %s  %s' % (big and big[0], 'ok' if ok else 'FAIL'))
     fails += 0 if ok else 1
+    ch = [c for c in consts(f40['XC-CHAR']) if isinstance(c, list)]
+    ok = bool(ch) and ch[0] == [('CHAR', 97), ('CHAR', 0o100000040)]
+    out.append('  characters: %s  %s' % (ch and ch[0], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
     lsh40 = consts(f40['XC-LSH'])
-    ok = not any(isinstance(c, int) and c == 1 << 30 for c in lsh40)
-    out.append('  lsh 1 30: 40-bit constants %s; native %s  %s'
+    ok = any(isinstance(c, int) and c == 1 << 30 for c in lsh40)
+    out.append('  lsh 1 30 folded with the target\'s fixnum: 40-bit constants %s; native %s  %s'
                % ([qfasl.show(c) for c in lsh40], [qfasl.show(c) for c in consts(nat['XC-LSH'])],
-                  'ok (not folded)' if ok else 'FAIL'))
+                  'ok' if ok else 'FAIL'))
     fails += 0 if ok else 1
     ash = [c for c in consts(f40['XC-ASH']) if isinstance(c, int)]
     ok = 2048576 in ash
@@ -182,6 +188,79 @@ def main():
     ok = 1024 * 1024 in pf and 256 * 1024 not in pf and bool(ps) and ps[0][1] == 32
     out.append('  planted: fold %s (want %d), #. %s (want 32)  %s'
                % (pf, 1024 * 1024, [qfasl.show(p) for p in ps], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+
+    # the tree's compile-time definitions, given to every compile for the
+    # target by cross-begin (SYS: COLD; CROSSDEFS): NUMDEF's defsubst, and
+    # PRODEF's macro, whose byte the compiler folds under the hook
+    # (lisp/defs.lisp)
+    dd, fd = fefs(j('t40-defs.qfasl'))
+    se = [c for c in consts(fd['XC-SHORT-EXPONENT']) if isinstance(c, int)]
+    ok = 0o2710 in se and 0o2110 not in se
+    out.append('  %%short-float-exponent: constants %s (want %d, the tree\'s (byte 8 23.); not %d)  %s'
+               % (se, 0o2710, 0o2110, 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    hw = fd['XC-METER'].halfwords
+    ok = 0o76037 in hw and 0o76030 not in hw
+    out.append('  fixnum-read-meter-for-scheduler: byte %s (want push of #o37, 76037; not #o30, 76030)  %s'
+               % ([oct(h) for h in hw if h & ~0o777 == 0o76000], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+
+    # what the compiler decides by the target's values, not this world's
+    tc = fd['XC-TABLE-CONSTANT']
+    syms = [qfasl.show(c) for c in consts(tc) if not isinstance(c, (int, float, list))]
+    ok = (16 in consts(tc) or 0o76020 in tc.halfwords) and not any('DISK-BLOCKS-PER-PAGE' in x for x in syms)
+    out.append('  disk-blocks-per-page folded: constants %s, halfwords %s  %s'
+               % ([qfasl.show(c) for c in consts(tc)], [oct(h) for h in tc.halfwords], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    rc = [c for c in consts(fd['XC-ROT']) if isinstance(c, int)]
+    ok = -2**31 in rc
+    out.append('  rot 1 31 folded with the target\'s fixnum: %s (want %d)  %s' % (rc, -2**31, 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    # a misc instruction: opcode 15 in bits 12-9, the misc number in bits 8-0
+    misc = [h & 0o777 for h in fd['XC-FLOAT-PROTO'].halfwords if (h >> 9) & 0o17 == 0o15]
+    ok = 0o651 in misc and 0o307 not in misc
+    out.append('  (float x 0f0): misc %s (want SMALL-FLOAT 651, not INTERNAL-FLOAT 307)  %s'
+               % ([oct(m) for m in misc], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    sf = [c for c in consts(fd['XC-SMALL-FLOAT']) if isinstance(c, Float32)]
+    ok = bool(sf) and sf[0].bits == 0x3EAAAAAB
+    out.append('  small-float folded: %s (want 3EAAAAAB)  %s'
+               % (['%08X' % c.bits for c in sf], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+
+    sl = [c for c in consts(fd['XC-SHORT-LITERAL']) if isinstance(c, list)]
+    bits = ['%08X' % x.bits for x in sl[0] if isinstance(x, Float32)] if sl else []
+    ok = bits == ['3FA66666', '3F333333']
+    out.append('  short-float literals: %s (want 3FA66666 3F333333)  %s' % (bits, 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    d2, f2 = fefs(j('t40-defs2.qfasl'))
+    sq = [c for c in consts(f2['XC-SQRT']) if isinstance(c, Float32)]
+    ok = bool(sq) and abs(sq[0].bits - 0x3FB504F3) <= 1
+    out.append('  (sqrt 2) folded after NUMDEF met: %s (want 3FB504F3)  %s'
+               % (['%08X' % c.bits for c in sq], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+
+    fl = [c for c in consts(fd['XC-FULLNESS']) if isinstance(c, Float32)]
+    ok = ['%08X' % c.bits for c in fl] == ['3F333333']
+    out.append('  a listed defsubst\'s float (hash-table-maximal-fullness): %s (want 3F333333)  %s'
+               % (['%08X' % c.bits for c in fl], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    dd = [c for c in consts(fd['XC-DEDUP']) if isinstance(c, Float32)]
+    ok = len(dd) == 1 and dd[0].bits == 0x3FB8AA3B
+    out.append('  two literals of one target float: constants %s (want one, 3FB8AA3B)  %s'
+               % (['%08X' % c.bits for c in dd], 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+
+    ll = [c for c in consts(fd['XC-LONG-LITERAL']) if isinstance(c, list)]
+    bits = ['%08X' % x.bits for x in ll[0] if isinstance(x, Float32)] if ll else []
+    ok = bits == ['3F800001']
+    out.append('  a long literal read exactly: %s (want 3F800001)  %s' % (bits, 'ok' if ok else 'FAIL'))
+    fails += 0 if ok else 1
+    pc = [c for c in consts(fd['XC-PI2']) if isinstance(c, Float32)]
+    ok = ['%08X' % c.bits for c in pc] == ['3FC90FDB']
+    out.append('  1.570796326 and 1.5707963185: constants %s (want one, 3FC90FDB)  %s'
+               % (['%08X' % c.bits for c in pc], 'ok' if ok else 'FAIL'))
     fails += 0 if ok else 1
 
     out.append('RESULT %s (%d failures)' % ('PASS' if fails == 0 else 'FAIL', fails))

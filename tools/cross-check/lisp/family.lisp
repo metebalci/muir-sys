@@ -123,6 +123,9 @@
 (defun xc-floats () '(1.5 -2.5 0.1 3.14159265358979 1.5s0 0.1s0 1.0e20))
 ;;; integers that are fixnums in the target and not all here
 (defun xc-big () '(2147483647 -2147483648 16777216 2147483648))
+;;; characters: the field's bits, unsigned; a mouse character has bit 24 set,
+;;; which this world's 25-bit field takes as its sign
+(defun xc-char () '(#.(%make-pointer dtp-character #o141) #.(%make-pointer dtp-character (- #o100000040 #o200000000))))
 ;;; lsh works on a fixnum's width: not folded in a cross build
 (defun xc-lsh () (lsh 1 30))
 ;;; ash does not: folded

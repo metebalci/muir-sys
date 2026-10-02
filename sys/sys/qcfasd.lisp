@@ -233,7 +233,18 @@
 	((ZEROP C))
       (FASD-NIBBLE (LDB (+ (LSH POS 6) 16.) ABS)))))
 
-(DEFUN FASD-CHARACTER (N)
+;(DEFUN FASD-CHARACTER (N)
+;  (LET* ((ABS (ABS N))
+;; quux revision 13 (contract g2 section 7, the cross build): a character is its
+;; field's bits, which the target's 32-bit field holds unsigned.  in a builder of
+;; 25-bit fields (system 2000's) a character with bit 24 set, as a mouse
+;; character's, is a negative number there, and was dumped negative, so the
+;; target's character had <31:25> set: zwei's comtab held #\mouse-... as
+;; -16777184, where a native compile holds 16777248.  it is dumped as the field's
+;; bits, unsigned, for a target of 40-bit words.
+(defun fasd-character (n)
+  (when (and (= (target-word-width) 40.) (minusp (char-int n)))
+    (setq n (+ (char-int n) (ash 1 (ldb #o0006 %%q-pointer)))))
   (LET* ((ABS (ABS N))
 	 (LENGTH (CEILING (HAULONG ABS) 16.)))
     (FASD-START-GROUP (< N 0) LENGTH FASL-OP-CHARACTER)
@@ -258,6 +269,13 @@
 ;  (ldb (byte 8 17.) (%pointer short-float)))
 
 (DEFUN FASD-SHORT-FLOAT (N)
+  ;; a cross build's short float is this world's, which may hold fewer bits than
+  ;; the target's ieee single (17 on system 2000): dumped, it would be a wrong
+  ;; constant, so the file stops (where the reader or a fold made one, the cross
+  ;; build makes a full single instead: cold:cross-read-flonum, target-small-float)
+  (when (and (target-one-float-p) (< (float-precision n) 24.))
+    (ferror nil "A short float of this world, ~S, of ~D bits, would be dumped for the target"
+	    n (float-precision n)))
   (if (= (target-word-width) 40.)
       (fasd-binary32 n)
   (LET ((EXP (- (SI:%SHORT-FLOAT-EXPONENT N) #o200)))
@@ -299,13 +317,35 @@
     (fasd-nibble (ldb (byte 16. 0) bits))
     nil))
 
+;; quux revision 13 (contract g2 section 7, the cross build): in a builder of
+;; 25-bit fields (system 2000's) a float is decoded from its own bits with that
+;; world's formats, as its sys2; numdef had them, and not by
+;; integer-decode-float.  the cross build loads the tree's sys2; numdef, a
+;; definitions file of system, whose ieee single's parameters and accessors then
+;; replace the builder's own, so every float of the files compiled after it was
+;; dumped wrong: sys2; hash's rehash size 1.3 became an infinity, and qld of the
+;; cold load looped in puthash-bootstrap.
+(defun host-integer-decode-float (x)
+  "|X| as (VALUES M E), |X| = M * 2^E, read from X's bits in a world of 25-bit fields."
+  (let ((x (abs x)))
+    (if (= (%data-type x) dtp-small-flonum)
+	(values (ldb (byte 17. 0) (%pointer x))
+		(- (ldb (byte 8 17.) (%pointer x)) 17. #o200))
+      (values (dpb (%p-ldb-offset (byte 8 0) x 0) (byte 8 24.)
+		   (dpb (%p-ldb-offset (byte 8 16.) x 1) (byte 8 16.)
+			(%p-ldb-offset (byte 16. 0) x 1)))
+	      (- (%p-ldb-offset (byte 11. 8) x 0) 31. #o2000)))))
+
 (defun float-to-binary32 (x)
   "The ieee 754 binary32 bits of the float X, rounded to nearest, ties to even:
 past the largest single an infinity, below the smallest normal one a subnormal
 or zero, as ieee 754 rounds."
   (if (zerop x)
       0
-    (multiple-value-bind (m e) (integer-decode-float x)	;|x| = m * 2^e
+;    (multiple-value-bind (m e) (integer-decode-float x)	;|x| = m * 2^e
+    (multiple-value-bind (m e) (if (= (ldb #o0006 %%q-pointer) 25.)	;|x| = m * 2^e
+				   (host-integer-decode-float x)
+				 (integer-decode-float x))
       (let* ((sign (if (minusp x) (ash 1 31.) 0))
 	     ;; |x| is in [2^lead, 2^(lead+1)); the last bit kept is 2^lsb, 24
 	     ;; bits down for a normal single, never below 2^-149 (a subnormal)
