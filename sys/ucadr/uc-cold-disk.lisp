@@ -837,10 +837,16 @@ DISK-RESTORE-1
 	((M-S) SETZ)
 MEM-SIZE-LOOP
 	((VMA M-S) ADD M-S (A-CONSTANT 40000))	;Memory comes in 16K increments
+	;; stop at physical 1760000000, where the frame buffer's window begins
+	;; (revision 13's address map): main memory is below it, and the window
+	;; reads back the field written, so a probe with no stop would count it
+	;; as memory after a memory that reached it.
+	(jump-greater-or-equal m-s (a-constant 1760000000) mem-size-done)
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)
        ((MD) (A-CONSTANT 37))			;Some 1's, some 0's
 	(CALL PHYS-MEM-READ)
 	(JUMP-EQUAL MD (A-CONSTANT 37) MEM-SIZE-LOOP)
+mem-size-done
 	;M-S now has the first non-existent location
 	((md) (a-constant 1))			;Turn ERROR-STOP-ENABLE back on
 	(CALL-XCT-NEXT PHYS-MEM-WRITE)		;quux: word 102, not 766012
@@ -1250,19 +1256,63 @@ COLD-SWAP-IN
 	((M-1) ADD M-1 A-DISK-OFFSET)
 	((M-2) SUB M-2 (A-CONSTANT END-OF-MICRO-CODE-SYMBOL-AREA))
 	(CALL COLD-DISK-READ)
+	;; use no more main memory than the band's page tables serve: one
+	;; physical-page-data word and 4 page-table-area words a page, the sizes
+	;; cold-reinit-pht and cold-reinit-ppd fill below.  the page table's size
+	;; was capped there, after the memory size was stored, so with more
+	;; memory than the tables serve (600 or 1024 boards against 32 megawords'
+	;; tables) lisp saw the whole memory: the herald said 65536k,
+	;; count-wired-pages read 32768 entries past the table, and
+	;; set-scavenger-ws and warm-read-gpt's physical-page-data end take
+	;; their extent from the same size.  the sizes are the band's
+	;; own (cold/qcom.lisp), so a band with smaller tables uses that much of a
+	;; bigger machine.
+	(call get-area-origins)			;moved up from below, for the sizes
+	((m-1) a-v-address-space-map)
+	((m-1) sub m-1 a-v-physical-page-data)	;pages the ppd serves
+	((m-2) a-v-physical-page-data)
+	((m-2) sub m-2 a-v-page-table-area)
+	((m-2) ldb (byte-field 30. 2) m-2 a-zero)	;pages the pht serves
+	(jump-less-or-equal m-1 a-2 cold-swap-in-cap-1)
+	((m-1) m-2)
+cold-swap-in-cap-1
+	((m-1) dpb m-1 vma-page-addr-part a-zero)	;in words
+	(jump-less-or-equal m-s a-1 cold-swap-in-cap-2)
+	((m-s) m-1)
+cold-swap-in-cap-2
 ;;; Set things up according to actual main memory size
 	((WRITE-MEMORY-DATA) Q-POINTER M-S (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 ;	((VMA-START-WRITE) (A-CONSTANT (PLUS 400 (EVAL %SYS-COM-MEMORY-SIZE))))
 	((vma-start-write) (a-constant (plus 2000 (eval %sys-com-memory-size))))	;1024-word pages
 	(ILLOP-IF-PAGE-FAULT)
 ;;; Now set up the table of area addresses
-	(CALL GET-AREA-ORIGINS)
+;	(CALL GET-AREA-ORIGINS)
+	;; done above, before the memory size is capped
 ;;; Reinitialize the page hash table to be completely empty;
 ;;; permanently wired pages have no entries.
 ;;; Decide the size of the PHT from the size of main memory; it should
 ;;; have 4 words in it for each page of main memory (thus will be 1/2 full).
 	((M-1) VMA-PAGE-ADDR-PART M-S)		;Number of pages of main memory
-	((M-1) ADD M-1 A-1 OUTPUT-SELECTOR-LEFTSHIFT-1)	;Times 4
+;	((M-1) ADD M-1 A-1 OUTPUT-SELECTOR-LEFTSHIFT-1)	;Times 4
+	;; times 4 by a byte: the left shift brings in q<31>, which is 1 here
+	;; on revision 13, so the size was 4 times the pages plus one, a page
+	;; more once rounded (66560 words at 256 boards).
+	((m-1) dpb m-1 (byte-field 30. 2) a-zero)	;times 4
+	;; rounded up to a power of two: compute-page-hash masks the hash to the
+	;; size's power of two (set-pht-index-mask) and wraps what is past the
+	;; size once, so a size between two powers got twice the hashes on its
+	;; first words: at 256 boards (66560 words) the first 64512, at 300
+	;; (77824) the first 53248.  the mask of the size less one, plus one, as
+	;; set-pht-index-mask-1 builds it; the table's area is a power of two
+	;; (cold/qcom.lisp), and the memory is capped to it above, so the size
+	;; stays within it.
+	((m-tem) sub m-1 (a-constant 1))
+	((m-2) a-zero)
+cold-reinit-pht-power-of-two
+	((m-2) m+a+1 m-2 a-2)			;shift left bringing in 1
+	((m-tem) (byte-field 37 1) m-tem)	;shift right bringing in 0
+	(jump-not-equal m-tem a-zero cold-reinit-pht-power-of-two)
+	((m-1) add m-2 (a-constant 1))
 	((M-1) ADD M-1 (A-CONSTANT (EVAL (1- PAGE-SIZE))))	;Round up to multiple of page
 	((M-1) AND M-1 (A-CONSTANT (EVAL (MINUS PAGE-SIZE))))
 	((M-TEM) A-V-PHYSICAL-PAGE-DATA)	;But not bigger than available space
@@ -1273,7 +1323,10 @@ COLD-SWAP-IN
 	;; main memory past its pages gets no entry: m-s, the memory entered below,
 	;; is cut to the table's pages, a quarter of its words, 1024 words each,
 	;; rather than filling entries below the table's origin.
-	((m-s) dpb m-1 (byte-field 24. 8.) a-zero)
+;	((m-s) dpb m-1 (byte-field 24. 8.) a-zero)
+	;; the memory is capped to the tables before its size is stored (above),
+	;; so the table's size is never cut here, and with the size a power of
+	;; two this would raise m-s past the memory if it were.
 COLD-REINIT-PHT-0
 	((A-PHT-INDEX-LIMIT) M-1)		;Size of page hash table
 	((WRITE-MEMORY-DATA) Q-POINTER M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
@@ -1301,6 +1354,16 @@ COLD-REINIT-PPD-0
 	((VMA-START-WRITE) SUB VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
 	(JUMP-GREATER-THAN VMA A-V-PHYSICAL-PAGE-DATA COLD-REINIT-PPD-0)
+	;; the end of the valid entries starts at the table's origin, and xcppg1
+	;; below raises it as it adds entries.  it was set only when the
+	;; microcode was loaded and on a warm boot, so after %disk-restore it
+	;; kept the previous world's end, past this band's table when that
+	;; world's table was elsewhere or larger (the cadr line's halt in
+	;; fatal-disk-error).  findcore's and the ager's scan pointers start at
+	;; page 0.
+	((a-v-physical-page-data-end) a-v-physical-page-data)
+	((a-findcore-scan-pointer) a-zero)
+	((a-aging-scan-pointer) a-zero)
 ;;; Make magic PHYSICAL-PAGE-DATA entries for the wired pages and
 ;;; free entries in PPD and PHT for the available main memory.
 ;;; M-J has the upper-bound address of the PHT.  M-I gets same for PPD.

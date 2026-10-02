@@ -422,6 +422,82 @@ file carries a comment in that file saying why.
     154, which holds valid entries, stays mapped and the 13 above it do
     not. The word below `REGION-ORIGIN` keeps its fill word. The paging
     and full-GC workload of the next entry passes at 256 and 512 boards.
+- **The cold boot's memory probe stops below the frame buffer's window,
+  and memory is capped to the band's tables before its size is stored.**
+  - `MEM-SIZE-LOOP` had no stop. It now stops at 1760000000, where
+    revision 13's frame buffer window begins: main memory is below it, and
+    the window reads back what is written, so it would be counted as
+    memory after a memory that reached it
+    (`sys/ucadr/uc-cold-disk.lisp:840-844`, `:849`). No memory muir-sim
+    gives reaches it (1024 boards, 64 M words, end at 400000000); built
+    with the stop at 100000000 instead, the microcode finds 16384K on 512
+    boards, so the stop is taken.
+  - The page table's size was capped to its area after
+    `%SYS-COM-MEMORY-SIZE` was stored, so with more memory than the
+    tables serve Lisp saw all of it: at 600 boards the herald said 38400K
+    and at 1024 65536K, and `COUNT-WIRED-PAGES` read 32768 entries past
+    physical-page-data at 1024 (1195 fixed wired pages, against 172);
+    `SET-SCAVENGER-WS` and a warm boot's `WARM-READ-GPT` take their extent
+    from the same size. The cold boot now caps the memory to what the
+    band's own tables serve, a physical-page-data word and 4 page-table
+    words a page, before it stores the size, as the CADR's line does
+    (`:1259-1289`): 32 M words with this tree's tables, and a band with
+    smaller tables uses that much of a bigger machine. The later cut of
+    `M-S` to the page table's size is commented out, as it no longer
+    applies (`:1326-1329`).
+  - The page table's size, 4 words a page, is rounded up to a power of
+    two (`:1301-1315`), as the CADR's line decided: `COMPUTE-PAGE-HASH`
+    masks the hash to the size's power of two and wraps what is past the
+    size once, so a size between two powers got twice the hashes on its
+    first words. Its "times 4", a left shift, brought in `Q<31>`, which is
+    1 at that point on revision 13, so the size was 4 times the pages plus
+    one, a page more once rounded; it is a byte now (`:1297-1300`).
+  - `COLD-SWAP-IN` starts the end of the valid physical-page-data entries
+    at the table's origin and the findcore and aging scan pointers at page
+    0 (`:1357-1366`), as the CADR's line does: they were set only when the
+    microcode was loaded and on a warm boot, so after `%DISK-RESTORE` they
+    kept the previous world's, wrong when that world's table was elsewhere
+    or larger. Every 40-bit band has its tables at the same place, so no
+    restore here showed it, and none was run.
+  - Measured on Y5's band, micro, before and after (the paging and full-GC
+    workload: a 2,000,000-word array filled, checked, kept through a full
+    GC, checked, dropped and GC'd again; the paging partition holds 13 M
+    words, so it cannot outgrow main memory here; probe lengths in words
+    from a resident page's hash to its entry, after the second GC):
+
+    | boards | memory found | page table, words | wired | probes, mean / max |
+    |---|---|---|---|---|
+    | 256 | 16384K / 16384K | 66560 / 65536 | 134 / 133 | 4.52 / 1790 → 5.86 / 1004 |
+    | 300 | 19200K / 19200K | 77824 / 131072 | 148 / 200 | 2.05 / 108 → 1.73 / 6 |
+    | 512 | 32768K / 32768K | 131072 / 131072 | 213 / 213 | 3.11 / 14 → 3.11 / 14 |
+    | 600 | 38400K / 32768K | 131072 / 131072 | 213 / 213 | not run |
+    | 1024 | 65536K / 32768K | 131072 / 131072 | 1236 / 213 | 2.93 / 14 → 3.11 / 14 |
+
+    At 256 boards "before" is with the previous entry's change alone,
+    which does not touch the page table. Before the change the page table at 256 and 300 boards was folded, the
+    first 64512 and 53248 of its words taking two hashes each; after it
+    no size is. A 300-board machine wires 52 more pages for the larger
+    table. The long probes at 256 boards, before and after, come from the
+    hash at a table of 65536 words with the band's pages, not from a fold.
+    The full GC takes 32.0 to 32.1 s of machine time at every size, before
+    and after, and every case of the workload passes.
+  - This entry and the previous one move every label from `MEM-SIZE-LOOP`
+    on; `ucadr.tbl` is unchanged, so a band built on the microcode before
+    them holds this microcode's error table too. The number stays 2001.
+    Assembled twice from the sources, byte for byte the same, the outputs
+    are (sha256):
+    - `ucadr.mcr` `ba3d9fe044ca4fdbd09d623d71b550b4400dc416f40faec9cc73bf74a7286eac`
+    - `ucadr.tbl` `ebf33853747ac3d7c0357210d7613b62c13c3bdf68f47dc48b1a80a9d7c2db8d`
+    - `ucadr.locs` `0b52148627b9a0f1f9432dba2950a95bf2ea189e0f0c7c6e41b3df4635a1610a`
+    - `ucadr.sym` `a33a14e2ec514fd5ed4f7a0d73c0eaf78f5c09bdda1b3f335dd64f08ecfb0469`
+
+    Boot PROM 2001 is unchanged. On the band built for the error table's
+    entry above, with them, system-check passes 93 of 93,
+    microcode-check 321 of 321 and System 2000's band cases 30 of 33 (the
+    three not applicable, as before), on the micro and rtl engines (on rtl
+    each case file ran from a fresh start, and `bignum-fixnum-extremes` in
+    twenty, since a long run there slowed to minutes a case); booted with no `ucadr.tbl` it prints that entry's line
+    and `(car 1)` is right.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
