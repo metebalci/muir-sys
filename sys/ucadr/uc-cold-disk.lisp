@@ -656,7 +656,13 @@ COLD-REINIT-PHT-2
 	(JUMP-GREATER-THAN VMA A-V-PAGE-TABLE-AREA COLD-REINIT-PHT-2)
 ;;; Initialize physical-page-data.  First make it all completely null.
 	((WRITE-MEMORY-DATA) (M-CONSTANT -1))
-	((VMA) A-V-REGION-ORIGIN)
+;	((VMA) A-V-REGION-ORIGIN)
+	;; fill from the end of the table, address-space-map's origin.
+	;; region-origin lies below page-table-area (cold/qcom.lisp, area-list),
+	;; so the loop wrote -1 one word below region-origin and stopped, and
+	;; the table was never filled: at 32 boards its 7168 entries past the
+	;; memory's pages kept the band's words.
+	((vma) a-v-address-space-map)
 COLD-REINIT-PPD-0
 	((VMA-START-WRITE) SUB VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
@@ -762,12 +768,27 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	;; Find out where to page off of if we don't know already 
 	(CALL-EQUAL A-DISK-OFFSET M-ZERO WARM-READ-LABEL)
 	;; Clear the unused pages of the PHT and PPD out of the map
-	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-V-PHYSICAL-PAGE-DATA-END)
-	((MD) ADD MD (A-CONSTANT 1))		;First page above PPD
-	(JUMP-GREATER-OR-EQUAL MD A-V-REGION-ORIGIN BEGCM2)
+;	((MD) DPB (M-CONSTANT -1) (BYTE-FIELD 8 0) A-V-PHYSICAL-PAGE-DATA-END)
+;	((MD) ADD MD (A-CONSTANT 1))		;First page above PPD
+	;; the first page above the table's valid entries: their end rounded up
+	;; to a page.  the end's page plus one skipped the end's own page when the
+	;; end fell on a page boundary, as it does with whole memory boards, and
+	;; left it mapped to its frame, which cold-reinit-ppd gives to paging.
+	((md) a-v-physical-page-data-end)
+	((md) add md (a-constant (eval (1- page-size))))
+	((md) and md (a-constant (eval (minus page-size))))
+;	(JUMP-GREATER-OR-EQUAL MD A-V-REGION-ORIGIN BEGCM2)
+	;; the table ends at address-space-map's origin; region-origin lies
+	;; below page-table-area (cold/qcom.lisp, area-list), so the loop never ran,
+	;; and the pages of the table past the memory's entries stayed mapped to
+	;; their own frames while cold-reinit-ppd gave those frames to paging, so
+	;; at 32 boards 28 frames were reachable both as table pages and as the
+	;; pages paged into them.
+	(jump-greater-or-equal md a-v-address-space-map begcm2)
 BEGCM1	((VMA-WRITE-MAP) (A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
 	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
-	(JUMP-LESS-THAN MD A-V-REGION-ORIGIN BEGCM1)
+;	(JUMP-LESS-THAN MD A-V-REGION-ORIGIN BEGCM1)
+	(jump-less-than md a-v-address-space-map begcm1)
 BEGCM2	((MD) A-V-PAGE-TABLE-AREA)
 	((MD) ADD MD A-PHT-INDEX-LIMIT)
 	(JUMP-GREATER-OR-EQUAL MD A-V-PHYSICAL-PAGE-DATA BEGCM4)

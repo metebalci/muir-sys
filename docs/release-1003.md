@@ -263,7 +263,7 @@ Every change to a source file carries a comment in that file saying why.
     and so does `%DISK-SAVE` while it writes the wired pages (`:284-289`),
     since the wired areas and the CCW list put after them now end past 64K.
   - **The end of PHYSICAL-PAGE-DATA's valid entries is set again at every
-    cold boot** (`ucadr/uc-cold-disk.lisp:664-672`), with the scan pointers
+    cold boot** (`ucadr/uc-cold-disk.lisp:670-678`), with the scan pointers
     of `FINDCORE` and the ager. It was set when the microcode was loaded
     and on a warm boot, and only raised after, so `%DISK-RESTORE` of a band
     whose table is elsewhere kept the old end: from this system at 32
@@ -273,13 +273,32 @@ Every change to a source file carries a comment in that file saying why.
     43,776, and the array is filled, checked, kept through a full GC and
     checked again.
   - **A wired page's PHYSICAL-PAGE-DATA entry is written at its page
-    number** (`ucadr/uc-cold-disk.lisp:687-700`). MIT's code merged the
+    number** (`ucadr/uc-cold-disk.lisp:693-706`). MIT's code merged the
     page number's low 8 bits into the table's origin, which serves only
     wired pages below 64K. With the larger tables the wired pages run past
     page 255: their entries landed on those of pages 0 and up, their own
     stayed as the band had them, their frames were paged into, and at 32
     boards the cold load halted in `FINDCORE` during `QLD`, reading a
     page's data as a table entry. QUUX's line has the same change.
+  - **The cold boot fills all of PHYSICAL-PAGE-DATA with -1 and takes the
+    table's unused pages out of the map** (`ucadr/uc-cold-disk.lisp:659-665`,
+    `:771-791`). `COLD-REINIT-PPD-0` and the loop at `BEGCM1` ended at
+    REGION-ORIGIN, which `AREA-LIST` (`cold/qcom.lisp:221`) puts below
+    PAGE-TABLE-AREA; both now end at ADDRESS-SPACE-MAP, the area after the
+    table. The fill wrote -1 only into the word below REGION-ORIGIN, the
+    last of MICRO-CODE-SYMBOL-AREA (an unused entry; it now keeps the fill
+    value of its neighbours), and the table's pages past the memory's
+    entries stayed mapped to their own frames while `COLD-REINIT-PPD` gave
+    those frames to paging: at 32 boards pages 299 to 326, 28 frames, each
+    reachable both as a table page and as the page paged into it. A word
+    changed through table page 299 read back changed through the array
+    page paged into frame 299. The first page taken out of the map is now
+    the end of the valid entries rounded up to a page: MIT's end-page-plus-one
+    skips the end's own page when the end falls on a page boundary, as it
+    does with whole memory boards, and with the two comparisons alone page
+    299 stayed mapped and aliased. Now none of the 28 pages translates to
+    its own frame and no frame is reachable both ways; at 60 boards the
+    table has no unused pages.
   - **The swap recommendations are unchanged.**
     `MEMORY-SIZE-SWAP-RECOMMENDATION-ALIST` (`sys2/gc.lisp:1018`) has
     entries from 320K to 1024K, which `DEFAULT-SWAP-RECOMMENDATIONS` matches
@@ -289,15 +308,15 @@ Every change to a source file carries a comment in that file saying why.
     band.
   - **The microcode changes again and keeps the number 1000**: microcode
     1000 with the fixes above and these changes to the cold boot, which add
-    21 control-store words, so every word from `MEM-SIZE-LOOP` on moves;
+    22 control-store words, so every word from `MEM-SIZE-LOOP` on moves;
     the constant 17000000 is a new A-memory constant, so the A-constants
     start one location later (`A-CONSTANT-LOC` 1177 to 1200). `ucadr.tbl` is
     the same. Assembled twice, each on a freshly booted band, the four
     files were the same both times. The outputs, of microcode 1000 with
     all the changes above (sha256):
-    - `ucadr.mcr` `02e09d0925af6117200996fb09413c90e664593bf84255e48105defa1479e2b9`
+    - `ucadr.mcr` `d26bc8e27410b8f667d7cb2a1be097a829ee9ad74533bb201ab16923b99518df`
     - `ucadr.tbl` `e510ce7cc4d7d1241b706ffbeef5c0e0caef10704dcb5dc477090fbc18898efd`
-    - `ucadr.locs` `f4a8b1662a0756f8eda70aa58eaac9551be6422cd04aae863da4863f49b94d1a`
+    - `ucadr.locs` `81e160f3c743f8edaa84566539ab287500989096218e1b14986e7454409d08fc`
     - `ucadr.sym` is not given (above).
 
     A System 1003 band needs it: on the microcode before these changes the
