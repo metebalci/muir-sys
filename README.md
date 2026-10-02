@@ -1,8 +1,7 @@
 # muir-sys
 
-**The Lisp Machine system for QUUX,** the machine that muir and muir-fpga
-evolve from the MIT CADR, continuing where System 100 left off and evolved
-step by step.
+**The Lisp Machine system for QUUX,** the machine that muir-sim and muir-fpga
+evolve from the MIT CADR, continuing where System 100 left off.
 
 The starting point is the MIT CADR and its system as MIT last left it. **System
 release 99.32** is the content of a backup of OZ recovered by the
