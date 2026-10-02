@@ -1722,10 +1722,20 @@ See P2BRANCH.")
 (DEFUN P2ANDOR (ARGL DEST)
   (PROG (TAG UNCONDITIONAL IDEST SENSE TAG1)
 	(SETQ SENSE (IF (EQ P2FN 'AND) 'TRUE 'FALSE))
-	(DO ()
-	    ((NOT (EQUAL (CAR (LAST ARGL))
-			 (IF (EQ SENSE 'TRUE) ''T ''NIL))))
-	  (SETQ ARGL (BUTLAST ARGL)))
+;	(DO ()
+;	    ((NOT (EQUAL (CAR (LAST ARGL))
+;			 (IF (EQ SENSE 'TRUE) ''T ''NIL))))
+;	  (SETQ ARGL (BUTLAST ARGL)))
+	;; a trailing 't in an and may be dropped only when the value is ignored:
+	;; for value, (and x t) is t when x is non-nil, and dropping the 't made the
+	;; compiled (and x t) return x itself.  a trailing 'nil in an or is always
+	;; dropped, as before, since (or x nil) has x's value.
+	(do ()
+	    ((not (and (equal (car (last argl))
+			      (if (eq sense 'true) ''t ''nil))
+		       (or (eq sense 'false)
+			   (and (null m-v-target) (eq dest 'd-ignore))))))
+	  (setq argl (butlast argl)))
 	(SETQ IDEST 'D-PDL)
 	;; RETURN branches can't be passed in to the last thing in an AND.
 	(AND (EQ (CADR BDEST) 'ALWAYS)
