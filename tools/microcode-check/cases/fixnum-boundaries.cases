@@ -1,0 +1,50 @@
+; Fixnum arithmetic at the 32-bit boundaries (microcode 2001; contract G2
+; sections 2.2 and 6.1): no fixnum is sign-extended before arithmetic, the
+; ALU's overflow condition makes the bignum.  Each operation is taken with the
+; most positive and most negative fixnums, 2147483647 and -2147483648, and
+; with negative operands, through the interpreter (the misc instructions on the
+; PDL) and through compiled functions of their arguments (the macroinstructions
+; and their operands); the first operand's type dispatch (D-NUMARG,
+; D-NUMARG1), the second's (D-FIXNUM-NUMARG2) and a bignum's fixnum operand
+; (ARITH-ANY-FIX) each unpack a fixnum (sys/ucadr/uc-arith.lisp).  Written to
+; pass on microcode 2001 as it was before the sign extension went: the
+; behaviour does not change.
+; --- + and its overflow
+(let ((x most-positive-fixnum)) (list (+ x 1) (fixnump (+ x 1)) (+ x 0) (+ x -1))) => (2147483648 NIL 2147483647 2147483646)
+(let ((x most-negative-fixnum)) (list (+ x -1) (fixnump (+ x -1)) (+ x 0) (+ x 1))) => (-2147483649 NIL -2147483648 -2147483647)
+(let ((x most-positive-fixnum) (y most-negative-fixnum)) (list (+ x y) (+ y y) (+ x x) (+ -1 -1))) => (-1 -4294967296 4294967294 -2)
+(progn (defun fb-add (x y) (+ x y)) (compile 'fb-add) (list (fb-add 2147483647 1) (fb-add -2147483648 -1) (fb-add -2147483648 2147483647) (fb-add -5 -7) (fb-add -2147483648 -2147483648))) => (2147483648 -2147483649 -1 -12 -4294967296)
+; --- - and its overflow
+(let ((x most-negative-fixnum)) (list (- x 1) (fixnump (- x 1)) (- x -1) (- 0 x) (- -5 -7))) => (-2147483649 NIL -2147483647 2147483648 2)
+(let ((x most-positive-fixnum)) (list (- x -1) (- x 2147483647) (- -1 x))) => (2147483648 0 -2147483648)
+(progn (defun fb-sub (x y) (- x y)) (compile 'fb-sub) (list (fb-sub -2147483648 1) (fb-sub 2147483647 -1) (fb-sub 0 -2147483648) (fb-sub -5 -7) (fb-sub -1 2147483647))) => (-2147483649 2147483648 2147483648 2 -2147483648)
+; --- * and its overflow
+(let ((x most-negative-fixnum)) (list (* x 1) (* x -1) (* x 2) (* -65536 32768) (* -65536 32769) (* -3 -5))) => (-2147483648 2147483648 -4294967296 -2147483648 -2147549184 15)
+(progn (defun fb-mul (x y) (* x y)) (compile 'fb-mul) (list (fb-mul 2147483647 2) (fb-mul -2147483648 -1) (fb-mul -65536 32768) (fb-mul 65536 -32769) (fb-mul -3 -5))) => (4294967294 2147483648 -2147483648 -2147549184 15)
+; --- 1+ and 1-
+(let ((x most-positive-fixnum) (y most-negative-fixnum)) (list (1+ x) (fixnump (1+ x)) (1+ y) (1+ -1) (1- y) (fixnump (1- y)) (1- x) (1- 0))) => (2147483648 NIL -2147483647 0 -2147483649 NIL 2147483646 -1)
+(progn (defun fb-inc (x) (list (1+ x) (1- x))) (compile 'fb-inc) (list (fb-inc 2147483647) (fb-inc -2147483648) (fb-inc -1) (fb-inc 0))) => ((2147483648 2147483646) (-2147483647 -2147483649) (0 -2) (1 -1))
+; --- ash
+(let ((x most-positive-fixnum) (y most-negative-fixnum)) (list (ash x 1) (ash y 1) (ash -1 31) (fixnump (ash -1 31)) (ash -1 32) (ash y -31) (ash -5 -1) (ash 1 31))) => (4294967294 -4294967296 -2147483648 T -4294967296 -1 -3 2147483648)
+(progn (defun fb-ash (x n) (ash x n)) (compile 'fb-ash) (list (fb-ash -2147483648 -1) (fb-ash -1073741824 1) (fb-ash -1073741825 1) (fb-ash 2147483647 -30) (fb-ash -7 0))) => (-1073741824 -2147483648 -2147483650 1 -7)
+; --- compare and equality on negative fixnums
+(let ((n most-negative-fixnum) (p most-positive-fixnum)) (list (< n -1) (> -1 n) (< -2 -1) (> -2 -1) (< n p) (> n p) (< -1 -1))) => (T T T NIL T NIL NIL)
+(let ((n most-negative-fixnum) (p most-positive-fixnum)) (list (= -1 (- 0 1)) (= n (- -2147483647 1)) (= -5 -6) (= n p) (= n (- n 0)) (eql -7 (- 3 10)) (eql n p))) => (T T NIL NIL T T NIL)
+(progn (defun fb-cmp (x y) (list (< x y) (> x y) (= x y) (eql x y))) (compile 'fb-cmp) (list (fb-cmp -2147483648 -1) (fb-cmp -1 -2147483648) (fb-cmp -2147483648 -2147483648) (fb-cmp -1 2147483647) (fb-cmp -7 -7))) => ((T NIL NIL NIL) (NIL T NIL NIL) (NIL NIL T T) (T NIL NIL NIL) (NIL NIL T T))
+(let ((n most-negative-fixnum)) (list (max -3 -7) (min n -1) (max n 2147483647) (min -1 -2))) => (-3 -2147483648 2147483647 -2)
+; --- one-argument functions of the extreme and negative fixnums
+(let ((n most-negative-fixnum) (p most-positive-fixnum)) (list (minusp n) (plusp n) (zerop n) (plusp p) (minusp -1) (zerop (+ n 2147483647 1)))) => (T NIL NIL T T T)
+(progn (defun fb-odd (x) (list (oddp x) (evenp x))) (compile 'fb-odd) (list (fb-odd -1) (fb-odd -2147483648) (fb-odd 2147483647) (fb-odd -6))) => ((T NIL) (NIL T) (T NIL) (NIL T))
+(let ((n most-negative-fixnum)) (list (abs -5) (abs n) (abs 2147483647) (minus -5) (- n) (fix -7) (float -3) (float n))) => (5 2147483648 2147483647 5 2147483648 -7 -3.0 -2.1474836e9)
+(list (haulong most-negative-fixnum) (haulong -1) (haulong most-positive-fixnum)) => (32 1 31)
+; --- logical functions, LDB and DPB of negative fixnums
+(let ((n most-negative-fixnum)) (list (logand -1 n) (logior n 1) (logxor -1 2147483647) (boole 6 -1 5) (logand -6 -3))) => (-2147483648 -2147483647 -2147483648 -6 -8)
+(list (ldb (byte 8 0) -2) (ldb (byte 4 28) -1) (ldb (byte 8 28) -1) (dpb 5 (byte 4 4) -1) (dpb -1 (byte 4 0) 0)) => (254 15 255 -161 15)
+; --- division of negative fixnums
+(let ((n most-negative-fixnum)) (list (quotient n -1) (quotient -7 2) (remainder -7 2) (\ -7 2) (\\ -12 18) (gcd n 6))) => (2147483648 -3 -1 -1 6 2)
+(list (multiple-value-list (floor -7 2)) (multiple-value-list (ceiling 7 -2)) (multiple-value-list (ceiling -7 -2)) (multiple-value-list (floor 7 -2))) => ((-4 1) (-3 1) (4 1) (-4 -1))
+(list (cli:// -6 4) (cli:// (expt 2 40) -6) (expt -2 31) (fixnump (expt -2 31)) (expt -3 3)) => (-3\2 -549755813888\3 -2147483648 T -27)
+; --- a bignum with a negative fixnum operand
+(let ((b (expt 2 40))) (list (+ b -1) (* b -2) (- b -5) (> b -1) (\ b -7) (quotient b -4))) => (1099511627775 -2199023255552 1099511627781 T 2 -274877906944)
+; --- characters unpack as fixnums; a float scaled by a negative fixnum
+(list (+ (int-char 65) 1) (1+ (int-char 65)) (scale-float 1.0 -3) (scale-float 1.0 3)) => (66 66 0.125 8.0)

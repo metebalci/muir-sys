@@ -22,11 +22,14 @@ FIXGET		(ERROR-TABLE RESTART FIXGET)
    (ERROR-TABLE ARGTYP FIXNUM M-T 1 FIXGET0)
    (ERROR-TABLE ARG-POPPED 0 PP M-T)
 FIXGET-1
-	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
-	((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
-	(POPJ-AFTER-NEXT
-	 (OA-REG-HIGH) BOXED-SIGN-BIT M-1)		;SIGN EXTEND
-       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-1)
+;	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
+;	((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+;	(POPJ-AFTER-NEXT
+;	 (OA-REG-HIGH) BOXED-SIGN-BIT M-1)		;SIGN EXTEND
+;       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-1)
+	;; quux revision 13: no sign extension (see fxunpk-p-1), the field alone
+	(popj-after-next (m-2) q-pointer m-t)	;second fixnum, its 32-bit field
+       ((m-1) q-pointer m-1)			;first fixnum, its 32-bit field
 
 
 ;;; MULTIPLY SUBROUTINE
@@ -394,18 +397,23 @@ GET-FIX-OR-BIGNUM
 			GET-ANY-BIG)
        ((M-C) C-PDL-BUFFER-POINTER-POP)
 GET-ANY-CHAR
-	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
-	((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+;	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
+;	((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+	((m-2) q-pointer m-t)	;quux revision 13: the field, no sign extension (see fxunpk-p-1)
 	((M-1) SELECTIVE-DEPOSIT M-C Q-DATA-TYPE A-ZERO)
 	(JUMP-NOT-EQUAL M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) GET-BIG-FIX)
 GET-CHAR-FIX
-	(POPJ-AFTER-NEXT
-	 (OA-REG-HIGH) BOXED-SIGN-BIT M-C)		;SIGN EXTEND (MUNG M SOURCE)
-       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-C)
+;	(POPJ-AFTER-NEXT
+;	 (OA-REG-HIGH) BOXED-SIGN-BIT M-C)		;SIGN EXTEND (MUNG M SOURCE)
+;       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-C)
+	(popj-after-next (m-1) q-pointer m-c)	;quux revision 13: the field, no sign extension (see fxunpk-p-1)
+       (no-op)					;nothing left to do in the return's slot
 GET-FIX-ANY
-	(POPJ-AFTER-NEXT
-	 (OA-REG-HIGH) BOXED-SIGN-BIT M-C)		;SIGN EXTEND (MUNG M SOURCE)
-       ((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-C)
+;	(POPJ-AFTER-NEXT
+;	 (OA-REG-HIGH) BOXED-SIGN-BIT M-C)		;SIGN EXTEND (MUNG M SOURCE)
+;       ((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-C)
+	(popj-after-next (m-2) q-pointer m-c)	;quux revision 13: the field, no sign extension (see fxunpk-p-1)
+       (no-op)					;nothing left to do in the return's slot
 
 GET-BIG-FIX
 	(JUMP-EQUAL M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-CHARACTER)) GET-CHAR-FIX)
@@ -539,8 +547,9 @@ XDIVD1	(CALL FXGTPP)					;M-1 GETS DIVIDEND LOW, M-2 DIVISOR
     (ERROR-TABLE ARGTYP FIXNUM PP 0)
     (ERROR-TABLE ARG-POPPED 0 PP M-A M-2)
 	((M-T) C-PDL-BUFFER-POINTER-POP)
-	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
-	((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+;	((OA-REG-HIGH) BOXED-SIGN-BIT M-T)		;SIGN EXTEND (MUNG M SOURCE)
+;	((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+	((m-1) q-pointer m-t)	;quux revision 13: the field, no sign extension (see fxunpk-p-1)
 	((M-TEM) DPB M-1
 	 (BYTE-FIELD (DIFFERENCE 32. Q-POINTER-WIDTH)
 		     (DIFFERENCE Q-POINTER-WIDTH 0))
@@ -671,17 +680,35 @@ XDIVD3	;DIVIDEND IS IN M-A (HIGH), M-TEM (LOW), DIVISOR IS IN M-2
 
 ;;; Packing and unpacking fixnums.
 
+;; quux revision 13 (contract g2 2.2, 6.1): a fixnum is the whole 32-bit
+;; field, arithmetic and the order conditions act on <31:0>, and the fixnum
+;; overflow condition finds a sum past 32 bits, so a fixnum is no longer
+;; sign-extended before arithmetic: mit's sign-extend-m-1 and the like copied
+;; the boxed sign bit over the tag.  at 40 bits that trick (oa-reg-high turning
+;; m-zero into m-minus-one) chose between two locations whose <39:32> are both
+;; 0, since constants and initial values are zero-extended from 32 bits (a1.5),
+;; so all it did was clear the tag: one q-pointer does the same.  the
+;; arithmetic type dispatches (d-numarg, d-numarg1, d-fixnum-numarg2) now fall
+;; through for a fixnum, and their callers unpack it in one word; these two
+;; remain for the other callers.
+;FXUNPK-P-1
+;	((M-1) C-PDL-BUFFER-POINTER-POP)
+;SIGN-EXTEND-M-1
+;	(POPJ-AFTER-NEXT 
+;		(OA-REG-HIGH) BOXED-SIGN-BIT M-1)
+;       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-1)
+;
+;FXUNPK-T-2
+;	(POPJ-AFTER-NEXT 
+;		(OA-REG-HIGH) BOXED-SIGN-BIT M-T)
+;       ((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
 FXUNPK-P-1
-	((M-1) C-PDL-BUFFER-POINTER-POP)
-SIGN-EXTEND-M-1
-	(POPJ-AFTER-NEXT 
-		(OA-REG-HIGH) BOXED-SIGN-BIT M-1)
-       ((M-1) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-1)
+	(popj-after-next (m-1) q-pointer c-pdl-buffer-pointer-pop)	;the field, no sign extension
+       (no-op)					;nothing left to do in the return's slot
 
 FXUNPK-T-2
-	(POPJ-AFTER-NEXT 
-		(OA-REG-HIGH) BOXED-SIGN-BIT M-T)
-       ((M-2) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-T)
+	(popj-after-next (m-2) q-pointer m-t)	;the field, no sign extension
+       (no-op)					;nothing left to do in the return's slot
 
 ;;; Come to one of these to return a fixnum in M-1.
 ;;; Checks for fixnum overflow, and adds data type DTP-FIX.
@@ -1138,7 +1165,8 @@ XSCALE-FLOAT (MISC-INST-ENTRY SCALE-FLOAT)
 	((M-B) Q-DATA-TYPE PDL-TOP)  ;Remember whether it's a small float.
 	(CALL GET-FLONUM)
 	((M-T) M-A)
-	(CALL FXUNPK-T-2)
+;	(CALL FXUNPK-T-2)
+	((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	((M-I) ADD M-I A-2)
 	(JUMP-EQUAL M-B (A-CONSTANT (EVAL DTP-SMALL-FLONUM)) SFLPACK-T)
 	(JUMP FLOPACK-T)
@@ -1150,7 +1178,11 @@ XABS (MISC-INST-ENTRY ABS) (ERROR-TABLE RESTART XABS)
     (ERROR-TABLE ARGTYP NUMBER PP T XABS)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-ABS))
-	(JUMP-GREATER-OR-EQUAL M-1 A-ZERO FIXPACK-T)
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
+;	(JUMP-GREATER-OR-EQUAL M-1 A-ZERO FIXPACK-T)
+	;; quux revision 13: m-1 is not a sum here, so boxed without the overflow
+	;; test, whose flag the unpacking byte word above does not load
+	(jump-greater-or-equal m-1 a-zero fixbox-t)
 	(JUMP-XCT-NEXT FIXPACK-T)
        ((M-1) SUB M-ZERO A-1)
 
@@ -1159,6 +1191,7 @@ XMINUS (MISC-INST-ENTRY MINUS) (ERROR-TABLE RESTART XMINUS)
     (ERROR-TABLE ARGTYP NUMBER PP T XMINUS)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-MINUS))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	(JUMP-XCT-NEXT FIXPACK-T)
        ((M-1) SUB M-ZERO A-1)
 
@@ -1167,6 +1200,7 @@ XZEROP (MISC-INST-ENTRY ZEROP) (ERROR-TABLE RESTART XZEROP)
     (ERROR-TABLE ARGTYP NUMBER PP T XZEROP)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-ZEROP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 FLONUM-ZEROP
 	((M-T) A-V-TRUE)
 	(POPJ-AFTER-NEXT POPJ-EQUAL M-1 A-ZERO)
@@ -1177,6 +1211,7 @@ XPLUSP (MISC-INST-ENTRY PLUSP) (ERROR-TABLE RESTART XPLUSP)
     (ERROR-TABLE ARGTYP NUMBER PP T XPLUSP)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-PLUSP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 FLONUM-PLUSP
 	((M-T) A-V-TRUE)
 	(POPJ-AFTER-NEXT POPJ-GREATER-THAN M-1 A-ZERO)
@@ -1187,6 +1222,7 @@ XMINUSP (MISC-INST-ENTRY MINUSP) (ERROR-TABLE RESTART XMINUSP)
     (ERROR-TABLE ARGTYP NUMBER PP T XMINUSP)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-MINUSP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 FLONUM-MINUSP
 	((M-T) A-V-TRUE)
 	(POPJ-AFTER-NEXT POPJ-LESS-THAN M-1 A-ZERO)
@@ -1197,6 +1233,7 @@ XODDP (MISC-INST-ENTRY ODDP) (ERROR-TABLE RESTART XODDP)
     (ERROR-TABLE ARGTYP NUMBER PP T XODDP)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-ODDP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	((M-T) A-V-TRUE)
 	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET (BYTE-FIELD 1 0) M-1)
        ((M-T) A-V-NIL)
@@ -1206,6 +1243,7 @@ XEVENP (MISC-INST-ENTRY EVENP) (ERROR-TABLE RESTART XEVENP)
     (ERROR-TABLE ARGTYP NUMBER PP T XEVENP)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-EVENP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	((M-T) A-V-TRUE)
 	(POPJ-AFTER-NEXT POPJ-IF-BIT-CLEAR (BYTE-FIELD 1 0) M-1)
        ((M-T) A-V-NIL)
@@ -1216,6 +1254,7 @@ X1PLS (MISC-INST-ENTRY 1+) ;ADD1 GETS FSET TO THIS
     (ERROR-TABLE ARGTYP NUMBER PP T X1PLS)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-ADD1))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	(JUMP-XCT-NEXT FIXPACK-T)
        ((M-1) ADD M-1 (A-CONSTANT 1))
 
@@ -1225,6 +1264,7 @@ X1MNS (MISC-INST-ENTRY 1-) ;SUB1 GETS FSET TO THIS
     (ERROR-TABLE ARGTYP NUMBER PP T X1MNS)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-SUB1))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	(JUMP-XCT-NEXT FIXPACK-T)
        ((M-1) SUB M-1 (A-CONSTANT 1))
 
@@ -1233,7 +1273,11 @@ XFIX (MISC-INST-ENTRY FIX) (ERROR-TABLE RESTART XFIX)
     (ERROR-TABLE ARGTYP NUMBER PP T XFIX)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-FIX))
-	(JUMP FIXPACK-T)
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
+;	(JUMP FIXPACK-T)
+	;; quux revision 13: m-1 is not a sum here, so boxed without the overflow
+	;; test, whose flag the unpacking byte word above does not load
+	(jump fixbox-t)
 
 XINTERNAL-FLOAT (MISC-INST-ENTRY INTERNAL-FLOAT)
 XFLOAT (MISC-INST-ENTRY FLOAT) (ERROR-TABLE RESTART XFLOAT)
@@ -1241,6 +1285,7 @@ XFLOAT (MISC-INST-ENTRY FLOAT) (ERROR-TABLE RESTART XFLOAT)
     (ERROR-TABLE ARGTYP NUMBER PP T XFLOAT)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-FLOAT))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	((M-I) (A-CONSTANT 2036))
 	(CALL-XCT-NEXT FNORM)
        ((Q-R) M-ZERO)
@@ -1251,6 +1296,7 @@ XSMALL-FLOAT (MISC-INST-ENTRY SMALL-FLOAT) (ERROR-TABLE RESTART XSMALL-FLOAT)
     (ERROR-TABLE ARGTYP NUMBER PP T XSMALL-FLOAT)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-SMALL-FLOAT))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	((M-I) (A-CONSTANT 2036))
 	(CALL-XCT-NEXT FNORM)
        ((Q-R) M-ZERO)
@@ -1262,6 +1308,7 @@ XHAUL (MISC-INST-ENTRY HAULONG)	;TAKES ONE ARG, RETURNS # SIGNIFICANT BITS
     (ERROR-TABLE ARGTYP NUMBER PP T XHAUL)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-HAULONG))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-1 A-ZERO XHAUL1)
        ((M-T) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	((M-1) SUB M-ZERO A-1)
@@ -1285,10 +1332,12 @@ QIADD		(ERROR-TABLE RESTART QIADD)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QIADD)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-ADD))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIADD0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIADD0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(JUMP-XCT-NEXT FIXPACK-P)
        ((M-1) ADD M-1 A-2)
 
@@ -1301,10 +1350,12 @@ QISUB		(ERROR-TABLE RESTART QISUB)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QISUB)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-SUB))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QISUB0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QISUB0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(JUMP-XCT-NEXT FIXPACK-P)
        ((M-1) SUB M-1 A-2)
 
@@ -1317,10 +1368,12 @@ QIMUL		(ERROR-TABLE RESTART QIMUL)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QIMUL)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-MUL))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIMUL0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIMUL0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(CALL-XCT-NEXT MPY)	;LOW PRODUCT TO Q-R, HIGH TO M-2
        ((Q-R) M-2)
 	((M-TEM) SELECTIVE-DEPOSIT Q-R
@@ -1344,10 +1397,12 @@ QIDIV		(ERROR-TABLE RESTART QIDIV)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QIDIV)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-IDIV))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIDIV0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIDIV0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	;; quux revision 13: -2^31 by -1, the one quotient that is not a fixnum:
 	;; minus the dividend, whose overflow fixpack-p sees
 	(jump-equal m-2 a-minus-one qidiv-by-minus-one)
@@ -1388,6 +1443,7 @@ XFLOOR-1-A
     (ERROR-TABLE ARGTYP NUMBER PP T XFIX)
     (ERROR-TABLE ARG-POPPED 0 PP)
        ((M-A) DPB M-1 ARITH-FIX-ROUNDING-MODE-FIELD (A-CONSTANT ARITH-1ARG-FIX))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 ;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
 	(JUMP fixbox-t)
 
@@ -1429,8 +1485,10 @@ XFLOOR-1-CEIL
 ;(Actually, it's hairier than that.  We change dividend to dividend+divisor
 ;and then move back by 1 toward the original dividend.
 ;The amount of change is thus |divisor|-1).
-	(CALL FXUNPK-T-2)
-	(CALL FXUNPK-P-1)
+;	(CALL FXUNPK-T-2)
+;	(CALL FXUNPK-P-1)
+	((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	((M-1) ADD M-1 A-2)
 	((M-1) SUB M-1 (A-CONSTANT 1))
 	(JUMP-GREATER-THAN M-2 A-ZERO XFLOOR-1-CEIL-POSITIVE)
@@ -1454,8 +1512,10 @@ XFLOOR-1-FLOOR
 	((M-1) XOR PDL-TOP A-T)
 	(JUMP-IF-BIT-CLEAR BOXED-SIGN-BIT M-1 XFLOOR-1-TRUNC)
 ;Replace the dividend with dividend-divisor+1.  (This cannot change the sign).
-	(CALL FXUNPK-T-2)
-	(CALL FXUNPK-P-1)
+;	(CALL FXUNPK-T-2)
+;	(CALL FXUNPK-P-1)
+	((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	((M-1) SUB M-1 A-2)
 	((M-1) ADD M-1 (A-CONSTANT 1))
 	(JUMP-GREATER-THAN M-2 A-ZERO XFLOOR-1-CEIL-POSITIVE)
@@ -1497,10 +1557,12 @@ QDIV		(ERROR-TABLE RESTART QDIV)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QDIV)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-DIV))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QDIV0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QDIV0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 ;The args are two fixnums, now unpacked in M-1 and M-2.  Second arg packed is in M-T.
 	(JUMP-EQUAL M-1 A-ZERO QDIV-ZERO)
 ;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
@@ -1522,7 +1584,8 @@ QDIV-SIGNS-RIGHT
 		QDIV-REL-PRIME)
        ((M-1) M-C)
 ;Get the denominator and the GCD in M-1 and M-2.  Save the GCD in M-D.
-	(CALL FXUNPK-T-2)
+;	(CALL FXUNPK-T-2)
+	((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	((M-D) M-2)
 	(CALL DIV)
 ;Save denominator/gcd in M-E, and divide numerator by the gcd.
@@ -1627,6 +1690,7 @@ XEQL1	((M-1) Q-DATA-TYPE M-T)
     (ERROR-TABLE ARGTYP NUMBER PP 0 XEQL)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-EQL))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 	(JUMP XEQL2)
 
 XEQL3
@@ -1642,11 +1706,13 @@ QIEQL		(ERROR-TABLE RESTART QIEQL)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QIEQL)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-EQUAL))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIEQL0)
 XEQL2 ;; Enter from EQL, with ARITH-2ARG-EQL in M-A.
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIEQL0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	((M-T) A-V-NIL)
 	(POPJ-AFTER-NEXT POPJ-NOT-EQUAL M-1 A-2)
        ((M-T) A-V-TRUE)
@@ -1660,10 +1726,12 @@ QIGRP		(ERROR-TABLE RESTART QIGRP)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QIGRP)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-GREATERP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIGRP0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QIGRP0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	((M-T) A-V-NIL)
 	(POPJ-AFTER-NEXT POPJ-LESS-OR-EQUAL M-1 A-2)
        ((M-T) A-V-TRUE)
@@ -1677,10 +1745,12 @@ QILSP		(ERROR-TABLE RESTART QILSP)
     (ERROR-TABLE ARGTYP NUMBER PP 0 QILSP)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-LESSP))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QILSP0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 QILSP0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	((M-T) A-V-NIL)
 	(POPJ-AFTER-NEXT POPJ-GREATER-OR-EQUAL M-1 A-2)
        ((M-T) A-V-TRUE)
@@ -1692,10 +1762,12 @@ XMAX (MISC-INST-ENTRY *MAX)
     (ERROR-TABLE ARGTYP NUMBER PP 0 XMAX)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-MAX))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART XMAX0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 XMAX0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 ;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
 	(JUMP-GREATER-OR-EQUAL M-1 A-2 fixbox-t)
 	(JUMP-XCT-NEXT fixbox-t)
@@ -1708,10 +1780,12 @@ XMIN (MISC-INST-ENTRY *MIN)
     (ERROR-TABLE ARGTYP NUMBER PP 0 XMIN)
     (ERROR-TABLE ARG-POPPED 0 PP M-T)
        ((M-A) (A-CONSTANT ARITH-2ARG-MIN))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART XMIN0)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP NUMBER M-T 1 XMIN0)
     (ERROR-TABLE ARG-POPPED 0 M-1 M-T)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 ;; quux revision 13: m-1 is not a sum here, so boxed without the overflow test
 	(JUMP-LESS-OR-EQUAL M-1 A-2 fixbox-t)
 	(JUMP-XCT-NEXT fixbox-t)
@@ -1732,7 +1806,8 @@ D-NUMARG
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;FREE
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;SYMBOL
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SYMBOL HEADER
-	(P-BIT FXUNPK-P-1)			;FIX
+;	(P-BIT FXUNPK-P-1)			;FIX
+	(p-bit r-bit)			;fix: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
 	(ARITH-XNM)				;EXTENDED NUMBER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;HEADER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;GC-FORWARD
@@ -1755,7 +1830,8 @@ D-NUMARG
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;ENTITY
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;STACK-CLOSURE
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SELF-REF-POINTER
-	(P-BIT FXUNPK-P-1)			;CHARACTER
+;	(P-BIT FXUNPK-P-1)			;CHARACTER
+	(p-bit r-bit)			;character: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
@@ -1770,7 +1846,8 @@ D-NUMARG1
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;FREE
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;SYMBOL
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SYMBOL HEADER
-	(P-BIT FXUNPK-P-1)			;FIX
+;	(P-BIT FXUNPK-P-1)			;FIX
+	(p-bit r-bit)			;fix: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
 	(ARITH-XNM-ANY)				;EXTENDED NUMBER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;HEADER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;GC-FORWARD
@@ -1793,7 +1870,8 @@ D-NUMARG1
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;ENTITY
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;STACK-CLOSURE
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SELF-REF-POINTER
-	(P-BIT FXUNPK-P-1)			;CHARACTER
+;	(P-BIT FXUNPK-P-1)			;CHARACTER
+	(p-bit r-bit)			;character: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
@@ -1809,7 +1887,8 @@ D-FIXNUM-NUMARG2
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;FREE
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;SYMBOL
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SYMBOL HEADER
-	(P-BIT INHIBIT-XCT-NEXT-BIT FXUNPK-T-2)	;FIX
+;	(P-BIT INHIBIT-XCT-NEXT-BIT FXUNPK-T-2)	;FIX
+	(p-bit r-bit)			;fix: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
 	(INHIBIT-XCT-NEXT-BIT ARITH-ANY-XNM)	;EXTENDED NUMBER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;HEADER
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;GC-FORWARD
@@ -1832,7 +1911,8 @@ D-FIXNUM-NUMARG2
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;ENTITY
 	(P-BIT INHIBIT-XCT-NEXT-BIT TRAP)	;STACK-CLOSURE
 	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;SELF-REF-POINTER
-	(P-BIT INHIBIT-XCT-NEXT-BIT FXUNPK-T-2)	;CHARACTER
+;	(P-BIT INHIBIT-XCT-NEXT-BIT FXUNPK-T-2)	;CHARACTER
+	(p-bit r-bit)			;character: quux revision 13, falls through; the caller unpacks it (see fxunpk-p-1)
  (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
 (END-DISPATCH)
 
@@ -2139,7 +2219,8 @@ ARITH-SFL-ANY		(ERROR-TABLE RESTART ARITH-SFL-ANY)
 ;;; I-ARG contains type of first argument, M-A contains operation.
 ARITH-ANY-FIX
 	(DISPATCH-XCT-NEXT (BYTE-FIELD 3 0) READ-I-ARG D-ARITH-ANY-FIX)
-       (CALL FXUNPK-T-2)
+;       (CALL FXUNPK-T-2)
+       ((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in the slot, no call (see fxunpk-p-1)
 
 (LOCALITY D-MEM)
 (START-DISPATCH 3 0)
@@ -4061,7 +4142,8 @@ BFXDIV
 ;Stack now has bignum, fixnum.  M-K has remainder from division.
 	((M-1) M-K)
 	((M-T) PDL-TOP)
-	(CALL FXUNPK-T-2)
+;	(CALL FXUNPK-T-2)
+	((m-2) q-pointer m-t)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	(CALL GCD-FIX-FIX)
 	(JUMP NORMALIZED-RATIONAL-TO-STACK)
 

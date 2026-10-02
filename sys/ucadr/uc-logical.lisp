@@ -134,10 +134,12 @@ QIAND0	((M-S) (A-CONSTANT (OA-LOW-CONTEXT (AND)))) ;An extra instruction, but sa
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) PP 0 QIAND0)
     (ERROR-TABLE ARG-POPPED 0 PP M-1)
        ((M-A) (A-CONSTANT ARITH-2ARG-BOOLE))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
     (ERROR-TABLE RESTART QIAND1)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) M-T 1 QIAND1)
     (ERROR-TABLE ARG-POPPED 0 M-T M-1)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(POPJ-AFTER-NEXT (M-1) AND M-2 A-1)
        ((M-T) Q-POINTER M-1 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 
@@ -153,10 +155,12 @@ QIIOR0	((M-S) (A-CONSTANT (OA-LOW-CONTEXT (IOR)))) ;An extra instruction, but sa
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) PP 0 QIIOR0)
     (ERROR-TABLE ARG-POPPED 0 PP M-1)
        ((M-A) (A-CONSTANT ARITH-2ARG-BOOLE))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIIOR1)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) M-T 1 QIIOR1)
     (ERROR-TABLE ARG-POPPED 0 M-T M-1)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(POPJ-AFTER-NEXT (M-1) IOR M-2 A-1)
        ((M-T) Q-POINTER M-1 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 
@@ -172,10 +176,12 @@ QIXOR0	((M-S) (A-CONSTANT (OA-LOW-CONTEXT (XOR)))) ;An extra instruction, but sa
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) PP 0 QIXOR0)
     (ERROR-TABLE ARG-POPPED 0 PP M-1)
        ((M-A) (A-CONSTANT ARITH-2ARG-BOOLE))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 		(ERROR-TABLE RESTART QIXOR1)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) M-T 1 QIXOR1)
     (ERROR-TABLE ARG-POPPED 0 M-T M-1)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	(POPJ-AFTER-NEXT (M-1) XOR M-2 A-1)
        ((M-T) Q-POINTER M-1 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 
@@ -196,10 +202,12 @@ XBOOLE0	(DISPATCH-XCT-NEXT Q-DATA-TYPE C-PDL-BUFFER-POINTER D-NUMARG1)
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) PP 1 XBOOLE1)
     (ERROR-TABLE ARG-POPPED 0 PP M-1)
        ((M-A) (A-CONSTANT ARITH-2ARG-BOOLE))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
     (ERROR-TABLE RESTART XBOOLE2)
 	(DISPATCH Q-DATA-TYPE M-T D-FIXNUM-NUMARG2 (I-ARG NUMBER-CODE-FIXNUM))
     (ERROR-TABLE ARGTYP (FIXNUM BIGNUM) M-T 2 XBOOLE2)
     (ERROR-TABLE ARG-POPPED 0 M-T M-1)
+	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	((OA-REG-LOW) M-S)
 	(POPJ-AFTER-NEXT (M-1) SETZ M-2 A-1)
        ((M-T) Q-POINTER M-1 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
@@ -333,13 +341,15 @@ XASH (MISC-INST-ENTRY ASH)
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)	;arg 2, shift count
     (ERROR-TABLE ARGTYP FIXNUM PP 1 XASH)
     (ERROR-TABLE ARG-POPPED 0 PP PP)
-	(CALL FXUNPK-P-1)			;M-2 gets arg 2
+;	(CALL FXUNPK-P-1)			;M-2 gets arg 2
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: unpack the fixnum in one word, no call (see fxunpk-p-1)
 	((M-2) M-1)
 		(ERROR-TABLE RESTART XASH1)
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER D-NUMARG)	;arg 1, number to shift
     (ERROR-TABLE ARGTYP NUMBER PP 0 XASH1)
     (ERROR-TABLE ARG-POPPED 0 PP M-1)
        ((M-A) (A-CONSTANT ARITH-1ARG-ASH))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	;Fixnum case
 	((OA-REG-HIGH) (BYTE-FIELD 1 31.) M-1)	;M-3 gets sign extension of M-1
 	((M-3) M-ZERO)

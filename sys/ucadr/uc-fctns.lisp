@@ -1007,6 +1007,7 @@ XEQUAL-XNUM
 	((PDL-PUSH) M-B)
 	(DISPATCH-XCT-NEXT Q-DATA-TYPE M-B D-NUMARG1)
        ((M-A) (A-CONSTANT ARITH-2ARG-EQUAL))
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg1, unpacked here
 ;; Will not fall through, since numbers are not fixnums.
 
 ;; If both arrays are strings, call STRING-EQUAL;
@@ -1257,6 +1258,7 @@ XLDB  (MISC-INST-ENTRY LDB) (ERROR-TABLE RESTART XLDB)
 	    (ERROR-TABLE ARGTYP NUMBER PP 1 XLDB)   ;processed via NUMARG.  Thus LDB is
 	    (ERROR-TABLE ARG-POPPED 0 PP PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-LDB))	    ;considered to be a one operand op.
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 		(ERROR-TABLE RESTART XLDB0)
 	(DISPATCH (I-ARG DATA-TYPE-INVOKE-OP)	;Arg1, byte pointer.  Must be fixnum.
 			Q-DATA-TYPE PDL-TOP TRAP-UNLESS-FIXNUM)
@@ -1464,6 +1466,7 @@ XDPB (MISC-INST-ENTRY DPB) (ERROR-TABLE RESTART XDPB)
 	    (ERROR-TABLE ARGTYP NUMBER PP T XDPB)  ;PROCESSED VIA NUMARG. THUS DPB IS A
 	    (ERROR-TABLE ARG-POPPED 0 PP PP PP)
        ((M-A) (A-CONSTANT ARITH-1ARG-DPB))	   ;ONE OPERAND OP.
+	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 ;FIXNUM CASE.  DATA TO DPB INTO (ARG3) SIGN EXTENDED IN M-1.
 		(ERROR-TABLE RESTART XDPB0)
 	(DISPATCH (I-ARG DATA-TYPE-INVOKE-OP)		 ;ARG2, BYTE POINTER

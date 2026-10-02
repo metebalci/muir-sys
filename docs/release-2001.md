@@ -230,6 +230,73 @@ file carries a comment in that file saying why.
   Boot PROM 2001 is unchanged. On Y5's band with them, system-check passes
   93 of 93 and microcode-check 174 of 174 (Y5's 170 and the new four), on
   the micro and rtl engines.
+- **No fixnum is sign-extended any more** (contract G2, section 6.1). MIT's
+  microcode sign-extended a fixnum before arithmetic, copying its sign bit
+  over the tag through `OA-REG-HIGH`, which turned `M-ZERO` into
+  `M-MINUS-ONE`: `SIGN-EXTEND-M-1` (reached through `FXUNPK-P-1`),
+  `FXUNPK-T-2`, `FIXGET-1`, `GET-ANY-CHAR`, `GET-CHAR-FIX`, `GET-FIX-ANY`
+  and `XDIVD1` (`sys/ucadr/uc-arith.lisp`). At 40 bits a fixnum is the
+  whole 32-bit field, arithmetic and the order conditions act on `<31:0>`,
+  and the overflow condition finds a sum past 32 bits, so nothing needs the
+  extension; and since constants and initial values are zero-extended
+  (A1.5), both locations have `<39:32>` zero, so all it did was clear the
+  tag. One `Q-POINTER` word does the same, and each of them is now that
+  word (`sys/ucadr/uc-arith.lisp:24-32`, `:399-415`, `:549-552`,
+  `:683-711`). The arithmetic type dispatches `D-NUMARG`, `D-NUMARG1` and
+  `D-FIXNUM-NUMARG2` fall through for a fixnum or a character instead of
+  calling the two unpackers (`sys/ucadr/uc-arith.lisp:1810`, `:1834`,
+  `:1850`, `:1874`, `:1891`, `:1915`), and each of their 47 callers unpacks
+  the argument in one word after the dispatch (the 1- and 2-argument
+  functions and comparisons in `uc-arith.lisp`, `QIAND0` and its kin,
+  `XBOOLE0` and `XASH` in `uc-logical.lisp`, `XEQUAL-XNUM`, `XLDB` and
+  `XDPB` in `uc-fctns.lisp`); the direct calls in `XSCALE-FLOAT`,
+  `XFLOOR-1-CEIL`, `XFLOOR-1-FLOOR`, `QDIV`, `ARITH-ANY-FIX`, `BFXDIV` and
+  `XASH` became that word too. `FXUNPK-P-1` and `FXUNPK-T-2` stay, a
+  `Q-POINTER` word and a return, for `GET-32-BITS`, `GET-FLONUM`,
+  `%GC-CONS-WORK` and the triangle drawing in `uc-hacks.lisp`. `XABS` and
+  `XFIX` box a fixnum through `fixbox-t` rather than `FIXPACK-T`, since the
+  word before is now the unpacking byte word, which does not load the
+  overflow flag (`sys/ucadr/uc-arith.lisp:1181-1185`, `:1276-1280`;
+  `tools/microcode-check/fixpack-flag.py` passes). The 25-bit range checks
+  and `D-FXOVCK` were already gone; the inline sign extension in the mouse
+  tracking (`uc-track-mouse.lisp:229-230`, `:250-251`), a scale factor
+  for `MPY`, is left as it is.
+  - Over the 12 workloads of G2 S4's comparison (muir-sim's profile, rtl,
+    K=4, the 4K cache, Arty timing, 2 M words), the microinstructions
+    executed drop from 348,651,568 to 341,336,206 (−7.32 M, −2.10%), the
+    microcycles by 2.34% and the time by 2.26%. The labels the change
+    touched account for −6.17 M: `SIGN-EXTEND-M-1`'s 4.57 M,
+    `FXUNPK-T-2`'s 2.73 M and `FXUNPK-P-1`'s 2.29 M less the 3.65 M of
+    the unpacking words at the callers, and `GET-ANY-CHAR`'s 0.17 M; the
+    other −1.14 M is elsewhere (paging, the disk, the main loop), since the
+    runs no longer keep step and execute 0.24% fewer macroinstructions.
+  - `tools/microcode-check/cases/fixnum-boundaries.cases` (new) takes
+    `+`, `-`, `*`, `1+`, `1-`, `ASH`, the comparisons and `=`/`EQL`,
+    the one-argument functions, the logical functions, `LDB`, `DPB`, the
+    divisions, a bignum with a negative fixnum and characters, at
+    2147483647 and -2147483648 and with negative operands, interpreted and
+    compiled: 28 cases, which pass on microcode 2001 before the change and
+    after it, on the micro and rtl engines. A partial change fails: of
+    seven mutants assembled from the change, the six that leave out the
+    unpacking at some callers (all of `D-FIXNUM-NUMARG2`'s, all of
+    `D-NUMARG`'s, seven or six sites, or `QIMUL`'s second argument alone)
+    or unpack without `Q-POINTER` (the tag kept) do not boot, the system's
+    own arithmetic going wrong before its TELNET server answers; the
+    seventh, `XHAUL`'s unpacking alone left out, boots and fails the
+    `HAULONG` case. The change itself, run the same way, passes all 28.
+  - The change moves most of the control store: 58 words more, every
+    label from `FIXGET-1` on moves, and `SIGN-EXTEND-M-1` is gone. The
+    number stays 2001. Assembled twice from the sources, byte for byte the
+    same, the outputs are (sha256):
+    - `ucadr.mcr` `be9f99719a4c6ef52cdfe5f0f2ecfa88c3ea0dc576e7701e41c781e0ea2190a2`
+    - `ucadr.tbl` `0feeefd69430eebdec9894b489a9eb6ab64a04df5803b582d6e21760991f3b35`
+    - `ucadr.locs` `e3328f6dd5257878b72586b2e93829e90f35e015e1c44cb935c34a69fa895068`
+    - `ucadr.sym` `b9d93e3d4fe2ab82d86d416a3a7b4c3f8df693eeeba208ff903ed0ae3a4289eb`
+
+    Boot PROM 2001 is unchanged. On Y5's band with them, system-check
+    passes 93 of 93, microcode-check 202 of 202 (174 and the new 28), and
+    System 2000's band cases 30 of 33 (the three not applicable, as
+    before), on the micro and rtl engines.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
