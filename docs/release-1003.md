@@ -332,3 +332,30 @@ Every change to a source file carries a comment in that file saying why.
   characters, is wider than the console. It shows at 32, 33 and 59 boards
   and not at 60, from `PRINT-HERALD` and on the console after the cold
   boot.
+- **A machine whose `sys/` holds no `ubin/ucadr.tbl` boots.** System 1002
+  read `SYS: UBIN; UCADR TBL` at every boot, so with the file absent (an
+  empty `sys/`, or one without `ubin/`) the boot stopped at "LOAD could not
+  find any file related to OZ: /sys/ubin/ucadr.tbl". `EH:INITIALIZE`
+  (`sys/eh/eh.lisp:2403-2417`) now forgets the band's cached table only when
+  the file can be read (`error-table-file-p`, `sys/eh/eh.lisp:2311-2315`,
+  which counts a missing file or directory as absent). Without it, the
+  band's own table, the one it was built with, is kept when it is for the
+  running microcode's version, and the console says so:
+
+  ```
+  [No error table file for microcode version 1000; using the band's own]
+  ```
+
+  For another version the load fails as before. A served file is still read
+  at every boot, so a rebuilt microcode's table replaces the band's; a band
+  booted without the file on a different build of the same-numbered
+  microcode uses the table it was built with. On a band built from this
+  tree and saved to LOD4 as a release band is, booted with no `ucadr.tbl`
+  and with an empty `sys/`, the boot completes, prints the line, and
+  `(car 1)` reports "The argument to CAR, 1, was of the wrong type"; the
+  band without the change stops at that LOAD's question. With the table served
+  it prints "[Loading error table for microcode version 1000]", and a
+  served table with one entry added is the one in use (705 entries, the
+  band's 704). `tools/lispm-check-test` (selftest), `tools/system-check`'s
+  interpreter-closure cases and `tools/microcode-check` give the same
+  results as the band without the change.
