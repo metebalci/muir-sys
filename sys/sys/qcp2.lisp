@@ -1728,13 +1728,17 @@ See P2BRANCH.")
 ;	  (SETQ ARGL (BUTLAST ARGL)))
 	;; a trailing 't in an and may be dropped only when the value is ignored:
 	;; for value, (and x t) is t when x is non-nil, and dropping the 't made the
-	;; compiled (and x t) return x itself.  a trailing 'nil in an or is always
-	;; dropped, as before, since (or x nil) has x's value.
+	;; compiled (and x t) return x itself.  a trailing 'nil in an or is dropped
+	;; only when one value is wanted: dropping it makes x the last form, which
+	;; passes all its values, so the compiled (or (values x 2) nil) returned
+	;; two values where an or's non-last form gives one.
 	(do ()
 	    ((not (and (equal (car (last argl))
 			      (if (eq sense 'true) ''t ''nil))
-		       (or (eq sense 'false)
-			   (and (null m-v-target) (eq dest 'd-ignore))))))
+		       (null m-v-target)
+		       (if (eq sense 'false)
+			   (neq dest 'd-return)
+			 (eq dest 'd-ignore)))))
 	  (setq argl (butlast argl)))
 	(SETQ IDEST 'D-PDL)
 	;; RETURN branches can't be passed in to the last thing in an AND.
@@ -1743,7 +1747,10 @@ See P2BRANCH.")
 	     (SETQ BDEST NIL))
 	;; Any non-null constant as arg in an AND is ignorable unless it is last.
 	;; NIL as arg in an OR is always ignorable.
-	(SETQ ARGL (COND ((EQ SENSE 'FALSE) (DELETE '(QUOTE NIL) ARGL))
+;	(SETQ ARGL (COND ((EQ SENSE 'FALSE) (DELETE '(QUOTE NIL) ARGL))
+	;; a nil left last by the loop above stays, so that the or gives one value.
+	(setq argl (cond ((eq sense 'false)
+			   (nconc (delete ''nil (butlast argl)) (last argl)))
 			 ((NULL ARGL) ARGL)
 			 (T (NREVERSE (CONS (CAR (LAST ARGL))
 					    (DEL #'(LAMBDA (IGNORE X)

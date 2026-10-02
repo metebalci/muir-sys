@@ -17,13 +17,22 @@ Every change to a source file carries a comment in that file saying why.
   than two arguments it now leaves the form alone, and the call goes to the
   function `\\`. Two or more arguments compile as before.
 - **A compiled `(and x t)` returns `t`, not `x`** (`p2andor`,
-  `sys/sys/qcp2.lisp:1725-1738`). Pass 2 dropped a trailing `t` from every
+  `sys/sys/qcp2.lisp:1725-1742`). Pass 2 dropped a trailing `t` from every
   `and`, so the compiled form returned `x` itself when it was non-nil, while
   the interpreter returned `t`; System 100's band does the same, so the rule is
-  MIT's. The trailing `t` is now dropped only when the value is ignored; a
-  trailing `nil` in an `or` is dropped as before. So `error-table-file-p`
-  (`sys/eh/eh.lisp:2311`), compiled with this compiler, returns `t` rather
-  than the truename; its callers use only its truth.
+  MIT's. The trailing `t` is now dropped only when the value is ignored. So
+  `error-table-file-p` (`sys/eh/eh.lisp:2311`), compiled with this compiler,
+  returns `t` rather than the truename; its callers use only its truth.
+- **A compiled `(or (values x 2) nil)` passes one value, not two** (`p2andor`,
+  `sys/sys/qcp2.lisp:1731-1742`, `1750-1753`). Pass 2 dropped every `nil` from
+  an `or`, the trailing one too, so the form before it became the last form
+  and passed all its values: under `multiple-value-list` or as a compiled
+  function's value, `(or (values x 2) nil)` gave `x` and `2`, where the
+  interpreter gives `x` alone, since only an `or`'s last form passes multiple
+  values. System 100's band does the same, so the rule is MIT's. A trailing
+  `nil` is now dropped only when one value is wanted (no multiple-value
+  target, and not the function's return); `nil`s before the last form are
+  dropped as before.
 - **`tools/release-scan` finds a private address that ends a sentence**
   (`tools/release-scan:116-119`). Its IPv4 pattern refused a match followed by
   any dot, so the full stop after an address hid it; it now refuses only a
