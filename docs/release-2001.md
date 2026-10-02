@@ -348,6 +348,48 @@ file carries a comment in that file saying why.
     there a fixnum is 25 bits in a 32-bit register, so -2^24 negates to
     2^24, and the same cases scaled to -16777216 and 16777215 pass, 135 of
     135, on the CADR's current band and microcode.
+- **A machine whose `sys/` holds no `ubin/ucadr.tbl` boots on the band's
+  own error table.** Since System 1002 `EH:INITIALIZE` forgot the band's
+  cached table at every boot, so every boot read `SYS: UBIN; UCADR TBL`,
+  and with the file absent (an empty `sys/`, or one without `ubin/`) the
+  boot stopped at "LOAD could not find any file related to HOST:
+  /sys/ubin/ucadr.tbl", asking for a pathname. `EH:INITIALIZE`
+  (`sys/eh/eh.lisp:2422-2432`) now forgets it only when the file can be
+  read (`error-table-file-p`, `sys/eh/eh.lisp:2322-2329`, which counts a
+  missing file or directory, `FS:FILE-LOOKUP-ERROR`, as absent; the
+  pathname is `error-table-pathname`'s, `:2317-2320`, which
+  `LOAD-ERROR-TABLE` loads, `:2308-2315`). Without the file the band's own
+  table, the one its build loaded, is kept when it is for the running
+  microcode's version, and the console says so:
+
+  ```
+  [No error table file for microcode version 2001; using the band's own]
+  ```
+
+  For another version the load fails as before. A served file is still
+  read at every boot. The CADR's line has the same change.
+  - A band built as Y5's was holds the table: read back from Y5's saved
+    band, `EH:MICROCODE-ERROR-TABLE-VERSION-NUMBER` and
+    `EH:ERROR-TABLE-NUMBER` are 2001 and `EH:ERROR-TABLE` holds 345
+    entries, all 345 in the table of Y5's microcode and 82 of them in
+    that of the microcode before this change (`b648486f`). So a band
+    booted without the file uses the table of the microcode its build ran
+    on, which is right only when the running microcode's `ucadr.tbl` is
+    that one.
+  - On a band built with the change as Y5's band was (this `eh.lisp`
+    compiled on Y5's band, `MAKE-COLD` into LOD3, QLD on microcode
+    `b648486f` at 32 M words and the save to LOD4; its cached table is
+    that microcode's, 345 of 345), booted with no `ucadr.tbl` and with an
+    empty `sys/`, the boot completes, prints the line, and `(car 1)`
+    reports "The argument to CAR, 1, was of the wrong type"; Y5's band
+    stops at the question above. With the file served it prints
+    "[Loading error table for microcode version 2001]", and a served table
+    with one entry added is the one in use (706 entries, the band's 705,
+    and the added restart in `EH:RESTART-LIST`).
+  - `error-table-file-p` returns the file's truename, not `T`: the
+    compiler compiles `(and x t)` as `x` (a compiled
+    `(defun f (x) (and (car x) t))` returns 5 for `'(5)`). Its one caller
+    tests it for `NIL` only.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

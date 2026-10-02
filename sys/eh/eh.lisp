@@ -2305,10 +2305,28 @@ If LOC is not bound in SG, the global binding is used."
     (%P-DPB DTP-FIX #o3005
 	    (LOCF (SYSTEM-COMMUNICATION-AREA %SYS-COM-DESIRED-MICROCODE-VERSION))))
   (SI:WITH-SYS-HOST-ACCESSIBLE
-    ;; the CADR's error table only; there is no ULAMBDA.
-    (LOAD (SEND (FS:PARSE-PATHNAME "SYS: UBIN; UCADR")
-		:NEW-TYPE-AND-VERSION "TBL" %MICROCODE-VERSION-NUMBER)
-	  :PACKAGE (SYMBOL-PACKAGE 'FOO))))
+;    ;; the CADR's error table only; there is no ULAMBDA.
+;    (LOAD (SEND (FS:PARSE-PATHNAME "SYS: UBIN; UCADR")
+;		:NEW-TYPE-AND-VERSION "TBL" %MICROCODE-VERSION-NUMBER)
+;	  :PACKAGE (SYMBOL-PACKAGE 'FOO))))
+    ;; the error table of ucadr, the only microcode; the pathname is
+    ;; error-table-pathname's, which initialize also probes.
+    (load (error-table-pathname)
+	  :package (symbol-package 'foo))))
+
+;; the running microcode's error table file, SYS: UBIN; UCADR TBL n.
+(defun error-table-pathname ()
+  (send (fs:parse-pathname "SYS: UBIN; UCADR")
+	:new-type-and-version "TBL" %microcode-version-number))
+
+;; t when the running microcode's error table file can be read.  initialize
+;; asks, so that a machine without the file keeps the band's own table.  a
+;; missing file or directory (a sys/ with no ubin/) both count as absent.
+(defun error-table-file-p ()
+  (condition-case ()
+      (si:with-sys-host-accessible
+	(and (probef (error-table-pathname)) t))
+    (fs:file-lookup-error nil)))
 
 ;; Divides up MICROCODE-ERROR-TABLE into CALLS-SUB-LIST, RESTART-LIST, and ERROR-TABLE.
 (DEFUN ASSURE-TABLE-PROCESSED (&AUX (DEFAULT-CONS-AREA WORKING-STORAGE-AREA))
@@ -2401,7 +2419,17 @@ This version does some invisible pointer following."
   ;; unreleased build of a microcode keeps its number (1000), so a band saved
   ;; under one build kept that build's table under a later one, and the error
   ;; handler looked a trap up at the wrong addresses ("no error-table entry").
-  (setq microcode-error-table-version-number 0 error-table-number 0)
+;  (setq microcode-error-table-version-number 0 error-table-number 0)
+  ;; but only when the table file is there: a machine whose sys/ holds no
+  ;; ubin/ucadr.tbl stopped at boot, unable to read it, though the band
+  ;; carries the table it was built with.  without the file, the band's own
+  ;; table is kept when it is for the running microcode's version, and a line
+  ;; says so; for any other version the load below fails as before.
+  (if (error-table-file-p)
+      (setq microcode-error-table-version-number 0 error-table-number 0)
+    (when (= microcode-error-table-version-number %microcode-version-number)
+      (format *terminal-io* "~&[No error table file for microcode version ~D; using the band's own]"
+	      %microcode-version-number)))
   (ASSURE-TABLE-LOADED)			;Gets the right UCONS/UCADR TABLE file loaded.
   (ASSURE-TABLE-PROCESSED)		;Processes the contents of UCONS/UCADR TABLE.
   )
