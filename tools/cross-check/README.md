@@ -242,3 +242,21 @@ place apart, the compile time, a generated symbol's number and the same symbol
 made a plain one, an `EXPR-SXHASH` value and a fixnum beside it, a
 `GENTEMP` name's number in a local map and the same name's stem, and a
 definition's hash in the macros-expanded record.
+
+## Comparing two cold loads of the 40-bit machine: `tools/cold-compare`
+
+`tools/cold-compare COLD-A COLD-B` compares two cold loads (the LOD band of
+each, copied off its pack) object by object, for G2 section 7's check (b),
+item 2: step 6's cold load against step 5's. It accepts only what two
+compiles of one source write differently: each file's attribute list,
+compared as a set of indicator-value pairs; the keywords those lists intern,
+compared by name wherever they are referenced; and each file's compile time
+(`:COMPILE-DATA`) and QFASL creation date (`FILE-ID-PACKAGE-ALIST`). Every
+other word is compared by meaning, a symbol by its name, so a word whose
+bytes are equal while it names another keyword is reported too; it prints
+the accepted differences by kind and accounts for every word a byte diff
+finds. `tools/cold-compare-test COLD-A COLD-B` is its control: on copies of
+COLD-B it plants an attribute's value, a symbol reference and a fixnum in a
+FEF, an instruction word, a fixnum in a list, and words made byte-equal to
+COLD-A's that name other keywords, each of which must be reported, and a
+change to one file's two dates, which must be accepted.

@@ -1,0 +1,687 @@
+#!/usr/bin/env python3
+"""cold-compare: two 40-bit cold loads compared object by object.
+
+Usage: tools/cold-compare [--labels A,B] [--max N] COLD-A COLD-B
+
+COLD-A and COLD-B are cold loads as MAKE-COLD writes them (the LOD band
+holding one, copied off the pack: 40-bit words, five bytes each, little
+endian).  Exit 0 when they are equal apart from what two compiles of one
+source write differently, 1 when anything else differs, 2 when a file cannot
+be read as a cold load.
+
+This is G2 section 7's check (b), item 2, as amended on 2 October 2026: the
+native route is a fixed point at the cold load when step 6's equals step 5's
+word for word, except where two compiles of one source write differently,
+and only there:
+
+  - each cold-load file's attribute list (the QFASL's file property list),
+    compared as a set of indicator-value pairs: a compile writes it in the
+    order its builder band holds it, which alternates from one generation to
+    the next;
+  - the keywords those lists intern, compared by name, since the first
+    list's order decides where the cold load allocates them and their print
+    names;
+  - each file's two dates: the compile time in its :COMPILE-DATA and the
+    QFASL's creation date in its FILE-ID-PACKAGE-ALIST.
+
+A byte diff is not enough, in either direction.  It counts the reordered
+attribute lists and the moved keywords as differences, and it misses a word
+whose bytes are equal while it names another symbol (a symbol pointer to an
+address that holds :COLD-LOAD in one cold load and :BASE in the other).  So
+every word is compared by meaning: a pointer to a symbol, or into its five
+words or its print name, as the symbol it names; every other word as it is,
+since everything else is allocated at the same address in both.  The words
+that still differ must lie in an attribute list (its cells, and the strings,
+lists and bignums it holds), and those lists must be equal as sets of pairs,
+or in the digits of one of the two dates.  Anything else is reported with
+the object that holds it: a FEF and its constant or instruction word, a
+symbol's cell, a string, a list and what holds it.
+
+The output gives the accepted differences by kind, a reconciliation of every
+word a byte diff finds, and each difference reported.  The layouts are
+sys/cold/qcom.lisp's (data types, cdr codes, areas, headers) and
+sys/cold/coldut.lisp's and coldld.lisp's (symbols, strings, bignums,
+*COLD-LOADED-FILE-PROPERTY-LISTS*).  Its self-test, with the planted
+changes it must report and the one it must accept, is
+tools/cold-compare-test.
+"""
+import argparse
+import bisect
+import collections
+import sys
+
+# sys/cold/qcom.lisp:15-43: the data types in a word's <37:32>, and the cdr
+# codes in <39:38> (qcom.lisp:46-50, 59-62).
+DTP_TRAP, DTP_NULL, DTP_FREE, DTP_SYMBOL, DTP_SYMBOL_HEADER, DTP_FIX = 0, 1, 2, 3, 4, 5
+DTP_EXTENDED_NUMBER, DTP_HEADER = 6, 7
+DTP_LOCATIVE, DTP_LIST, DTP_U_ENTRY, DTP_FEF_POINTER = 13, 14, 15, 16
+DTP_ARRAY_POINTER, DTP_ARRAY_HEADER = 17, 18
+DTP_SMALL_FLONUM, DTP_INSTANCE_HEADER, DTP_SELF_REF, DTP_CHARACTER = 21, 24, 27, 28
+DTP_NAMES = ['TRAP', 'NULL', 'FREE', 'SYMBOL', 'SYMBOL-HEADER', 'FIX',
+             'EXTENDED-NUMBER', 'HEADER', 'GC-FORWARD', 'EXTERNAL-VALUE-CELL-POINTER',
+             'ONE-Q-FORWARD', 'HEADER-FORWARD', 'BODY-FORWARD', 'LOCATIVE', 'LIST',
+             'U-ENTRY', 'FEF-POINTER', 'ARRAY-POINTER', 'ARRAY-HEADER', 'STACK-GROUP',
+             'CLOSURE', 'SMALL-FLONUM', 'SELECT-METHOD', 'INSTANCE', 'INSTANCE-HEADER',
+             'ENTITY', 'STACK-CLOSURE', 'SELF-REF-POINTER', 'CHARACTER']
+CDR_NORMAL, CDR_ERROR, CDR_NIL, CDR_NEXT = 0, 1, 2, 3
+
+# The types whose field is not an address.  An unboxed word (a string's
+# characters, a FEF's instructions, a numeric array's elements) is tagged
+# DTP-FIX (coldut.lisp, vunboxed) and a bignum digit DTP-TRAP
+# (store-bignum-40), so neither is ever read as a pointer here.  Every other
+# type's field is an address (DTP-NULL and DTP-FREE hold their own word's or
+# symbol's), which a moved symbol's translation applies to.
+NOT_ADDRESSES = {DTP_TRAP, DTP_FIX, DTP_HEADER, DTP_U_ENTRY, DTP_ARRAY_HEADER,
+                 DTP_SMALL_FLONUM, DTP_SELF_REF, DTP_CHARACTER}
+
+# sys/cold/qcom.lisp:432-446: header types in a DTP-HEADER word's <23:19>.
+HEADER_FEF_TYPES = {1, 8, 9, 10, 11}
+HEADER_ARRAY_LEADER, HEADER_BIGNUM = 2, 6
+# qcom.lisp:738-758: array types in an array header's <23:19>.
+ART_NAMES = ['ART-ERROR', 'ART-1B', 'ART-2B', 'ART-4B', 'ART-8B', 'ART-16B', 'ART-32B',
+             'ART-Q', 'ART-Q-LIST', 'ART-STRING', 'ART-STACK-GROUP-HEAD',
+             'ART-SPECIAL-PDL', 'ART-HALF-FIX', 'ART-REG-PDL', 'ART-FLOAT',
+             'ART-FPS-FLOAT', 'ART-FAT-STRING', 'ART-COMPLEX-FLOAT', 'ART-COMPLEX',
+             'ART-COMPLEX-FPS-FLOAT']
+ART_STRING = 9
+
+# qcom.lisp:146-148: the system communication area is page 1, at 2000; its
+# first word locates the REGION-ORIGIN area, its second is the band's size.
+SYS_COM = 0o2000
+# qcom.lisp:250-298, AREA-LIST: the area numbers this tool reads (in a cold
+# load every area is one region, its number the area's).  Checked against the
+# names in AREA-NAME when an image is read.
+AREA_REGION_ORIGIN, AREA_REGION_LENGTH, AREA_REGION_BITS = 4, 5, 6
+AREA_REGION_FREE_POINTER, AREA_AREA_NAME = 7, 13
+# qcom.lisp:112-114: a region's representation type, list or structure.
+REGION_REP_SHIFT, REP_LIST = 20, 0
+
+# The names of the moved symbols' five words (coldut.lisp, store-symbol-vector).
+SYMBOL_CELLS = ['print name', 'value cell', 'function cell', 'property list', 'package cell']
+
+
+def tag(v):
+    return (v >> 32) & 0o77
+
+
+def ptr(v):
+    return v & 0xffffffff
+
+
+def cdr(v):
+    return v >> 38
+
+
+def with_ptr(v, p):
+    return (v & ~0xffffffff) | p
+
+
+class Bad(Exception):
+    """An image that cannot be read as a cold load."""
+
+
+class Image:
+    """One cold load's words, areas and symbols."""
+
+    def __init__(self, path, label):
+        self.path, self.label = path, label
+        with open(path, 'rb') as f:
+            self.raw = f.read()
+        if len(self.raw) < (SYS_COM + 2) * 5:
+            raise Bad('%s: too short for a cold load' % path)
+        size = self.word(SYS_COM + 1)
+        if tag(size) != DTP_FIX or ptr(size) * 5 > len(self.raw):
+            raise Bad('%s: the valid size at %o is not a fixnum within the file' % (path, SYS_COM + 1))
+        self.size = ptr(size)
+        mv = memoryview(self.raw)
+        self.w = [int.from_bytes(mv[i:i + 5], 'little') for i in range(0, self.size * 5, 5)]
+        self.tail = self.raw[self.size * 5:]
+        self._areas()
+        self._symbols()
+
+    def word(self, a):
+        return int.from_bytes(self.raw[a * 5:a * 5 + 5], 'little')
+
+    # -- areas, for naming where a word is
+    def _areas(self):
+        w = self.w
+        ro = w[SYS_COM]
+        if tag(ro) != DTP_LOCATIVE:
+            raise Bad('%s: no locative to REGION-ORIGIN at %o' % (self.path, SYS_COM))
+        ro = ptr(ro)
+        org = lambda i: ptr(w[ro + i])
+        names, i = [], org(AREA_AREA_NAME)
+        while True:     # AREA-NAME is a cdr-coded list (coldut.lisp, q-storage-finalize)
+            names.append(self.symbol_name(ptr(w[i])) if tag(w[i]) == DTP_SYMBOL else '?')
+            if cdr(w[i]) != CDR_NEXT or len(names) > 0o400:
+                break
+            i += 1
+        for n, want in ((AREA_REGION_ORIGIN, 'REGION-ORIGIN'), (AREA_REGION_LENGTH, 'REGION-LENGTH'),
+                        (AREA_REGION_BITS, 'REGION-BITS'), (AREA_AREA_NAME, 'AREA-NAME'),
+                        (AREA_REGION_FREE_POINTER, 'REGION-FREE-POINTER')):
+            if n >= len(names) or names[n] != want:
+                raise Bad('%s: area %d is not %s' % (self.path, n, want))
+        self.areas = []
+        for i, name in enumerate(names):
+            bits = ptr(w[org(AREA_REGION_BITS) + i])
+            self.areas.append((org(i), ptr(w[org(AREA_REGION_LENGTH) + i]),
+                               ptr(w[org(AREA_REGION_FREE_POINTER) + i]), name,
+                               (bits >> REGION_REP_SHIFT) & 3 == REP_LIST))
+        self.areas.sort()
+        self.area_origins = [a[0] for a in self.areas]
+
+    def area(self, a):
+        """(origin, length, free pointer, name, list-p) of the area holding A."""
+        k = bisect.bisect_right(self.area_origins, a) - 1
+        return self.areas[k] if k >= 0 else None
+
+    # -- strings and symbols
+    def array_info(self, a):
+        """An array header at A: (type, length, first data word)."""
+        h = ptr(self.w[a])
+        n, data = h & 0o1777, a + 1
+        if h & (1 << 11):                       # long length: the next word
+            n, data = ptr(self.w[a + 1]), a + 2
+        ndims = (h >> 12) & 7
+        data += max(ndims - 1, 0)               # the other dimensions
+        return (h >> 19) & 0o37, n, data
+
+    def string_words(self, a):
+        """The words of the string whose header is at A, or None."""
+        if not (0 <= a < self.size) or tag(self.w[a]) != DTP_ARRAY_HEADER:
+            return None
+        t, n, data = self.array_info(a)
+        if t != ART_STRING:
+            return None
+        return range(a, data + (n + 3) // 4)
+
+    def string(self, a):
+        t, n, data = self.array_info(a)
+        out = bytearray()
+        for k in range((n + 3) // 4):
+            out += ptr(self.w[data + k]).to_bytes(4, 'little')
+        return out[:n].decode('latin-1')
+
+    def symbol_name(self, s):
+        p = ptr(self.w[s])
+        return self.string(p) if self.string_words(p) else '?'
+
+    def _symbols(self):
+        """Every symbol, by its header word, and its key (package, name): the
+        package cell holds a symbol naming the package (coldut.lisp,
+        store-symbol-vector), whose empty name is the keyword package's."""
+        w = self.w
+        self.sym_key = {}
+        self.by_key = collections.defaultdict(list)
+        for s in range(self.size):
+            if tag(w[s]) != DTP_SYMBOL_HEADER:
+                continue
+            if self.string_words(ptr(w[s])) is None:
+                raise Bad('%s: the symbol header at %o does not point at a string' % (self.path, s))
+            pk = w[s + 4]
+            if tag(pk) == DTP_SYMBOL and ptr(pk) != 0:
+                pkg = self.symbol_name(ptr(pk))
+            elif tag(pk) == DTP_SYMBOL:
+                pkg = None
+            else:
+                pkg = '#%o' % (pk & 0x3fffffffff)
+            key = (pkg, self.symbol_name(s))
+            self.sym_key[s] = key
+            self.by_key[key].append(s)
+
+    def lookup(self, name):
+        hits = [s for k, ss in self.by_key.items() if k[1] == name for s in ss]
+        if len(hits) != 1:
+            raise Bad('%s: %d symbols named %s' % (self.path, len(hits), name))
+        return hits[0]
+
+    # -- lists
+    def list_cells(self, v, limit=100000):
+        """The list V: [(element word address, element word)], the tail word,
+        and every word its cells occupy."""
+        out, cells = [], []
+        if tag(v) != DTP_LIST:
+            return out, v, cells
+        i = ptr(v)
+        while len(out) < limit:
+            if not 0 <= i < self.size:
+                raise Bad('%s: a list runs to %o, outside the band' % (self.path, i))
+            x = self.w[i]
+            out.append((i, x))
+            cells.append(i)
+            c = cdr(x)
+            if c == CDR_NEXT:
+                i += 1
+            elif c == CDR_NIL:
+                return out, None, cells
+            elif c == CDR_NORMAL:
+                cells.append(i + 1)
+                nx = self.w[i + 1]
+                if tag(nx) == DTP_LIST:
+                    i = ptr(nx)
+                else:
+                    return out, nx, cells
+            else:
+                raise Bad('%s: a list cell at %o has cdr code ERROR' % (self.path, i))
+        raise Bad('%s: a list at %o runs past %d cells' % (self.path, ptr(v), limit))
+
+    # -- meaning, for attribute lists: symbols by name, nothing by address
+    def meaning(self, v, words, depth=0, dates=None):
+        """V's value as a comparable tuple, the words of its substructure added
+        to WORDS.  DATES, when given, is a set to which a bignum's digit words
+        are added and whose digits are then left out of the meaning."""
+        t, p = tag(v), ptr(v)
+        if depth > 40:
+            raise Bad('%s: structure nested past 40 at %o' % (self.path, p))
+        if t == DTP_SYMBOL:
+            return ('symbol',) + self.sym_key[p]
+        if t == DTP_LIST:
+            els, tail, cells = self.list_cells(v)
+            words.update(cells)
+            return ('list', tuple(self.meaning(x, words, depth + 1) for _, x in els),
+                    None if tail is None else self.meaning(tail, words, depth + 1))
+        if t == DTP_ARRAY_POINTER and self.string_words(p):
+            words.update(self.string_words(p))
+            return ('string', self.string(p))
+        if t == DTP_EXTENDED_NUMBER and tag(self.w[p]) == DTP_HEADER:
+            h = ptr(self.w[p])
+            if (h >> 19) & 0o37 == HEADER_BIGNUM:
+                n = h & 0o777777
+                digits = range(p + 1, p + 1 + n)
+                words.add(p)
+                if dates is not None:
+                    dates.update(digits)
+                    return ('date bignum', h)
+                words.update(digits)
+                return ('bignum', h, tuple(self.w[d] for d in digits))
+        if t in NOT_ADDRESSES:
+            return ('word', v & 0x3fffffffff)
+        # any other object in an attribute list: by its type and address,
+        # which is the same object's in both cold loads
+        return ('object', t, p)
+
+    def bignum(self, p):
+        h = ptr(self.w[p])
+        val = 0
+        for k in range(h & 0o777777):
+            val |= ptr(self.w[p + 1 + k]) << (31 * k)
+        return -val if h & (1 << 18) else val
+
+    # -- printing
+    def show(self, v, depth=0):
+        t, p = tag(v), ptr(v)
+        if t == DTP_SYMBOL:
+            pkg, name = self.sym_key.get(p, (None, '?'))
+            return name if pkg is None else (':' + name if pkg == '' else pkg + ':' + name)
+        if t == DTP_FIX:
+            return str(p - (1 << 32) if p & (1 << 31) else p)
+        if t == DTP_LIST and depth < 3:
+            try:
+                els, tail, _ = self.list_cells(v, 12)
+            except Bad:
+                return '(list at %o)' % p
+            s = '(' + ' '.join(self.show(x, depth + 1) for _, x in els[:8])
+            s += ' ...' if len(els) > 8 else ''
+            return s + (' . ' + self.show(tail, depth + 1) if tail is not None and len(els) <= 8 else '') + ')'
+        if t == DTP_ARRAY_POINTER and self.string_words(p):
+            s = self.string(p)
+            return '"%s"' % (s if len(s) <= 40 else s[:40] + '...')
+        if t == DTP_EXTENDED_NUMBER and tag(self.w[p]) == DTP_HEADER and (ptr(self.w[p]) >> 19) & 0o37 == HEADER_BIGNUM:
+            return 'bignum %d' % self.bignum(p)
+        name = DTP_NAMES[t] if t < len(DTP_NAMES) else 'type %o' % t
+        return 'DTP-%s %o' % (name, p)
+
+    def describe(self, a, depth=0):
+        """Which object holds the word at A."""
+        ar = self.area(a)
+        if ar is None:
+            return 'word %o' % a
+        org, length, free, aname, listp = ar
+        if a >= org + free:
+            return 'word %o past the free pointer of %s' % (a, aname)
+        if listp:
+            return self._describe_list(a, org, aname, depth)
+        # a structure area: the nearest header at or below A
+        h = a
+        while h >= org and tag(self.w[h]) not in (DTP_SYMBOL_HEADER, DTP_HEADER,
+                                                   DTP_ARRAY_HEADER, DTP_INSTANCE_HEADER):
+            h -= 1
+        if h < org:
+            return 'word %o in %s' % (a, aname)
+        x, k = self.w[h], a - h
+        if tag(x) == DTP_SYMBOL_HEADER:
+            return 'symbol %s, %s (%o)' % (self.show(with_ptr(DTP_SYMBOL << 32, h)),
+                                           SYMBOL_CELLS[k] if k < 5 else 'word %d' % k, a)
+        if tag(x) == DTP_HEADER:
+            ht = (ptr(x) >> 19) & 0o37
+            if ht in HEADER_FEF_TYPES:
+                boxed = (ptr(x) >> 1) & 0o37777                 # %%FEFH-PC-IN-WORDS
+                what = ('boxed word %d' % k if k < boxed else
+                        'instruction word %d (halfwords %d-%d)' % (k - boxed, 2 * k, 2 * k + 1))
+                return 'FEF %s, %s (%o)' % (self.show(self.w[h + 2]), what, a)
+            if ht == HEADER_BIGNUM:
+                return 'bignum %d at %o, word %d' % (self.bignum(h), h, k)
+            if ht == HEADER_ARRAY_LEADER:
+                return 'leader of the array at %o, word %d (%o)' % (h + k, k, a)
+            return 'object with header type %d at %o, word %d (%o)' % (ht, h, k, a)
+        if tag(x) == DTP_ARRAY_HEADER:
+            t, n, data = self.array_info(h)
+            if t == ART_STRING:
+                return 'string "%s" at %o, word %d' % (self.string(h)[:40], h, k)
+            return '%s array at %o, word %d (%o)' % (ART_NAMES[t] if t < len(ART_NAMES) else t, h, k, a)
+        return 'instance at %o, word %d (%o)' % (h, k, a)
+
+    def _describe_list(self, a, org, aname, depth):
+        # back to the start of the list: over a cdr-next run, and from a full
+        # cons's cdr word (cdr code ERROR) to its car
+        s, n = a, 0
+        while s > org and (cdr(self.w[s]) == CDR_ERROR or cdr(self.w[s - 1]) == CDR_NEXT):
+            s -= 1
+            n += cdr(self.w[s]) == CDR_NEXT
+        where = 'list cell %o (element %d of the list at %o) in %s' % (a, n, s, aname)
+        if depth >= 3:
+            return where
+        holders = self.referrers().get(s, [])
+        if not holders:
+            return where + ', held by nothing'
+        return where + ', held by ' + self.describe(holders[0], depth + 1)
+
+    def referrers(self):
+        if not hasattr(self, '_refs'):
+            self._refs = collections.defaultdict(list)
+            for i, x in enumerate(self.w):
+                if tag(x) in (DTP_LIST, DTP_LOCATIVE):
+                    self._refs[ptr(x)].append(i)
+        return self._refs
+
+
+class Files:
+    """*COLD-LOADED-FILE-PROPERTY-LISTS* (coldld.lisp, initialize-file-plist,
+    set-file-loaded-id, record-definitions, q-fasl-op-file-property-list):
+    a list of (file-name-string . plist), each plist
+      (DEFINITIONS defs FILE-ID-PACKAGE-ALIST ((NIL (truename . date) "COLDLOADED"))
+       . attribute-list)
+    where the attribute list is the QFASL's own file property list, (:WORD-WIDTH
+    40 :COMPILE-DATA (user host time major minor plist) ...)."""
+
+    def __init__(self, img):
+        self.img = img
+        root = img.lookup('*COLD-LOADED-FILE-PROPERTY-LISTS*')
+        els, tail, _ = img.list_cells(img.w[root + 1])
+        self.order, self.files = [], {}
+        for addr, e in els:
+            if tag(e) != DTP_LIST or cdr(img.w[ptr(e)]) != CDR_NORMAL:
+                raise Bad('%s: an entry of *COLD-LOADED-FILE-PROPERTY-LISTS* at %o is not (name . plist)'
+                          % (img.path, addr))
+            c = ptr(e)
+            name = img.show(img.w[c])
+            self.order.append(name)
+            self.files[name] = self._file(name, img.w[c + 1])
+
+    def _file(self, name, plist):
+        img = self.img
+        els, tail, cells = img.list_cells(plist)
+        sym = lambda x: tag(x) == DTP_SYMBOL and img.sym_key[ptr(x)][1]
+        if len(els) < 4 or sym(els[0][1]) != 'DEFINITIONS' or sym(els[2][1]) != 'FILE-ID-PACKAGE-ALIST':
+            raise Bad('%s: file %s: its plist does not begin DEFINITIONS, FILE-ID-PACKAGE-ALIST'
+                      % (img.path, name))
+        f = {'attr words': set(), 'dates': set(), 'created': set(), 'compiled': set(), 'pairs': [],
+             'symbols': set()}
+        # the creation date: (cdr (cadr (car file-id-package-alist)))
+        ida, _, _ = img.list_cells(els[3][1])
+        ent, _, _ = img.list_cells(ida[0][1]) if ida else ([], None, None)
+        qid = ent[1][1] if len(ent) == 3 else None
+        if qid is None or tag(qid) != DTP_LIST or cdr(img.w[ptr(qid)]) != CDR_NORMAL:
+            raise Bad('%s: file %s: FILE-ID-PACKAGE-ALIST is not ((NIL (truename . date) id))'
+                      % (img.path, name))
+        if img.meaning(img.w[ptr(qid) + 1], set(), dates=f['created'])[0] != 'date bignum':
+            raise Bad('%s: file %s: its creation date is not a bignum' % (img.path, name))
+        # the attribute list: the plist's elements after the generator's four
+        attr = els[4:]
+        for i, x in attr:
+            f['attr words'].add(i)
+            if cdr(x) == CDR_NORMAL:
+                f['attr words'].add(i + 1)
+        if len(attr) % 2 or tail is not None:
+            raise Bad('%s: file %s: its attribute list is not a property list' % (img.path, name))
+        for (_, ind), (_, val) in zip(attr[0::2], attr[1::2]):
+            if tag(ind) == DTP_SYMBOL:
+                f['symbols'].add(ptr(ind))
+            if sym(ind) == 'COMPILE-DATA':
+                f['pairs'].append((img.meaning(ind, f['attr words']), self._compile_data(name, val, f)))
+            else:
+                f['pairs'].append((img.meaning(ind, f['attr words']), img.meaning(val, f['attr words'])))
+        # the symbols the list interns, at any depth
+        for a in f['attr words']:
+            if tag(img.w[a]) == DTP_SYMBOL:
+                f['symbols'].add(ptr(img.w[a]))
+        f['dates'] = f['created'] | f['compiled']
+        return f
+
+    def _compile_data(self, name, val, f):
+        """(user host time major minor plist) (sys/sys/qcfile.lisp:173-179): the
+        time is the compile's date, compared as a bignum of the same length."""
+        img = self.img
+        els, tail, cells = img.list_cells(val)
+        if len(els) < 3:
+            raise Bad('%s: file %s: :COMPILE-DATA has no time' % (img.path, name))
+        f['attr words'].update(cells)
+        out = []
+        for k, (_, x) in enumerate(els):
+            if k == 2:
+                m = img.meaning(x, f['attr words'], dates=f['compiled'])
+                if m[0] != 'date bignum':
+                    raise Bad('%s: file %s: the time in :COMPILE-DATA is not a bignum' % (img.path, name))
+                out.append(m)
+            else:
+                out.append(img.meaning(x, f['attr words']))
+        return ('list', tuple(out), None if tail is None else img.meaning(tail, f['attr words']))
+
+
+def show_pair(img, pair):
+    def s(m):
+        k = m[0]
+        if k == 'symbol':
+            return m[2] if m[1] is None else (':' + m[2] if m[1] == '' else m[1] + ':' + m[2])
+        if k == 'string':
+            return '"%s"' % m[1]
+        if k == 'list':
+            return '(' + ' '.join(s(x) for x in m[1]) + (' . ' + s(m[2]) if m[2] else '') + ')'
+        if k == 'word' and tag(m[1]) == DTP_FIX:
+            p = ptr(m[1])
+            return str(p - (1 << 32) if p & (1 << 31) else p)
+        if k == 'date bignum':
+            return '<date>'
+        return repr(m)
+    return '%s %s' % (s(pair[0]), s(pair[1]))
+
+
+def compare(a, b, out, max_shown):
+    """Compare cold loads A and B; print the result to OUT; return the number of
+    differences reported."""
+    reports = []
+
+    def report(text):
+        reports.append(text)
+
+    if a.size != b.size:
+        report('the bands differ in size: %d words and %d' % (a.size, b.size))
+    if a.tail != b.tail:
+        report('the files differ past the band\'s %d words' % min(a.size, b.size))
+    n = min(a.size, b.size)
+
+    # -- symbols matched by name, and the moved ones' words mapped
+    moved, remap = {}, {}
+    for key, sa in a.by_key.items():
+        sb = b.by_key.get(key, [])
+        if sa == sb:
+            continue
+        if not sb:
+            report('symbol %s is only in %s' % (key, a.label))
+            continue
+        if len(sa) != 1 or len(sb) != 1:
+            report('symbols %s: at %s in %s and %s in %s, which cannot be matched by name'
+                   % (key, [oct(x) for x in sa], a.label, [oct(x) for x in sb], b.label))
+            continue
+        moved[sa[0]] = sb[0]
+    for key in set(b.by_key) - set(a.by_key):
+        report('symbol %s is only in %s' % (key, b.label))
+    for sa, sb in moved.items():
+        for k in range(5):
+            remap[sa + k] = sb + k
+        pa, pb = a.string_words(ptr(a.w[sa])), b.string_words(ptr(b.w[sb]))
+        if len(pa) == len(pb):
+            for x, y in zip(pa, pb):
+                remap[x] = y
+        else:
+            report('symbol %s: its print name has %d words in %s and %d in %s'
+                   % (a.show(with_ptr(DTP_SYMBOL << 32, sa)), len(pa), a.label, len(pb), b.label))
+    # the moved words must be a permutation of the same words, else some word
+    # of one cold load would have no counterpart in the other
+    if set(remap) != set(remap.values()):
+        report('the moved symbols and print names do not occupy the same words: %s'
+               % sorted(oct(x) for x in set(remap) ^ set(remap.values()))[:20])
+
+    def translate(v):
+        if tag(v) in NOT_ADDRESSES:
+            return v
+        q = remap.get(ptr(v))
+        return v if q is None else with_ptr(v, q)
+
+    # -- the cold-loaded files and their attribute lists
+    fa, fb = Files(a), Files(b)
+    if fa.order != fb.order:
+        report('the cold-loaded files differ: %s only in %s, %s only in %s, or their order'
+               % (sorted(set(fa.order) - set(fb.order)), a.label,
+                  sorted(set(fb.order) - set(fa.order)), b.label))
+    attr_ok, dates_a, dates_b = set(), {}, {}
+    attr_a, attr_b = {}, {}
+    interned = set()
+    pairs_equal = 0
+    for name in fa.order:
+        f, g = fa.files[name], fb.files.get(name)
+        if g is None:
+            continue
+        for x in f['attr words']:
+            attr_a[x] = name
+        for x in g['attr words']:
+            attr_b[x] = name
+        for x in f['dates']:
+            dates_a[x] = (name, 'compile time' if x in f['compiled'] else 'creation date')
+        for x in g['dates']:
+            dates_b[x] = (name, 'compile time' if x in g['compiled'] else 'creation date')
+        interned |= f['symbols']
+        ca, cb = collections.Counter(f['pairs']), collections.Counter(g['pairs'])
+        if ca == cb:
+            attr_ok.add(name)
+            pairs_equal += 1
+            continue
+        for p in ca - cb:
+            report('file %s: attribute %s in %s, not in %s' % (name, show_pair(a, p), a.label, b.label))
+        for p in cb - ca:
+            report('file %s: attribute %s in %s, not in %s' % (name, show_pair(b, p), b.label, a.label))
+
+    # a moved symbol must be a keyword an attribute list interns
+    for sa in sorted(moved):
+        pkg, nm = a.sym_key[sa]
+        if pkg != '' or sa not in interned:
+            report('symbol %s moved (%o in %s, %o in %s) and is not a keyword an attribute list interns'
+                   % (a.show(with_ptr(DTP_SYMBOL << 32, sa)), sa, a.label, moved[sa], b.label))
+
+    # -- every word, by meaning
+    kinds = collections.Counter()           # accepted words, by kind
+    recon = collections.Counter()           # the byte diff's words, by what accounts for them
+    hidden = collections.Counter()          # byte-equal words that differ by meaning
+    shown = []
+    na = in_bad_lists = 0
+    for i in range(n):
+        j = remap.get(i, i)
+        x, y = a.w[i], b.w[j]
+        bytes_differ = x != b.w[i]
+        if translate(x) == y:
+            if bytes_differ:
+                if i in dates_a:
+                    recon['date'] += 1
+                elif i in attr_a:
+                    recon['attribute list'] += 1
+                elif i in remap:
+                    recon['moved keyword (symbol words and print names)'] += 1
+                else:
+                    recon['reference to a moved keyword, the same by name'] += 1
+            continue
+        if not bytes_differ:
+            hidden['in an attribute list' if i in attr_a else 'elsewhere'] += 1
+        # a date's digit: 31 bits, <39:31> zero (coldut.lisp, store-bignum-40)
+        if i in dates_a and dates_b.get(j) == dates_a[i] and x >> 31 == 0 and y >> 31 == 0:
+            kinds['date: ' + dates_a[i][1]] += 1
+            recon['date'] += 1 if bytes_differ else 0
+            continue
+        if i in attr_a and attr_b.get(j) == attr_a[i] and attr_a[i] in attr_ok:
+            kinds['attribute list, equal as a set of pairs'] += 1
+            recon['attribute list'] += 1 if bytes_differ else 0
+            continue
+        if i in attr_a and attr_b.get(j) == attr_a[i]:
+            # a word of an attribute list that differs as a set: the file's
+            # report above names the pairs, which says more than its words
+            recon['REPORTED (in an attribute list reported above)'] += 1 if bytes_differ else 0
+            in_bad_lists += 1
+            continue
+        recon['REPORTED (word)'] += 1 if bytes_differ else 0
+        na += 1
+        if len(shown) < max_shown:
+            shown.append('%s: %s in %s, %s in %s' % (a.describe(i), a.show(x), a.label, b.show(y), b.label))
+
+    # -- the result
+    p = lambda *s: print(*s, file=out)
+    byte_diff = sum(recon.values())
+    reported = sum(v for k, v in recon.items() if k.startswith('REPORTED'))
+    p('cold-compare: %s (%s) against %s (%s): %d words' % (a.label, a.path, b.label, b.path, n))
+    p('byte diff: %d words differ' % byte_diff)
+    p('accepted:')
+    p('  attribute lists equal as sets of pairs: %d of %d files' % (pairs_equal, len(fa.order)))
+    p('  keywords moved, compared by name: %d (%s)' % (
+        len(moved), ' '.join('%s %o->%o' % (a.show(with_ptr(DTP_SYMBOL << 32, s)), s, moved[s])
+                             for s in sorted(moved))))
+    for k in sorted(kinds):
+        p('  words differing by meaning, %s: %d' % (k, kinds[k]))
+    p('reconciliation of the byte diff\'s %d words:' % byte_diff)
+    for k in sorted(recon):
+        p('  %-50s %d' % (k, recon[k]))
+    p('  %-50s %d of %d' % ('accounted for without a report', byte_diff - reported, byte_diff))
+    p('byte-equal words that differ by meaning: %d (%s)' % (
+        sum(hidden.values()), ', '.join('%s %d' % kv for kv in sorted(hidden.items())) or 'none'))
+    total = len(reports) + na
+    p('differences reported: %d (%d words outside attribute lists, %d other findings; '
+      '%d words in attribute lists that differ as sets)' % (total, na, len(reports), in_bad_lists))
+    for r in reports + shown:
+        p('DIFF ' + r)
+    if na > len(shown):
+        p('DIFF ... and %d more words (--max)' % (na - len(shown)))
+    p('cold-compare: ' + ('DIFFER' if total else
+                          'EQUAL apart from attribute-list order, moved keywords and dates'))
+    return total
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description='Two 40-bit cold loads compared object by object (G2 section 7, check (b), item 2).',
+        epilog='Exit 0 when they are equal apart from attribute-list order, the keywords those '
+               'lists intern, and each file\'s two dates; 1 when anything else differs; 2 when a '
+               'file cannot be read.  See the head of this file for what is compared and why.')
+    ap.add_argument('cold_a', metavar='COLD-A', help='the first cold load (e.g. step 5\'s)')
+    ap.add_argument('cold_b', metavar='COLD-B', help='the second cold load (e.g. step 6\'s)')
+    ap.add_argument('--labels', default='A,B', help='names for the two in the output (default A,B)')
+    ap.add_argument('--max', type=int, default=40, help='differing words shown (default 40)')
+    args = ap.parse_args()
+    la, lb = (args.labels.split(',') + ['B'])[:2]
+    try:
+        a, b = Image(args.cold_a, la), Image(args.cold_b, lb)
+        bad = compare(a, b, sys.stdout, args.max)
+    except (Bad, OSError) as e:
+        print('cold-compare: %s' % e)
+        return 2
+    return 1 if bad else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

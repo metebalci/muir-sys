@@ -856,6 +856,14 @@ file carries a comment in that file saying why.
     which depend on the compiling world's floats, are normalised.
     `tools/cross-check/plant_a.py` (new) plants a change for each rule and
     checks the verdict.
+  - **G2 section 7 check (b), item 2, compares the cold loads object by
+    object** (`tools/cold-compare`, new): step 6's cold load equals step 5's
+    except for each file's attribute list, compared as a set of pairs, the
+    keywords those lists intern, compared by name, and each file's compile
+    time and creation date. A byte diff counted the reordered lists and moved
+    keywords as differences and missed a word naming another keyword at an
+    unchanged address. `tools/cold-compare-test` (new) plants the changes it
+    must report and the one it must accept.
   - **The cold load is made in a 40-bit world too** (the native rebuild, G2
     section 7 step 5; `sys/cold/coldut.lisp:83-140`): a page goes to and from
     the disk through a one-page RQB by a packed transfer, its 5 blocks, the

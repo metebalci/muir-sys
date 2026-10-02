@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""cold-compare-test: the self-test of tools/cold-compare.
+
+Usage: tools/cold-compare-test [--keep] COLD-A COLD-B
+
+COLD-A and COLD-B are two cold loads that cold-compare accepts, such as G2's
+steps 5 and 6 (the LOD band of each, copied off its pack).  Each case runs
+cold-compare on COLD-A against COLD-B, or against a copy of COLD-B with one
+change planted, and checks its exit status and what it names.  The planted
+changes are found by decoding COLD-B, not at fixed addresses, so a pair other
+than Y5's serves as well.  The copies are made in muir-sys-cold-compare-test
+under $XDG_CACHE_HOME (by default the home directory's .cache) and removed at
+the end unless --keep.
+
+The cases (G2 section 7, check (b), item 2, as amended on 2 October 2026):
+  pair      COLD-A against COLD-B: exit 0, nothing reported, every word of the
+            byte diff accounted for, and the byte-equal words that differ by
+            meaning (a symbol pointer naming another keyword) all inside
+            attribute lists equal as sets
+  (a)       one attribute's value changed (:BASE 8 to 10, or another fixnum
+            attribute when no file has :BASE 8): exit 1, naming the file
+            and the attribute
+  (b)       a symbol in a FEF's constants changed to another symbol: exit 1,
+            naming the FEF and its boxed word
+  (c)       one instruction word of a FEF changed: exit 1, naming the FEF and
+            its instruction word
+  (d1)      a fixnum among a FEF's constants changed: exit 1, naming the FEF
+  (d2)      a fixnum in a list outside the attribute lists changed: exit 1,
+            naming the list cell and what holds it
+  (e1)      a word outside the attribute lists that names a moved keyword set
+            to COLD-A's bytes for it, so a byte diff sees it equal while it
+            names another keyword: exit 1, naming the word
+  (e2)      one file's attribute list set to COLD-A's words for it, byte for
+            byte, so that its keywords are read through COLD-B's table: exit 1,
+            naming the file's attributes
+  dates     one file's compile time and creation date both changed: exit 0
+A planted case must report exactly the words it planted and nothing else
+(any other difference would mean the plant reached something it did not
+aim at, or the tool reports more than it should).
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOL = os.path.join(HERE, 'cold-compare')
+_loader = importlib.machinery.SourceFileLoader('cold_compare', TOOL)
+_spec = importlib.util.spec_from_loader('cold_compare', _loader)
+cc = importlib.util.module_from_spec(_spec)
+_loader.exec_module(cc)
+tag, ptr, cdr, with_ptr = cc.tag, cc.ptr, cc.cdr, cc.with_ptr
+
+
+def run(a, b):
+    p = subprocess.run([sys.executable, TOOL, '--labels', 'A,B', a, b],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return p.returncode, p.stdout
+
+
+def fefs(img):
+    """Every FEF in a structure area: (header address, boxed words, storage length)."""
+    for org, length, free, name, listp in img.areas:
+        if listp:
+            continue
+        for h in range(org, org + free):
+            x = img.w[h]
+            if tag(x) == cc.DTP_HEADER and (ptr(x) >> 19) & 0o37 in cc.HEADER_FEF_TYPES:
+                n = img.w[h + 1]
+                if tag(n) == cc.DTP_FIX:
+                    yield h, (ptr(x) >> 1) & 0o37777, ptr(n)
+
+
+def main():
+    ap = argparse.ArgumentParser(description='Self-test of tools/cold-compare.')
+    ap.add_argument('cold_a', metavar='COLD-A')
+    ap.add_argument('cold_b', metavar='COLD-B')
+    ap.add_argument('--keep', action='store_true', help='keep the planted copies')
+    args = ap.parse_args()
+    work = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'),
+                        'muir-sys-cold-compare-test')
+    os.makedirs(work, exist_ok=True)
+    A, B = cc.Image(args.cold_a, 'A'), cc.Image(args.cold_b, 'B')
+    fa, fb = cc.Files(A), cc.Files(B)
+    attr_b = set().union(*(f['attr words'] for f in fb.files.values()))
+    dates_b = set().union(*(f['dates'] for f in fb.files.values()))
+    moved_a = {s for k, ss in A.by_key.items() for s in ss if B.by_key.get(k) != ss}
+    results = []
+
+    def case(name, plants, want_exit, want=(), want_count=None):
+        """Plant {address: word} in a copy of COLD-B and run the tool."""
+        if plants is None:
+            results.append((name, False, 'no place to plant it was found'))
+            return
+        path = args.cold_b
+        if plants:
+            buf = bytearray(B.raw)
+            for addr, word in plants.items():
+                buf[addr * 5:addr * 5 + 5] = word.to_bytes(5, 'little')
+            path = os.path.join(work, name.split()[0].strip('()') + '.img')
+            with open(path, 'wb') as f:
+                f.write(buf)
+        code, out = run(args.cold_a, path)
+        diffs = [l for l in out.splitlines() if l.startswith('DIFF ')]
+        ok = code == want_exit and all(w in out for w in want)
+        if want_count is not None and len(diffs) != want_count:
+            ok = False
+        why = 'exit %d, %d DIFF lines' % (code, len(diffs))
+        results.append((name, ok, why))
+        print('=== %s: %s (%s)' % (name, 'PASS' if ok else 'FAIL', why))
+        for p in plants or {}:
+            print('    planted %o: %011o -> %011o' % (p, B.w[p] & 0x3fffffffff, plants[p] & 0x3fffffffff))
+        print(out.rstrip())
+        if plants and not args.keep:
+            os.remove(path)
+
+    # -- pair: exit 0, nothing reported, the byte diff accounted for
+    code, out = run(args.cold_a, args.cold_b)
+    lines = out.splitlines()
+    acc = [l for l in lines if 'accounted for without a report' in l]
+    byte = [l for l in lines if l.startswith('byte diff:')]
+    hid = [l for l in lines if l.startswith('byte-equal words that differ by meaning')]
+    ok = (code == 0 and acc and byte and acc[0].split()[-3] == acc[0].split()[-1]
+          and hid and 'elsewhere' not in hid[0] and 'REPORTED' not in out)
+    results.append(('pair', ok, 'exit %d; %s; %s' % (code, acc[0].strip() if acc else '?', hid[0] if hid else '?')))
+    print('=== pair: %s' % ('PASS' if ok else 'FAIL'))
+    print(out.rstrip())
+
+    # -- (a): one fixnum attribute's value
+    plant = None
+    for want_ind in ('BASE', None):
+        for name in fb.order:
+            for i in sorted(fb.files[name]['attr words']):
+                x = B.w[i]
+                if tag(x) != cc.DTP_SYMBOL or B.sym_key[ptr(x)][0] != '' or cdr(x) != cc.CDR_NEXT:
+                    continue
+                if want_ind and B.sym_key[ptr(x)][1] != want_ind:
+                    continue
+                v = B.w[i + 1]
+                if i + 1 in fb.files[name]['attr words'] and tag(v) == cc.DTP_FIX and (
+                        want_ind is None or ptr(v) == 8):
+                    plant = ({i + 1: with_ptr(v, 10 if ptr(v) == 8 else ptr(v) + 1)},
+                             'file %s: attribute :%s' % (name, B.sym_key[ptr(x)][1]))
+                    break
+            if plant:
+                break
+        if plant:
+            break
+    case('(a) an attribute value', plant and plant[0], 1, plant and [plant[1]], 2)
+
+    # -- (b), (c), (d1): a FEF's symbol constant, instruction word, fixnum constant
+    # NIL and T, the first two symbols of RESIDENT-SYMBOL-AREA (qcom.lisp:251)
+    nil, t = 0, 5
+    assert B.sym_key[nil] == (None, 'NIL') and B.sym_key[t] == (None, 'T'), 'NIL and T not at 0 and 5'
+    sym_plant = ins_plant = fix_plant = None
+    for h, boxed, length in fefs(B):
+        fname = B.show(B.w[h + 2])
+        for k in range(7, boxed):         # past the FEF's fixed words (qcom.lisp:863-869)
+            x = B.w[h + k]
+            if not sym_plant and tag(x) == cc.DTP_SYMBOL and ptr(x) not in (nil, t):
+                sym_plant = ({h + k: with_ptr(x, t)}, 'FEF %s, boxed word %d' % (fname, k))
+            if not fix_plant and tag(x) == cc.DTP_FIX:
+                fix_plant = ({h + k: with_ptr(x, (ptr(x) + 1) & 0xffffffff)}, 'FEF %s, boxed word %d' % (fname, k))
+        if not ins_plant and length > boxed + 1:
+            k = boxed
+            ins_plant = ({h + k: B.w[h + k] ^ 1}, 'FEF %s, instruction word 0' % fname)
+        if sym_plant and ins_plant and fix_plant:
+            break
+    case('(b) a symbol reference in a FEF', sym_plant and sym_plant[0], 1, sym_plant and [sym_plant[1]], 1)
+    case('(c) an instruction word', ins_plant and ins_plant[0], 1, ins_plant and [ins_plant[1]], 1)
+    case('(d1) a fixnum constant in a FEF', fix_plant and fix_plant[0], 1, fix_plant and [fix_plant[1]], 1)
+
+    # -- (d2): a fixnum in a list held by something, outside attribute lists
+    plant = None
+    for org, length, free, aname, listp in B.areas:
+        if not listp or aname in ('AREA-NAME',):
+            continue
+        for i in range(org, org + free):
+            x = B.w[i]
+            if (tag(x) == cc.DTP_FIX and i not in attr_b and i not in dates_b
+                    and cdr(x) in (cc.CDR_NEXT, cc.CDR_NIL) and ptr(x) < 1000):
+                d = B.describe(i)
+                if 'held by nothing' not in d:
+                    plant = ({i: with_ptr(x, ptr(x) + 1)}, 'list cell %o' % i)
+                    break
+        if plant:
+            break
+    case('(d2) a fixnum in a list', plant and plant[0], 1, plant and [plant[1], 'held by'], 1)
+
+    # -- (e1): a moved keyword's reference made byte-equal to COLD-A's
+    plant = None
+    for i in range(B.size):
+        x, y = A.w[i], B.w[i]
+        if (x != y and tag(x) == cc.DTP_SYMBOL and ptr(x) in moved_a and i not in attr_b
+                and i not in moved_a and tag(y) == cc.DTP_SYMBOL):
+            plant = ({i: x}, '%o' % i)
+            break
+    case('(e1) a byte-equal reference to another keyword', plant and plant[0], 1, plant and [plant[1]], 1)
+
+    # -- (e2): one file's attribute list made byte-equal to COLD-A's
+    # (the file whose list differs in the most words, so that the plant
+    # carries a reordered list whole, the byte-equal keyword words with it)
+    plant = None
+    for name in fb.order:
+        f, g = fa.files.get(name), fb.files[name]
+        if f is None or f['attr words'] != g['attr words']:
+            continue
+        diff = {i: A.w[i] for i in g['attr words'] if A.w[i] != B.w[i]}
+        if (diff and any(tag(A.w[i]) == cc.DTP_SYMBOL and ptr(A.w[i]) in moved_a for i in diff)
+                and (plant is None or len(diff) > len(plant[0]))):
+            plant = (diff, 'file %s: attribute' % name)
+    case('(e2) an attribute list byte-equal to COLD-A\'s', plant and plant[0], 1, plant and [plant[1]])
+
+    # -- dates: one file's compile time and creation date both changed
+    plant = None
+    for name in fb.order:
+        g = fb.files[name]
+        if g['compiled'] and g['created']:
+            plant = {}
+            for d in (min(g['compiled']), min(g['created'])):
+                plant[d] = with_ptr(B.w[d], (ptr(B.w[d]) + 12345) & 0x7fffffff)
+            break
+    case('dates of one file changed', plant, 0, ['date: compile time', 'date: creation date'], 0)
+
+    if not args.keep:
+        shutil.rmtree(work, ignore_errors=True)
+    print()
+    for name, ok, why in results:
+        print('%-50s %s  %s' % (name, 'PASS' if ok else 'FAIL', why))
+    bad = sum(1 for _, ok, _ in results if not ok)
+    print('cold-compare-test: %d of %d cases pass' % (len(results) - bad, len(results)))
+    return 1 if bad else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

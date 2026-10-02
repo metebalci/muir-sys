@@ -35,8 +35,10 @@
 # their self-test release-test (docs/building.md, Publishing a release), and
 # the cross build's checks, tools/cross-check/ (its README), whose Python
 # modules leave a __pycache__ when they run, the microcode's checks,
-# tools/microcode-check/ (its README), and the system's checks,
-# tools/system-check/ (its README).
+# tools/microcode-check/ (its README), the system's checks,
+# tools/system-check/ (its README), and the comparison of two cold loads,
+# tools/cold-compare with its self-test cold-compare-test
+# (tools/cross-check/README.md).
 /tools/*
 !/tools/lispm-check
 !/tools/lispm-check-test/
@@ -47,6 +49,8 @@
 !/tools/cross-check/
 !/tools/microcode-check/
 !/tools/system-check/
+!/tools/cold-compare
+!/tools/cold-compare-test
 /tools/cross-check/__pycache__/
 
 # Working notes for Claude Code, and its agents' worktrees: local, not for the
