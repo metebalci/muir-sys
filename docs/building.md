@@ -308,6 +308,13 @@ passed.
 UTC, and the whole build runs with ozd at `utc`: there are no two halves, no
 `--timezone`, and no hole.
 
+**From System 1003 on** the cold load needs microcode with the change that
+gives it 60 memory boards (`docs/release-1003.md`), so the current microload
+holds that microcode by stage 5, as MCR1 does from the start in the
+procedure above. System 1003's wired areas end past the 64K that earlier
+microcode maps while it cold-boots: on the microcode before that change,
+System 1003's band halts in the cold boot (`XRGN1+2`).
+
 ## Publishing a release
 
 A release is built and checked by the SHA of one commit, never by a branch

@@ -281,8 +281,19 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   P-N-STRING			600
   NR-SYM			500
   MACRO-COMPILED-PROGRAM	1000
-  PAGE-TABLE-AREA		128.		;Enough for 2 megawords of main memory
-  PHYSICAL-PAGE-DATA		32.		;Enough for 2 megawords of main memory
+; PAGE-TABLE-AREA		128.		;Enough for 2 megawords of main memory
+; PHYSICAL-PAGE-DATA		32.		;Enough for 2 megawords of main memory
+  ;; the tables are sized for 60 memory boards, 3,932,160 words, all the
+  ;; memory below the xbus i/o space at physical 17000000; at 2 megawords
+  ;; the cold boot halted on a machine with more than 32 boards.  the ppd
+  ;; takes a word per page of main memory; the pht 4 words a page (half
+  ;; full), rounded up to a power of two, since the hash is masked to one
+  ;; (uc-page-fault.lisp, compute-page-hash) and folded twice onto the
+  ;; table's first words otherwise: 4 x 15360 pages round up to 65536.  the
+  ;; cold boot uses no more memory than these sizes serve, and gives the
+  ;; unused pages of both back to paging (uc-cold-disk.lisp, cold-swap-in).
+  page-table-area		256.		;4 x 15360 pages, a power of two
+  physical-page-data		60.		;15360 pages, 60 boards of 64k
   ADDRESS-SPACE-MAP		1		;Assuming 8-bit bytes
   LINEAR-PDL-AREA		100
   LINEAR-BIND-PDL-AREA		10
@@ -302,9 +313,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   MICRO-CODE-PAGING-AREA	1000
   PAGE-GC-BITS			40
   FASL-TABLE-AREA		201		;3 times length-of-fasl-table plus 1 page
-  EXTRA-PDL-AREA		113		;NOTE!! this is carefully calculated to cause
-						; EXTRA-PDL-AREA to end on a level-2
+;  EXTRA-PDL-AREA		113		;NOTE!! this is carefully calculated to cause
+;						; EXTRA-PDL-AREA to end on a level-2
   ; map boundary (200000)
+  ;; with the larger pht and ppd above, the areas before it end at 250400
+  ;; (page 337.), so extra-pdl-area ends at the next boundary but one,
+  ;; 340000 (page 448.), and is 111. pages rather than mit's 75.  the next
+  ;; boundary, 300000, would leave it 47. pages.
+  extra-pdl-area		157		;must end on an address space quantum boundary
   FASL-TEMP-AREA 		40
   ))
 

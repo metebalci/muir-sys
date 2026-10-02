@@ -35,7 +35,10 @@ Every change to a source file carries a comment in that file saying why.
   - `ucadr.mcr` `ec7263ea988da1ba6300953b7266f2c032f9242e3be432e47392f4bcea6f56a0`
   - `ucadr.tbl` `01f20b6f9a22778f3bfed34acf7d151da82251b218908c302cb8f7145dffa201`
   - `ucadr.locs` `4b19782bcdb715f68c8541590e28cc7b2a2e988b951bada707455689669ee22b`
-  - `ucadr.sym` `99b50807fcb3bb32a6f91b4b8e62abb3a3aae0718acfb5ebc5eb2b441ec2282e`
+  - `ucadr.sym` is not given: it holds the same symbols in the order of a
+    hash table, which differs with the band that assembles it. These
+    sources gave one file on System 1001's band and another on System
+    1002's, the same lines once sorted.
 - **`GCD` of two bignums is never negative.** When the shorter of two
   bignums of two or more words divides the longer, `GCDBB-LONG` returned the
   divisor with its sign, so `(gcd (expt 2 90) (- (expt 2 31)))` gave
@@ -162,3 +165,136 @@ Every change to a source file carries a comment in that file saying why.
     fixes, `interpreter-closure` passes, and interpreted closures over `LET`,
     `LET*`, `FLET`, `BLOCK` and `TAGBODY` give what they gave before, but for
     the two that found `Y` free, which now give `(1 2)` and `42`.
+- **Main memory of up to 60 boards, 3,932,160 words (3840K).** muir-sim's
+  `cadr` keeps 32 boards, 2048K, by default; `cadr --main-memory-boards 60`
+  gives this system 3840K, all the memory below the Xbus I/O space at
+  physical 17000000. Bands before System 1003, MIT's System 100 among them,
+  halt in the cold boot on more than 32 boards on the microcode they were
+  released with (measured at 33, 59 and 60 on Systems 100, 1001 and 1002).
+  MIT's tables and cold boot were made for 2 megawords:
+  - **The page tables hold 60 boards** (`cold/qcom.lisp:284-296`):
+    PHYSICAL-PAGE-DATA is 60 pages, a word a page of main memory, and
+    PAGE-TABLE-AREA 256 pages: 4 words a page, as the cold boot fills it
+    (half full), rounded up to a power of two (below). They were 32 and
+    128, 2 megawords. The wired areas now end at 83,968 words (244000)
+    rather than 44,032. EXTRA-PDL-AREA, which must end on an address-space
+    quantum boundary, is 111 pages rather than 75 and ends at 340000 rather
+    than 200000 (`cold/qcom.lisp:316-323`); MICRO-CODE-ENTRY-AREA and the
+    areas after it start there. A machine with fewer boards uses its share
+    of the tables, and the cold boot gives the unused pages of both to
+    paging, as MIT's did below 2 megawords. Wired pages, from `ROOM`: 172
+    at 32 boards, as on the band built without the change, 301 at 33, 327
+    at 59 and 328 at 60. The free virtual space is 48K smaller (9936K
+    rather than 9984K). The wired areas take more of the level-2 map,
+    which the cold boot sets up for them (`INIMAP7`,
+    `ucadr/uc-cold-disk.lisp:46-50`): 11 of its 32 blocks rather than 6,
+    and with the one kept for faults, 20 are left for paging rather than
+    25. This system now needs at
+    least 2 boards, where System 1002 boots on 1; on 1 board it halts in
+    the cold boot (`FATAL-DISK-ERROR+1`), its wired areas being past the
+    memory.
+  - **The memory probe stops at physical 17000000**, where 60 boards end
+    and the Xbus I/O space begins (`ucadr/uc-cold-disk.lisp:328-339`). The
+    frame buffer there reads back what is written, so with 60 boards the
+    probe counted it as 32K more memory.
+  - **The cold boot uses no more memory than the band's tables serve**
+    (`ucadr/uc-cold-disk.lisp:593-618`): the smaller of
+    PHYSICAL-PAGE-DATA's words and a quarter of PAGE-TABLE-AREA's, read from
+    the band's area origins (`GET-AREA-ORIGINS`, now called before the
+    memory size is stored), not from a constant. Past them it halted in
+    `XCPPG1`, "Bigger than space allocated"
+    (`ucadr/uc-page-fault.lisp:1333`). So a band with 2-megaword tables
+    uses 2048K of a bigger machine: this system built with MIT's table
+    sizes cold-booted, loaded (`QLD`) and saved at 60 boards, and its band
+    reports 2048K there, as System 1002's band does on this microcode.
+  - **The page table's size is rounded up to a power of two**
+    (`ucadr/uc-cold-disk.lisp:624-638`). `COMPUTE-PAGE-HASH` masks the hash
+    to the size's power of two and wraps what is past the size once
+    (`ucadr/uc-page-fault.lisp:683-690`), so a size between two powers got
+    twice the hashes on its first words. With 4 words a page at 60 boards,
+    61,440 words, the first 4096 words were loaded twice: after filling
+    3,500,000 words, an entry sat on average 3.07 words from its hash and
+    at most 370, against 3.05 and 26 at 32 boards, and a full GC with the
+    array live took about 140 s rather than 103 s at 32. With 65,536 words
+    the entries sit 2.80 words from their hash on average and at most 14 at
+    60 boards (2.72 and 14 at 59, 1.09 and 8 at 33; 32 boards keep 32,768
+    words and 3.05 and 26), and the full GC takes 103 s at 60 boards, as at
+    32 (102 s on the band built without the change): the GC's paging is
+    the same at both sizes (about 250,000 `FINDCORE` steps and 82,000 disk
+    reads), so the 37 s were spent searching the page table. At 33 to 59
+    boards the table is 65,536 words too, which wires up to 124 pages more
+    than 4 words a page would.
+  - **The cold boot direct-maps 128K rather than 64K** while it reads the
+    wired areas and fills the tables (`ucadr/uc-cold-disk.lisp:307-313`),
+    and so does `%DISK-SAVE` while it writes the wired pages (`:284-289`),
+    since the wired areas and the CCW list put after them now end past 64K.
+  - **The end of PHYSICAL-PAGE-DATA's valid entries is set again at every
+    cold boot** (`ucadr/uc-cold-disk.lisp:664-672`), with the scan pointers
+    of `FINDCORE` and the ager. It was set when the microcode was loaded
+    and on a warm boot, and only raised after, so `%DISK-RESTORE` of a band
+    whose table is elsewhere kept the old end: from this system at 32
+    boards, `(disk-restore 1)` of System 1002's band left it at 72,448,
+    past 1002's table (35,584 to 43,775), and the machine halted in
+    `FATAL-DISK-ERROR` when a 3,500,000-word array was made. Now it is
+    43,776, and the array is filled, checked, kept through a full GC and
+    checked again.
+  - **A wired page's PHYSICAL-PAGE-DATA entry is written at its page
+    number** (`ucadr/uc-cold-disk.lisp:687-700`). MIT's code merged the
+    page number's low 8 bits into the table's origin, which serves only
+    wired pages below 64K. With the larger tables the wired pages run past
+    page 255: their entries landed on those of pages 0 and up, their own
+    stayed as the band had them, their frames were paged into, and at 32
+    boards the cold load halted in `FINDCORE` during `QLD`, reading a
+    page's data as a table entry. QUUX's line has the same change.
+  - **The swap recommendations are unchanged.**
+    `MEMORY-SIZE-SWAP-RECOMMENDATION-ALIST` (`sys2/gc.lisp:1018`) has
+    entries from 320K to 1024K, which `DEFAULT-SWAP-RECOMMENDATIONS` matches
+    exactly, so at 2048K, the default, no entry applies, and the areas keep
+    the cold load's 0; above 2048K the same holds. Measured: 0 for
+    WORKING-STORAGE-AREA at 32, 33, 59 and 60 boards, as on System 1002's
+    band.
+  - **The microcode changes again and keeps the number 1000**: microcode
+    1000 with the fixes above and these changes to the cold boot, which add
+    21 control-store words, so every word from `MEM-SIZE-LOOP` on moves;
+    the constant 17000000 is a new A-memory constant, so the A-constants
+    start one location later (`A-CONSTANT-LOC` 1177 to 1200). `ucadr.tbl` is
+    the same. Assembled twice, each on a freshly booted band, the four
+    files were the same both times. The outputs, which replace those given
+    above (sha256):
+    - `ucadr.mcr` `0f2cc2e7ed3ea711849ef8b1b7cca46f263f4e48dbfa35e55d9317bee89055a4`
+    - `ucadr.tbl` `01f20b6f9a22778f3bfed34acf7d151da82251b218908c302cb8f7145dffa201`
+    - `ucadr.locs` `7fbb6a1a81080413d757986e7d68bb5204ec129543a56dcff38106e3db2ac63d`
+    - `ucadr.sym` `cfaadead842804c63b1e32f58fd51ccf743084d926950988a717833d696aff8b`
+
+    A System 1003 band needs it: on the microcode before these changes the
+    band halts in the cold boot (`XRGN1+2`), its wired areas being past the
+    64K mapped. `docs/building.md` says so for the build.
+  - Measured on muir-sim's `cadr`, micro engine, with this system built
+    from this tree: the herald and `ROOM` say 2048K at 32 boards, 2112K at
+    33, 3776K at 59 and 3840K at 60, and the microcode's own figures, the
+    end of PHYSICAL-PAGE-DATA's entries and the page table's size, agree
+    with each. A paging check, an array of 3,500,000 words filled and
+    checked, a full GC with it live, checked again, then dropped and a GC
+    again, keeps the array intact three times at 60 boards, three at 32
+    and once each at 33 and 59; at 60 boards all 7168 page frames above
+    2048K then hold pages. In two of those runs, one at 32 boards and one
+    at 60, a `ROOM` after the first GC and the second GC failed with "The
+    argument AREA was NIL", a fault of MIT's GC that this change does not
+    touch; the band built without the change shows it too. A band saved at 60 boards boots there with
+    3840K. `tools/lispm-check-test` (selftest), `tools/system-check` and
+    `tools/microcode-check` give the same results at 32 and 60 boards as
+    this tree's band without the change at 32.
+- **The herald says how to give the system more memory** when the machine
+  has less than the page tables serve (`io/disk.lisp:1291-1302`):
+
+  ```
+  This system can use up to 3840K of physical memory:
+  use --main-memory-boards 60 in muir-sim or muir-fpga.
+  ```
+
+  The most is computed from the band's PHYSICAL-PAGE-DATA and
+  PAGE-TABLE-AREA, as the cold boot computes it, and compared with the
+  memory the cold boot found, the figure the herald prints; one line, 105
+  characters, is wider than the console. It shows at 32, 33 and 59 boards
+  and not at 60, from `PRINT-HERALD` and on the console after the cold
+  boot.

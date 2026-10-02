@@ -1288,6 +1288,18 @@ This is obsolete -- You probably want PRINT-HERALD"
     (FORMAT STREAM "~&~DK physical memory, ~DK virtual memory."
 	    (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE) #o2000)
 	    (TRUNCATE VIRTUAL-MEMORY-SIZE #o2000))
+    ;; the page tables are sized for 60 memory boards (cold/qcom.lisp), but
+    ;; the simulator's default is 32, so a machine with less memory than the
+    ;; tables serve is told how to get it.  the most is what the cold boot
+    ;; can use: a physical-page-data word and 4 page-table words a page
+    ;; (ucadr/uc-cold-disk.lisp, cold-swap-in); a board is 64k.  two lines,
+    ;; since one, 105 characters, is wider than the console's 95 columns.
+    (let ((most (* page-size (min (region-length physical-page-data)
+				  (truncate (region-length page-table-area) 4)))))
+      (when (< (system-communication-area %sys-com-memory-size) most)
+	(format stream "~%This system can use up to ~DK of physical memory:~%use --main-memory-boards ~D in muir-sim or muir-fpga."
+		(truncate most #o2000)
+		(truncate most #o200000))))
     (DESCRIBE-SYSTEM-VERSIONS STREAM)
     ;; the same guard as the first line: with no site, "UNKNOWN" rather
     ;; than a trap on the unbound site-name.
