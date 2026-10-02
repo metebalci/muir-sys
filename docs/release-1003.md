@@ -16,6 +16,14 @@ Every change to a source file carries a comment in that file saying why.
   from it, so the call signalled that `NIL` was of the wrong type; with fewer
   than two arguments it now leaves the form alone, and the call goes to the
   function `\\`. Two or more arguments compile as before.
+- **A compiled `(and x t)` returns `t`, not `x`** (`p2andor`,
+  `sys/sys/qcp2.lisp:1725-1738`). Pass 2 dropped a trailing `t` from every
+  `and`, so the compiled form returned `x` itself when it was non-nil, while
+  the interpreter returned `t`; System 100's band does the same, so the rule is
+  MIT's. The trailing `t` is now dropped only when the value is ignored; a
+  trailing `nil` in an `or` is dropped as before. So `error-table-file-p`
+  (`sys/eh/eh.lisp:2311`), compiled with this compiler, returns `t` rather
+  than the truename; its callers use only its truth.
 - **`tools/release-scan` finds a private address that ends a sentence**
   (`tools/release-scan:116-119`). Its IPv4 pattern refused a match followed by
   any dot, so the full stop after an address hid it; it now refuses only a
