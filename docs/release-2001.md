@@ -191,6 +191,45 @@ file carries a comment in that file saying why.
     Y3's band, and interpreted closures over `LET`, `LET*`, `FLET`, `BLOCK`
     and `TAGBODY` give what they gave before, but for the two that found `Y`
     free, which now give `(1 2)` and `42`.
+- **A full GC leaves every region in the address space map.** The cold
+  load gives its last area, `FASL-TEMP-AREA`, a region of no length:
+  `CREATE-AREAS` ends the areas at that area's origin, and a region's
+  length is its area's bound less its origin (`sys/cold/coldut.lisp:604-618`,
+  `:686-687`; the sort at `:1448-1449` expects it). In Y5's band of System
+  2001 it is region 41, at 999424, the origin of region 42. `FREE-REGION` and
+  `UPDATE-REGION-PHT` (`sys/ucadr/uc-storage-allocation.lisp`) step through a
+  region's quanta and pages testing at the end of each loop, so for a region
+  of no length they stored 0 in the address space map for the quantum at its
+  origin, and called `XCPGS0` on the page below it, both another region's.
+  A full GC frees that region once `FASL-TEMP-AREA` has a second one
+  (`GC-RECLAIM-OLDSPACE`, `sys/sys2/gc.lisp:439-443`), an area at a time,
+  with other processes running between areas; when one of them had made a
+  region at that quantum in between, the new region dropped out of the map,
+  and the next `ROOM` or GC signalled "The argument AREA was NIL, which is
+  not an area number" (`GC-GET-SPACE-SIZES`, `sys/sys2/gc.lisp:189`), or a
+  reference that missed the map halted at `GET-MAP-BITS`, "Region not found"
+  (`sys/ucadr/uc-page-fault.lisp:306`). Both loops now return first for a
+  region of no length (`sys/ucadr/uc-storage-allocation.lisp:884-891`,
+  `:897`, `:919-923`). MIT's, in microcode 323 as well; the CADR's line has
+  the same fix. `tools/microcode-check/run zero-length-region` frees the
+  region as the GC does: on Y5's band and microcode 2001 it answers
+  `(NIL T NIL)` in its third case (the quantum gone from the map, the page
+  below gone from the page hash table) and `ROOM` signals "The argument AREA was NIL", on the
+  micro and rtl engines, and with the fix all four cases pass on both.
+- **The fix adds two control-store words**, one before `FREE-REGION-1` and
+  one before `UPDATE-REGION-PHT-0`, so every word from `FREE-REGION-1` on is
+  one location later and from `UPDATE-REGION-PHT-0` on two; every symbol of
+  Y5's microcode 2001 is at the same place once moved, but for the new label
+  `FREE-REGION-2`. The number stays 2001. Assembled twice from the sources,
+  byte for byte the same, the outputs are (sha256):
+  - `ucadr.mcr` `faf8ca9cc39077f4f430952c40ec178fa97d3a06b712ea2397e7921ad314e81a`
+  - `ucadr.tbl` `c3aca75df862767a1c4ec600644a43de8c3e20b780c4e5b3d956d01007e09c09`
+  - `ucadr.locs` `da13f170e32c9c5c738880a8f3f779b1dca5b9b472ee50e0a024ca6b6d2248e9`
+  - `ucadr.sym` `2f7d93afa290b35a9260f8033762bb182f4677786a0974990da47c5450a902c0`
+
+  Boot PROM 2001 is unchanged. On Y5's band with them, system-check passes
+  93 of 93 and microcode-check 174 of 174 (Y5's 170 and the new four), on
+  the micro and rtl engines.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

@@ -881,11 +881,20 @@ FREE-REGION
 	;; Remove from ADDRESS-SPACE-MAP
 	;; Referencing these addresses will halt in PAGE-IN-GET-MAP-BITS
 	((M-T) M-1)
+	;; a region of no length owns no quantum.  the loop below tests at its end, so
+	;; it stored 0 for the quantum at such a region's origin, which is another
+	;; region's: the cold load gives its last area, fasl-temp-area, a region of no
+	;; length at the end of its areas, where the next region made begins, and a
+	;; full gc that freed it after that quantum had passed to a new region left
+	;; the new region out of the map ("the argument area was nil" from
+	;; gc-get-space-sizes, or "region not found" in get-map-bits).
+	(jump-greater-or-equal m-t a-2 free-region-2)
 FREE-REGION-1
 	(CALL-XCT-NEXT ADDRESS-SPACE-MAP-STORE)
        ((M-K) A-ZERO)
 	((M-T) ADD M-T (A-CONSTANT (EVAL %ADDRESS-SPACE-QUANTUM-SIZE)))
 	(JUMP-LESS-THAN M-T A-2 FREE-REGION-1)
+free-region-2
 	(POPJ-AFTER-NEXT (M-T) A-V-NIL)
        (NO-OP)
 
@@ -907,6 +916,11 @@ UPDATE-REGION-PHT
 	;; M-1 has lowest address in region, M-2 has highest address in region +1
 	;; Both are necessarily a multiple of the page size.
 	;; Call XCPGS0 on each page, to fix the PHT entry (if any) and the map.
+	;; a region of no length has no page.  the loop below tests at its end, so it
+	;; called xcpgs0 on the page below such a region's origin, another region's
+	;; page: a flip gave it this region's map bits, and free-region made it
+	;; flushable and forgot it.
+	(popj-less-or-equal m-2 a-1)
 UPDATE-REGION-PHT-0
 	(CALL-XCT-NEXT XCPGS0)
        ((C-PDL-BUFFER-POINTER-PUSH) SUB MD (A-CONSTANT (EVAL PAGE-SIZE)))
