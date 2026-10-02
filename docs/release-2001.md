@@ -297,6 +297,57 @@ file carries a comment in that file saying why.
     passes 93 of 93, microcode-check 202 of 202 (174 and the new 28), and
     System 2000's band cases 30 of 33 (the three not applicable, as
     before), on the micro and rtl engines.
+- **A bignum minus or times -2^31, the most negative fixnum, is right
+  again.** With 32-bit fixnums the magnitude of -2^31 is 2^31, which is no
+  fixnum, and negating -2^31 in a 32-bit register gives -2^31 back.
+  `BFXSUB`, a bignum minus a fixnum, negated the fixnum and went on as a
+  bignum plus a fixnum, which took the -2^31 for a negative addend and
+  subtracted its magnitude: `(- (expt 2 40) most-negative-fixnum)` was
+  2^40 - 2^31 and `(- (expt 2 31) most-negative-fixnum)` was 0.
+  `BFXMPY-OK`, a bignum times a negative fixnum in either order, negated
+  it for `MULTIPLY-ONCE`, which got 20000000000 in `M-2`, no positive
+  32-bit multiplier: `(* (expt 2 40) most-negative-fixnum)` was
+  -9903517953099800764370386944. `FLOOR`, `CEILING`, `TRUNCATE`, `ROUND`
+  and `MOD` make their remainder from the quotient through `QIMUL` and
+  `QISUB` (`XFLOOR-2`, `sys/ucadr/uc-arith.lisp:1527-1546`), so their
+  remainders went wrong too. Addition, the fixnum minus the bignum, the
+  divisions, the comparisons and the rest were right. Now `BFXSUB` sends
+  -2^31 straight to `BFXADD-1` as the magnitude 2^31 to add, which
+  `BADD5` and `BSUB-C` take as an unsigned 32-bit digit with its carry, as
+  a bignum plus -2^31 already did (`sys/ucadr/uc-arith.lisp:3991-3998`,
+  `:4013-4016`); `BFXMPY-OK` sends it to the new `BFXMPY-SETZ`, which
+  makes the product as the bignum's digits moved up one 31-bit place over
+  a zero digit, the sign changed (`:4073-4078`, `:4106-4128`).
+  - `tools/microcode-check/cases/bignum-fixnum-extremes.cases` (new, 119
+    cases) takes 14 bignums from 2^31 to four digits, both signs, with
+    -2147483648 and 2147483647: `+`, `-`, `*`, `QUOTIENT`, `REMAINDER`,
+    `MOD`, `<`, `>`, `=`, `EQL` and `EQUAL`, then `FLOOR`, `CEILING`,
+    `TRUNCATE`, `ROUND`, `GCD`, `LOGAND`, `LOGIOR`, `LOGXOR`, `MAX`, `MIN`
+    and `CLI://`, the bignum first and the fixnum first, in an interpreted
+    function and a compiled one, against values computed outside the
+    machine. On microcode 2001 before the fix, 41 of them fail on the
+    micro engine: the three forms above, and with -2^31 `(- b f)`,
+    `(* b f)` and `(* f b)` for all 14 bignums, and the remainders of
+    `MOD` and `FLOOR` for 5, `TRUNCATE` and `ROUND` for 4 and `CEILING`
+    for 3, interpreted and compiled alike; nothing with 2147483647 fails.
+    With the fix all 119 pass, on the micro and rtl engines.
+  - The fix adds 18 control-store words, so every label from `BFXSUB` on
+    moves. The number stays 2001. Assembled twice from the sources, byte
+    for byte the same, the outputs are (sha256):
+    - `ucadr.mcr` `b648486fba5fbeec8823fd1419e79b263db958031fa97317b0c0f57b15b7f292`
+    - `ucadr.tbl` `ebf33853747ac3d7c0357210d7613b62c13c3bdf68f47dc48b1a80a9d7c2db8d`
+    - `ucadr.locs` `904b96babea4de1397ab1f71768ec37b0e718bc7dc88cbab2bbb1a74e9c48d09`
+    - `ucadr.sym` `3dbf06bc6f178756ee1dead271f3baa3ac80f0ff5d108e123dd6826ce2e4d923`
+
+    Boot PROM 2001 is unchanged. On Y5's band with them, system-check
+    passes 93 of 93, microcode-check 321 of 321 (202 and the new 119), and
+    System 2000's band cases 30 of 33 (the three not applicable, as before),
+    on the micro and rtl engines (on rtl the new cases ran in four parts,
+    each from a fresh start, since a long run there slowed to minutes a
+    case). The CADR's line does not have the fault:
+    there a fixnum is 25 bits in a 32-bit register, so -2^24 negates to
+    2^24, and the same cases scaled to -16777216 and 16777215 pass, 135 of
+    135, on the CADR's current band and microcode.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

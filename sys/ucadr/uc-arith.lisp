@@ -3988,8 +3988,15 @@ FXBRETQ	(POPJ-AFTER-NEXT	;RETURN BIGNUM ARG.
        ((C-PDL-BUFFER-POINTER-PUSH) DPB M-T Q-ALL-BUT-CDR-CODE   ;LEAVE RESULT BOTH PLACES
 			 (A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NEXT)))  ;FOR GOOD MEASURE.
 
-BFXSUB	((M-2) SUB M-ZERO A-2)	;NO SETZ PROBLEMS!
-BFXADD 
+;; quux revision 13: a fixnum is 32 bits, so negating -2^31 gives -2^31 back,
+;; and fxbadd0 then took b - (-2^31) for b + (-2^31): (- (expt 2 40)
+;; most-negative-fixnum) was 2^40 - 2^31.  b - (-2^31) is b + 2^31, so -2^31
+;; goes straight to bfxadd-1 as the magnitude 2^31: m-2 holds 20000000000,
+;; which badd5 and bsub-c take as an unsigned 32-bit digit with its carry.
+;BFXSUB	((M-2) SUB M-ZERO A-2)	;NO SETZ PROBLEMS!
+bfxsub	(jump-equal m-2 (a-constant negative-setz) bfxsub-setz)
+	((m-2) sub m-zero a-2)
+BFXADD
 FXBADD	(JUMP-EQUAL M-2 A-ZERO FXBRETQ)  ;SPECIAL CASE IF ADDING ZERO, JUST RETURN OTHER GUY
 FXBADD0	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-2 A-ZERO BFXADD-1)
        ((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC M-T-TO-CPDL)))
@@ -4002,6 +4009,11 @@ BFXADD-SUB	;M-Q/M-I bignum, M-2 positive number to be subtracted
 	((M-B) (A-CONSTANT 1))
 	(JUMP-XCT-NEXT BSUB-C)
        ((M-E) (A-CONSTANT 1))
+
+;; bignum minus -2^31 (see bfxsub): the bignum plus the magnitude 2^31 in m-2.
+bfxsub-setz
+	(jump-xct-next bfxadd-1)
+       ((micro-stack-data-push) (a-constant (i-mem-loc m-t-to-cpdl)))
 
 BFXADD-1
 	(JUMP-IF-BIT-SET BIGNUM-HEADER-SIGN M-C BFXADD-SUB)
@@ -4058,6 +4070,12 @@ FXBMPY	(JUMP-EQUAL M-2 A-ZERO RETURN-ZERO)	;0*X=0
 
 BFXMPY-OK
 	(JUMP-GREATER-OR-EQUAL M-2 A-ZERO BFXMPY-1)
+;; quux revision 13: a fixnum is 32 bits, so negating -2^31 gives -2^31 back,
+;; and multiply-once got 20000000000 in m-2, no positive 32-bit multiplier:
+;; (* (expt 2 40) most-negative-fixnum) was wrong.  times -2^31 is the
+;; bignum's digits one 31-bit place up with a zero digit below, the sign
+;; changed (bfxmpy-setz).
+	(jump-equal m-2 (a-constant negative-setz) bfxmpy-setz)
 	((M-2) SUB M-ZERO A-2)			;NEGATIVE FIXNUM, CHANGE SIGN OF RESULT
 	((M-C) XOR M-C (A-CONSTANT (BYTE-VALUE BIGNUM-HEADER-SIGN 1)))
 BFXMPY-1
@@ -4084,6 +4102,29 @@ BFXMPY-1
 	((M-1) ADD M-T A-D)
 	(JUMP-XCT-NEXT UN-CONS)
        ((M-2) (A-CONSTANT 1))
+
+;; a bignum (m-q, header m-c, length m-i) times -2^31 (see bfxmpy-ok): a new
+;; bignum of m-i + 1 digits, digit i + 1 its digit i and digit 1 zero, the sign
+;; the other one.  its top digit is the old top digit, not zero, and it is at
+;; least 2^62, never a fixnum.  the result goes to m-t and the pdl, as
+;; bfxmpy-1's does.
+bfxmpy-setz
+	((m-c) xor m-c (a-constant (byte-value bignum-header-sign 1)))
+	(call-xct-next bncons)
+       ((m-b) add m-i (a-constant 2))
+	((c-pdl-buffer-pointer-push) dpb m-t q-all-but-cdr-code
+					 (a-constant (byte-value q-cdr-code cdr-next)))
+bfxmpy-setz-l
+	((vma-start-read) add m-q a-i)
+	(check-page-read)
+	((vma-start-write) m+a+1 m-t a-i)
+	(check-page-write)
+	(jump-greater-than-xct-next m-i (a-constant 1) bfxmpy-setz-l)
+       ((m-i) sub m-i (a-constant 1))
+	((md) a-zero)
+	((vma-start-write) add m-t (a-constant 1))
+	(check-page-write)
+	(popj)
 
 ;; MULTIPLY-ONCE multiplies a bignum in M-Q,M-I by a fixnum in M-2 and adds the fixnum in M-1.
 ;; Writes answer M-T (as if it is a bignum). Leaves last word (not written) in M-1.
