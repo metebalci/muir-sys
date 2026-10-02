@@ -1,7 +1,7 @@
 # muir-sys
 
-**The Lisp Machine system for muir and muir-fpga,** continuing where System
-100 left off and evolved step by step.
+**The Lisp Machine system for muir-sim and muir-fpga,** continuing where
+System 100 left off.
 
 This branch, `cadr`, is the CADR's system; `main` is QUUX's. Both are
 described at <https://muir.metebalci.com/system/>.
