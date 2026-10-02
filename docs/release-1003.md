@@ -24,21 +24,21 @@ Every change to a source file carries a comment in that file saying why.
   (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
   FAIL line it planted.
 - **The microcode changes, and keeps the number 1000 until it is released**
-  (it becomes 1001 then). It is microcode 1000 with the three fixes below,
+  (it becomes 1001 then). It is microcode 1000 with the four fixes below,
   assembled from `sys/ucadr/` as `docs/building.md` describes; the same
   sources without them assemble to System 1002's `ucadr.mcr`, `.tbl`,
   `.locs` and `.sym` byte for byte. The fixes change seven control-store
-  words and add four after `GCDBB-LONG`, so every word from `GCDBB-NO-LUCK`
-  on is four locations later; every other word, every dispatch entry and
-  every symbol is the same once moved, and three A-memory words that hold
-  control-store addresses move with them. The outputs (sha256):
-  - `ucadr.mcr` `ec7263ea988da1ba6300953b7266f2c032f9242e3be432e47392f4bcea6f56a0`
-  - `ucadr.tbl` `01f20b6f9a22778f3bfed34acf7d151da82251b218908c302cb8f7145dffa201`
-  - `ucadr.locs` `4b19782bcdb715f68c8541590e28cc7b2a2e988b951bada707455689669ee22b`
-  - `ucadr.sym` is not given: it holds the same symbols in the order of a
-    hash table, which differs with the band that assembles it. These
-    sources gave one file on System 1001's band and another on System
-    1002's, the same lines once sorted.
+  words and add six: one before `FREE-REGION-1`, one before
+  `UPDATE-REGION-PHT-0` and four after `GCDBB-LONG`, so every word from
+  `FREE-REGION-1` on is one location later, from `UPDATE-REGION-PHT-0` on
+  two and from `GCDBB-NO-LUCK` on six; every other word, every dispatch
+  entry and every symbol is the same once moved, but for the new label
+  `FREE-REGION-2`, and 26 A-memory words that hold control-store addresses
+  move with them. Its outputs are given with the cold boot's changes for
+  60 boards below, which change it again. `ucadr.sym` is not given: it
+  holds the same symbols in the order of a hash table, which differs with
+  the band that assembles it. These sources gave one file on System 1001's
+  band and another on System 1002's, the same lines once sorted.
 - **`GCD` of two bignums is never negative.** When the shorter of two
   bignums of two or more words divides the longer, `GCDBB-LONG` returned the
   divisor with its sign, so `(gcd (expt 2 90) (- (expt 2 31)))` gave
@@ -90,6 +90,40 @@ Every change to a source file carries a comment in that file saying why.
   loops of 100,000 iterations of the `CONDITION-CASE` the error came 17
   times in 600,000 iterations on micro, 3 in 400,000 on rtl and 1 in 230,000
   on muir-fpga's CADR without the fix, and not in 400,000 on micro with it.
+- **A full GC leaves every region in the address space map.** The cold
+  load gives its last area, `FASL-TEMP-AREA`, a region of no length at the
+  end of its areas (`CREATE-AREAS`, `sys/cold/coldut.lisp:389-403`; the
+  sort at `:1181` expects it), where the next region made begins: in the
+  bands of Systems 1001 and 1002 and in one built from this branch it is
+  region 41, at the origin of another region. `FREE-REGION` and
+  `UPDATE-REGION-PHT` (`ucadr/uc-storage-allocation.lisp`) step through a
+  region's quanta and pages testing at the end of each loop, so for a region
+  of no length they stored 0 in the address space map for the quantum at its
+  origin, and called `XCPGS0` on the page below it, both another region's.
+  A full GC frees that region once `FASL-TEMP-AREA` has a second one
+  (`GC-RECLAIM-OLDSPACE`, `sys2/gc.lisp:439-443`), an area at a time with
+  other processes running between areas. When one of them made a region at
+  that quantum after `WORKING-STORAGE-AREA`'s old regions were freed and
+  before `FASL-TEMP-AREA`'s were, the new region dropped out of the map: the
+  next `ROOM` or GC signalled "The argument AREA was NIL, which is not an
+  area number" (`GC-GET-SPACE-SIZES`, `sys2/gc.lisp:189`), and a reference
+  that missed the map halted at `GET-MAP-BITS+13`, "Region not found"
+  (`ucadr/uc-page-fault.lisp:215`). Both loops now return first for a
+  region of no length (`ucadr/uc-storage-allocation.lisp:829-835`, `:841`,
+  `:863-866`); two control-store words are added. MIT's, in microcode 323
+  as well. With a 3,000,000-word array filled, checked, kept across
+  `GC-IMMEDIATELY`, checked again, dropped and collected again, at 32
+  boards on muir-sim's micro engine, the band built from this branch failed
+  in 4 of 20 runs before the fix and System 1002's release band in 2 of 10,
+  each failure with that one quantum out of the map, and the band built
+  from this branch passed 20 of 20 with it. With a region made at that
+  quantum just before `FASL-TEMP-AREA`'s old regions are freed (advice on
+  `GC-RECLAIM-OLDSPACE-AREA`), the same band failed 5 of 5 runs without the
+  fix and passed 10 of 10 with it. `tools/microcode-check/run
+  zero-length-region` frees the region directly: it halts at
+  `GET-MAP-BITS+13` on this branch's microcode without the fix, on the
+  micro and rtl engines, and on System 1002's, and passes all four cases
+  with it on both engines.
 - **An interpreted `LET` keeps its variables while a closure is made under
   it with a temporary `DEFAULT-CONS-AREA`.** Making an interpreted closure
   (`INTERPRETER-ENCLOSE`, `sys/eval.lisp:2144`) copies every stack frame
@@ -259,12 +293,12 @@ Every change to a source file carries a comment in that file saying why.
     the constant 17000000 is a new A-memory constant, so the A-constants
     start one location later (`A-CONSTANT-LOC` 1177 to 1200). `ucadr.tbl` is
     the same. Assembled twice, each on a freshly booted band, the four
-    files were the same both times. The outputs, which replace those given
-    above (sha256):
-    - `ucadr.mcr` `0f2cc2e7ed3ea711849ef8b1b7cca46f263f4e48dbfa35e55d9317bee89055a4`
-    - `ucadr.tbl` `01f20b6f9a22778f3bfed34acf7d151da82251b218908c302cb8f7145dffa201`
-    - `ucadr.locs` `7fbb6a1a81080413d757986e7d68bb5204ec129543a56dcff38106e3db2ac63d`
-    - `ucadr.sym` `cfaadead842804c63b1e32f58fd51ccf743084d926950988a717833d696aff8b`
+    files were the same both times. The outputs, of microcode 1000 with
+    all the changes above (sha256):
+    - `ucadr.mcr` `02e09d0925af6117200996fb09413c90e664593bf84255e48105defa1479e2b9`
+    - `ucadr.tbl` `e510ce7cc4d7d1241b706ffbeef5c0e0caef10704dcb5dc477090fbc18898efd`
+    - `ucadr.locs` `f4a8b1662a0756f8eda70aa58eaac9551be6422cd04aae863da4863f49b94d1a`
+    - `ucadr.sym` is not given (above).
 
     A System 1003 band needs it: on the microcode before these changes the
     band halts in the cold boot (`XRGN1+2`), its wired areas being past the

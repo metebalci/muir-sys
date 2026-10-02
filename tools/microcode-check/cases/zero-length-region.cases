@@ -1,0 +1,17 @@
+; Freeing a region of no length leaves the address space map and the page hash
+; table of the regions around it alone (sys/ucadr/uc-storage-allocation.lisp
+; FREE-REGION and UPDATE-REGION-PHT, docs/release-1003.md).  Load
+; lisp/zero-length-region.lisp first.  The cold load gives FASL-TEMP-AREA, the
+; last area, a region of no length at the end of its areas, where the next region
+; made begins (in the bands of Systems 1001 to 1003, one of WORKING-STORAGE-AREA's);
+; a full GC frees it once FASL-TEMP-AREA has another region.  Before the fix,
+; FREE-REGION took that quantum out of the address space map, and the machine
+; halted at GET-MAP-BITS+13 ("Region not found") in the third case.
+;
+; The band has such a region, and its origin is in another region.
+(eq (si:area-name (zlr-area (zlr-region))) 'si:fasl-temp-area) => T
+(let ((r (zlr-region))) (not (member (%region-number (si:region-origin r)) (list nil r)))) => T
+; Free it: the other region keeps its quantum, and the page below stays in core.
+(zlr-free (zlr-region)) => (T T T)
+; The other region's area is still found, as ROOM and the GC look it up.
+(progn (with-output-to-string (standard-output) (room)) t) => T
