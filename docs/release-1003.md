@@ -223,16 +223,17 @@ Every change to a source file carries a comment in that file saying why.
     which the cold boot sets up for them (`INIMAP7`,
     `ucadr/uc-cold-disk.lisp:46-50`): 11 of its 32 blocks rather than 6,
     and with the one kept for faults, 20 are left for paging rather than
-    25. This system now needs at
+    25; the cold boot then gives back those that map no page (below), so
+    at 32 boards 8 are wired and 23 left. This system now needs at
     least 2 boards, where System 1002 boots on 1; on 1 board it halts in
     the cold boot (`FATAL-DISK-ERROR+1`), its wired areas being past the
     memory.
   - **The memory probe stops at physical 17000000**, where 60 boards end
-    and the Xbus I/O space begins (`ucadr/uc-cold-disk.lisp:328-339`). The
+    and the Xbus I/O space begins (`ucadr/uc-cold-disk.lisp:411-422`). The
     frame buffer there reads back what is written, so with 60 boards the
     probe counted it as 32K more memory.
   - **The cold boot uses no more memory than the band's tables serve**
-    (`ucadr/uc-cold-disk.lisp:593-618`): the smaller of
+    (`ucadr/uc-cold-disk.lisp:676-701`): the smaller of
     PHYSICAL-PAGE-DATA's words and a quarter of PAGE-TABLE-AREA's, read from
     the band's area origins (`GET-AREA-ORIGINS`, now called before the
     memory size is stored), not from a constant. Past them it halted in
@@ -242,7 +243,7 @@ Every change to a source file carries a comment in that file saying why.
     sizes cold-booted, loaded (`QLD`) and saved at 60 boards, and its band
     reports 2048K there, as System 1002's band does on this microcode.
   - **The page table's size is rounded up to a power of two**
-    (`ucadr/uc-cold-disk.lisp:624-638`). `COMPUTE-PAGE-HASH` masks the hash
+    (`ucadr/uc-cold-disk.lisp:707-721`). `COMPUTE-PAGE-HASH` masks the hash
     to the size's power of two and wraps what is past the size once
     (`ucadr/uc-page-fault.lisp:683-690`), so a size between two powers got
     twice the hashes on its first words. With 4 words a page at 60 boards,
@@ -259,11 +260,11 @@ Every change to a source file carries a comment in that file saying why.
     boards the table is 65,536 words too, which wires up to 124 pages more
     than 4 words a page would.
   - **The cold boot direct-maps 128K rather than 64K** while it reads the
-    wired areas and fills the tables (`ucadr/uc-cold-disk.lisp:307-313`),
-    and so does `%DISK-SAVE` while it writes the wired pages (`:284-289`),
+    wired areas and fills the tables (`ucadr/uc-cold-disk.lisp:390-396`),
+    and so does `%DISK-SAVE` while it writes the wired pages (`:367-372`),
     since the wired areas and the CCW list put after them now end past 64K.
   - **The end of PHYSICAL-PAGE-DATA's valid entries is set again at every
-    cold boot** (`ucadr/uc-cold-disk.lisp:670-678`), with the scan pointers
+    cold boot** (`ucadr/uc-cold-disk.lisp:753-761`), with the scan pointers
     of `FINDCORE` and the ager. It was set when the microcode was loaded
     and on a warm boot, and only raised after, so `%DISK-RESTORE` of a band
     whose table is elsewhere kept the old end: from this system at 32
@@ -273,7 +274,7 @@ Every change to a source file carries a comment in that file saying why.
     43,776, and the array is filled, checked, kept through a full GC and
     checked again.
   - **A wired page's PHYSICAL-PAGE-DATA entry is written at its page
-    number** (`ucadr/uc-cold-disk.lisp:693-706`). MIT's code merged the
+    number** (`ucadr/uc-cold-disk.lisp:776-789`). MIT's code merged the
     page number's low 8 bits into the table's origin, which serves only
     wired pages below 64K. With the larger tables the wired pages run past
     page 255: their entries landed on those of pages 0 and up, their own
@@ -281,8 +282,8 @@ Every change to a source file carries a comment in that file saying why.
     boards the cold load halted in `FINDCORE` during `QLD`, reading a
     page's data as a table entry. QUUX's line has the same change.
   - **The cold boot fills all of PHYSICAL-PAGE-DATA with -1 and takes the
-    table's unused pages out of the map** (`ucadr/uc-cold-disk.lisp:659-665`,
-    `:771-791`). `COLD-REINIT-PPD-0` and the loop at `BEGCM1` ended at
+    table's unused pages out of the map** (`ucadr/uc-cold-disk.lisp:742-748`,
+    `:854-874`). `COLD-REINIT-PPD-0` and the loop at `BEGCM1` ended at
     REGION-ORIGIN, which `AREA-LIST` (`cold/qcom.lisp:221`) puts below
     PAGE-TABLE-AREA; both now end at ADDRESS-SPACE-MAP, the area after the
     table. The fill wrote -1 only into the word below REGION-ORIGIN, the
@@ -299,24 +300,69 @@ Every change to a source file carries a comment in that file saying why.
     299 stayed mapped and aliased. Now none of the 28 pages translates to
     its own frame and no frame is reachable both ways; at 60 boards the
     table has no unused pages.
+  - **The wired areas keep a level-2 map block only for each 8K words that
+    still maps a page** (`COMPACT-WIRED-MAP`,
+    `ucadr/uc-cold-disk.lisp:81-161`, called at `BEGCM4`, `:881`). The cold
+    boot gives every 8K words of the wired areas a level-2 block of its own,
+    and those blocks are never reused for paging (`INIMAP7`, `:46-50`); with
+    fewer than 60 boards, once the tables' unused pages are out of the map,
+    whole 8K-word blocks of the page table map no page, 3 of the 11 at 32
+    boards. After `BEGCM1` and `BEGCM3` the blocks that still map a page
+    are given level-2 blocks 0 up, in order, with their pages mapped as
+    before (straight below the page table's end, in PHYSICAL-PAGE-DATA's
+    valid entries rounded up to a page, and from ADDRESS-SPACE-MAP to the
+    wired end), the others none, and the first reusable block
+    (`A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT`) moves down, so the blocks
+    freed join those the level-1 map miss reuses
+    (`ucadr/uc-page-fault.lisp:364-395`): at 32 boards 23 blocks are left
+    for paging rather than 20; at 60 boards all 11 map pages and nothing
+    changes. In the reverse first-level map (system communication area
+    words 40-77) a kept block's entry names the 8K words it now maps and a
+    freed block's is -1, so the level-1 map miss clears no wired entry when
+    it reuses one. Since `RESET-MACHINE` maps the wired areas from scratch
+    at every start (`INITIAL-MAP`), the cold boot, the warm boot,
+    `%DISK-RESTORE` and the start after `%DISK-SAVE` all compact the map
+    again, each from its band's own tables. muir-sim's disk takes no time,
+    so there a map reload is most of what paging costs: compiling four of
+    the system's larger files (`io/format`, `window/sheet`, `zwei/zmacs`,
+    `sys2/gc`) at 32 boards took 805.8 s of machine time rather than
+    864.7 s (6.8% less, the mean of three runs each, each run within 0.9%
+    of its mean), with 28% fewer level-1 map reloads; on the rtl engine `io/format` alone took 149.98 s rather than
+    158.64 s. The paging and full-GC workload and an incremental-GC one
+    changed by 0.5% or less. Measured on the band built from this tree:
+    the first reusable block is 8 at 32 boards and 11 at 60; a band saved
+    at 32 and at 60 boards boots; `(disk-restore 1)` of System 1002's band
+    and `(disk-restore 2)` of a System 1003 band saved at 60 boards, both
+    from this band at 32, then fill, check, GC with it live and check a
+    3,500,000-word array; so does the band after a warm boot (Control,
+    Meta and Return), which keeps a variable set before it.
   - **The swap recommendations are unchanged.**
     `MEMORY-SIZE-SWAP-RECOMMENDATION-ALIST` (`sys2/gc.lisp:1018`) has
     entries from 320K to 1024K, which `DEFAULT-SWAP-RECOMMENDATIONS` matches
     exactly, so at 2048K, the default, no entry applies, and the areas keep
     the cold load's 0; above 2048K the same holds. Measured: 0 for
     WORKING-STORAGE-AREA at 32, 33, 59 and 60 boards, as on System 1002's
-    band.
+    band. Entries for 2048K and above were measured and are left out: a
+    read-ahead of 8 to 31 pages at 2048K made the compile 2.0 to 3.2%
+    slower and the paging workloads 0.3 to 2.5% faster; at 3840K every
+    workload changed by 1.2% or less.
   - **The microcode changes again and keeps the number 1000**: microcode
     1000 with the fixes above and these changes to the cold boot, which add
     22 control-store words, so every word from `MEM-SIZE-LOOP` on moves;
     the constant 17000000 is a new A-memory constant, so the A-constants
-    start one location later (`A-CONSTANT-LOC` 1177 to 1200). `ucadr.tbl` is
-    the same. Assembled twice, each on a freshly booted band, the four
-    files were the same both times. The outputs, of microcode 1000 with
+    start one location later (`A-CONSTANT-LOC` 1177 to 1200).
+    `COMPACT-WIRED-MAP` (above) adds 48 control-store words after
+    `INITIAL-MAP` and its call at `BEGCM4` one more, so every word from
+    `PHYS-MEM-READ` on moves 48 locations and from `BEGCM4`'s next word on
+    49 (octal: `MEM-SIZE-LOOP` 27202 to 27262, `BEG0000` 27545 to 27625);
+    `A-CONSTANT-LOC` moves from 1200 to 1201, and every A-memory variable
+    keeps its location. `ucadr.tbl` is the same. Assembled twice, each on a
+    freshly booted band, the four files, `ucadr.sym` among them, were the
+    same both times. The outputs, of microcode 1000 with
     all the changes above (sha256):
-    - `ucadr.mcr` `d26bc8e27410b8f667d7cb2a1be097a829ee9ad74533bb201ab16923b99518df`
+    - `ucadr.mcr` `97b8a3324446e0a38128dd781aabd4634160ab8fb23ddf211fcc26f83b9a2040`
     - `ucadr.tbl` `e510ce7cc4d7d1241b706ffbeef5c0e0caef10704dcb5dc477090fbc18898efd`
-    - `ucadr.locs` `81e160f3c743f8edaa84566539ab287500989096218e1b14986e7454409d08fc`
+    - `ucadr.locs` `cef1e7b3c34860855fbda6f6d4673850ff6f12096fb88967b4272569245b313e`
     - `ucadr.sym` is not given (above).
 
     A System 1003 band needs it: on the microcode before these changes the

@@ -78,6 +78,89 @@ INIMAP5	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 INIMAP6	(JUMP-LESS-THAN VMA (A-CONSTANT 477) INIMAP5)
 	(POPJ)
 
+;; the wired areas are mapped through the first level-2 map blocks, one for each
+;; 8k words, and those blocks are never reused for paging.  with page tables for
+;; 60 memory boards (cold/qcom.lisp) the wired areas take 11 of the 31 blocks at
+;; any memory size, though with fewer boards whole 8k-word blocks of the tables
+;; are unused: begcm1 and begcm3 have just unmapped every page of them.  here
+;; the blocks that still map a page are given level-2 blocks 0 up, in order, the
+;; others none (37, map not set up), and the blocks freed join the ones the
+;; level-1 map miss reuses: at 32 boards 3 more.  a block's pages are mapped
+;; again as initial-map and begcm1 and begcm3 leave them: straight below the
+;; page table's end, in physical-page-data's valid entries rounded up to a page,
+;; and from address-space-map to the wired end.  in the reverse first-level map
+;; a kept block's entry names the 8k-word block it now maps, as level-1-map-miss
+;; records one (initial-map left each its own, which after the move named
+;; another block); the freed blocks' entries are made -1 (no previous user);
+;; blocks past the old first reusable one, which may already map a page, keep
+;; theirs.
+;; clobbers m-a, m-c, m-1, m-2, md, vma, a-tem1, a-tem2.
+compact-wired-map
+	((vma-start-read) (a-constant (eval (plus 400 %sys-com-wired-size))))
+	(illop-if-page-fault)
+	;; the bounds are dtp-fix pointers, as get-area-origins makes them, so the
+	;; addresses compared with them are too.
+	((m-a) q-pointer read-memory-data (a-constant (byte-value q-data-type dtp-fix)))  ;wired end
+	((m-1) a-pht-index-limit)
+	((a-tem1) add m-1 a-v-page-table-area)	;page table's end
+	((m-1) a-v-physical-page-data-end)
+	((m-1) add m-1 (a-constant (eval (1- page-size))))
+	((a-tem2) and m-1 (a-constant (eval (minus page-size))))  ;valid ppd's end, a page
+	((m-c) a-zero)				;next level-2 block given
+	((md) (a-constant (byte-value q-data-type dtp-fix)))  ;the 8k-word block's first address
+cwm-block
+	((m-1) add md (a-constant 20000))	;and its end
+	(jump-less-than md a-tem1 cwm-used)	;begins below the page table's end
+	(jump-greater-than m-1 a-v-physical-page-data cwm-gap-2)
+	(jump cwm-unused)			;inside the page table's unused end
+cwm-gap-2
+	(jump-less-than md a-tem2 cwm-used)
+	(jump-greater-than m-1 a-v-address-space-map cwm-used)
+cwm-unused					;inside physical-page-data's unused end
+	((vma-write-map) dpb (m-constant -1) map-write-first-level-map
+		(a-constant (byte-mask map-write-enable-first-level-write)))
+	(jump-xct-next cwm-next)
+       ((md) add md (a-constant 20000))
+cwm-used
+	((vma-write-map) dpb m-c map-write-first-level-map
+		(a-constant (byte-mask map-write-enable-first-level-write)))
+	((m-2) md)				;the block's address, kept
+	((write-memory-data) q-pointer md)	;untyped, as level-1-map-miss writes it
+	((vma-start-write) add m-c (a-constant 440))	;its reverse first-level entry
+	(illop-if-page-fault)			;no md load in the cycle after the write
+	((md) m-2)
+	((m-c) add m-c (a-constant 1))
+cwm-page					;its 32 level-2 entries
+	(jump-greater-or-equal md a-a cwm-off)	;past the wired areas
+	(jump-less-than md a-tem1 cwm-on)
+	(jump-less-than md a-v-physical-page-data cwm-off)
+	(jump-less-than md a-tem2 cwm-on)
+	(jump-less-than md a-v-address-space-map cwm-off)
+cwm-on	((vma-write-map) vma-phys-page-addr-part md	;self-address, as inimap3
+		(a-constant (plus (byte-value map-access-code 3)
+				  (byte-value map-meta-bits 64)
+				  (byte-value map-write-enable-second-level-write 1))))
+	(jump cwm-page-next)
+cwm-off	((vma-write-map) (a-constant (byte-value map-write-enable-second-level-write 1)))
+cwm-page-next
+	((md) add md (a-constant (eval page-size)))
+	((m-1) (byte-field 5 8) md)
+	(jump-not-equal m-1 a-zero cwm-page)
+cwm-next
+	(jump-less-than md a-a cwm-block)
+	((vma) a-v-nil)				;no garbage left in vma
+	((m-1) a-second-level-map-reuse-pointer-init)	;the old first reusable block
+	((a-second-level-map-reuse-pointer-init) m-c)
+	((a-second-level-map-reuse-pointer) m-c)
+	((write-memory-data) (m-constant -1))
+cwm-reverse
+	(popj-greater-or-equal m-c a-1)
+	((vma-start-write) add m-c (a-constant 440))	;reverse first-level map, 440-477
+	(illop-if-page-fault)
+	(jump-xct-next cwm-reverse)
+       ((m-c) add m-c (a-constant 1))
+
+
 ;PHYSICAL MEMORY REFERENCING.
 ;THIS WORKS BY TEMPORARILY CLOBBERING LOCATION 0 OF THE SECOND-LEVEL MAP.
 ;A-TEM1, A-TEM2, AND A-TEM3 ARE USED AS TEMPORARIES.  ARGS ARE IN VMA AND MD.
@@ -795,7 +878,8 @@ BEGCM2	((MD) A-V-PAGE-TABLE-AREA)
 BEGCM3	((VMA-WRITE-MAP) (A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
 	((MD) ADD MD (A-CONSTANT (EVAL PAGE-SIZE)))
 	(JUMP-LESS-THAN MD A-V-PHYSICAL-PAGE-DATA BEGCM3)
-BEGCM4	;; Get A-INITIAL-FEF, A-QTRSTKG, A-QCSTKG, A-QISTKG
+BEGCM4	(call compact-wired-map)		;free the level-2 blocks of unused table parts
+	;; Get A-INITIAL-FEF, A-QTRSTKG, A-QCSTKG, A-QISTKG
 	((VMA) (BYTE-FIELD 9 0) (M-CONSTANT -1)) ;777 ;SCRATCH-PAD-INIT-AREA MINUS ONE
 	((M-K) (A-CONSTANT (A-MEM-LOC A-SCRATCH-PAD-BEG))) ;FIRST A MEM LOC TO BLT INTO
 BEG03	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
