@@ -676,6 +676,46 @@ file carries a comment in that file saying why.
   93 of 93 on micro and on rtl, and microcode-check 548 of 548 on micro; a full save
   (`(si:disk-save 3 t)`), an incremental save (`(si:disk-save 3 t t)`), a
   cold boot of each saved band and `(si:disk-restore 3)` work.
+- **The herald names the board QUUX runs on** (contract quux-fullhd,
+  section 6.5): "Machine Type QUUX on Kria KR260", or "QUUX" alone when the
+  machine names none. `SI:BOARD-NAME` (`sys/sys/genric.lisp:1858-1872`)
+  reads the board name from feature words 20-24: up to 20 characters, 4 to a
+  word in `<31:0>`, the low byte first, ended by the first zero byte, and
+  NIL when word 20's low byte is 0. `DESCRIBE-SYSTEM-VERSIONS`
+  (`sys/sys2/patch.lisp:338-345`) prints it after the machine type on the
+  Machine Type line, and `PRINT-FEATURE-PAGE` (`sys/sys/genric.lisp:1904-1906`)
+  prints a "Board name" line, "(none)" without one. Nothing branches on the
+  name. The comment at `sys/window/shwarm.lisp:1887-1895` said the video
+  controller's default size was 1920 by 1080; it is 1280 by 1024, and up to
+  1920 by 1080 by board. `tools/system-check/cases/herald-machine-type.cases`
+  (new) checks the line on muir-sim, whose name is "muir-sim" on both engines,
+  and, with a feature page given a name, a 20-character name, a 10- and a
+  9-character one and none. Measured with muir-sim 91ce0c9 on the
+  hand-over band of `c44fe06` with the files compiled: the case passes 13 of
+  13 on micro and on rtl; against a byte order reversed, a read of 16 characters, a herald
+  without the name and the band unchanged it fails 6, 2, 2 and 8 of 13. A band
+  saved with the change and booted at 1920x1080 prints "QUUX on muir-sim" on
+  micro and rtl; with the name set to 20 characters through muir-sim's
+  `Machine::set_board_name` it prints all 20, and with words 20-24 zero
+  "QUUX" alone. On that band at 1920x1080, on micro and rtl, Zmacs fills the
+  screen, Peek, the Inspector, the system menu and a three-way split screen
+  draw right, the mouse reaches the main screen's four corners, (0,0) to
+  (1919,1055), and the who line is at the bottom, lines 1056-1079; saved
+  with Zmacs exposed, the band boots at 1280x1024 and again at 1920x1080
+  with Zmacs drawn right each time.
+- **A band booted at a screen size other than the one it was saved at keeps
+  its Chaosnet** (`TV:SET-SCREENS-TO-VIDEO`,
+  `sys/window/shwarm.lisp:1957-1971`). Before resizing the screens it reset
+  the Chaosnet, as for a boot on which the window system's initialization
+  ran before the Chaosnet's; in System 2001's band the system
+  initialization list runs CHAOS-NCP before WINDOW, so the reset came after
+  the Chaosnet had been enabled and left it off. Measured on `c44fe06`'s
+  hand-over band, saved at 1280x1024 and booted at 1920x1080 on micro:
+  `CHAOS:ENABLE` NIL, no TELNET server ("nothing heard for 180 s"), on
+  muir-sim da8eb55 and 91ce0c9; `(chaos:reset t)` typed at the console
+  brought TELNET back. The reset now enables the Chaosnet again when it was
+  enabled. A band saved at 1920x1080 with the change and booted at
+  1280x1024 has `CHAOS:ENABLE` T and answers TELNET, on micro and rtl.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

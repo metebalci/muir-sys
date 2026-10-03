@@ -1855,6 +1855,22 @@ The microcode sets it at boot from MACHINE-ID."
 	    ;; not "words/line": / escapes the next character in this readtable
   "What the words of QUUX's feature page hold, from word 0 on.")
 
+;; quux (contract quux-fullhd, 6.5): the board name, feature words 20-24: up
+;; to 20 characters, 4 to a word in <31:0>, the low byte first, ended by the
+;; first zero byte.  it names what runs this machine, a board or muir-sim, so
+;; that the herald can say so; nothing branches on it, since a program that
+;; needs a property reads the feature word that states it.  a machine without
+;; a name reads 0 there, which is no name.
+(defun board-name ()
+  "The name of what runs this QUUX, from the feature page, or NIL if it names none."
+  (let ((name (make-array 20. ':type 'art-string ':fill-pointer 0)))
+    (dotimes (i 20.)
+      (let ((char (feature-page-field (+ #o20 (truncate i 4))
+				      (nth (remainder i 4) '(#o0010 #o1010 #o2010 #o3010)))))
+	(if (zerop char) (return))
+	(array-push name char)))
+    (and (plusp (fill-pointer name)) name)))
+
 ;; from system 2000 the system runs only on quux, whose feature page this
 ;; reads; lisp-reinitialize stops on anything else.
 (defun print-feature-page (&optional (stream *standard-output*))
@@ -1885,6 +1901,9 @@ The microcode sets it at boot from MACHINE-ID."
 		   (format stream "~% ~22A ~D  (~:[no multiply~;multiply~], ~:[no divide~;divide~])"
 			   name word (ldb-test (byte 1 0) word) (ldb-test (byte 1 1) word))
 		 (format stream "~% ~22A ~D" name word))))))
+    ;; quux (contract quux-fullhd, 6.5): words 20-24, the board name, as the
+    ;; herald prints it, or "(none)" when they hold no name.
+    (format stream "~% ~22A ~A" "Board name" (or (board-name) "(none)"))
     (terpri stream)))
 
 (defun machine-version ()

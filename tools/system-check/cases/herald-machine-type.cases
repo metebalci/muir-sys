@@ -1,0 +1,25 @@
+; The herald's Machine Type line names what runs the machine, the board name
+; of feature words 20-24 (contract quux-fullhd, 6.5; SI:BOARD-NAME,
+; sys/sys/genric.lisp; DESCRIBE-SYSTEM-VERSIONS, sys/sys2/patch.lisp): up to
+; 20 characters, 4 to a word in <31:0>, the low byte first, ended by the first
+; zero byte.  On muir-sim, either engine, the name is "muir-sim", and the line
+; reads "Machine Type QUUX on muir-sim"; with no name it reads "QUUX" alone.
+; Run with --compile --files sys/sys/genric.lisp,sys/sys2/patch.lisp on a
+; band built before the change.  Values are compared with runs of spaces
+; collapsed, so the column the value starts at is checked on its own.
+; The first two cases are controls; the cases after the machine's own name
+; give SI:FEATURE-PAGE-FIELD a page whose words 20-24 hold a given name,
+; packed as the contract packs it, and pass on any machine.
+(si:machine-type) => "QUUX"
+(progn (defun hmt-versions () (with-output-to-string (s) (si:describe-system-versions s))) (defun hmt-line (label v) (let* ((i (string-search label v)) (b (string-reverse-search-char #\return v i))) (substring v (if b (1+ b) 0) (string-search-char #\return v i)))) (defun hmt-column (label v) (let ((line (hmt-line label v))) (string-search-not-char #\space line (+ (string-search label line) (length label))))) (hmt-line "Microcode" (hmt-versions))) => " Microcode 2001"
+(si:board-name) => "muir-sim"
+(hmt-line "Machine Type" (hmt-versions)) => " Machine Type QUUX on muir-sim"
+(let ((v (hmt-versions))) (= (hmt-column "Machine Type" v) (hmt-column "Microcode" v))) => T
+(progn (defun hmt-with-name (name thunk) (let ((orig #'si:feature-page-field) (words (make-list 5 ':initial-element 0))) (dotimes (i (length name)) (setf (nth (truncate i 4) words) (dpb (char-code (aref name i)) (byte 8 (* 8 (remainder i 4))) (nth (truncate i 4) words)))) (letf (((symbol-function 'si:feature-page-field) #'(lambda (w ppss) (if (<= #o20 w #o24) (ldb ppss (nth (- w #o20) words)) (funcall orig w ppss))))) (funcall thunk)))) t) => T
+(hmt-with-name "Kria KR260" #'si:board-name) => "Kria KR260"
+(hmt-with-name "ABCDEFGHIJKLMNOPQRST" #'si:board-name) => "ABCDEFGHIJKLMNOPQRST"
+(hmt-with-name "ABCDEFGHIJKLMNOPQRST" #'(lambda () (hmt-line "Machine Type" (hmt-versions)))) => " Machine Type QUUX on ABCDEFGHIJKLMNOPQRST"
+(hmt-with-name "DE25-Nano" #'(lambda () (hmt-line "Board name" (with-output-to-string (s) (si:print-feature-page s))))) => " Board name DE25-Nano"
+(hmt-with-name "" #'si:board-name) => NIL
+(hmt-with-name "" #'(lambda () (hmt-line "Machine Type" (hmt-versions)))) => " Machine Type QUUX"
+(hmt-with-name "" #'(lambda () (hmt-line "Board name" (with-output-to-string (s) (si:print-feature-page s))))) => " Board name (none)"

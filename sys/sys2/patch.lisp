@@ -335,7 +335,14 @@ The microcode version number and some other suitable information is also include
   (format s "~& Machine Type")
   (dotimes (i (- max 12.))		;decimal: this file reads in base 8
     (write-char #/space s))
-  (format s " ~A" (machine-type)))
+;  (format s " ~A" (machine-type)))
+  ;; quux (contract quux-fullhd, 6.5): and what runs it, the board name of
+  ;; feature words 20-24, on the same line: "QUUX on Kria KR260", or "QUUX"
+  ;; alone when the machine names none.
+  (format s " ~A" (machine-type))
+  (let ((board (board-name)))
+    (when board
+      (format s " on ~A" board))))
 
 (DEFUN PRINT-SYSTEM-MODIFICATIONS (&REST SYSTEM-NAMES)
   "Print descriptions of all loaded patches of the systems in SYSTEM-NAMES, or all systems."

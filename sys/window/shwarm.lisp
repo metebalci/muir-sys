@@ -1887,8 +1887,12 @@ SHEET's cursor is not used or moved."
 ;;; This height may get hacked by the who-line making code if the wholine ends up
 ;;; at the bottom of the main screen (which it usually does!)
 ;;; quux: the video controller's size, from the feature page, not the cadr tv's 768 by
-;;; 963 at 24 words a line: 1920 by 1080 at 60 by default, and muir-sim can make
-;;; it other sizes.  the window system is built from these when it loads.
+;;; 963 at 24 words a line: 1280 by 1024 at 40 by default (muir-sim's, and the
+;;; arty's and the de25-nano's), and muir-sim and a board can make it other
+;;; sizes, up to 1920 by 1080 at 60 (the kria kr260's; contract quux-fullhd).
+;;; this said 1920 by 1080 was the default, which it is not.  the window
+;;; system is built from these when it loads, and resized to the feature
+;;; page's size at every boot (set-screens-to-video).
 ;;; quux (contract q13): mono tv is renamed the video controller, and
 ;;; si:mono-tv-width and the rest si:video-width and the rest, here and below
 ;;; (set-screens-to-video, screen-set-video, sheet-set-video-pitch).  its
@@ -1957,7 +1961,14 @@ SHEET's cursor is not used or moved."
       ;; connections from before the save, found no buffer and stopped with
       ;; "error in the scheduler".  the reset here is the one that is
       ;; about to run anyway.
-      (if (fboundp 'chaos:reset) (chaos:reset))
+;      (if (fboundp 'chaos:reset) (chaos:reset))
+      ;; quux (contract quux-fullhd): in system 2001's band chaos-ncp comes
+      ;; before window on the list, so this reset came after the chaosnet's
+      ;; own and left it off: a band booted at a size other than the one it
+      ;; was saved at had no chaosnet, and no telnet server.  the reset
+      ;; turns the chaosnet on again when it was on, which in the other
+      ;; order, before chaos-ncp, it is not (the save turns it off).
+      (if (fboundp 'chaos:reset) (chaos:reset (symbol-value 'chaos:enable)))
       (delaying-screen-management
 	(without-interrupts
 	  (let ((who-height (sheet-height who-line-screen)))
