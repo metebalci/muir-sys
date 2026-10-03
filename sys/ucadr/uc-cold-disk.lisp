@@ -790,7 +790,31 @@ COLD-REINIT-PPD-2
 	(JUMP COLD-REINIT-PPD-4)
 
 COLD-REINIT-PPD-3
-	((VMA M-C) SUB M-C (A-CONSTANT 4))		;Put in a PHT entry for free page
+;	((VMA M-C) SUB M-C (A-CONSTANT 4))		;Put in a PHT entry for free page
+	;; a free page's entry goes at the first hole from its frame's hash xor
+	;; 4 entries, where free-region puts a freed page's (uc-page-fault.lisp,
+	;; xcpgs0).  laid every other entry down from the table's top, the free
+	;; pages sat in frame order, and findcore, which takes them in frame
+	;; order, emptied the table section by section while the pages it filled
+	;; hashed elsewhere, so the sections not yet reached filled up (on quux's
+	;; line at 32 m words, 90-100% after four flips).  hashed by frame,
+	;; consecutive frames spread over the table.  the hash of a frame and of
+	;; a virtual page from the same 128-page block start at the same offset
+	;; in their 8-entry group, so at the hash itself every real page's slot
+	;; held a free page (measured on quux's line, whose hash is this one);
+	;; xor 4 takes the group's other half.
+	((m-t) m-r)					;the frame's address
+	(call compute-page-hash)
+	((m-t) xor m-t (a-constant 8.))			;xor 4 entries (8 words)
+cold-reinit-ppd-5
+	((vma-start-read) add m-t a-v-page-table-area)	;the first hole from it
+	(illop-if-page-fault)
+	(jump-if-bit-clear pht1-valid-bit read-memory-data cold-reinit-ppd-6)
+	((m-t) add m-t (a-constant 2))
+	(jump-less-than m-t a-pht-index-limit cold-reinit-ppd-5)
+	(jump-xct-next cold-reinit-ppd-5)
+       ((m-t) sub m-t a-pht-index-limit)		;wrap around
+cold-reinit-ppd-6
 	(CALL-XCT-NEXT XCPPG1)				;Create physical page
        ((C-PDL-BUFFER-POINTER-PUSH) M-R)		;At this address
 COLD-REINIT-PPD-4

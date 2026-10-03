@@ -441,3 +441,63 @@ Every change to a source file carries a comment in that file saying why.
   band's 704). `tools/lispm-check-test` (selftest), `tools/system-check`'s
   interpreter-closure cases and `tools/microcode-check` give the same
   results as the band without the change.
+- **Free pages' entries in the page hash table are spread by frame**, as
+  on QUUX's line, where the table degenerated under the incremental GC at
+  32 M words (runs of 10,000 entries, 1,000 probes a miss). The cold boot
+  entered the free pages every other entry down from the table's top, in
+  frame order (`COLD-REINIT-PPD-3`), and findcore takes free pages in frame
+  order (`FINDCORE0`, `sys/ucadr/uc-page-fault.lisp:756`), while
+  `FREE-REGION` (`XFREE-REGION`, `sys/ucadr/uc-storage-allocation.lisp:806`)
+  made each freed page's entry a free page's in place, on the slot its
+  virtual page had hashed to (`XCPGS0`, the two lines now commented out at
+  `sys/ucadr/uc-page-fault.lisp:1295-1296`). Now `XCPGS0`'s free-region
+  path deletes the freed page's entry (`COREFOUND2`, `PHTDEL`) and enters
+  the frame anew as a free page with `XCPPG1` at the first hole from the
+  frame's hash xor 4 entries (`sys/ucadr/uc-page-fault.lisp:1297-1328`),
+  and the cold boot puts each free page there too
+  (`sys/ucadr/uc-cold-disk.lisp:794-819`). The mechanism is MIT's, in
+  microcode 323 as well, and this code has it: under the incremental GC at
+  32 boards the table's worst run went from 2304 entries and 164 probes a
+  miss to 991 and 33, and the compile workload below took 2.6% less machine
+  time. The transient long runs at 60 boards have another cause and stay
+  (below).
+  - The microcode changes again and keeps the number 1000. The fix adds
+    26 control-store words, 17 in `XCPGS0`'s free-region path and 9 at
+    `COLD-REINIT-PPD-3`, so every word from `XCPGS3` on is 17 locations
+    later and from `COLD-REINIT-PPD-4` on 26; A-memory and the dispatch
+    memory keep their size, and `ucadr.tbl` changes. The same sources
+    without the fix assemble to the outputs given above. Assembled twice,
+    each on a freshly booted copy of System 1002's band, the four files
+    were the same both times; the outputs (sha256):
+    - `ucadr.mcr` `6c63921041582506a6a2dbae5fb8e9280aba18176efe6be3263f80bf016ff796`
+    - `ucadr.tbl` `a41a2596379452166c75ed005c6b2d8433940b806747b64db0b680cc5816fd6f`
+    - `ucadr.locs` `9ab9e6932de576fd35ecea019d69a63e4c8b8e1d3e7ebf5aa6f12a446c928517`
+    - `ucadr.sym` is not given (above).
+  - Measured on the band built from this tree with this microcode in its
+    current microcode partition, muir-sim's `cadr`, micro engine: the paging
+    and full-GC workload (a 3,500,000-word array) keeps the array intact
+    three times at 32 boards and three at 60, with no "The argument AREA was
+    NIL"; bands saved at 32 and at 60 boards boot (2048K, 3840K);
+    `(disk-restore 1)` of System 1002's band and `(disk-restore 2)` of a
+    System 1003 band saved at 60 boards, both from this band at 32, then
+    fill, check, GC with it live and check the array; a warm boot (Control,
+    Meta and Return) keeps a variable set before it, the console's "Reset
+    it?" answered Yes (the warm boot asks it when it catches a process
+    running: in 4 of 4 runs on this band and 1 of 3 on the band before the
+    change); the boot with this tree served and with an empty `sys/` both
+    complete, the second on the band's own error table.
+    `tools/lispm-check-test` (selftest), `tools/system-check`'s
+    interpreter-closure cases, `tools/microcode-check`'s pdl-refill and
+    zero-length-region (micro and rtl) give the same results as before the
+    change. Compiling four of the system's larger files at 32 boards (as
+    above) took 785.0 s of machine time rather than 805.8 s (2.6% less, the
+    mean of three runs each).
+  - With the reproducer of QUUX's line (the incremental GC under 80 blocks
+    of 100K words consed, the table dumped every 2 blocks): at 32 boards the
+    worst run is 991 entries and 33.0 probes a miss rather than 2304 and
+    164.0, though 12 dumps still hold a run over 100 rather than 13. At 60
+    boards the transient long runs come at the same blocks before and after
+    and are hardly shorter: 1143 entries and 22.1 probes a miss at block 40
+    rather than 1192 and 23.8. Every dump with such a run, at 32 boards and at
+    60, has memory full of real pages and no free page's entry, so the runs
+    that remain have another cause, which this change does not touch.

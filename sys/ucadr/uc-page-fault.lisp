@@ -1282,6 +1282,8 @@ XCPGS (MISC-INST-ENTRY %CHANGE-PAGE-STATUS)
 ;Here from UPDATE-REGION-PHT.  Must bash only M-A, M-B, M-T, tems.
 ;Returns address which came in on pdl, in MD.
 ;Note magic kludge -- sign of M-D means get rid of page entirely (for FREE-REGION)
+;; that path (below) also bashes m-pgf-tem, in phtdel, a-tem1, in
+;; compute-page-hash, and vma; free-region alone takes it.
 XCPGS0	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
        ((M-T) Q-POINTER C-PDL-BUFFER-POINTER)	;Virtual address
 	(JUMP-IF-BIT-CLEAR-XCT-NEXT		;If not swapped in, return NIL, and make
@@ -1290,8 +1292,40 @@ XCPGS0	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
 	((M-T) A-V-TRUE)			;Get ready to return T
 	(JUMP-EQUAL M-D A-V-NIL XCPGS1)		;See if should change swap-status
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 31.) M-D XCPGS3) ;If sign bit of M-D set,
-	((A-TEM2) ANDCA MD (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT))) ;clear modified flag
-	((MD) DPB (M-CONSTANT -1) PHT1-VIRTUAL-PAGE-NUMBER A-TEM2) ;and forget virtual page
+;	((A-TEM2) ANDCA MD (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT))) ;clear modified flag
+;	((MD) DPB (M-CONSTANT -1) PHT1-VIRTUAL-PAGE-NUMBER A-TEM2) ;and forget virtual page
+	;; free-region: delete the page's entry and enter the frame anew as a
+	;; free page at its own slot, the first hole from the frame's hash xor 4
+	;; entries, where the cold boot puts it (uc-cold-disk.lisp,
+	;; cold-reinit-ppd-3).  forgotten in place, a freed page's entry stayed
+	;; on the slot its virtual page hashed to, while findcore takes free
+	;; pages in frame order wherever their entries lie, so the entries
+	;; gathered where the collector's pages hash and long runs formed (on
+	;; quux's line at 32 m words, 10,000 entries and 1,000 probes a miss).
+	;; this code has the same mechanism: under the incremental gc at 32
+	;; boards the worst run went from 2304 entries and 164 probes a miss to
+	;; 991 and 33, and a compile workload ran 2.6% faster.  the transient
+	;; runs at 60 boards (1,192 entries, 24 probes) stay: they come with
+	;; memory full of real pages and no free page's entry, another cause.
+	((m-a) read-memory-data)			;pht1, the page for phtdelx
+	((m-t) vma)					;-> pht entry to delete
+	((vma-start-read) add vma (a-constant 1))	;pht2
+	(illop-if-page-fault)
+	(call-xct-next corefound2)			;delete it: physical-page-data,
+       ((m-b) pht2-physical-page-number read-memory-data) ; pht, map; m-b is the frame
+	((m-t) dpb m-b vma-phys-page-addr-part a-zero)	;the frame's address,
+	((c-pdl-buffer-pointer-push) m-t)		; for xcppg1
+	(call compute-page-hash)			;the frame's hash, xor 4 entries
+	((m-t) xor m-t (a-constant 8.))			; (8 words): cold-reinit-ppd-3 says why
+xcpgs4	((vma-start-read) add m-t a-v-page-table-area)	;the first hole from it
+	(illop-if-page-fault)
+	(jump-if-bit-clear pht1-valid-bit read-memory-data xcpgs5)
+	((m-t) add m-t (a-constant 2))
+	(jump-less-than m-t a-pht-index-limit xcpgs4)
+	(jump-xct-next xcpgs4)
+       ((m-t) sub m-t a-pht-index-limit)		;wrap around
+xcpgs5	(call xcppg1)					;the free page's entry; returns t
+	(jump xcpgs2)
 XCPGS3	((WRITE-MEMORY-DATA-START-WRITE)
 		SELECTIVE-DEPOSIT MD PHT1-ALL-BUT-SWAP-STATUS-CODE A-D)
 	(ILLOP-IF-PAGE-FAULT)
