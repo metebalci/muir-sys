@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The self-test of tools/lispm-check. It runs the tool seven times against the
+# The self-test of tools/lispm-check. It runs the tool eight times against the
 # files beside this script, once for each way of serving files, and checks each
 # exit status, and for the full case file each case's verdict against
 # expected.txt:
@@ -9,10 +9,12 @@
 #   pass.cases                                        exit 0
 #   selftest.cases, broken.lisp (unclosed form)       exit 2, the file's load fails
 #   the same with --compile                           exit 2, qc-file reports it
+#   question.cases (bare questions, an error's)       exit 1, verdicts and texts as
+#                                                     expected-question.txt, in under 20 s
 # (for the two with exit 2, the tool's message must name broken.lisp and the
 # step that failed), and then pass.cases once more with no --file-server,
 # where the default, auto, must choose the mode's server for the mode's band.
-# The seven run in each mode of LISPM_CHECK_TEST_MODES, "device" by default:
+# The eight run in each mode of LISPM_CHECK_TEST_MODES, "device" by default:
 #   device  --file-server device on LISPM_CHECK_DEVICE_BAND, or the tool's
 #           default band run/check/band.img: a band whose SYS: is on HOST, its
 #           files served by quux's file device
@@ -40,6 +42,7 @@ trap 'rm -f "$out"' EXIT
 check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-ARGS...
     # TEXT, when given, must appear in the output: a status 2 must be the
     # broken file's and not, say, a flag the tool refused or a boot that failed.
+    # WITHIN, when set in the environment of the call, bounds the cases' time.
     local name=$1 want=$2 verdicts=$3 text=; shift 3
     [ "$1" != -- ] && { text=$1; shift; }
     shift
@@ -53,14 +56,24 @@ check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-AR
     fi
     if [ -n "$verdicts" ]; then
         while IFS= read -r line; do
-            local status=${line%% *} form=${line#* }
-            if ! grep -qF -- "$status  $form  " "$out"; then
-                echo "FAIL $name: no line \"$status  $form\""; sed 's/^/    /' "$out"; fails=$((fails+1)); return
+            # STATUS FORM, or STATUS FORM  -> TEXT when the line's text after
+            # the arrow must match too
+            local status=${line%% *} form=${line#* } why=
+            case $form in *'  -> '*) why="-> ${form#*  -> }"; form=${form%%  -> *} ;; esac
+            if ! grep -qF -- "$status  $form  $why" "$out"; then
+                echo "FAIL $name: no line \"$status  $form  $why\""; sed 's/^/    /' "$out"; fails=$((fails+1)); return
             fi
         done < "$verdicts"
         local n; n=$(grep -cE '^(PASS|FAIL|ERROR)  ' "$out")
         if [ "$n" != "$(wc -l < "$verdicts")" ]; then
             echo "FAIL $name: $n verdict lines, wanted $(wc -l < "$verdicts")"; fails=$((fails+1)); return
+        fi
+    fi
+    if [ -n "$within" ]; then
+        # the cases' time, the summary's "all", must stay under WITHIN seconds
+        local all; all=$(sed -n 's/.*, all \([0-9.]*\) s)$/\1/p' "$out")
+        if [ -z "$all" ] || ! awk -v a="$all" -v w="$within" 'BEGIN { exit !(a < w) }'; then
+            echo "FAIL $name: the cases took ${all:-?} s, wanted under $within s"; sed 's/^/    /' "$out"; fails=$((fails+1)); return
         fi
     fi
     echo "ok   $name (exit $got)"
@@ -83,6 +96,9 @@ for mode in ${LISPM_CHECK_TEST_MODES:-device}; do
     check "$mode broken-file" 2 "" "lispm-check: $here/broken.lisp: (let " -- "${m[@]}" --files "$here/broken.lisp" "$@" "$here/selftest.cases"
     check "$mode broken-compile" 2 "" "lispm-check: $here/broken.lisp: (qc-file " -- "${m[@]}" --compile --files "$here/broken.lisp" "$@" "$here/selftest.cases"
     # the default, --file-server auto, must choose this mode for this band
+    # a bare (Y or N) or (Yes or No) fails its case at once, answered No: with
+    # --timeout 30, a run that waited for any question takes 30 s or more
+    within=20 check "$mode question" 1 "$here/expected-question.txt" -- "${m[@]}" --files "$here/selftest.lisp" "$@" --timeout 30 "$here/question.cases"
     check "$mode auto" 0 "" "lispm-check: files served by $mode: " -- --band "$band" --files "$here/selftest.lisp" "$@" "$here/pass.cases"
 done
 [ "$fails" = 0 ] && echo "self-test passed" || echo "self-test FAILED ($fails)"

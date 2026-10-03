@@ -157,6 +157,28 @@ with runs of whitespace collapsed to one space. Each form runs inside a
 `condition-case`, so an error is reported by its message and the next case
 goes on in the same session. A form must not read from the terminal.
 
+A form that asks a question anyway fails at once, whatever the case
+expected. Every question asked through `FQUERY` (`Y-OR-N-P`, `YES-OR-NO-P` and
+`FQUERY` itself) first signals the condition `FQUERY`; the case's
+`condition-case` has a clause for it, which ends the form there and reports
+the question's text. GC-ON's question shows it:
+
+```
+FAIL  (progn (gc-on) ...)  -> asked Try garbage collecting after all?, the form ended there
+```
+
+This is the only way to see `YES-OR-NO-P` over TELNET, where it prints no
+prompt at all, only a beep. A second line of defence catches a question asked
+some other way: when what the case printed ends with a bare `(Y or N)` or
+`(Yes or No)`, with no error before it and no output for 0.5 s after it, the
+case fails with `-> asked QUESTION, answered No`, the question is answered No,
+and the next case is sent once that form has ended. The words inside a value
+or followed by more output ask nothing: a value is printed between the case's
+markers, read before any question. An error that escapes the case's handlers,
+followed by the listener's "Enter the debugger (No means abort instead)? (Y or
+N)", is answered No as before and reported as an `ERROR` with the error's
+message.
+
 ```
 (check-selftest-square 7) => 49
 (list 'a
@@ -247,13 +269,15 @@ tree is a class with the same methods, named in `FILE_SERVERS`.
 
 ## Self-test
 
-`tools/lispm-check-test/run.sh` runs the tool seven times on the files beside
+`tools/lispm-check-test/run.sh` runs the tool eight times on the files beside
 it, for each file server, and checks each exit status and verdict: the case
 file loaded as source and compiled (status 1, with a wrong value, a wrong
 error message and an unexpected error on purpose, and a case that the tree's
 `sys/` is served), a wrong expected value (1), only passing cases (0), and a
 file with an unclosed form, loaded and compiled (2, with the tool's message
-naming the file and the step that failed); and then the passing cases once
+naming the file and the step that failed), the question cases
+(`question.cases`: status 1, each verdict and its text as
+`expected-question.txt`, the cases' time under 20 s with `--timeout 30`); and then the passing cases once
 more with no `--file-server`, where `auto` must choose that mode's server for
 that band. `LISPM_CHECK_TEST_MODES` picks the modes, each run with the
 `ubin/` beside its band:

@@ -34,11 +34,17 @@ Forms are read by the listener: base 10, traditional syntax, where / escapes,
 so a slash inside a string is written twice.  A value is compared with its
 whitespace runs collapsed to one space.  Each form runs inside a
 condition-case, so an error is reported by its message and the listener goes
-on with the next case; a form must not read from the terminal.
+on with the next case; a form must not read from the terminal.  One that asks
+a question through FQUERY (Y-OR-N-P, YES-OR-NO-P and FQUERY itself) fails at
+once, naming the question, and the form ends there.  Failing that, a bare
+"(Y or N)" or "(Yes or No)" at the end of what the case printed fails it too,
+and is answered No; the next case waits for that form to end.
 
 Output, one line per case, then a summary:
   PASS  FORM  -> VALUE
   FAIL  FORM  -> VALUE, expected TEXT
+  FAIL  FORM  -> asked QUESTION, the form ended there
+  FAIL  FORM  -> asked QUESTION, answered No
   ERROR  FORM  -> the error's message
 Before them, a FILE line for each file, and a WARN line for each line the
 compiler or the loader printed about it.
@@ -499,12 +505,37 @@ class Machine:
 # The function every case is run through, defined and compiled into the
 # checkpoint at setup.  SETUP_VERSION is part of the checkpoint's key: change it
 # whenever this or the setup's forms change.
-HELPER = ('(defun lispm-check-case (k form)'
-          ' (condition-case (e) (format t "~%{~D{~S}~D}~%" k (eval form) k)'
-          ' (error (format t "~%{~D!~A!~D}~%" k (send e \':report-string) k))))')
-SETUP_VERSION = '1'
+# A question the form asks through FQUERY (Y-OR-N-P, YES-OR-NO-P, FQUERY
+# itself) signals the condition FQUERY first (sys/io1/fquery.lisp); the
+# clause for it ends the form there and prints the question between ? markers,
+# so the case fails at once rather than waiting out --timeout for an answer
+# nobody types.  YES-OR-NO-P prints no prompt over TELNET at all, so only this
+# sees it.  Clauses are tried in order; FQUERY is not an error.
+CASE_FORM = ('(condition-case (e) (format t "~%%{~D{~S}~D}~%%" %(k)s %(form)s %(k)s)'
+             ' (fquery (format t "~%%{~D?~A?~D}~%%" %(k)s (send e \':report-string) %(k)s))'
+             ' (error (format t "~%%{~D!~A!~D}~%%" %(k)s (send e \':report-string) %(k)s)))')
+HELPER = '(defun lispm-check-case (k form) %s)' % (CASE_FORM % {'k': 'k', 'form': '(eval form)'})
+# 2: the FQUERY clause
+SETUP_VERSION = '2'
 
 ERROR_RE = re.compile(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)')
+# The second line of defence, for a question the FQUERY clause does not see
+# (one asked without FQUERY, or in the setup's forms): the last line of what a
+# case printed ends with the prompt of
+# Y-OR-N-P or YES-OR-NO-P (sys/io1/fquery.lisp) and nothing follows it.
+# YES-OR-NO-P prints its prompt only through a rubout handler, which the TELNET
+# stream lacks, so over TELNET only Y-OR-N-P's is ever seen.
+# Without this a case that asks one (GC-ON's "Try garbage collecting after
+# all? (Y or N)") waited out --timeout, since the case's condition-case answers
+# only errors.
+# Line ends may follow the prompt too: the echo of the form's own RETURN can
+# come after what the form printed.
+QUESTION_RE = re.compile(r'([^\r\n]*\((Y or N|Yes or No)\))[ \x07\r\n]*$')
+# How long the output must stay quiet after such a prompt before it counts as a
+# question: a form may print the words itself and go on printing.
+QUESTION_QUIET = 0.5
+# The answer No to each: one character for Y-OR-N-P, a line for YES-OR-NO-P.
+QUESTION_NO = {'Y or N': b'N', 'Yes or No': b'No\r\n'}
 
 
 class Session:
@@ -512,6 +543,10 @@ class Session:
         self.s, self.log, self.helper = sock, log, helper
         self.buf = ''
         self.tag = random.randrange(100000, 900000)
+        # the tag of a case answered No to a question and still running: its
+        # answer comes before the next case's (see _settle)
+        self.pending = None
+        self.last_data = now()
 
     def _read(self):
         try:
@@ -523,16 +558,34 @@ class Session:
         t = d.decode('latin-1')
         self.buf += t
         self.log.write(t)
+        self.last_data = now()
+
+    def _question(self, after):
+        """The bare question at the end of AFTER, the text after the case's
+        echo, once the output has been quiet for QUESTION_QUIET; else None.
+        Not while the case's own answer is being printed: a value holding the
+        words is inside the markers, which the case's answer opens."""
+        m = QUESTION_RE.search(after)
+        if not m or now() - self.last_data < QUESTION_QUIET:
+            return None
+        return m
 
     def run(self, form, timeout):
-        """Evaluate form; return ('value', printed value, output before it)
-        or ('error', message, output before it).  The form runs inside a
-        condition-case, so an error prints its message rather than asking
-        whether to enter the debugger; in a checkpointed world through
+        """Evaluate form; return ('value', printed value, output before it),
+        ('error', message, output before it), ('asked', the question, output
+        before it), a question asked through FQUERY, which ended the form, or
+        ('question', the question, output before it), a bare "(Y or N)" or
+        "(Yes or No)" seen in the output and answered No.
+        The form runs inside a condition-case, so an error prints its
+        message rather than asking whether to enter the debugger; in a
+        checkpointed world through
         HELPER, compiled at setup, since the listener takes 0.3 s more to
         evaluate a condition-case form than to call a compiled function.  The
         markers are printed with ~D from numbers, so the echo of the form
         never holds them."""
+        deadline = now() + timeout
+        if self.pending is not None:
+            self._settle(deadline, form)
         self.tag += 1
         k = self.tag
         self.buf = ''
@@ -540,19 +593,17 @@ class Session:
         if self.helper:
             sent = "(lispm-check-case %d '%s)" % (k, form)
         else:
-            sent = ('(condition-case (e) (format t "~%%{~D{~S}~D}~%%" %d %s %d)'
-                    ' (error (format t "~%%{~D!~A!~D}~%%" %d (send e \':report-string) %d)))'
-                    % (k, form, k, k, k))
+            sent = CASE_FORM % {'k': k, 'form': form}
         self.s.sendall((sent + '\r\n').encode('latin-1'))
         echo_end = sent[-24:]
-        answer = re.compile(r'\{%d([{!])(.*?)[}!]%d\}' % (k, k), re.S)
-        deadline = now() + timeout
+        answer = re.compile(r'\{%d([{!?])(.*?)[}!?]%d\}' % (k, k), re.S)
+        opened = re.compile(r'\{%d[{!?]' % k)
         while True:
             m = answer.search(self.buf)
             if m:
                 # what the form printed: after the echoed line, before the answer
                 out = self.buf[:m.start()].split(echo_end, 1)[-1]
-                return ('value' if m.group(1) == '{' else 'error'), m.group(2), out
+                return {'{': 'value', '!': 'error', '?': 'asked'}[m.group(1)], m.group(2), out
             m = ERROR_RE.search(self.buf)
             if m and ('(Y or N)' in self.buf[m.start():] or '\n->' in self.buf[m.start():]):
                 # An error the condition-case did not catch: leave it for top level.
@@ -560,8 +611,39 @@ class Session:
                 out = self.buf[:m.start()].split(echo_end, 1)[-1]
                 self._abort(deadline)
                 return 'error', msg, out
+            if echo_end in self.buf and not m and not opened.search(self.buf):
+                # A bare question, with no error before it: the case fails,
+                # naming it, and is answered No so that the form goes on.  It
+                # ends later; the next case waits for that (_settle).
+                out = self.buf.split(echo_end, 1)[1]
+                q = self._question(out)
+                if q:
+                    self.s.sendall(QUESTION_NO[q.group(2)])
+                    self.pending = k
+                    self.buf = ''
+                    return 'question', q.group(1).strip(), out[:q.start()]
             if now() > deadline:
                 raise RunFailed('no answer in %g s to %s' % (timeout, oneline(form)))
+            self._read()
+
+    def _settle(self, deadline, form):
+        """Wait for the case answered No to a question to end: its answer,
+        an error (left for top level as in run), or another question, answered
+        No too, before the next case, FORM, is sent."""
+        k, self.pending = self.pending, None
+        answer = re.compile(r'\{%d[{!?].*?[}!?]%d\}' % (k, k), re.S)
+        opened = re.compile(r'\{%d[{!?]' % k)
+        while not answer.search(self.buf):
+            m = ERROR_RE.search(self.buf)
+            if m and ('(Y or N)' in self.buf[m.start():] or '\n->' in self.buf[m.start():]):
+                self._abort(deadline)
+                return
+            q = None if m or opened.search(self.buf) else self._question(self.buf)
+            if q:
+                self.s.sendall(QUESTION_NO[q.group(2)])
+                self.buf = ''
+            if now() > deadline:
+                raise RunFailed('no answer in time to a question\'s case, before %s' % oneline(form))
             self._read()
 
     def _abort(self, deadline):
@@ -772,7 +854,7 @@ def check(a, chk, cases):
                          else '(let ((si:inhibit-fdefine-warnings t)) (load "%s.lisp"))' % name]
             for step in steps:
                 r = sess.run(step, a.file_timeout)
-                if r[0] == 'error':
+                if r[0] != 'value':
                     raise RunFailed('%s: %s: %s' % (path, step, normal(r[1])))
                 # What the step printed besides ;Loading lines: the compiler's
                 # diagnostics, headed "<< While compiling F >>".  qc-file
@@ -791,7 +873,15 @@ def check(a, chk, cases):
         for form, kind, text in cases:
             r = sess.run(form, a.timeout)
             shown = oneline(form)
-            if r[0] == 'value':
+            if r[0] == 'asked':
+                # whatever the case expected: it asked through FQUERY, and the
+                # helper ended the form there
+                verdict, why = 'FAIL', 'asked %s, the form ended there' % normal(r[1])
+            elif r[0] == 'question':
+                # a prompt seen in the output, which the FQUERY clause did not
+                # catch: answered No, the form went on
+                verdict, why = 'FAIL', 'asked %s, answered No' % normal(r[1])
+            elif r[0] == 'value':
                 val = normal(r[1])
                 if kind == '=>!':
                     verdict, why = 'FAIL', '%s, expected an error' % val

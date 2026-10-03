@@ -1,0 +1,13 @@
+FAIL (y-or-n-p "Selftest short question? ")  -> asked Selftest short question?, the form ended there
+PASS (check-selftest-square 8)  -> 64
+FAIL (yes-or-no-p "Selftest long question? ")  -> asked Selftest long question?, the form ended there
+PASS (check-selftest-square 9)  -> 81
+FAIL (fquery '(:choices (((:red "Red") #/r) ((:blue "Blue") #/b))) "Selftest colour? ")  -> asked Selftest colour?, the form ended there
+PASS (check-selftest-square 12)  -> 144
+FAIL (progn (format t "Selftest raw question? (Y or N) ") (do ((c (read-char) (read-char))) ((not (char-equal c #/return)) c)))  -> asked Selftest raw question? (Y or N), answered No
+PASS (check-selftest-square 13)  -> 169
+ERROR (let ((eh:condition-handlers nil)) (condition-bind ((error 'si:eval-abort-trivial-errors-handler)) (car 'selftest-symbol)))  -> >>TRAP: The argument to CAR, SELFTEST-SYMBOL, was of the wrong type. The function expected a cons.
+PASS (check-selftest-square 10)  -> 100
+PASS "Selftest? (Y or N) "  -> "Selftest? (Y or N) "
+PASS (progn (format t "Selftest? (Yes or No)~%") 'done)  -> DONE
+PASS (check-selftest-square 11)  -> 121
