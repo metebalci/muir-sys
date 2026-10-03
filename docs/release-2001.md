@@ -646,6 +646,36 @@ file carries a comment in that file saying why.
     rather than 177.2 s at 2 M words, and the workload's full GC 32.12 s
     rather than 32.06 s. Before the fix, 100 blocks at 32 M words left the
     TELNET connection unanswered for 180 s, and ozd closed it.
+- **QUUX's disk has a PAGE partition of 128 M words** (Mete, 2026-10-03).
+  System 2000's disk kept the CADR pack's block numbers, and its PAGE of
+  65,246 blocks, 13,049 pages of 5 blocks, gave 13,362,176 words of virtual
+  memory, fewer than revision 13's 32 M words of main memory: the herald
+  said "13049K virtual memory", and at 32 M words the incremental GC found
+  6.85 M words free against the 8.42 M words it commits, so `GC-ON` asked
+  "Try garbage collecting after all?" on the query stream, which a TELNET
+  session never answers. The new layout (`docs/building.md`, "Writing
+  QUUX's release disk") has a PAGE of 655,360 blocks, 131,072 pages,
+  671,088,640 bytes; MCR1, MCR2 and the bands keep their sizes and order,
+  the bands moved up by 590,114 blocks, and the disk is 853,359 blocks,
+  873,839,616 bytes, rather than 263,245. The CADR's pack is unchanged. No
+  source changed: `DISK-INIT` takes the virtual memory from the PAGE
+  partition's whole pages (`sys/io/disk.lisp:1461-1463`), bounded only by
+  A memory's address, 258,047 pages; the microcode takes its bounds from
+  the GPT's PAGE entry (`sys/ucadr/uc-cold-disk.lisp:1748-1755`;
+  `MAKE-REGION`, `sys/ucadr/uc-storage-allocation.lisp:765`); the
+  address-space map covers all 16,384 quanta of the 28-bit space; and an
+  incremental band's page bitmap, now 4 pages, fits the 8-page buffer
+  below the copy buffer (`sys/ucadr/uc-cold-disk.lisp:1123`, `:1878`).
+  Measured on micro at 32 M words, the band of the page hash table's entry
+  above and its microcode on a disk of the new layout: the herald says
+  "32768K physical memory, 131072K virtual memory",
+  `SI:VIRTUAL-MEMORY-SIZE` is 134,217,728, the free space 127,713,312
+  words against 109,144,239 committed, and a case of `GC-ON` and
+  80,000 conses returns `T` without asking, where on the old layout, the
+  same band and microcode, it waits for the answer. System-check passes
+  93 of 93 on micro and on rtl, and microcode-check 548 of 548 on micro; a full save
+  (`(si:disk-save 3 t)`), an incremental save (`(si:disk-save 3 t t)`), a
+  cold boot of each saved band and `(si:disk-restore 3)` work.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

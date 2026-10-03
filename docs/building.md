@@ -39,7 +39,9 @@ fallback until it is retired. The stages are the ones described under "The
 stages"; what differs is where each one runs and how the disk is handled.
 
 **The disk** is a GPT (docs/booting.md), made on the host with `sgdisk`:
-MCR1, MCR2, PAGE and LOD1 to LOD4. The machine only reads it.
+MCR1, MCR2, PAGE and LOD1 to LOD4, in the layout given under "Writing
+QUUX's release disk" (from System 2001 on, a PAGE of 128 M words). The
+machine only reads its GPT.
 
 1. **The builder goes in LOD2.** Copy the previous band (its current
    LOD partition) into LOD2 and its microcode's `ucadr.mcr` into MCR1, and
@@ -607,30 +609,59 @@ including PAGE, must contain only zeroes.
 
 ### Writing QUUX's release disk
 
-QUUX's release disk is a new GPT disk in the build disk's layout, 263,245
-blocks of 1024 bytes, with only the microcode and the band loaded: the
-release's `ucadr.mcr` in MCR1, named "MCR1 UCADR 2000", and the saved band
-in LOD1, named "LOD1 System 2000", both with attribute bit 48. Every other
-partition, PAGE included, is zero. The type GUIDs are muir-sim's, the
-sectors 512 bytes:
+QUUX's release disk is a new GPT disk in the build disk's layout, with only
+the microcode and the band loaded: the release's `ucadr.mcr` in MCR1, named
+"MCR1 UCADR 2NNN", and the saved band in LOD1, named "LOD1 System 2NNN",
+both with attribute bit 48. Every other partition, PAGE included, is zero.
+The type GUIDs are muir-sim's, the sectors 512 bytes.
+
+**The layout from System 2001 on** is 853,359 blocks of 1024 bytes
+(873,839,616 bytes). PAGE is 655,360 blocks, 131,072 pages of 5 blocks:
+128 M words of virtual memory, 671,088,640 bytes at 5 bytes a packed word.
+The microcode partitions and the bands keep their sizes; the bands follow
+PAGE, and the disk ends with the same 81 blocks after LOD4. In blocks:
+
+| partition | first block | blocks |
+|-----------|------------:|-------:|
+| MCR1      |          17 |    148 |
+| MCR2      |         165 |    148 |
+| PAGE      |         323 | 655,360 |
+| LOD1      |     655,683 | 49,419 |
+| LOD2      |     705,102 | 49,419 |
+| LOD3      |     754,521 | 49,419 |
+| LOD4      |     803,940 | 49,338 |
+
+The system's virtual memory is the PAGE partition's whole pages
+(`DISK-INIT`, `sys/io/disk.lisp:1461-1463`), so a disk of this layout
+boots with "131072K virtual memory" in its herald. System 2000's disk had
+the T-300's 263,245 blocks with the CADR pack's block numbers, and a PAGE of
+65,246 blocks, 13,049 pages: 13,362,176 words, fewer than revision 13's 32 M
+words of main memory, so the incremental garbage collector found too little
+free space and `GC-ON` asked whether to go on. The commands:
 
 ```
-truncate -s 269562880 disk.img
+truncate -s 873839616 disk.img
 sgdisk -o -a 2 \
-  -n 1:34:329        -t 1:9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da -c "1:MCR1 UCADR 2000" \
-  -n 2:330:625       -t 2:9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da -c 2:MCR2 \
-  -n 3:646:131137    -t 3:4652bea5-06af-4bd9-b2bb-3541370151c8 -c 3:PAGE \
-  -n 4:131138:229975 -t 4:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c "4:LOD1 System 2000" \
-  -n 5:229976:328813 -t 5:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 5:LOD2 \
-  -n 6:328814:427651 -t 6:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 6:LOD3 \
-  -n 7:427652:526327 -t 7:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 7:LOD4 \
+  -n 1:34:329          -t 1:9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da -c "1:MCR1 UCADR 2NNN" \
+  -n 2:330:625         -t 2:9e318cf5-a95b-4b3b-b2ad-9ae306b0e2da -c 2:MCR2 \
+  -n 3:646:1311365     -t 3:4652bea5-06af-4bd9-b2bb-3541370151c8 -c 3:PAGE \
+  -n 4:1311366:1410203 -t 4:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c "4:LOD1 System 2NNN" \
+  -n 5:1410204:1509041 -t 5:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 5:LOD2 \
+  -n 6:1509042:1607879 -t 6:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 6:LOD3 \
+  -n 7:1607880:1706555 -t 7:a3b30470-c5d4-41c1-87a8-d26590424cb8 -c 7:LOD4 \
   -A 1:set:48 -A 4:set:48 disk.img
 dd if=sys/ubin/ucadr.mcr of=disk.img bs=1024 seek=17 conv=notrunc
-dd if=<build disk> of=disk.img bs=1024 skip=213826 seek=65569 count=49338 conv=notrunc
+dd if=<build disk> of=disk.img bs=1024 skip=803940 seek=655683 count=49338 conv=notrunc
 sgdisk -v disk.img
 qemu-img convert -f raw -O vpc -o subformat=dynamic,force_size=on disk.img disk.vhd
 qemu-img convert -f vpc -O raw disk.vhd back.img && cmp disk.img back.img
 ```
+
+System 2000's disk was written by the same commands with `truncate -s
+269562880` and PAGE at sectors 646-131137, LOD1 to LOD4 at 131138-229975,
+229976-328813, 328814-427651 and 427652-526327, and the band copied with
+`skip=213826 seek=65569`. A build disk of the old layout has its LOD4 at
+block 213,826; a band built on it is copied with that `skip`.
 
 The band is copied from the build disk's LOD4, where step 5 of "Building a
 System 2000 band on QUUX" saved it; a band boots from whichever LOD
