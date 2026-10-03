@@ -515,6 +515,48 @@ file carries a comment in that file saying why.
     each case file ran from a fresh start, and `bignum-fixnum-extremes` in
     twenty, since a long run there slowed to minutes a case); booted with no `ucadr.tbl` it prints that entry's line
     and `(car 1)` is right.
+- **`GCD`, `\\`, `LCM`, `\`, `REMAINDER` and `CLI:REM` with a float
+  signal the wrong-type error instead of halting the machine.** A single
+  float is an immediate on revision 13 whose pointer field holds its bits
+  (`#x3FC00000` for 1.5), past the 28-bit address space. `GET-BIG-FIX` and
+  `GET-ANY-BIG`, which `XGCD` (`INTERNAL-\\`) and `XREM` (`\`) reach
+  through `GET-FIX-OR-BIGNUM` for an argument that is neither a fixnum nor
+  a character, started a read at that field before `ASSURE-BIGNUM` tested
+  the type, and the machine halted at `PGF-MAP-MISS` (PC 24173):
+  `(gcd 1.5 2)`, `(gcd 2 1.5)`, `(\ 7 1.5)`. Now the callers only set
+  `M-I`, and `ASSURE-BIGNUM` starts the read after its type test
+  (`sys/ucadr/uc-arith.lisp:422`, `:434`, `:447`, `:456-467`; `GET-32-BITS`,
+  `:482`, the same), so a float gets the "fixnum or a bignum" error that a
+  symbol or a rational gets, as on the CADR. `CLI:REM` compiles to `\`
+  and so takes no float, here as on the CADR.
+  - `tools/microcode-check/cases/integer-ops-on-floats.cases` (new, 227
+    cases): `GCD`, `\\`, `SYS:INTERNAL-\\`, `LCM`, `\`, `REMAINDER`,
+    `CLI:REM`, `MOD`, `LOGAND`, `LOGIOR`, `LOGXOR`, `%DIV`, `ASH` and
+    `LDB`, each with 1.5, `1\2`, `(int-char 97)` and `'foo` in each integer
+    position, interpreted and in a compiled function, with two bignum
+    controls through `ASSURE-BIGNUM`. On microcode 2001 before the fix the
+    machine halts at the first float case, `(gcd 1.5 6)`; run one by one,
+    the 28 float cases of the first seven functions halt and every other
+    case answers as after the fix. With the fix all 227 pass.
+  - The fix adds one control-store word, so every label from `GET-32-BITS`
+    on moves, and `ucadr.tbl` changes. The number stays 2001. Assembled
+    twice from the sources, byte for byte the same, the outputs are
+    (sha256):
+    - `ucadr.mcr` `8dd5369452afc40a9ecbf40a0fb8953fda8318006bc5b8be941ecccf0d3e9154`
+    - `ucadr.tbl` `b9f10afe306187f29a0e299d320088b1c9601eb0e920289bde7489de67f06efc`
+    - `ucadr.locs` `b73d818a579fc25d74f775fb6b7afcbdee43a6dd4b1eebd240c5f2d61a44e648`
+    - `ucadr.sym` `b57e8f81cc65d03ea6ad3b7478c13abd553a8a1dc49d413729179d65ad0c8017`
+
+    Boot PROM 2001 is unchanged. On the band built for the error table's
+    entry above, with them, system-check passes 93 of 93, microcode-check
+    548 of 548 (321 and the new 227) and System 2000's band cases 30 of 33
+    (the three not applicable, as before), on the micro and rtl engines (on
+    rtl each case file ran from a fresh start, the new one in four parts
+    and `bignum-fixnum-extremes` in twenty, and the runs that stalled under
+    host load ran again). The CADR's line does not halt: on its current band
+    and microcode the 28 cases that halted here signal the same errors, as
+    do the same functions with its small float `1.5s0`, and `CLI:REM`
+    takes no float there either.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

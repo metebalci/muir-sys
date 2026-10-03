@@ -418,7 +418,8 @@ GET-FIX-ANY
 GET-BIG-FIX
 	(JUMP-EQUAL M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-CHARACTER)) GET-CHAR-FIX)
 	((M-A) (A-CONSTANT 2))
-	((VMA-START-READ M-I) M-C)
+	;((VMA-START-READ M-I) M-C)
+	((m-i) m-c)		;assure-bignum starts the read, after its type test
 	(CALL ASSURE-BIGNUM)
     (ERROR-TABLE ARG-POPPED 0 M-C M-T)
 	(POPJ-AFTER-NEXT
@@ -429,7 +430,8 @@ GET-ANY-BIG
 	(JUMP-EQUAL M-1 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-CHARACTER))
 		    GET-ANY-CHAR)
 	((M-A) (A-CONSTANT 1))
-	((VMA-START-READ M-I) M-T)
+	;((VMA-START-READ M-I) M-T)
+	((m-i) m-t)		;assure-bignum starts the read, after its type test
 	(CALL ASSURE-BIGNUM)
     (ERROR-TABLE ARG-POPPED 0 M-C M-T)
 	((M-T) M-I)
@@ -441,7 +443,8 @@ GET-ANY-BIG
 			GET-FIX-ANY)
 ;;; HERE THEY ARE BIG-BIG
 	((M-A) (A-CONSTANT 3))
-	((VMA-START-READ M-I) M-C)
+	;((VMA-START-READ M-I) M-C)
+	((m-i) m-c)		;assure-bignum starts the read, after its type test
 	(CALL ASSURE-BIGNUM)
     (ERROR-TABLE ARG-POPPED 0 M-C M-T)
 	(POPJ-AFTER-NEXT
@@ -450,10 +453,18 @@ GET-ANY-BIG
 
 ;;; ASSURES THAT THE HEADER NOW BEING READ INTO MD POINTS TO A LEGAL BIGNUM HEADER
 ;;; VMA AND M-I CONTAIN POINTER TO THE BIGNUM
+;; quux revision 13: m-i holds the argument and the read starts here, after the
+;; type test.  callers started it before, at the argument's pointer field
+;; whatever its type; a single float is an immediate whose field is its bits
+;; (#x3fc00000 for 1.5), past the 28-bit address space, so (gcd 1.5 2) or
+;; (\ 7 1.5) halted the machine at pgf-map-miss instead of signalling the
+;; wrong-type error that a symbol gets.  the read still starts with vma =
+;; m-i, so md and vma hold the header and its address on return, as before.
 ASSURE-BIGNUM
 	((M-TEM) Q-DATA-TYPE M-I)
 	(CALL-NOT-EQUAL M-TEM (A-CONSTANT (EVAL DTP-EXTENDED-NUMBER)) TRAP)
 		(ERROR-TABLE ARGTYP (FIXNUM BIGNUM) M-I NIL)
+	((vma-start-read) m-i)
 	(CHECK-PAGE-READ)			;CHECK FOR PAGE FAULTS
 	(DISPATCH TRANSPORT-HEADER READ-MEMORY-DATA)
 	((M-I) VMA)		;get transported number address 
@@ -467,7 +478,8 @@ ASSURE-BIGNUM
 GET-32-BITS
 	((M-TEM) Q-DATA-TYPE C-PDL-BUFFER-POINTER)
 	(JUMP-EQUAL M-TEM (A-CONSTANT (EVAL DTP-FIX)) FXUNPK-P-1)
-	((VMA-START-READ M-I) C-PDL-BUFFER-POINTER-POP)
+	;((VMA-START-READ M-I) C-PDL-BUFFER-POINTER-POP)
+	((m-i) c-pdl-buffer-pointer-pop)	;assure-bignum starts the read, after its type test
 	(CALL ASSURE-BIGNUM)
 	((M-I) BIGNUM-HEADER-LENGTH MD)
 	((M-J) BIGNUM-HEADER-SIGN MD)
