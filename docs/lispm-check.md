@@ -154,23 +154,27 @@ with runs of whitespace collapsed to one space. Each form runs inside a
 `condition-case`, so an error is reported by its message and the next case
 goes on in the same session. A form must not read from the terminal.
 
-A form that asks a question anyway fails at once. When what the case printed
-ends with a bare `(Y or N)` or `(Yes or No)` prompt, with no error before it
-and no output for 0.5 s after it, the case is a `FAIL` naming the question,
-whatever it expected, and the question is answered No so that the form goes
-on; the next case is sent once that form has ended. GC-ON's question shows
-it:
+A form that asks a question anyway fails at once, whatever the case
+expected. Every question asked through `FQUERY` (`Y-OR-N-P`, `YES-OR-NO-P` and
+`FQUERY` itself) first signals the condition `FQUERY`; the case's
+`condition-case` has a clause for it, which ends the form there and reports
+the question's text. GC-ON's question shows it:
 
 ```
-FAIL  (progn (gc-on) ...)  -> asked Try garbage collecting after all? (Y or N), answered No
+FAIL  (progn (gc-on) ...)  -> asked Try garbage collecting after all?, the form ended there
 ```
 
-The words inside a value or followed by more output ask nothing: a value is
-printed between the case's markers, read before any question. `YES-OR-NO-P`
-prints no prompt over TELNET, only a beep, so a form that calls it still waits
-out `--timeout`. An error the `condition-case` does not see first, followed by
-the listener's "Enter the debugger (No means abort instead)? (Y or N)", is
-answered No as before and reported as an `ERROR` with the error's message.
+This is the only way to see `YES-OR-NO-P` over TELNET, where it prints no
+prompt at all, only a beep. A second line of defence catches a question asked
+some other way: when what the case printed ends with a bare `(Y or N)` or
+`(Yes or No)`, with no error before it and no output for 0.5 s after it, the
+case fails with `-> asked QUESTION, answered No`, the question is answered No,
+and the next case is sent once that form has ended. The words inside a value
+or followed by more output ask nothing: a value is printed between the case's
+markers, read before any question. An error that escapes the case's handlers,
+followed by the listener's "Enter the debugger (No means abort instead)? (Y or
+N)", is answered No as before and reported as an `ERROR` with the error's
+message.
 
 ```
 (check-selftest-square 7) => 49

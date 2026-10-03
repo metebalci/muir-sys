@@ -1,17 +1,29 @@
 ; tools/lispm-check's self-test of questions, run with --files selftest.lisp.
-; A form that asks a bare "(Y or N)" fails at once, naming the question, and is
-; answered No, though its value would match: the run must not wait out
-; --timeout.  YES-OR-NO-P is not here: over TELNET it prints no prompt at all,
-; only a beep, so it still waits out --timeout.  The self-test (run.sh) checks each verdict and its text,
-; and the exit status 1.
+; A form that asks a question fails at once, naming it, though its value would
+; match: the run must not wait out --timeout.  The self-test (run.sh) checks
+; each verdict and its text, and the exit status 1.
 
-; a bare question fails, and the listener answers the next case
+; questions through FQUERY: the helper's FQUERY clause ends the form there, and
+; the listener answers the next case.  YES-OR-NO-P prints no prompt over
+; TELNET, only a beep, so nothing but the clause can see it; the colour
+; question is no Y-or-N one either.
 (y-or-n-p "Selftest short question? ") => NIL
 (check-selftest-square 8) => 64
+(yes-or-no-p "Selftest long question? ") => NIL
+(check-selftest-square 9) => 81
+(fquery '(:choices (((:red "Red") #/r) ((:blue "Blue") #/b))) "Selftest colour? ") => :RED
+(check-selftest-square 12) => 144
 
-; an error the case's condition-case does not see first: the listener's own
-; "Enter the debugger" question after the error's message, answered No as before
-(condition-bind ((error 'si:eval-abort-trivial-errors-handler)) (car 'selftest-symbol))
+; a prompt printed without FQUERY: the second line of defence, the "(Y or N)"
+; at the end of the output, answered No: the N is the first character after
+; the RETURN left over from the form's own line
+(progn (format t "Selftest raw question? (Y or N) ") (do ((c (read-char) (read-char))) ((not (char-equal c #/return)) c))) => #/N
+(check-selftest-square 13) => 169
+
+; an error that escapes the case's handlers (here by hiding them): the
+; listener's own "Enter the debugger" question after the error's message,
+; answered No as before
+(let ((eh:condition-handlers nil)) (condition-bind ((error 'si:eval-abort-trivial-errors-handler)) (car 'selftest-symbol)))
 (check-selftest-square 10) => 100
 
 ; the question's words in a value, or in output with more after them, ask nothing
