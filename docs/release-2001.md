@@ -557,6 +557,95 @@ file carries a comment in that file saying why.
     and microcode the 28 cases that halted here signal the same errors, as
     do the same functions with its small float `1.5s0`, and `CLI:REM`
     takes no float there either.
+- **The page hash table stays spread under the incremental GC at 32 M
+  words.** At 32 M words the incremental GC slowed from about 1.5 s to 10-19
+  s for each 100K words consed, with stalls of 57 and 130 s, after four to
+  eight flips, while the paging meters did not change: the page hash table
+  held runs of 10,000 entries, and a search for a page not in it took 1,000
+  probes. At 2, 8 and 12.5 M words it did not.
+  - The cold boot entered the free pages every other entry down from the
+    table's top, in frame order (`COLD-REINIT-PPD-3`,
+    `sys/ucadr/uc-cold-disk.lisp:1394-1397` before), and findcore takes
+    free pages in frame order (`FINDCORE0`,
+    `sys/ucadr/uc-page-fault.lisp:981`), so it emptied the table an eighth
+    at a time from the top. `FREE-REGION` (`XFREE-REGION`,
+    `sys/ucadr/uc-storage-allocation.lisp:858-866`) made each freed page's
+    entry a free page's in place (`XCPGS0`, the two lines now commented
+    out at `sys/ucadr/uc-page-fault.lisp:1696-1697`), on the slot its virtual
+    page had hashed to. With 25,000 of the 32,768 frames free, the eighths
+    findcore had not reached kept their cold-boot entries and gained these,
+    and went to 94-100% full. Dumps of the whole table every 2 blocks of a
+    reproducer (80 blocks of 100K words, 7 to 8 flips) show it: findcore
+    took 4096 entries from each of the top six eighths and 143 from the
+    bottom two, and 18641 entries were made in place, 14178 of them not
+    taken again by the end. `PHTDEL`'s rule that a free page's entry moves
+    into any hole (`:1266`) moved tens to hundreds of entries a flip and is
+    not the cause.
+  - Now `XCPGS0`'s free-region path deletes the freed page's entry
+    (`COREFOUND2`, `PHTDEL`) and enters the frame anew as a free page with
+    `XCPPG1` at the first hole from the frame's hash xor 4 entries
+    (`sys/ucadr/uc-page-fault.lisp:1698-1725`), and the cold boot puts each
+    free page there too (`sys/ucadr/uc-cold-disk.lisp:1396-1418`). Each half
+    alone fails: with the free-region path alone the table degenerated as
+    before (longest run 11009, 930 probes a miss at block 80), with the
+    cold boot alone later (2046 and 40, growing). Hashed by frame,
+    consecutive frames spread over the table. At the hash itself every real
+    page's slot held a free page, since the hash of a frame and of a
+    virtual page from the same 128-page block start at the same offset in
+    their 8-entry group (1334 of 1334 at the prompt, 4.6 probes a hit
+    against 1.5); xor 4 takes the group's other half. MIT's, in microcode
+    323 as well; the CADR's line has the same fix.
+  - Measured with that reproducer, micro (longest run / probes a miss /
+    probes a hit, at block 80): before, 11262 / 993 / 224 (a repeat 11281 /
+    1005 / 312), from 2883 at the fourth flip; after, 14 / 2.0 / 1.1. Over 300
+    blocks (26 flips) after, at most 16 / 2.2. At 2, 8 and 12.5 M words
+    (100 blocks) after, at most 91 / 3.2, 22 / 2.3 and 7 / 1.7, where before
+    it reached 303 / 13, 1837 / 106 and 455 / 7 for a while. In dumps taken
+    without interrupts, before and after, no entry is out of a search's
+    reach and no page is in the table twice.
+  - The fix adds 26 control-store words, 17 in `XCPGS0`'s free-region
+    path and 9 at `COLD-REINIT-PPD-3`, so every word from `XCPGS3` on is 17
+    locations later and from `COLD-REINIT-PPD-4` on 26; A-memory and the
+    dispatch memory keep their size, and `ucadr.tbl` changes. The number
+    stays 2001. Assembled twice from the sources, byte for byte the same,
+    the outputs are (sha256):
+    - `ucadr.mcr` `c00c3e7ac8e70e22ba91f844d4b4362e2505000ca028053f41a42215df664efd`
+    - `ucadr.tbl` `ceb290d0ea917f814ec5a0d3d33b454bb2b765253411183b6ad986049deddebe`
+    - `ucadr.locs` `0585902f0b06e5352cb67a8ce5c6dfa2bce38ebecabcac87c739f600eb8a96f2`
+    - `ucadr.sym` `488f043d52e9d0b7e7cdfbf35462c525b4c45e3a71e1df40e22644ce3d18041e`
+
+    Boot PROM 2001 is unchanged. On the band built for the error table's
+    entry above, its microcode replaced by them, system-check passes 93 of
+    93, microcode-check 548 of 548 and System 2000's band cases 30 of 33
+    (the three not applicable, as before), on the micro and rtl engines (on
+    rtl each case file from a fresh start, `integer-ops-on-floats` in four
+    parts and `bignum-fixnum-extremes` in twenty, and the runs that stalled
+    under host load ran again).
+  - Measured on that band, micro: the reproducer at 32 M words keeps the
+    longest run at 16 or less and a miss at 2.2 probes or less in all 41
+    of its dumps (7 flips; at block 80, 14 / 2.0 / 1.1), and at 2, 8 and
+    12.5 M words (100 blocks) at most 79 / 3.2, 37 / 2.4 and 7 / 1.7. In
+    the paging and full-GC workload (a 2,000,000-word array filled,
+    checked, GC'd while live, checked, dropped and GC'd again) the real
+    pages' entries sit 14 words in all from their hashes after the fill,
+    rather than 2270, and the array stays intact. A cold boot, a warm boot
+    (Control, Meta and Return) that keeps a variable, `(si:disk-save 3 t)`
+    and the saved band's run, a cold boot of the saved band and
+    `(si:disk-restore 3)` work, and a boot with an empty `sys/` and `site/`
+    uses the band's own error table.
+  - The cost: freeing a region now takes each of its pages in the table
+    out and enters its frame again. Per flip of the incremental GC,
+    `GC-RECLAIM-OLDSPACE-AREA` took 37.2 ms of machine time rather than
+    19.0 ms at 32 M words (about 2,800 pages in the table freed: 13.2 µs a
+    page rather than 6.8), and 28.1 ms rather than 14.9 ms at 2 M words
+    (about 650 pages). A flip's machine time, a run's time over its flips,
+    is 13 to 22 s: at 32 M words 17.7 s after (40 blocks of 100K words, 3
+    flips) against 13.5 and 14.8 s before (4 flips, the same blocks); at 2
+    M words 22.3 s against 22.1 s (100 blocks, 8 flips). The same consing
+    took 53.2 s rather than 54.0 and 59.2 s at 32 M words and 178.1 s
+    rather than 177.2 s at 2 M words, and the workload's full GC 32.12 s
+    rather than 32.06 s. Before the fix, 100 blocks at 32 M words left the
+    TELNET connection unanswered for 180 s, and ozd closed it.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.
