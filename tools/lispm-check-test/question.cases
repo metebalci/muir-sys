@@ -1,0 +1,20 @@
+; tools/lispm-check's self-test of questions, run with --files selftest.lisp.
+; A form that asks a bare "(Y or N)" fails at once, naming the question, and is
+; answered No, though its value would match: the run must not wait out
+; --timeout.  YES-OR-NO-P is not here: over TELNET it prints no prompt at all,
+; only a beep, so it still waits out --timeout.  The self-test (run.sh) checks each verdict and its text,
+; and the exit status 1.
+
+; a bare question fails, and the listener answers the next case
+(y-or-n-p "Selftest short question? ") => NIL
+(check-selftest-square 8) => 64
+
+; an error the case's condition-case does not see first: the listener's own
+; "Enter the debugger" question after the error's message, answered No as before
+(condition-bind ((error 'si:eval-abort-trivial-errors-handler)) (car 'selftest-symbol))
+(check-selftest-square 10) => 100
+
+; the question's words in a value, or in output with more after them, ask nothing
+"Selftest? (Y or N) " => "Selftest? (Y or N) "
+(progn (format t "Selftest? (Yes or No)~%") 'done) => DONE
+(check-selftest-square 11) => 121
