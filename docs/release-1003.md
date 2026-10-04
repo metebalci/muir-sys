@@ -9,8 +9,7 @@ Every change to a source file carries a comment in that file saying why.
 - **The system number is 1003** (`patch/system.patch-directory`,
   `patch/system-1003.patch-directory`), now that System 1002 is released,
   so that no band built from this branch calls itself 1002. The microcode
-  stays 1000 and moves to 1001 only when a changed microcode is next
-  released.
+  is 1001 (below).
 - **A compiled `(gcd n)` or `(\\ n)` with one argument works** (`convert-\\`,
   `sys/sys/qcopt.lisp:320-334`). The optimizer built `(internal-\\ n nil)`
   from it, so the call signalled that `NIL` was of the wrong type; with fewer
@@ -50,8 +49,13 @@ Every change to a source file carries a comment in that file saying why.
   both rolling sets (`tools/release-test:53-56`, `:375-411`): the four cases
   fail with the old pattern and hold with the new, and the sums written for
   `latest-cadr`'s files equal the published ones.
-- **The microcode changes, and keeps the number 1000 until it is released**
-  (it becomes 1001 then). It is microcode 1000 with the four fixes below,
+- **The microcode changes, and is 1001.** It kept the number 1000 while it
+  was reworked and takes 1001 for the release, which changes one byte of
+  `ucadr.mcr` and one of `ucadr.tbl` and nothing else: the same sources
+  (`67b4056`) assembled numbered 1000 and numbered 1001 differ there alone,
+  and `ucadr.locs` not at all. The digests given at each change below were
+  taken numbered 1000; the release's, numbered 1001, are given with the last
+  change, the Chaosnet's transmit list. It is microcode 1000 with the four fixes below,
   assembled from `sys/ucadr/` as `docs/building.md` describes; the same
   sources without them assemble to System 1002's `ucadr.mcr`, `.tbl`,
   `.locs` and `.sym` byte for byte. The fixes change seven control-store
@@ -373,7 +377,7 @@ Every change to a source file carries a comment in that file saying why.
     read-ahead of 8 to 31 pages at 2048K made the compile 2.0 to 3.2%
     slower and the paging workloads 0.3 to 2.5% faster; at 3840K every
     workload changed by 1.2% or less.
-  - **The microcode changes again and keeps the number 1000**: microcode
+  - **The microcode changes again** (still numbered 1000 then): microcode
     1000 with the fixes above and these changes to the cold boot, which add
     22 control-store words, so every word from `MEM-SIZE-LOOP` on moves;
     the constant 17000000 is a new A-memory constant, so the A-constants
@@ -385,7 +389,7 @@ Every change to a source file carries a comment in that file saying why.
     `A-CONSTANT-LOC` moves from 1200 to 1201, and every A-memory variable
     keeps its location. `ucadr.tbl` is the same. Assembled twice, each on a
     freshly booted band, the four files, `ucadr.sym` among them, were the
-    same both times. The outputs, of microcode 1000 with
+    same both times. The outputs, numbered 1000, with
     all the changes above (sha256):
     - `ucadr.mcr` `97b8a3324446e0a38128dd781aabd4634160ab8fb23ddf211fcc26f83b9a2040`
     - `ucadr.tbl` `e510ce7cc4d7d1241b706ffbeef5c0e0caef10704dcb5dc477090fbc18898efd`
@@ -435,7 +439,7 @@ Every change to a source file carries a comment in that file saying why.
   running microcode's version, and the console says so:
 
   ```
-  [No error table file for microcode version 1000; using the band's own]
+  [No error table file for microcode version 1001; using the band's own]
   ```
 
   For another version the load fails as before. A served file is still read
@@ -446,9 +450,12 @@ Every change to a source file carries a comment in that file saying why.
   and with an empty `sys/`, the boot completes, prints the line, and
   `(car 1)` reports "The argument to CAR, 1, was of the wrong type"; the
   band without the change stops at that LOAD's question. With the table served
-  it prints "[Loading error table for microcode version 1000]", and a
+  it prints "[Loading error table for microcode version 1001]", and a
   served table with one entry added is the one in use (705 entries, the
-  band's 704). `tools/lispm-check-test` (selftest), `tools/system-check`'s
+  band's 704). These were measured on microcode 1000, and the lines quoted
+  are microcode 1001's: a band saved on microcode 1001 and booted with an
+  empty `sys/` prints the first, and `(car 1)` reports the same; booted with
+  this tree's `sys/ubin/` served it prints the second. `tools/lispm-check-test` (selftest), `tools/system-check`'s
   interpreter-closure cases and `tools/microcode-check` give the same
   results as the band without the change.
 - **Free pages' entries in the page hash table are spread by frame**, as
@@ -471,14 +478,14 @@ Every change to a source file carries a comment in that file saying why.
   miss to 991 and 33, and the compile workload below took 2.6% less machine
   time. The transient long runs at 60 boards have another cause and stay
   (below).
-  - The microcode changes again and keeps the number 1000. The fix adds
+  - The microcode changes again (still numbered 1000 then). The fix adds
     26 control-store words, 17 in `XCPGS0`'s free-region path and 9 at
     `COLD-REINIT-PPD-3`, so every word from `XCPGS3` on is 17 locations
     later and from `COLD-REINIT-PPD-4` on 26; A-memory and the dispatch
     memory keep their size, and `ucadr.tbl` changes. The same sources
     without the fix assemble to the outputs given above. Assembled twice,
     each on a freshly booted copy of System 1002's band, the four files
-    were the same both times; the outputs (sha256):
+    were the same both times; the outputs, numbered 1000 (sha256):
     - `ucadr.mcr` `6c63921041582506a6a2dbae5fb8e9280aba18176efe6be3263f80bf016ff796`
     - `ucadr.tbl` `a41a2596379452166c75ed005c6b2d8433940b806747b64db0b680cc5816fd6f`
     - `ucadr.locs` `9ab9e6932de576fd35ecea019d69a63e4c8b8e1d3e7ebf5aa6f12a446c928517`
@@ -511,3 +518,47 @@ Every change to a source file carries a comment in that file saying why.
     rather than 1192 and 23.8. Every dump with such a run, at 32 boards and at
     60, has memory full of real pages and no free page's entry, so the runs
     that remain have another cause, which this change does not touch.
+- **The Chaosnet sends the oldest queued packet, and none twice**
+  (`CHAOS-XMT-0`, `CHAOS-XMT-DONE` and the new `CHAOS-XMT-TAIL`,
+  `sys/ucadr/uc-chaos.lisp:138-153`, `:191-234`). `TRANSMIT-INT-PKT` pushes
+  a packet onto the head of the transmit list
+  (`sys/network/chaos/chsncp.lisp:1966-1975`). The microcode sent the head,
+  left it on the list while it was on the cable, and at Transmit Done popped
+  the head: a packet pushed in that time was freed unsent and the one on the
+  cable sent again, so four packets queued back to back went out 0, 2, 1, 0,
+  and 3 only when its connection retransmitted it. MIT's, in microcode 323
+  as well; muir-fpga's boards raise Transmit Done later than muir-sim does,
+  which made it frequent there. `CHAOS-XMT-0` now sends the list's tail, the
+  oldest packet, and `CHAOS-XMT-DONE` unlinks the tail and frees it: NIL
+  goes into the thread of the packet before it, or into the list's head when
+  it is the only one, so a push racing it fails its `%STORE-CONDITIONAL` and
+  goes round again. Lisp is unchanged; the walk uses only the registers the
+  handler used before, M-A, M-T, M-TEM and A-INTR-TEM2, and is bounded at
+  512 packets, past which the machine halts at `ILLOP`. The QUUX line has the
+  same fix.
+  - The microcode becomes 1001. `CHAOS-XMT-0` is two words shorter and the
+    tail walk and the unlinking add 17, so every word from `CHAOS-XMT-1` on is
+    two locations earlier and from `CHAOS-LIST-GET` on 15 later (octal:
+    `CHAOS-XMT-1` 26150 to 26146, `CHAOS-LIST-GET` 26207 to 26226); A-memory
+    and the dispatch memory keep their size, and `ucadr.tbl` changes.
+    Assembled twice, numbered 1001, each on a freshly booted copy of System
+    1002's band, the four files were the same both times. The release's
+    outputs, microcode 1001 (sha256):
+    - `ucadr.mcr` `180d8cd8435b48bacfbd7c32e94613ccbbd7959df051127be0aa0ff0c7ab957d`
+    - `ucadr.tbl` `d870bd9e798c695b8613bd74d00c688f7c6e1e1b81ffeb6a13445873f0df680e`
+    - `ucadr.locs` `418d687365d0587f46c7d0c143faedaad41a7cea3644cd511f148c7deb9f43d0`
+    - `ucadr.sym` is not given (above).
+  - `tools/microcode-check/run chaos-transmit-order` pushes four
+    full-length packets back to back while the first is on the cable and
+    notes the order in which they leave the list; muir-sim's `--chaos-trace`
+    shows the cable. On the CADR the pushes are `TRANSMIT-INT-PKT`'s own push
+    (`tools/microcode-check/lisp/chaos-transmit-order.lisp:21-35`, `:53-63`):
+    the whole of it takes about 500 us of the CADR's time, too long for four
+    pushes to land in the first frame (with it the list held three, and the
+    cable showed 0, 1, 1, 0, 2 and 3 never). The
+    precondition, all four on the list after the last push, holds on every
+    run. On the band built from this tree with microcode `67b4056` it fails
+    (they leave in an order other than 0, 1, 2, 3, and the cable shows 0, 2,
+    1, 0 and 3 never), on micro (three runs) and rtl, and so does System
+    1002's release band; with the fix it passes, the cable showing 0, 1, 2,
+    3, on micro (three runs) and rtl, at 32 and at 60 boards.

@@ -1,0 +1,24 @@
+; The Chaosnet transmit list sends its packets oldest first (CHAOS-XMT-0
+; and CHAOS-XMT-DONE, sys/ucadr/uc-chaos.lisp).  Load lisp/chaos-transmit-order.lisp
+; first.  CTO-RUN pushes four full-length packets back to back while the
+; first is on the cable and notes the order in which they leave the transmit
+; list.  MIT's microcode sends and keeps the head and pops the head at
+; Transmit Done: a push while a packet is on the cable makes it free the new
+; packet unsent and send the old one again, so 0, 2, 1, 0 go on the cable and
+; 3 never does, and they leave the list as (3 2 1 0).  Run with muir's
+; --chaos-trace (through a wrapper of cadr) to see the cable: the four go to
+; hosts 177270 to 177273.  On the CADR the pushes are TRANSMIT-INT-PKT's own
+; push, CTO-PUSH, since the whole of TRANSMIT-INT-PKT is too slow to land
+; them inside the first frame (the lisp file says how much).
+;
+; The control: one packet alone leaves the list.
+(progn (cto-run 1) (cto :order)) => (0)
+; The precondition: all four are on the list after the last push, the first
+; still on the cable.  If not, the check below means nothing.
+(progn (cto-run) (cto :window)) => "window entered"
+(cto :length) => 4
+; The microseconds between the pushes, and the order.
+(cto :gaps)
+(cto :order) => (0 1 2 3)
+; Again, to see it is not a matter of timing.
+(progn (cto-run) (list (cto :window) (cto :order))) => ("window entered" (0 1 2 3))
