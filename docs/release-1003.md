@@ -40,6 +40,16 @@ Every change to a source file carries a comment in that file saying why.
   does. `tools/release-test` plants such an address in a Lisp file, case (e)
   (`tools/release-test:23-24`, `:69`, `:216-220`), and it fails with the one
   FAIL line it planted.
+- **`tools/release-sums` takes the rolling releases' fixed names**
+  (`tools/release-sums:45-51`, `:10-13`). `latest-cadr` and `latest-quux`
+  carry the newest numbered release's assets as `cadr-pack.img.gz` and
+  `quux-disk.vhd.gz`, which the tool did not count as a pack or disk: writing
+  their `SHA256SUMS` stopped at "0 disks or packs" (exit 2), and `--check` of
+  the published `latest-cadr` sums failed with "cadr-pack.img is named in
+  SHA256SUMS and missing" (exit 1). `tools/release-test` writes and checks
+  both rolling sets (`tools/release-test:53-56`, `:375-411`): the four cases
+  fail with the old pattern and hold with the new, and the sums written for
+  `latest-cadr`'s files equal the published ones.
 - **The microcode changes, and keeps the number 1000 until it is released**
   (it becomes 1001 then). It is microcode 1000 with the four fixes below,
   assembled from `sys/ucadr/` as `docs/building.md` describes; the same

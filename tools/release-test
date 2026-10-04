@@ -50,6 +50,10 @@ section 1.5, planted faults (a)-(d), and section 1.3):
                differs, and passes on the right ones; --api-prefix next-
                passes with the old assets beside the next- ones and fails
                when a next- asset is missing.
+  sums rolling the same for the rolling releases' fixed names: latest-cadr
+               (cadr-pack.img.gz, cadr-sys.tar.gz) and latest-quux
+               (quux-disk.vhd.gz, quux-promh.mcr, quux-sys.tar.gz): writing
+               names the uncompressed pack or disk, and --check passes.
 The planted strings are made at run time, so this file matches no pattern
 itself.  Exit status 0 if every case holds, 1 otherwise.
 """
@@ -368,6 +372,43 @@ def main():
     case('sums: --api-prefix next- with a next- asset missing',
          [SUMS, '--check', rel, '--api', W('api-next-short.json'), '--api-prefix', 'next-'], 1,
          fails=[(nxt[0]['name'][5:], 'not among')])
+    # The rolling releases latest-cadr and latest-quux carry a numbered
+    # release's assets under fixed names; release-sums once knew only the
+    # numbered names, and refused these (writing exited 2 with "0 disks or
+    # packs", --check failed on the uncompressed line as missing).
+    for label, files in (
+            ('latest-cadr', (('pack.img.gz', 'cadr-pack.img.gz'),
+                             ('src.tar.gz', 'cadr-sys.tar.gz'))),
+            ('latest-quux', (('disk.vhd.gz', 'quux-disk.vhd.gz'),
+                             ('src.tar.gz', 'quux-promh.mcr'),
+                             ('src.tar.gz', 'quux-sys.tar.gz')))):
+        roll = W(label)
+        os.makedirs(roll)
+        for src, name in files:
+            shutil.copy(W(src), os.path.join(roll, name))
+        disk = files[0][1][:-3]
+        # SHA256SUMS as the rolling releases publish it, made here without
+        # release-sums: every asset and the pack or disk uncompressed, in
+        # byte order of the names.
+        def digest(f):
+            h = hashlib.sha256()
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                h.update(chunk)
+            return h.hexdigest()
+        sums = {n: digest(open(os.path.join(roll, n), 'rb')) for _, n in files}
+        sums[disk] = digest(gzip.open(os.path.join(roll, files[0][1])))
+        want = ''.join('%s  %s\n' % (sums[n], n) for n in sorted(sums, key=lambda n: n.encode()))
+        code, out = run([SUMS, roll])
+        written = open(os.path.join(roll, 'SHA256SUMS')).read() if code == 0 else ''
+        ok = code == 0 and written == want
+        results.append(('sums: %s names written' % label, ok))
+        print('%s  sums: %s names written (exit %d)' % ('PASS' if ok else 'WRONG', label, code))
+        if not ok:
+            for l in out.splitlines():
+                print('        ' + l)
+        open(os.path.join(roll, 'SHA256SUMS'), 'w').write(want)
+        case('sums: %s names --check' % label, [SUMS, '--check', roll], 0,
+             passes=[(disk, 'decompressed', 'matches')])
 
     if not a.keep:
         shutil.rmtree(work)
