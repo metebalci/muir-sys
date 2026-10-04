@@ -716,6 +716,54 @@ file carries a comment in that file saying why.
   brought TELNET back. The reset now enables the Chaosnet again when it was
   enabled. A band saved at 1920x1080 with the change and booted at
   1280x1024 has `CHAOS:ENABLE` T and answers TELNET, on micro and rtl.
+- **The Chaosnet sends its packets in the order they were queued, oldest
+  first, and none is lost or sent twice** (`CHAOS-XMT-0`, `CHAOS-XMT-DONE` and
+  the new `CHAOS-XMT-TAIL`, `sys/ucadr/uc-chaos.lisp:166-183`, `:222-270`;
+  microcode 2001, rebuilt). `TRANSMIT-INT-PKT` pushes a packet onto the head
+  of the transmit list. MIT's microcode sent the head, left it on the list
+  while it was on the cable, and at its Transmit Done popped the head: a
+  packet pushed in that time was freed unsent and the one on the cable sent
+  again, so four packets queued back to back went out 0, 2, 1, 0, and 3
+  only when its connection retransmitted it, about half a second later. The
+  boards' interfaces raise Transmit Done later than muir-sim's, which made
+  this frequent there. Now the packet sent is the list's tail, the oldest,
+  and Transmit Done unlinks the tail and frees it: NIL goes into the thread
+  of the packet before it, or into the list's head when it is the only one,
+  so a push racing it reads a head that has changed and its
+  `%STORE-CONDITIONAL` goes round again. The Lisp side is unchanged, and the
+  walk uses only the registers MIT's handler used (M-A, M-T, M-TEM,
+  A-INTR-TEM2). It is bounded at 512 packets: a list of more than the
+  chaosnet buffers there are (40) is circular or not one, and the machine
+  halts at `ILLOP` rather than loop in the interrupt.
+  `tools/microcode-check/cases/chaos-transmit-order.cases` (new, with
+  `lisp/chaos-transmit-order.lisp`) pushes four full-length packets back to
+  back inside `WITHOUT-INTERRUPTS`, checks that all four are on the list
+  after the last push (the window entered: on muir-sim the pushes land 200
+  microseconds apart on micro and 89 on rtl, a frame is 1.5 ms), and that
+  they leave it as (0 1 2 3). On the hand-over band of `c44fe06` with its
+  microcode, muir-sim 91ce0c9's `--chaos-trace` showed 0, 2, 1, 0 on the
+  cable, twice on micro and twice on rtl, and the case failed 2 of 6; with
+  this microcode the cable showed 0, 1, 2, 3 each time and the case passes 6
+  of 6 on both engines. System 1001's release band, on MIT's microcode 323
+  with the same code, sent 0, 0, 2, 0 and 0, 1, 1, 0 on muir-sim's `cadr`.
+  It also slowed TELNET: on rtl, three runs of a check that compiles three
+  files and sends the same 9,991 bytes took 866 to 1,499 s and 4,305 to
+  4,803 frames before, 422 to 440 s and 3,934 frames with this microcode.
+  The labels from `CHAOS-XMT-0` on move and `ucadr.tbl` changes, so a band
+  built on the microcode before this one reads this one's error table from
+  `SYS: UBIN; UCADR TBL`; the number stays 2001 and boot PROM 2001 is
+  unchanged. Assembled twice from the sources, byte for byte the same, the
+  outputs are (sha256):
+  - `ucadr.mcr` `06a9f3ee9a7834d3cb924a1ff14ce718f5e84b5a686a14d31aab59f611c593d1`
+  - `ucadr.tbl` `28245d1650f46060cef2a25147126afbde9a9bef499d002f002d050aba8e27a4`
+  - `ucadr.locs` `ac8ca1b61fcabe3ed2d8727b2d14c2ea233a977579586e1da09fe6c8a15d2f23`
+  - `ucadr.sym` `e6bdf2dd0f3a9cfa5b0a367f2504ae0f3c359c24e8d93d4cc3f3f1c40f1e0cb6`
+
+  On the hand-over band with them, microcode-check
+  passes 554 of 554 on micro and every file on rtl (611 of 611, the two long
+  files in parts that repeat their defining cases), system-check 106 of 106
+  on both engines, and muir-sim's System 2000 cases 30 of 33, the 3 that do
+  not apply on revision 13 as before.
 - **The cross build** (contract G2, section 7, option (iii)): System 2000's
   band compiles SYSTEM for the 40-bit machine and writes its cold load, as
   `docs/building.md` ("Cross-building for the 40-bit QUUX") describes.

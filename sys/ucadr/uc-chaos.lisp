@@ -168,11 +168,20 @@ CHAOS-XMT-0
 ;	((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
 	;; communication area is at 2000, a page of its own, not 400
-	((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
-	(CHECK-PAGE-READ-NO-INTERRUPT)
+;	((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
+;	(CHECK-PAGE-READ-NO-INTERRUPT)
+;	((A-CHAOS-TRANSMIT-ABORTED) SETZ)	;Forget this state left from previous packet
+;	((M-A) Q-TYPED-POINTER READ-MEMORY-DATA) ;Note, don't call CHAOS-LIST-GET
+;						;since we are leaving it on the list for now
+	;; quux: the packet sent is the oldest, the list's tail, not its head.
+	;; transmit-int-pkt pushes onto the head while a packet may be on the
+	;; cable; mit's code sent the head and chaos-xmt-done popped the head,
+	;; so a push in that time freed the new packet unsent and sent the old
+	;; one again (0, 2, 1, 0 on the cable, 3 never, until the connection's
+	;; retransmission).  the tail stays the tail while pushes come, so the
+	;; packet sent is the one chaos-xmt-done takes off.
+	(call chaos-xmt-tail)			;m-a the oldest packet, or nil
 	((A-CHAOS-TRANSMIT-ABORTED) SETZ)	;Forget this state left from previous packet
-	((M-A) Q-TYPED-POINTER READ-MEMORY-DATA) ;Note, don't call CHAOS-LIST-GET
-						;since we are leaving it on the list for now
 	(JUMP-EQUAL M-A A-V-NIL CHAOS-INTR-EXIT)	;Nothing to transmit, give up
 	;; If this is not a retransmission, initialize retry count
 	(JUMP-NOT-EQUAL M-ZERO A-CHAOS-TRANSMIT-RETRY-COUNT CHAOS-XMT-1)
@@ -211,18 +220,54 @@ CHAOS-XMT-3
 
 ;; Here when we are through with a transmit packet.
 CHAOS-XMT-DONE
-	(CALL-XCT-NEXT CHAOS-LIST-GET)		;Pull this guy off xmt list, we're done with it
+;	(CALL-XCT-NEXT CHAOS-LIST-GET)		;Pull this guy off xmt list, we're done with it
 ;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-TRANSMIT-LIST))))
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
 	;; communication area is at 2000, a page of its own, not 400
-       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
-	(CALL-NOT-EQUAL-XCT-NEXT M-A A-V-NIL CHAOS-LIST-PUT)	;Add to free list
+;       ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
+	;; quux: take off the packet chaos-xmt-0 sent, the tail (see there), not
+	;; the head: nil goes into the thread of the packet before it, or into
+	;; the list's head when it is the only one.  a push racing this one
+	;; read the head before it changed, so its %store-conditional fails
+	;; and it pushes again onto the empty list.
+	(call chaos-xmt-tail)			;m-a the tail, m-t the word pointing at it
+	(jump-equal m-a a-v-nil chaos-xmt-done-1)	;list emptied under us: nothing to free
+	((write-memory-data) a-v-nil)
+	((vma-start-write) m-t)			;unlink the tail
+	(check-page-write-no-interrupt)
+	(CALL-XCT-NEXT CHAOS-LIST-PUT)		;Add to free list
 ;       ((VMA-START-READ) (A-CONSTANT (EVAL (+ 400 %SYS-COM-CHAOS-FREE-LIST))))
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
 	;; communication area is at 2000, a page of its own, not 400
        ((vma-start-read) (a-constant (eval (+ 2000 %sys-com-chaos-free-list))))
+chaos-xmt-done-1
 	(JUMP-XCT-NEXT CHAOS-XMT-0)		;Now transmit more if possible
        ((A-CHAOS-TRANSMIT-RETRY-COUNT) SETZ)	;Transmit not in progress now
+
+;; quux: the transmit list's tail, its oldest packet, whose thread is nil
+;; (chaos-xmt-0, chaos-xmt-done).  returns it in m-a, nil when the list is
+;; empty, and in m-t the address of the word that points at it: the list's
+;; head, or the thread of the packet before it.  uses m-tem and a-intr-tem2.
+;; the walk is bounded: the list holds at most the chaosnet buffers there
+;; are, 40 as create-chaosnet-buffers makes them, and a list still going
+;; after 1000 (octal) packets is circular or not a list of buffers, which
+;; halts the machine at illop rather than loop in the interrupt.
+chaos-xmt-tail
+	((vma-start-read m-t) (a-constant (eval (+ 2000 %sys-com-chaos-transmit-list))))
+	(check-page-read-no-interrupt)
+	((m-a) q-typed-pointer read-memory-data)
+	(popj-equal m-a a-v-nil)		;empty list
+	((a-intr-tem2) (a-constant 1000))	;the bound
+chaos-xmt-tail-1
+	((vma-start-read) sub m-a (a-constant (eval (+ 2 %chaos-leader-thread))))
+	(check-page-read-no-interrupt)		;md gets the next packet
+	((m-tem) q-typed-pointer read-memory-data)
+	(popj-equal m-tem a-v-nil)		;none: m-a is the tail
+	((a-intr-tem2) add (m-constant -1) a-intr-tem2)
+	(call-equal m-zero a-intr-tem2 illop)	;past the bound
+	((m-t) vma)				;m-a's thread points at the next one
+	(jump-xct-next chaos-xmt-tail-1)
+       ((m-a) m-tem)
 
 ;;; Take packet off list which has been VMA-START-READ, return it in M-A
 ;;; M-A can return with NIL in it.  Uses A-INTR-TEM1
