@@ -562,3 +562,33 @@ Every change to a source file carries a comment in that file saying why.
     1, 0 and 3 never), on micro (three runs) and rtl, and so does System
     1002's release band; with the fix it passes, the cable showing 0, 1, 2,
     3, on micro (three runs) and rtl, at 32 and at 60 boards.
+
+## Known faults found, not yet fixed
+
+- **A warm boot that catches the Chaos Background process running hangs the
+  network's start.** Chaos Background is made with `:WARM-BOOT-ACTION NIL`
+  (`sys/network/chaos/chsncp.lisp:128`), so a warm boot that interrupts it
+  arrests it with `:WARM-BOOT` (`sys/sys2/proces.lisp:957-969`) until the
+  "Reset it?" question at the end of `LISP-REINITIALIZE`
+  (`sys/sys/ltop.lisp:369-383`). Before that question the boot logs in to
+  the file server, and the login waits for a reply
+  (`FILE-WAIT-FOR-TRANSACTION`, `sys/network/chaos/qfile.lisp:418`) that
+  only Chaos Background would handle, so the boot never gets there; and
+  `CHAOS-SERVERS-ENABLED`, cleared at the boot's start
+  (`sys/sys/ltop.lisp:269`), is set again only at its end (`:398`), so TELNET
+  is refused ("No server for this contact name"). A cold boot recovers.
+  MIT's: forced, with Chaos Background busy when the warm boot comes, it
+  hung in 5 of 5 warm boots on microcode 1000 and 4 of 5 on 1001, with the
+  same process states; of 30 warm boots without forcing, 3 hung on
+  microcode 1001 and none on 1000, a difference within chance (Fisher's
+  one-sided p about 0.12). Listed, not fixed, for this release.
+- **At 60 boards the page hash table has transient long runs.** Under the
+  incremental GC, with memory full of real pages and no free page's entry,
+  a dump of the table now and then holds a run of about 1,150 entries, and
+  a miss then takes about 22 probes: 1143 entries and 22.1 probes at block
+  40 of the reproducer above (the spreading of free pages by frame, at
+  `sys/ucadr/uc-page-fault.lisp:1297-1328`), where the dumps before and
+  after it hold runs of 47 and 14 entries and 2.2 probes a miss. The runs
+  heal on their own. They come at the same blocks with and without that
+  change, so their cause is another, and it is not established. Listed,
+  not fixed: the table is to be redesigned after this release.
