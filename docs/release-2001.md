@@ -1,8 +1,13 @@
 # System 2001
 
-What QUUX's next release changes from System 2000. It is in progress on
-`main`: each change is recorded here as it is made. Every change to a source
-file carries a comment in that file saying why.
+What System 2001, QUUX's second release and its first on the 40-bit word
+(revision 13), changes from System 2000. Every change to a source file
+carries a comment in that file saying why. Each change was recorded here as
+it was made: its `path:line` citations are of the file as it was then, so a
+later change to the same file may have moved them, and the microcode sums
+given with a change are those of that step's assembly. The released
+microcode's and PROM's are under "Microcode 2001 and boot PROM 2001" below;
+the faults known at the release are listed at the end.
 
 - **The system number is 2001** (`patch/system.patch-directory`,
   `patch/system-2001.patch-directory`), now that System 2000 is released,
@@ -13,6 +18,16 @@ file carries a comment in that file saying why.
   output's version for `UCADR`, the version asked for `PROMH`), so no
   source changed for it. This supersedes Q12's rule (its section 1.1) that
   the microcode and the PROM keep 2000 until a changed one is released.
+  The released files, in the sources' `sys/ubin/`, each assembled twice from
+  the release's `sys/ucadr/` and the same byte for byte (sha256):
+  - `ucadr.mcr` `06a9f3ee9a7834d3cb924a1ff14ce718f5e84b5a686a14d31aab59f611c593d1`
+  - `ucadr.tbl` `28245d1650f46060cef2a25147126afbde9a9bef499d002f002d050aba8e27a4`
+  - `ucadr.locs` `ac8ca1b61fcabe3ed2d8727b2d14c2ea233a977579586e1da09fe6c8a15d2f23`
+  - `ucadr.sym` `e6bdf2dd0f3a9cfa5b0a367f2504ae0f3c359c24e8d93d4cc3f3f1c40f1e0cb6`
+  - `promh.mcr` `5917bae4a5e21806acd40fa9af7bc89a307e45f49cc974ee880c9e4ba002b9ca`
+  - `promh.tbl` `177198f4611391211852d914b58aac4877952df1d49c080e3f305c1099da129b`
+  - `promh.locs` `c76d0ddbe365199c4310b02ad876a8ba98b15271bbffd409b3128c6628148566`
+  - `promh.sym` `0935acf726b8f7b2d52281c739281ed435bcf94ac26ddef669c8e7b8d0357663`
 - **The micro-assembler assembles for a 40-bit word** when
   `ua:*word-width*` is `40.` (`sys/sys/cadrlp.lisp:227-258`): the fields of
   contract G2's appendix A1. At its default, `32.`, the words are what they
@@ -84,6 +99,20 @@ file carries a comment in that file saying why.
   `tools/release-test` writes and checks both rolling sets
   (`tools/release-test:53-56`, `:375-411`): the four cases fail with the old
   pattern and hold with the new.
+- **`tools/lispm-check` ends a case whose form asks a question**
+  (`tools/lispm-check:506-540`; `docs/lispm-check.md:160-179`), as on the
+  CADR's line. A question asked through `FQUERY` (`Y-OR-N-P`, `YES-OR-NO-P`,
+  `FQUERY` itself) is caught by the case's `condition-case`, which ends the
+  form there and fails the case naming the question; a bare "(Y or N)" or
+  "(Yes or No)" with nothing after it fails the case and is answered No.
+  Such a case waited out `--timeout` before: GC-ON's "Try garbage collecting
+  after all?" on System 2000's disk layout now fails in seconds. The
+  checkpoint's `SETUP_VERSION` is 2. `tools/lispm-check-test/question.cases`
+  (new) and `expected-question.txt` hold it.
+- **`tools/cold-compare-test` builds its cache directory's default from the
+  home directory** (`tools/cold-compare-test:83-84`) rather than from a
+  tilde path, which `tools/release-scan` reports as a local path in the
+  sources; behaviour is unchanged.
 - **`GCD` of two bignums is never negative.** When the shorter of two
   bignums of two or more words divides the longer, `GCDBB-LONG` returned the
   divisor with its sign, so `(gcd (expt 2 90) (- (expt 2 31)))` gave
@@ -749,7 +778,10 @@ file carries a comment in that file saying why.
   back inside `WITHOUT-INTERRUPTS`, checks that all four are on the list
   after the last push (the window entered: on muir-sim the pushes land 200
   microseconds apart on micro and 89 on rtl, a frame is 1.5 ms), and that
-  they leave it as (0 1 2 3). On the hand-over band of `c44fe06` with its
+  they leave it as (0 1 2 3). It walks the list once and checks each packet
+  against that walk (`lisp/chaos-transmit-order.lisp:53-60`): counting the
+  list and then searching it for each packet could see the first frame end
+  in between and report the window not entered. On the hand-over band of `c44fe06` with its
   microcode, muir-sim 91ce0c9's `--chaos-trace` showed 0, 2, 1, 0 on the
   cable, twice on micro and twice on rtl, and the case failed 2 of 6; with
   this microcode the cable showed 0, 1, 2, 3 each time and the case passes 6
@@ -1085,8 +1117,10 @@ file carries a comment in that file saying why.
     bits, halts at the new `ERROR-A-MEM-SECTION-32-BITS` (G2 section 2.8).
   - **Lisp**: the register page is `#o17777400` from the I/O region's base
     (`FEATURE-PAGE-XBUS-ADDRESS`, `sys/sys/ltop.lisp`; MINI's constants,
-    `sys/cold/mini.lisp`; the keyboard, mouse, Chaosnet, disk status and
-    screen-control addresses), and the frame buffer's physical base
+    `sys/cold/mini.lisp`; the keyboard, mouse, Chaosnet
+    (`sys/network/chaos/chsncp.lisp`), disk status and screen-control
+    addresses, and the error-stop words 101 and 102 that
+    `sys/window/color.lisp` writes), and the frame buffer's physical base
     1760000000 (`VIDEO-BUFFER-ADDRESS`).
   - **The cross build**: `cross-check-formats` lets
     `%%ADI-PREVIOUS-ADI-FLAG` move with the cdr code
@@ -1462,3 +1496,58 @@ file carries a comment in that file saying why.
     (`lisp/world.lisp`, which gives every parameter this world also has its
     value here, the symbols in a value being the cold-load package's), the
     latter with `lisp/pages32.lisp`; `lisp/pages256.lisp` is gone.
+- **The compiled fonts in `sys/fonts/` and `SYS: DEMO; TVBGAR` are 40-bit
+  files.** They have no source, and the tree held System 100's 32-bit files,
+  which this system's fasloader refuses ("was compiled for a 32-bit word, and
+  this world's is 40 bits", `sys/sys/qfasl.lisp:198-205`): a font change to
+  `HL18` failed with "Font HL18 not found". The 35 fonts of the `FONTS` system,
+  `CPTFON` and `TVBGAR` are now the files the release band was built from,
+  which the cross build wrote by loading System 100's file on System 2000's
+  band, the font's symbol bound, and dumping its value for the 40-bit target
+  (`cross-dump-symbol-value`, `sys/cold/cross.lisp:887`; `docs/building.md`,
+  "Loading the 40-bit cold load"). The other 45 were written the same way;
+  `BIGOLD` and `PRT12B`, which set `FONTS:BIGFNT` and `FONTS:APL14` and have
+  no attribute list, load right only in their own default package, so they
+  were loaded without `FONTS` given. Written so again, three of the band's
+  fonts (`TR8`, `HL12`, `TVFONT`) are their build inputs byte for byte but
+  for the dump's date in the header. The band loads none of these files at
+  boot.
+
+## Known faults found, not yet fixed
+
+- **A warm boot that catches the Chaos Background process running waits at
+  the console, and TELNET is refused until it is answered.** Chaos
+  Background is made with `:WARM-BOOT-ACTION NIL`
+  (`sys/network/chaos/chsncp.lisp:128`), so a warm boot that interrupts it
+  arrests it (`sys/sys2/proces.lisp:982`) and asks "Reset it?  Answer No if
+  you want to debug it." at the end of `LISP-REINITIALIZE`
+  (`sys/sys/ltop.lisp:463`); `CHAOS-SERVERS-ENABLED`, cleared at the boot's
+  start (`:355`), is set again only after that question (`:484`), so a
+  TELNET connection is refused ("No server for this contact name") until
+  someone answers it at the console. Answered Yes, the boot completes and
+  keeps the world. MIT's. The CADR's line hangs here instead (System 1003's
+  notes), since its boot first logs in to the file server over the
+  Chaosnet; QUUX's boot logs in to `HOST`, the file device, and reaches the
+  question. Forced as on the CADR's line, with Chaos Background busy when
+  the warm boot comes, on the release's disk (micro, 32 M words): the
+  question came in 8 of 8 warm boots, logged in to `HOST` or to `OZ`, with
+  TELNET refused for 180 s each time; Yes typed at the console brought
+  TELNET back in 6 of 6, and a variable set before the boot kept its value;
+  3 of 3 warm boots without forcing asked nothing and answered TELNET.
+- **A date printed MM/DD parses as DD/MM outside the United States**, as
+  in System 2000: at the site's zone, `*TIMEZONE*` -1,
+  `TIME:PARSE-UNIVERSAL-TIME` takes "3/4/2026 12:00" as 3 April, not 4 March
+  (`SET-MONTH-AND-DATE`, `sys/io1/timpar.lisp`). MIT's.
+- **`(%div 0 0)` returns 0** rather than signalling division by zero, as in
+  System 2000; `(%div 1 0)` signals it. MIT's.
+- **The inspector traps on a symbol that has a function but no value**, as
+  in System 2000: `(:METHOD TV:BASIC-INSPECT :OBJECT-SYMBOL)` on `CAR`
+  stops with "The variable CAR is unbound"; its "Function is" line takes
+  `SYMBOL-VALUE` where it means the function (`sys/window/inspct.lisp:383`).
+- **`LISTF` over TELNET traps after the listing**, as in System 2000:
+  `(listf "SYS: SITE;")` typed at the TELNET listener prints the directory,
+  then stops with "Some argument to ARRAY-ACTIVE-LENGTH, NIL, was of the
+  wrong type" in `:STRING-OUT` of the TELNET stream, under
+  `STREAM-COPY-UNTIL-EOF`. The cause is not sought yet.
+- **Video controller sizes above 1920 by 1080 are not supported**, as in
+  System 2000.
