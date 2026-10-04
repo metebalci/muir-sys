@@ -1,0 +1,11 @@
+; the band saved at @MAXBOARDS@ boards booted from LOD2 at @MAXBOARDS@ boards
+(si:print-herald)
+(login "LISPM" "OZ" t)
+(or (= (ldb #o2010 si:current-loaded-band) #\2) (ferror nil "Expected the band saved to LOD2"))
+(or (= (si:get-system-version) @SYSTEM@.) (ferror nil "Expected System @SYSTEM@"))
+(or (= (si:system-communication-area si:%sys-com-memory-size) @MAXWORDS@.) (ferror nil "Expected @MAXBOARDS@ boards of memory"))
+(list (si:get-system-version) %microcode-version-number (si:system-communication-area si:%sys-com-memory-size) (si:system-communication-area si:%sys-com-wired-size))
+(list (si:region-origin si:page-table-area) (si:region-length si:page-table-area) (si:region-origin si:physical-page-data) (si:region-length si:physical-page-data) (si:region-origin si:extra-pdl-area) (si:region-length si:extra-pdl-area) (si:region-origin si:micro-code-entry-area))
+(+ 1 2)
+(or (and si:qld-mini-done (not si:*in-cold-load-p*) (not si:mini-script-running-p)) (ferror nil "Final QLD state did not pass"))
+(make-system 'system :print-only :noconfirm)

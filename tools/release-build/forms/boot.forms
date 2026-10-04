@@ -1,0 +1,9 @@
+; the published files booted as a user would: system, microcode, file access, ucadr.tbl served
+(si:print-herald)
+(or (= (si:get-system-version) @SYSTEM@.) (ferror nil "Expected System @SYSTEM@"))
+(or (= %microcode-version-number @MICROCODE@.) (ferror nil "Expected microcode @MICROCODE@"))
+(list (si:get-system-version) %microcode-version-number si:site-name (ldb #o2010 si:current-loaded-band))
+(login "LISPM" "OZ" t)
+(with-open-file (s "SYS: SYS; SYSDCL LISP" :direction :input) (readline s))
+(or (probe-file "SYS: UBIN; UCADR TBL") (ferror nil "No SYS: UBIN; UCADR TBL served"))
+(+ 1 2)

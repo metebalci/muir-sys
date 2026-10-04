@@ -1,0 +1,9 @@
+; division by the most negative fixnum and every quotient and remainder of
+; DIV-CHECK (load lisp/divcheck.lisp first) written to OZ: /lispm/div.text,
+; checked exactly on the host (run, verify_div)
+%microcode-version-number => @MICROCODE@
+(= (%div 5 -16777216) (%div -5 16777216)) => T
+(%div 5 -16777216)
+(multiple-value-list (floor 4294967295 -16777216)) => (-256 -1)
+(multiple-value-list (truncate 4294967295 -16777216)) => (-255 16777215)
+(progn (div-check "OZ: //lispm//div.text") t) => T

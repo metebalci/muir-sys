@@ -1,0 +1,3 @@
+; assemble the boot PROM from the release's sys/ucadr, on a freshly booted band
+(progn (make-system (quote cadr-micro-assembler) :compile :noconfirm :nowarn) t) => T
+(let ((*standard-input* (make-string-input-stream "9. T")) (old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p #'(lambda (&rest ignore) t)) (ua:assemble "SYS: UCADR; PROMH TEXT") t) (fset 'y-or-n-p old))) => T

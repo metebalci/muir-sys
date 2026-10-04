@@ -1,0 +1,3 @@
+; every multiply and divide path written out to OZ: /lispm/arith.text and checked on
+; the host (load lisp/arith-check.lisp first)
+(progn (arith-check "OZ: //lispm//arith.text") t) => T

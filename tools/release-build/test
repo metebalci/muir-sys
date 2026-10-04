@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""The tests of tools/release-build/run: its parts, each on a fault planted.
+
+Usage:
+  tools/release-build/test [-v] [NAME...]
+
+Each test runs one part of the builder on a small input and checks that it
+passes when the input is right and fails, naming the fault, when one fault
+is planted: a tree with no sys/ubin/, a date fixture that lost its mtime, a
+second assembly of the microcode that differs from the first, a sources
+tarball member that is not root's, a release pack with a byte outside its
+two partitions, a cold-load file read again after the cold boot, a loaded id
+an hour off, a wrong quotient.  They take seconds and boot no machine; the
+release pack's test needs muir-sim's diskpack (RELEASE_BUILD_DISKPACK, or
+diskpack on PATH) and is skipped, saying so, without it.  The sources test
+exports this repository's HEAD.  Exit status 0 when every test passes.
+"""
+import gzip, importlib.machinery, importlib.util, io, os, shutil, socket
+import struct, subprocess, sys, tarfile, tempfile, time, unittest
+
+# no __pycache__ beside the tool: it would carry local paths into the tree
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+
+
+def load_builder():
+    loader = importlib.machinery.SourceFileLoader('release_build', os.path.join(HERE, 'run'))
+    spec = importlib.util.spec_from_loader('release_build', loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+rb = load_builder()
+
+
+class Scratch(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix='release-build-test-')
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def path(self, *p):
+        return os.path.join(self.d, *p)
+
+
+class Line(unittest.TestCase):
+    def test_cadr(self):
+        self.assertEqual(rb.line_of(1003, 1001), 'cadr')
+
+    def test_quux_not_written(self):
+        with self.assertRaises(rb.Fault) as c:
+            rb.line_of(2001, 2001)
+        self.assertIn('QUUX', str(c.exception))
+
+    def test_microcode_of_other_machine(self):
+        with self.assertRaises(rb.Fault):
+            rb.line_of(1003, 2001)
+
+    def test_no_machine(self):
+        with self.assertRaises(rb.Fault):
+            rb.line_of(3001, 3001)
+
+
+class Ports(Scratch):
+    def test_plan_disjoint(self):
+        plan = rb.port_plan(51000, 51999)
+        seen = set()
+        for name, (lo, hi) in plan.items():
+            r = set(range(lo, hi + 1))
+            self.assertFalse(r & seen, name)
+            seen |= r
+            self.assertTrue(51000 <= lo <= hi <= 51999, name)
+
+    def test_plan_too_small(self):
+        with self.assertRaises(rb.Fault):
+            rb.port_plan(51000, 51100)
+
+    def test_busy_port_found(self):
+        s = socket.socket()
+        s.bind(('127.0.0.1', 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+        try:
+            self.assertIn(port, rb.busy_ports(port - 2, port + 2))
+        finally:
+            s.close()
+
+
+class Builder(Scratch):
+    def test_digest(self):
+        p = self.path('pack.img')
+        open(p, 'wb').write(b'LABL' + bytes(100))
+        rb.check_digest(p, rb.sha256_file(p), 'builder')
+        with self.assertRaises(rb.Fault) as c:
+            rb.check_digest(p, '0' * 64, 'builder')
+        self.assertIn('builder', str(c.exception))
+
+
+class AsmTree(Scratch):
+    """An exported tree must have an empty sys/ubin/ before it is assembled
+    into: the assembler makes no directory (docs/building.md)."""
+
+    def test_export_has_empty_ubin(self):
+        t = self.path('t')
+        rb.export_tree(REPO, 'HEAD', t)
+        self.assertTrue(os.path.isdir(os.path.join(t, 'sys', 'ubin')))
+        self.assertEqual(os.listdir(os.path.join(t, 'sys', 'ubin')), [])
+        rb.check_asm_tree(t)
+
+    def test_planted_missing_ubin(self):
+        t = self.path('t')
+        rb.export_tree(REPO, 'HEAD', t)
+        os.rmdir(os.path.join(t, 'sys', 'ubin'))
+        with self.assertRaises(rb.Fault) as c:
+            rb.check_asm_tree(t)
+        self.assertIn('sys/ubin', str(c.exception))
+
+    def test_planted_git_archive_alone(self):
+        t = self.path('t')
+        os.makedirs(t)
+        a = subprocess.run(['git', '-C', REPO, 'archive', 'HEAD'], check=True, capture_output=True).stdout
+        tarfile.open(fileobj=io.BytesIO(a)).extractall(t)
+        with self.assertRaises(rb.Fault):
+            rb.check_asm_tree(t)
+
+    def test_planted_stale_ubin(self):
+        t = self.path('t')
+        rb.export_tree(REPO, 'HEAD', t)
+        open(os.path.join(t, 'sys', 'ubin', 'ucadr.mcr'), 'wb').write(b'old')
+        with self.assertRaises(rb.Fault):
+            rb.check_asm_tree(t)
+
+
+class Fixtures(Scratch):
+    """The date check's fixtures carry their meaning in their mtimes alone."""
+
+    def test_written_with_mtimes(self):
+        d = self.path('q12d')
+        rb.write_date_fixtures(d)
+        self.assertEqual(rb.check_date_fixtures(d), [])
+        self.assertEqual(len(os.listdir(d)), len(rb.DATE_FIXTURES))
+
+    def test_planted_copy_without_mtimes(self):
+        d, e = self.path('q12d'), self.path('copy')
+        rb.write_date_fixtures(d)
+        shutil.copytree(d, e, copy_function=shutil.copy)   # as cp -r copies
+        problems = rb.check_date_fixtures(e)
+        # y2099's mtime is in the future and today's is not 0, so every one differs
+        self.assertEqual(len(problems), len(rb.DATE_FIXTURES), problems)
+
+    def test_planted_one_touched(self):
+        d = self.path('q12d')
+        rb.write_date_fixtures(d)
+        os.utime(os.path.join(d, 'jul.text'))
+        problems = rb.check_date_fixtures(d)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('jul', problems[0])
+
+    def test_planted_one_missing(self):
+        d = self.path('q12d')
+        rb.write_date_fixtures(d)
+        os.remove(os.path.join(d, 'oct25b.text'))
+        problems = rb.check_date_fixtures(d)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('oct25b', problems[0])
+
+    def test_cases_from_table(self):
+        for site in ('berlin', 'm1'):
+            text = rb.dates_cases(site)
+            for name, t in rb.DATE_FIXTURES:
+                self.assertIn('(- (q12-listed-date "%s") %d) => 0' % (name, t + rb.UT), text)
+                self.assertIn('(q12-set-date "%s" %d)' % (name, t + rb.UT), text)
+
+
+class Assembly(Scratch):
+    def files(self, d, flip=None):
+        os.makedirs(d)
+        for i, n in enumerate(rb.UCADR_FILES):
+            b = bytearray(bytes([i]) * 64)
+            if n == flip:
+                b[17] ^= 1
+            open(os.path.join(d, n), 'wb').write(b)
+
+    def test_same_twice(self):
+        self.files(self.path('a'))
+        self.files(self.path('b'))
+        self.assertEqual(rb.compare_files(self.path('a'), self.path('b'), rb.UCADR_FILES), [])
+
+    def test_planted_second_differs(self):
+        self.files(self.path('a'))
+        self.files(self.path('b'), flip='ucadr.mcr')
+        self.assertEqual(rb.compare_files(self.path('a'), self.path('b'), rb.UCADR_FILES), ['ucadr.mcr'])
+
+    def test_planted_missing(self):
+        self.files(self.path('a'))
+        self.files(self.path('b'))
+        os.remove(self.path('b', 'ucadr.tbl'))
+        self.assertEqual(rb.compare_files(self.path('a'), self.path('b'), rb.UCADR_FILES), ['ucadr.tbl'])
+
+    def test_notes_digests(self):
+        # the last digests the notes give are the release's (docs/release-1003.md)
+        d = rb.notes_digests(os.path.join(REPO, 'docs', 'release-1003.md'))
+        self.assertEqual(d['ucadr.mcr'], '180d8cd8435b48bacfbd7c32e94613ccbbd7959df051127be0aa0ff0c7ab957d')
+        self.assertEqual(d['ucadr.tbl'], 'd870bd9e798c695b8613bd74d00c688f7c6e1e1b81ffeb6a13445873f0df680e')
+        self.assertEqual(d['ucadr.locs'], '418d687365d0587f46c7d0c143faedaad41a7cea3644cd511f148c7deb9f43d0')
+
+    def test_planted_notes_without_digest(self):
+        p = self.path('notes.md')
+        open(p, 'w').write('- `ucadr.mcr` `%s`\n- `ucadr.tbl` `%s`\n' % ('a' * 64, 'b' * 64))
+        with self.assertRaises(rb.Fault) as c:
+            rb.notes_digests(p)
+        self.assertIn('ucadr.locs', str(c.exception))
+
+    def test_planted_digest_differs(self):
+        self.files(self.path('a'))
+        want = {n: rb.sha256_file(self.path('a', n)) for n in ('ucadr.mcr', 'ucadr.tbl', 'ucadr.locs')}
+        self.assertEqual(rb.digest_mismatches(self.path('a'), want), [])
+        want['ucadr.tbl'] = 'c' * 64
+        self.assertEqual([m[0] for m in rb.digest_mismatches(self.path('a'), want)], ['ucadr.tbl'])
+
+
+class Sources(Scratch):
+    def ubin(self, n=None):
+        u = self.path('ubin')
+        os.makedirs(u)
+        for name in rb.UBIN_FILES[:n]:
+            open(os.path.join(u, name), 'wb').write(name.encode() * 3)
+        return u
+
+    def test_tarball(self):
+        out = self.path('release-1003-sys.tar.gz')
+        rb.make_sources(REPO, 'HEAD', self.ubin(), out, 'release-1003')
+        self.assertEqual(rb.check_sources(out, 'release-1003'), [])
+        raw = open(out, 'rb').read(10)
+        self.assertEqual(raw[3], 0)                          # no name, no flags
+        self.assertEqual(raw[4:8], bytes(4))                 # no date
+
+    def test_reproducible(self):
+        u = self.ubin()
+        a, b = self.path('a.tar.gz'), self.path('b.tar.gz')
+        rb.make_sources(REPO, 'HEAD', u, a, 'release-1003')
+        time.sleep(1.1)
+        rb.make_sources(REPO, 'HEAD', u, b, 'release-1003')
+        self.assertEqual(rb.sha256_file(a), rb.sha256_file(b))
+
+    def planted(self, add):
+        out = self.path('bad.tar.gz')
+        tar = self.path('bad.tar')
+        a = subprocess.run(['git', '-C', REPO, 'archive', '--format=tar', '--prefix=release-1003/', 'HEAD'],
+                           check=True, capture_output=True).stdout
+        open(tar, 'wb').write(a)
+        with tarfile.open(tar, 'a') as t:
+            add(t)
+        rb.gzip_file(tar, out)
+        return rb.check_sources(out, 'release-1003')
+
+    def test_planted_owner(self):
+        u = self.ubin()
+        p = self.planted(lambda t: t.add(u, arcname='release-1003/sys/ubin'))   # no root filter
+        if os.getuid() == 0:
+            self.skipTest('run as root: the files are root\'s')
+        self.assertTrue(any('owner' in x for x in p), p)
+
+    def test_planted_coldrun(self):
+        u = self.ubin()
+        c = self.path('coldrun.lisp')
+        open(c, 'w').write('(si:qld)\n')
+        def add(t):
+            t.add(u, arcname='release-1003/sys/ubin', filter=rb.root_owned)
+            t.add(c, arcname='release-1003/site/coldrun.lisp', filter=rb.root_owned)
+        p = self.planted(add)
+        self.assertTrue(any('coldrun' in x for x in p), p)
+
+    def test_planted_ubin_short(self):
+        u = self.ubin(9)
+        p = self.planted(lambda t: t.add(u, arcname='release-1003/sys/ubin', filter=rb.root_owned))
+        self.assertTrue(any('sys/ubin' in x for x in p), p)
+
+    def test_planted_top(self):
+        u = self.ubin()
+        out = self.path('x.tar.gz')
+        rb.make_sources(REPO, 'HEAD', u, out, 'release-1004')
+        self.assertTrue(rb.check_sources(out, 'release-1003'))
+
+
+def diskpack_bin():
+    p = os.environ.get('RELEASE_BUILD_DISKPACK') or shutil.which('diskpack')
+    return p if p and os.access(p, os.X_OK) else None
+
+
+@unittest.skipUnless(diskpack_bin(), 'no diskpack: set RELEASE_BUILD_DISKPACK to muir-sim\'s')
+class ReleasePack(Scratch):
+    def setUp(self):
+        super().setUp()
+        self.dp = diskpack_bin()
+        self.build = self.path('build.img')
+        dp = lambda *a: subprocess.run([self.dp, self.build, *a], check=True, capture_output=True)
+        dp('initialize')
+        band = self.path('band.bin')
+        open(band, 'wb').write(bytes(range(256)) * 4 * 300)        # 300 blocks of a pretend band
+        dp('load', 'LOD4', band)
+        # a microcode file diskpack takes: two control-store words and one
+        # A-memory word (muir-sim src/mcr.rs, parse)
+        w = lambda x: struct.pack('<HH', x >> 16, x & 0xffff)
+        self.mcr = self.path('ucadr.mcr')
+        open(self.mcr, 'wb').write(w(1) + w(0) + w(2) + struct.pack('<4H', 0, 1, 2, 3)
+                                   + struct.pack('<4H', 0, 4, 5, 6) + w(4) + w(0) + w(1) + w(7))
+
+    def test_pack(self):
+        out = self.path('release-1003-pack.img')
+        rb.write_release_pack(self.dp, self.build, 'LOD4', self.mcr, out, 1003, 1001)
+        self.assertEqual(rb.check_release_pack(self.dp, out, self.build, 'LOD4', self.mcr), [])
+        label = subprocess.run([self.dp, out, 'show'], check=True, capture_output=True, text=True).stdout
+        self.assertIn('"UCADR 1001"', label)
+        self.assertIn('"Exp 1003"', label)
+        # the partitions are where read_region reads them: diskpack's own dump agrees
+        parts = rb.partitions(self.dp, out)
+        dump = self.path('lod1.bin')
+        subprocess.run([self.dp, out, 'dump', 'LOD1', dump], check=True, capture_output=True)
+        self.assertEqual(open(dump, 'rb').read(), rb.read_region(out, *parts['LOD1'][:2]))
+
+    def test_planted_mcr_differs(self):
+        out = self.path('release-1003-pack.img')
+        rb.write_release_pack(self.dp, self.build, 'LOD4', self.mcr, out, 1003, 1001)
+        parts = rb.partitions(self.dp, out)
+        os.chmod(out, 0o644)
+        with open(out, 'r+b') as f:
+            f.seek(parts['MCR1'][0] * rb.BLOCK + 2)
+            f.write(b'\x55')
+        p = rb.check_release_pack(self.dp, out, self.build, 'LOD4', self.mcr)
+        self.assertTrue(any('MCR1' in x for x in p), p)
+
+    def test_planted_byte_outside(self):
+        out = self.path('release-1003-pack.img')
+        rb.write_release_pack(self.dp, self.build, 'LOD4', self.mcr, out, 1003, 1001)
+        parts = rb.partitions(self.dp, out)
+        os.chmod(out, 0o644)
+        with open(out, 'r+b') as f:
+            f.seek(parts['LOD2'][0] * rb.BLOCK + 5000)
+            f.write(b'\x01')
+        p = rb.check_release_pack(self.dp, out, self.build, 'LOD4', self.mcr)
+        self.assertTrue(any('LOD2' in x for x in p), p)
+
+    def test_planted_band_differs(self):
+        out = self.path('release-1003-pack.img')
+        rb.write_release_pack(self.dp, self.build, 'LOD4', self.mcr, out, 1003, 1001)
+        parts = rb.partitions(self.dp, out)
+        os.chmod(out, 0o644)
+        with open(out, 'r+b') as f:
+            f.seek(parts['LOD1'][0] * rb.BLOCK + 3)
+            f.write(b'\xff')
+        p = rb.check_release_pack(self.dp, out, self.build, 'LOD4', self.mcr)
+        self.assertTrue(any('LOD1' in x for x in p), p)
+
+
+SYSDCL = '''(DEFCONST COLD-LOAD-FILE-LIST
+  '("SYS: SYS; QRAND QFASL >"
+;   "SYS: SYS; GONE QFASL >"
+    "SYS: SYS2; STRING QFASL >"))
+'''
+
+
+class GatesLog(Scratch):
+    def log(self, after):
+        before = ['2026-10-03T20:34:26Z 177201 (LISPM-1) read /sys/sys/qrand.qfasl']
+        text = '\n'.join(before) + '\n'
+        off = len(text)
+        return (text + '\n'.join(after) + '\n').encode(), off
+
+    OK = ['2026-10-03T23:52:56Z MINI from 177201 (LISPM-1) read /sys/sys/qrand.qfasl',
+          '2026-10-03T23:52:56Z MINI from 177201 (LISPM-1) report: qld-complete',
+          '2026-10-03T23:52:56Z MINI from 177201 (LISPM-1) report: script-ends']
+
+    def test_pass(self):
+        log, off = self.log([l for l in self.OK if ' read ' not in l])
+        g = rb.gates_from_log(log, off, SYSDCL)
+        self.assertEqual([v[1] for v in g], [True, True], g)
+
+    def test_planted_read_again(self):
+        log, off = self.log(['2026-10-04T00:00:00Z 177201 (LISPM-1) read /sys/sys2/string.qfasl'] + self.OK[1:])
+        g = dict((v[0], v) for v in rb.gates_from_log(log, off, SYSDCL))
+        self.assertFalse(g['G1'][1])
+        self.assertIn('string.qfasl', g['G1'][2])
+
+    def test_planted_readtable_again(self):
+        log, off = self.log(['2026-10-04T00:00:00Z 177201 (LISPM-1) read /sys/io/crdtbl.qfasl'] + self.OK[1:])
+        self.assertFalse(dict((v[0], v) for v in rb.gates_from_log(log, off, SYSDCL))['G1'][1])
+
+    def test_commented_file_not_watched(self):
+        log, off = self.log(['2026-10-04T00:00:00Z 177201 (LISPM-1) read /sys/sys/gone.qfasl'] + self.OK[1:])
+        self.assertTrue(dict((v[0], v) for v in rb.gates_from_log(log, off, SYSDCL))['G1'][1])
+
+    def test_planted_no_script_end(self):
+        log, off = self.log(self.OK[1:2])
+        self.assertFalse(dict((v[0], v) for v in rb.gates_from_log(log, off, SYSDCL))['G2'][1])
+
+
+class GateIds(Scratch):
+    def tree(self):
+        t = self.path('tree')
+        os.makedirs(os.path.join(t, 'sys', 'sys'))
+        f = os.path.join(t, 'sys', 'sys', 'qrand.qfasl')
+        open(f, 'w').write('x')
+        os.utime(f, (1790000000, 1790000000))
+        return t
+
+    def test_pass(self):
+        ok, why = rb.gate_ids(['OZ: /sys/sys/qrand.qfasl\t%d' % (1790000000 + rb.UT)], self.tree())
+        self.assertTrue(ok, why)
+
+    def test_planted_hour_off(self):
+        ok, why = rb.gate_ids(['OZ: /sys/sys/qrand.qfasl\t%d' % (1790000000 + rb.UT - 3600)], self.tree())
+        self.assertFalse(ok, why)
+
+    def test_planted_text(self):
+        ok, why = rb.gate_ids(['OZ: /sys/sys/qrand.qfasl\ttext 10/04/26 01:00:00'], self.tree())
+        self.assertFalse(ok, why)
+
+
+class Arithmetic(unittest.TestCase):
+    DIV = 'TRUNCATE 7 -2 -3 1\nFLOOR 7 -2 -4 -1\nCEILING 7 -2 -3 1\nDIV 6 -4 -3 2\nTRUNCATE 1 0 ERR\nDIV 0 0 0 1\ndone\n'
+    ARITH = ('* 3 -7 => (-21)\nTRUNCATE 7 -2 => (-3 1)\nREM 7 -2 => (1)\n'
+             'GCD 1237940039285380274899124224 -2147483648 => (2147483648)\n'
+             'REM 1 0 => (ERROR "called with only 2 arguments")\ndone\n')
+
+    def test_div(self):
+        ok, why = rb.verify_div(self.DIV)
+        self.assertTrue(ok, why)
+        self.assertIn('DIV 0 0', why)             # the listed fault, (%div 0 0) is 0
+
+    def test_planted_div_wrong(self):
+        ok, why = rb.verify_div(self.DIV.replace('FLOOR 7 -2 -4 -1', 'FLOOR 7 -2 -3 1'))
+        self.assertFalse(ok, why)
+
+    def test_planted_div_zero_divisor(self):
+        # only (%div 0 0) is the listed fault; any other answer to a zero divisor fails
+        ok, why = rb.verify_div(self.DIV.replace('TRUNCATE 1 0 ERR', 'TRUNCATE 1 0 0 1'))
+        self.assertFalse(ok, why)
+
+    def test_planted_div_no_done(self):
+        ok, why = rb.verify_div(self.DIV.replace('done\n', ''))
+        self.assertFalse(ok, why)
+
+    def test_arith(self):
+        ok, why = rb.verify_arith(self.ARITH)
+        self.assertTrue(ok, why)
+
+    def test_planted_gcd_negative(self):
+        ok, why = rb.verify_arith(self.ARITH.replace('=> (2147483648)', '=> (-2147483648)'))
+        self.assertFalse(ok, why)
+
+
+class MachineStart(Scratch):
+    """A machine whose ozd finds its port taken is started again."""
+
+    def bins(self, ozd_body):
+        b = {}
+        for name, body in (('ozd', ozd_body), ('cadr', 'while read l; do [ "$l" = quit ] && exit 0; done'), ('diskpack', 'exit 0')):
+            p = self.path(name)
+            open(p, 'w').write('#!/bin/sh\n' + body + '\n')
+            os.chmod(p, 0o755)
+            b[name] = p
+        return b
+
+    def test_retry_on_address_in_use(self):
+        # the first start finds the port taken, the second does not
+        flag = self.path('once')
+        b = self.bins('if [ ! -e %s ]; then touch %s; echo "ozd: --tcp 127.0.0.1:1: Address already in use '
+                      '(os error 98)"; exit 1; fi; exec sleep 30' % (flag, flag))
+        m = rb.Machine(self.path('m'), b, (52990, 52993), self.d)
+        try:
+            m.start(tries=3, settle=0.5)
+            self.assertIsNone(m.ozd.poll())
+        finally:
+            m.stop()
+        self.assertEqual(open(self.path('m', 'ozd.log')).read().count('Address already in use'), 1)
+
+    def test_other_failure_not_retried(self):
+        b = self.bins('echo "ozd: no such root"; exit 1')
+        m = rb.Machine(self.path('m'), b, (52990, 52993), self.d)
+        with self.assertRaises(rb.Fault) as c:
+            m.start(tries=3, settle=0.5)
+        self.assertIn('no such root', str(c.exception))
+
+    def test_port_stays_taken(self):
+        b = self.bins('echo "Address already in use"; exit 1')
+        m = rb.Machine(self.path('m'), b, (52990, 52993), self.d)
+        with self.assertRaises(rb.Fault) as c:
+            m.start(tries=2, settle=0.5)
+        self.assertIn('stayed in use', str(c.exception))
+
+
+class Record(unittest.TestCase):
+    def test_step_figures_kept(self):
+        # a step's own 'seconds' (the forms' time) beside the run's (the step's)
+        r = rb.step_record({'seconds': 11, 'comment': 'x'}, status='passed', seconds=12)
+        self.assertEqual(r, {'step seconds': 11, 'comment': 'x', 'status': 'passed', 'seconds': 12})
+
+
+class Templates(unittest.TestCase):
+    def test_every_template_filled(self):
+        v = rb.template_values(1003, 1001, 'cadr')
+        for sub in ('forms', 'cases'):
+            for n in sorted(os.listdir(os.path.join(HERE, sub))):
+                text = rb.render(os.path.join(HERE, sub, n), v)
+                self.assertNotIn('@', text.replace('#\\@', ''), n)
+
+    def test_numbers(self):
+        v = rb.template_values(1003, 1001, 'cadr')
+        self.assertIn('1003.', rb.render(os.path.join(HERE, 'forms', 'verify.forms'), v))
+        self.assertIn('1001', rb.render(os.path.join(HERE, 'cases', 'ucadr.cases'), v))
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2 if '-v' in sys.argv else 1, argv=[sys.argv[0]] + [a for a in sys.argv[1:] if a != '-v'])

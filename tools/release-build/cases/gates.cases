@@ -1,0 +1,4 @@
+; QLD gates on a saved band: every loaded id dumped to OZ: /lispm/ids.text (compared with the mtimes outside),
+; and what MAKE-SYSTEM would load again (printed, compared outside)
+(q12-dump-ids)
+(make-system 'system :print-only :noconfirm)

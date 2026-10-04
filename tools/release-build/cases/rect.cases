@@ -1,0 +1,14 @@
+; %DRAW-RECTANGLE on a 32 by 4 one-bit array laid over the first four words
+; of an eight-word vector, with a read MAR on a word of it
+(list tv:alu-ior tv:alu-andca tv:alu-xor)
+(progn (defvar *rv*) (defvar *ra*) t) => T
+; %DRAW-RECTANGLE is a misc instruction: only compiled code runs it
+(progn (defun rect-probe (row) (condition-case (e) (progn (si:set-mar (aloc *rv* row) ':read) (system:%draw-rectangle 32 4 0 0 1 *ra*) 'no-trap) (condition (list 'trap (send e ':report-string))))) (compile 'rect-probe) t) => T
+(progn (setq *rv* (make-array 8)) (dotimes (i 8) (aset (+ 10 i) *rv* i)) (%p-contents-offset *rv* 5)) => 14
+(progn (setq *ra* (make-array '(4 32) ':type 'art-1b ':displaced-to (+ (%pointer *rv*) 1))) (array-dimensions *ra*)) => (4 32)
+; control: a MAR on the rectangle's last row traps, so the MAR sees these reads
+(prog1 (rect-probe 3) (si:clear-mar))
+; the word below the rectangle: MIT's code reads it, the fix does not
+(prog1 (rect-probe 4) (si:clear-mar)) => NO-TRAP
+; ALU 1, AND with the mask, leaves every word as it was
+(list (aref *rv* 0) (aref *rv* 3) (aref *rv* 4) (aref *rv* 5)) => (10 13 14 15)

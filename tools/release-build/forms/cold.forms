@@ -1,0 +1,10 @@
+; stage 4 on the builder, rebooted: the COLD system and MAKE-COLD into @COLD@, its
+; question answered (the partition is checked empty before the build)
+(login "LISPM" "OZ" t)
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: SYS; SYSDCL QFASL"))
+(load "SYS: COLD; COLDPK LISP")
+(qc-file "SYS: COLD; COLDUT LISP")
+(qc-file "SYS: COLD; COLDLD LISP")
+(make-system 'cold :noconfirm)
+(or (numberp time:*timezone*) (ferror nil "The builder's time zone is no longer a number"))
+(let ((old (symbol-function 'fquery))) (unwind-protect (progn (fset 'fquery #'(lambda (&rest ignore) t)) (funcall (intern "MAKE-COLD" "COLD") "@COLD@")) (fset 'fquery old)))

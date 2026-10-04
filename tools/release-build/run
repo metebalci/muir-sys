@@ -1,0 +1,1828 @@
+#!/usr/bin/env python3
+"""release-build: build a release of this system from one commit, and check it.
+
+Usage:
+  tools/release-build/run --system N --microcode M --commit SHA
+        --builder PACK --builder-sha256 HEX --builder-ubin DIR
+        --muir-sim PATH[@COMMIT] --ozd PATH[@COMMIT]
+        --ports LO-HI --out DIR [--work DIR] [--repo DIR]
+        [--builder-band LOD1] [--body FILE] [--tag-msg FILE]
+        [--from STEP | --steps STEP,STEP...] [--list]
+
+It does, from the commit alone, what docs/building.md describes for a
+release ("Building System 1003's release" and "Publishing a release", steps
+1 and the checks): it exports the tree with git archive, assembles the
+microcode and the PROM on the builder band twice over and compares, compiles
+the system on the builder band with its MCR1 holding the new microcode,
+makes the cold load, loads it with QLD from a COLDRUN script, saves and
+verifies the band, writes the release pack and the sources tarball, their
+SHA256SUMS (tools/release-sums), scans them (tools/release-scan), and runs
+the gates G1-G5 and the release's checks on the published files: a boot as a
+user would (micro and rtl), lispm-check's suites at 32 and at 60 boards and on
+rtl, the herald at 32, 33, 59 and 60 boards, a save at 60 boards, a keyboard
+cold boot and a warm boot.  Every step is logged under OUT/logs and recorded
+in OUT/record.txt and OUT/record.json: what it ran, on what, how long, and
+what it found.  The assets are in OUT/dist, exactly as they are uploaded;
+nothing is published.
+
+Arguments (each also from the environment, RELEASE_BUILD_ and the option's
+name in capitals with _ for -, e.g. RELEASE_BUILD_BUILDER_SHA256):
+  --system N        the system number, 1NNN the CADR's, 2NNN QUUX's
+  --microcode M     ua:version-number of the microcode assembled from the commit
+  --commit SHA      the release's commit, in the repository --repo (default:
+                    the repository this tool is in)
+  --builder PACK    the band that builds it: the previous release's pack
+  --builder-sha256  that pack's SHA-256, checked before anything else
+  --builder-band    its partition holding the builder band (LOD1)
+  --builder-ubin    the sys/ubin/ of the builder's release (from its sources
+                    tarball): the assemblies boot the builder on its own
+                    microcode, whose ucadr.tbl the cold boot reads
+  --muir-sim, --ozd a git checkout, built at @COMMIT (default its HEAD) from
+                    a git archive into the work directory, or a directory
+                    holding the executables (cadr and diskpack; ozd)
+  --ports LO-HI     at least 700 ports, all free: the machines' and every
+                    lispm-check run's ports are taken from them
+  --out DIR         the record, the logs and dist/ (the assets); a gitignored
+                    directory (run/ in this tree)
+  --work DIR        trees, packs and caches: default
+                    $XDG_CACHE_HOME/release-build/<system>-<commit>
+  --body, --tag-msg the release body and tag message, scanned with the assets
+                    when given
+  --from STEP       run from STEP on, after a run that recorded the steps
+                    before it with the same arguments; --steps runs only those
+  --list            list the steps and stop
+
+The line is the system number's: the CADR's steps are written; QUUX's (its
+disk, PROM and machine) are not yet, and a 2NNN number is refused, naming
+what is missing.  Exit status 0 when every step passed; 1 when one failed,
+with the step and the reason on the last line; 2 for bad arguments.
+
+The tests of its parts are tools/release-build/test.
+"""
+import argparse, datetime, gzip, hashlib, json, os, re, select, shutil, signal
+import socket, struct, subprocess, sys, tarfile, threading, time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOLS = os.path.dirname(HERE)
+OWN_REPO = os.path.dirname(TOOLS)
+
+UT = 2208988800                 # universal time of 1970-01-01T00:00Z
+BLOCK = 1024                    # a CADR disk block: 256 words of 32 bits
+UCADR_FILES = ['ucadr.mcr', 'ucadr.tbl', 'ucadr.locs', 'ucadr.sym']
+PROM_FILES = ['promh.mcr', 'promh.tbl', 'promh.locs', 'promh.sym']
+DIAG_FILES = ['dcfu.uload', 'memd.uload']
+UBIN_FILES = UCADR_FILES + PROM_FILES + DIAG_FILES
+NOTES_DIGESTED = ['ucadr.mcr', 'ucadr.tbl', 'ucadr.locs']
+# Assembled again from the same sources, these are byte for byte the builder
+# release's; the symbol files and the diagnostics' dumps hold symbols in the
+# order of a hash table, which differs with the band that assembles them, so
+# they are recorded, not required.
+PROM_SAME = ['promh.mcr', 'promh.tbl', 'promh.locs']
+PROM_RECORDED = ['promh.sym', 'dcfu.uload', 'memd.uload']
+
+# The date check's fixtures (docs/building.md, gate 5): each file's meaning is
+# its mtime, T (Unix seconds), so they are written here with it, never copied:
+# a copy that does not keep mtimes (cp -r) makes every one of them wrong.
+DATE_FIXTURES = [
+    ('jan', 1768478400), ('apr15', 1776254400), ('apr27', 1777291200),
+    ('jul', 1784116800), ('oct26', 1793016000), ('oct25a', 1792888200),
+    ('oct25b', 1792891800), ('mar2000', 951912000), ('dec2000', 978264000),
+    ('y1970', 0), ('y2099', 4102444799)]
+DATE_SHOWN = 9                  # the first nine are also printed (not a check)
+
+# What differs between the lines.  QUUX's entry is not written: its disk is a
+# VHD, it has its own PROM asset and machine, and its build is main's.
+LINES = {
+    'cadr': {
+        'machine': 'cadr', 'exe_flag': '--cadr', 'image': 'pack',
+        'cold': 'LOD3', 'save': 'LOD4', 'release_band': 'LOD1', 'mcr': 'MCR1',
+        'max_boards': 60, 'board_words': 65536,
+        'site_zone': '(-1 "Europe//Berlin" "CET")',
+        'partitions': ['MCR1', 'MCR2', 'PAGE', 'LOD1', 'LOD2', 'LOD3', 'LOD4'],
+        'herald_boards': [32, 33, 59, 60],
+    },
+}
+
+
+class Fault(Exception):
+    """A step's check failed; the message says what and where."""
+
+
+def slurp(path, mode='r', **kw):
+    with open(path, mode, **kw) as f:
+        return f.read()
+
+
+def spit(path, data, mode='w'):
+    with open(path, mode) as f:
+        f.write(data)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+# --------------------------------------------------------------------------
+# The parts (tools/release-build/test plants a fault in each).
+
+def line_of(system, microcode):
+    """The line a system number belongs to; QUUX's is refused for now."""
+    machine = {1: 'cadr', 2: 'quux'}.get(system // 1000)
+    if machine is None:
+        raise Fault('System %d: the CADR\'s numbers are 1NNN and QUUX\'s 2NNN' % system)
+    if microcode // 1000 != system // 1000:
+        raise Fault('microcode %d is not the %s\'s (System %d): the numbers go by machine'
+                    % (microcode, {'cadr': 'CADR', 'quux': 'QUUX'}[machine], system))
+    if machine not in LINES:
+        raise Fault('System %d is QUUX\'s: this builder\'s QUUX steps are not written yet '
+                    '(its VHD disk, its PROM asset and the quux machine; LINES has no "quux")' % system)
+    return machine
+
+
+def port_plan(lo, hi):
+    """Disjoint port ranges for everything one build starts: four for each
+    machine it drives, and fifty for each lispm-check run that can be going
+    at the same time."""
+    if hi - lo + 1 < 700:
+        raise Fault('--ports %d-%d: need at least 700 ports' % (lo, hi))
+    plan = {'build': (lo, lo + 3), 'hand': (lo + 10, lo + 13),
+            'boot-micro': (lo + 20, lo + 23), 'boot-rtl': (lo + 30, lo + 33)}
+    slots = ['asm-ucadr-1', 'asm-ucadr-2', 'asm-prom', 'asm-dcfu', 'asm-memd', 'gates',
+             'lane-A', 'lane-B', 'lane-C', 'lane-D', 'lane-H']
+    for i, s in enumerate(slots):
+        plan[s] = (lo + 100 + 50 * i, lo + 149 + 50 * i)
+    return plan
+
+
+def busy_ports(lo, hi):
+    """The ports in lo-hi on which 127.0.0.1 cannot bind TCP or UDP now."""
+    busy = []
+    for p in range(lo, hi + 1):
+        for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+            s = socket.socket(socket.AF_INET, kind)
+            try:
+                s.bind(('127.0.0.1', p))
+            except OSError:
+                busy.append(p)
+                break
+            finally:
+                s.close()
+    return busy
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def check_digest(path, want, what):
+    got = sha256_file(path)
+    if got != want.lower():
+        raise Fault('%s %s: SHA-256 %s, not %s' % (what, path, got, want))
+    return got
+
+
+def export_tree(repo, commit, dest):
+    """git archive of COMMIT into DEST, and the empty sys/ubin/ an exported
+    tree needs: the assembler writes there and makes no directory, and Git
+    keeps none (docs/building.md, Assembling the microcode)."""
+    if os.path.exists(dest):
+        shutil.rmtree(dest)
+    os.makedirs(dest)
+    a = subprocess.run(['git', '-C', repo, 'archive', '--format=tar', commit],
+                       check=True, capture_output=True).stdout
+    r = subprocess.run(['tar', '-x', '-C', dest], input=a, capture_output=True)
+    if r.returncode:
+        raise Fault('tar -x into %s: %s' % (dest, r.stderr.decode(errors='replace')))
+    os.makedirs(os.path.join(dest, 'sys', 'ubin'))
+    return dest
+
+
+def check_asm_tree(tree):
+    u = os.path.join(tree, 'sys', 'ubin')
+    if not os.path.isdir(u):
+        raise Fault('%s has no sys/ubin/: DCFU and MEMD stop at "Directory not found for '
+                    'SYS: UBIN; ..." without it' % tree)
+    if os.listdir(u):
+        raise Fault('%s/sys/ubin/ is not empty (%s): an exported tree has none'
+                    % (tree, ', '.join(sorted(os.listdir(u))[:4])))
+
+
+def write_date_fixtures(d):
+    os.makedirs(d, exist_ok=True)
+    for name, t in DATE_FIXTURES:
+        p = os.path.join(d, name + '.text')
+        with open(p, 'w') as f:
+            f.write(('q12 %s\n' if name.startswith('y') else 'q12 date check %s\n') % name)
+        os.utime(p, (t, t))
+
+
+def check_date_fixtures(d):
+    problems = []
+    for name, t in DATE_FIXTURES:
+        p = os.path.join(d, name + '.text')
+        if not os.path.exists(p):
+            problems.append('%s.text missing from %s' % (name, d))
+        elif int(os.stat(p).st_mtime) != t:
+            problems.append('%s.text mtime %d, not %d' % (name, int(os.stat(p).st_mtime), t))
+    return problems
+
+
+def dates_cases(site, zone='(-1 "Europe//Berlin" "CET")'):
+    """The date check's cases (Q12 1.11, docs/release-1002.md): at the band's
+    own site or at a fixed -1, host to band (the listed date of each fixture)
+    and band to host (a date set and listed back; the host's mtime is checked
+    outside)."""
+    out = ['; the date check, generated by tools/release-build/run from DATE_FIXTURES']
+    if site == 'berlin':
+        out += ['; the band\'s own site', '(list time:*timezone* time:*timezone-name* (car time:*timezone-rule*)) => ' + zone]
+    elif site == 'm1':
+        out += ['; the site at -1: a fixed offset, no summer time',
+                "(progn (push '(:timezone . -1) si:site-option-alist) (time:set-timezone-from-site)"
+                ' (list time:*timezone* time:*timezone-name* time:*timezone-rule*)) => (-1 NIL NIL)']
+    else:
+        raise Fault('no date site %r' % site)
+    out.append('; host to band: the listed :creation-date of a file whose mtime is T, less T + %d' % UT)
+    for name, t in DATE_FIXTURES:
+        out.append('(- (q12-listed-date "%s") %d) => 0' % (name, t + UT))
+    out.append('; band to host: set the creation date to T + %d; the listing reads it back' % UT)
+    for name, t in DATE_FIXTURES:
+        out.append('(- (q12-set-date "%s" %d) %d) => 0' % (name, t + UT, t + UT))
+    out.append('; the local display of each instant (not a check)')
+    for name, t in DATE_FIXTURES[:DATE_SHOWN]:
+        out.append('(time:print-universal-time %d nil)' % (t + UT))
+    return '\n'.join(out) + '\n'
+
+
+def compare_files(a, b, names):
+    """The names whose files differ between directories a and b, or are
+    missing from either."""
+    bad = []
+    for n in names:
+        pa, pb = os.path.join(a, n), os.path.join(b, n)
+        if not (os.path.isfile(pa) and os.path.isfile(pb)):
+            bad.append(n)
+        elif slurp(pa, 'rb') != slurp(pb, 'rb'):
+            bad.append(n)
+    return bad
+
+
+def notes_digests(path):
+    """The last SHA-256 the release notes give for each of the microcode's
+    files: the notes give each change's digests in turn, the release's last."""
+    text = slurp(path, encoding='utf-8', errors='replace')
+    found = {}
+    for m in re.finditer(r'`(ucadr\.(?:mcr|tbl|locs))`\s+`([0-9a-f]{64})`', text):
+        found[m.group(1)] = m.group(2)
+    missing = [n for n in NOTES_DIGESTED if n not in found]
+    if missing:
+        raise Fault('%s gives no SHA-256 for %s' % (path, ', '.join(missing)))
+    return found
+
+
+def digest_mismatches(d, want):
+    out = []
+    for n, w in sorted(want.items()):
+        p = os.path.join(d, n)
+        g = sha256_file(p) if os.path.exists(p) else 'missing'
+        if g != w:
+            out.append((n, g, w))
+    return out
+
+
+def root_owned(ti):
+    ti.uid = ti.gid = 0
+    ti.uname = ti.gname = 'root'
+    return ti
+
+
+def gzip_file(src, dst):
+    """gzip as the releases are: Python's gzip at level 9, no name, no date
+    (docs/building.md: gzip -9 -n writes other bytes)."""
+    with open(src, 'rb') as s, open(dst, 'wb') as o:
+        with gzip.GzipFile(filename='', mode='wb', fileobj=o, mtime=0) as g:
+            shutil.copyfileobj(s, g, 1 << 20)
+
+
+def make_sources(repo, commit, ubin, out_gz, top):
+    """The sources tarball: git archive --prefix=TOP/ COMMIT plus sys/ubin/,
+    every member root's, and no COLDRUN."""
+    tar = out_gz + '.tar.tmp'
+    try:
+        subprocess.run(['git', '-C', repo, 'archive', '--format=tar', '--prefix=' + top + '/',
+                        '--output=' + os.path.abspath(tar), commit], check=True, capture_output=True)
+        with tarfile.open(tar, 'a') as t:
+            t.add(ubin, arcname=top + '/sys/ubin', filter=root_owned)
+        gzip_file(tar, out_gz)
+    finally:
+        if os.path.exists(tar):
+            os.remove(tar)
+    return out_gz
+
+
+def check_sources(gz, top):
+    problems = []
+    with open(gz, 'rb') as f:
+        h = f.read(10)
+    if h[:2] != b'\x1f\x8b':
+        return ['%s is not gzip' % gz]
+    if h[3] != 0 or h[4:8] != bytes(4):
+        problems.append('gzip header carries a name or a date (flags %d, mtime %d)'
+                        % (h[3], struct.unpack('<I', h[4:8])[0]))
+    with tarfile.open(gz) as t:
+        members = t.getmembers()
+    names = [m.name for m in members]
+    owners = ['%s %d/%d %s/%s' % (m.name, m.uid, m.gid, m.uname, m.gname) for m in members
+              if (m.uid, m.gid, m.uname, m.gname) != (0, 0, 'root', 'root')]
+    if owners:
+        problems.append('owner not root: %d members, first %s' % (len(owners), owners[0]))
+    tops = sorted(set(n.split('/')[0] for n in names))
+    if tops != [top]:
+        problems.append('top directories %s, not %s' % (tops, top))
+    cold = [n for n in names if 'coldrun' in n.lower()]
+    if cold:
+        problems.append('coldrun in the sources: %s' % cold[0])
+    ub = sorted(m.name.split('/sys/ubin/', 1)[1] for m in members
+                if m.isfile() and m.name.startswith(top + '/sys/ubin/'))
+    if ub != sorted(UBIN_FILES):
+        problems.append('sys/ubin holds %s, not %s' % (ub, sorted(UBIN_FILES)))
+    if top + '/site/site.lisp' not in names:
+        problems.append('no %s/site/site.lisp' % top)
+    return problems
+
+
+def diskpack(dp, pack, *args):
+    r = subprocess.run([dp, pack, *args], capture_output=True, text=True)
+    if r.returncode:
+        raise Fault('diskpack %s %s: %s' % (pack, ' '.join(args), (r.stderr or r.stdout).strip()))
+    return r.stdout
+
+
+def partitions(dp, pack):
+    """name -> (first block, blocks, comment), and the current marks, from diskpack show."""
+    parts = {}
+    for m in re.finditer(r'^(\*?)\s*(\w+) at block\s+(\d+),\s+(\d+) blocks long, "(.*)"$',
+                         diskpack(dp, pack, 'show'), re.M):
+        parts[m.group(2)] = (int(m.group(3)), int(m.group(4)), m.group(5))
+    return parts
+
+
+def write_release_pack(dp, build_pack, build_part, mcr, out, system, microcode):
+    """The release pack (docs/building.md, Writing a release pack): muir's
+    default layout with the microcode in MCR1 and the saved band in LOD1."""
+    if os.path.exists(out):
+        raise Fault('%s exists: a release pack is written once' % out)
+    diskpack(dp, out, 'initialize')
+    diskpack(dp, out, 'name', 'LISPM-1')
+    diskpack(dp, out, 'comment', 'System %d' % system)
+    diskpack(dp, out, 'load', 'MCR1', mcr)
+    diskpack(dp, out, 'modify', 'MCR1', 'keep', 'UCADR %d' % microcode)
+    diskpack(dp, out, 'load-from', 'LOD1', build_pack, build_part)
+    diskpack(dp, out, 'modify', 'LOD1', 'keep', 'Exp %d' % system)
+    diskpack(dp, out, 'current', 'LOD1')
+    diskpack(dp, out, 'current', 'MCR1')
+    os.chmod(out, 0o444)
+    return out
+
+
+def read_region(path, start_block, blocks):
+    with open(path, 'rb') as f:
+        f.seek(start_block * BLOCK)
+        return f.read(blocks * BLOCK)
+
+
+def check_release_pack(dp, pack, build_pack, build_part, mcr):
+    """The pack begins LABL; MCR1 holds the microcode as diskpack loads it;
+    LOD1 is the build pack's saved band block for block; every other byte past
+    the label, every other partition and the free blocks, is zero."""
+    problems = []
+    with open(pack, 'rb') as f:
+        if f.read(4) != b'LABL':
+            problems.append('the pack does not begin LABL')
+    parts = partitions(dp, pack)
+    want = LINES['cadr']['partitions']
+    if sorted(parts) != sorted(want):
+        problems.append('partitions %s, not %s' % (sorted(parts), sorted(want)))
+        return problems
+    # diskpack writes the control store's words, not the file: compare with
+    # MCR1 of a scratch pack that diskpack loaded from the same file
+    ref = pack + '.mcr-reference'
+    try:
+        diskpack(dp, ref, 'initialize')
+        diskpack(dp, ref, 'load', 'MCR1', mcr)
+        s, n, _ = parts['MCR1']
+        rs, rn, _ = partitions(dp, ref)['MCR1']
+        if read_region(pack, s, n) != read_region(ref, rs, rn):
+            problems.append('MCR1 is not %s as diskpack loads it' % os.path.basename(mcr))
+    finally:
+        if os.path.exists(ref):
+            os.remove(ref)
+    bparts = partitions(dp, build_pack)
+    s, n, _ = parts['LOD1']
+    bs, bn, _ = bparts[build_part]
+    if n != bn or read_region(pack, s, n) != read_region(build_pack, bs, bn):
+        problems.append('LOD1 differs from the build pack\'s %s' % build_part)
+    # every other block past the label
+    keep = sorted((parts[p][0], parts[p][0] + parts[p][1]) for p in ('MCR1', 'LOD1'))
+    first = min(p[0] for p in parts.values())
+    size = os.path.getsize(pack)
+    names = sorted((v[0], v[0] + v[1], k) for k, v in parts.items())
+    with open(pack, 'rb') as f:
+        pos = first * BLOCK
+        for a, b in keep + [(size // BLOCK, size // BLOCK)]:
+            end = a * BLOCK
+            f.seek(pos)
+            while pos < end:
+                chunk = f.read(min(1 << 22, end - pos))
+                if not chunk:
+                    break
+                if any(chunk):
+                    i = next(k for k, c in enumerate(chunk) if c)
+                    blk = (pos + i) // BLOCK
+                    where = next((nm for x, y, nm in names if x <= blk < y), 'the free blocks')
+                    problems.append('%s is not empty (block %d)' % (where, blk))
+                    pos = end
+                    break
+                pos += len(chunk)
+            pos = b * BLOCK
+    return problems
+
+
+def gates_from_log(log, offset, sysdcl):
+    """G1 and G2 from ozd's log of the build machine, from the cold boot on."""
+    after = log[offset:].decode('latin-1').splitlines()
+    block = re.search(r'\(DEFCONST COLD-LOAD-FILE-LIST(.*?)\)\)', sysdcl, re.S | re.I)
+    if not block:
+        raise Fault('no COLD-LOAD-FILE-LIST in sys/sys/sysdcl.lisp')
+    names = []
+    for line in block.group(1).splitlines():
+        if line.lstrip().startswith(';'):
+            continue
+        for d, f in re.findall(r'"SYS: ([A-Z0-9-]+); ([A-Z0-9-]+) QFASL >"', line, re.I):
+            names.append('/sys/%s/%s.qfasl' % (d.lower(), f.lower()))
+    names += ['/sys/io/rdtbl.qfasl', '/sys/io/crdtbl.qfasl']
+    again = []
+    for l in after:
+        m = re.search(r' read (\S+)$', l)
+        if m and m.group(1) in names:
+            again.append(l)
+    g1 = ('G1', not again, '%d files watched (%d of COLD-LOAD-FILE-LIST, RDTBL, CRDTBL); read again '
+          'after the cold boot: %d%s' % (len(names), len(names) - 2, len(again),
+                                         ('; first: ' + again[0]) if again else ''))
+    qc = any('report: qld-complete' in l for l in after)
+    se = any('report: script-ends' in l for l in after)
+    return [g1, ('G2', qc and se, 'qld-complete %s, script-ends %s' % (qc, se))]
+
+
+def gate_ids(lines, tree):
+    """G3: no loaded id's date is text, and every numeric one is its file's
+    mtime plus UT."""
+    text, wrong, gone = [], [], []
+    for l in lines:
+        if not l.strip():
+            continue
+        name, rec = l.split('\t', 1)
+        if rec.startswith('text '):
+            text.append(l)
+            continue
+        path = os.path.join(tree, name.split(': /', 1)[1]) if ': /' in name else None
+        if not path or not os.path.exists(path):
+            gone.append(name)
+            continue
+        m = int(os.stat(path).st_mtime) + UT
+        if int(rec) != m:
+            wrong.append('%s %s, mtime+UT %d' % (name, rec, m))
+    ok = not text and not wrong and len(lines) > 0
+    return ok, ('%d ids; text %d%s; numeric not mtime+%d %d%s; not in the tree %s'
+                % (len(lines), len(text), (' (' + text[0] + ')') if text else '', UT, len(wrong),
+                   (' (' + wrong[0] + ')') if wrong else '', gone))
+
+
+# (%div 0 0) returns 0 rather than signalling (MIT's; docs/release-1002.md,
+# Known faults): the one line the division check lets pass.
+KNOWN_DIV = {'DIV 0 0 0 1'}
+
+
+def verify_div(text):
+    from fractions import Fraction
+    n = errs = 0
+    bad, known, done = [], [], False
+    for line in text.splitlines():
+        p = line.split()
+        if not p:
+            continue
+        if p == ['done']:
+            done = True
+            continue
+        op, a, b = p[0], int(p[1]), int(p[2])
+        n += 1
+        if p[3] == 'ERR':
+            if b != 0:
+                bad.append('unexpected error: ' + line)
+            else:
+                errs += 1
+            continue
+        if b == 0:
+            (known if line.strip() in KNOWN_DIV else bad).append('no error for a zero divisor: ' + line)
+            continue
+        q, r = int(p[3]), int(p[4])
+        if op == 'TRUNCATE':
+            eq = abs(a) // abs(b) * (1 if (a >= 0) == (b > 0) else -1)
+            er = a - eq * b
+        elif op == 'FLOOR':
+            eq, er = a // b, a % b
+        elif op == 'CEILING':
+            eq = -((-a) // b)
+            er = a - eq * b
+        elif op == 'DIV':
+            f = Fraction(a, b)
+            eq, er = f.numerator, f.denominator
+        else:
+            bad.append('unknown operation: ' + line)
+            continue
+        if (q, r) != (eq, er):
+            bad.append('wrong: %s, expected %d %d' % (line, eq, er))
+    ok = done and not bad and n > 0
+    return ok, ('cases %d, zero-divisor errors %d, wrong %d%s; listed fault %s; done line %s'
+                % (n, errs, len(bad), (' (' + bad[0] + ')') if bad else '', known or 'not met', done))
+
+
+def verify_arith(text):
+    import math
+    n = zl = 0
+    bad, done = [], False
+    for line in text.splitlines():
+        if line.strip() == 'done':
+            done = True
+        m = re.match(r'(\S+) (-?\d+) (-?\d+) => \((.*)\)$', line.strip())
+        if not m:
+            continue
+        op, a, b, v = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+        if op not in ('*', 'TRUNCATE', 'REM', 'GCD'):
+            continue
+        n += 1
+        if op == 'REM' and 'called with only 2 arguments' in v:
+            zl += 1           # ZL's REM is (rem pred item list): the same on every band
+            continue
+        if v.startswith('ERROR'):
+            if b != 0 or op in ('*', 'GCD'):
+                bad.append('unexpected error: ' + line)
+            continue
+        got = [int(x) for x in v.split()]
+        if op == '*':
+            exp = [a * b]
+        elif op == 'GCD':
+            exp = [math.gcd(a, b)]
+        else:
+            q = abs(a) // abs(b) * (1 if (a >= 0) == (b > 0) else -1)
+            exp = [q, a - q * b] if op == 'TRUNCATE' else [a - q * b]
+        if got != exp:
+            bad.append('wrong: %s, expected %s' % (line, exp))
+    ok = done and not bad and n > 0
+    return ok, ('checked %d, wrong %d%s, ZL REM lines skipped %d, done line %s'
+                % (n, len(bad), (' (' + bad[0] + ')') if bad else '', zl, done))
+
+
+def ucode_files(tree):
+    """The microcode's source files, in order, from sys/ucadr/ucode.lisp."""
+    text = slurp(os.path.join(tree, 'sys', 'ucadr', 'ucode.lisp'), encoding='latin-1')
+    m = re.search(r'\(:MICRO-ASSEMBLE\s*\((.*?)\)', text, re.S | re.I)
+    if not m:
+        raise Fault('no :MICRO-ASSEMBLE list in sys/ucadr/ucode.lisp')
+    body = '\n'.join(l.split(';', 1)[0] for l in m.group(1).splitlines())
+    return re.findall(r'"([A-Z0-9-]+)"', body, re.I)
+
+
+def template_values(system, microcode, line, tree=OWN_REPO):
+    L = LINES[line]
+    mb = L['max_boards']
+    return {'SYSTEM': str(system), 'MICROCODE': str(microcode), 'COLD': L['cold'],
+            'SAVE': L['save'], 'SAVECHAR': L['save'][-1], 'MAXBOARDS': str(mb),
+            'MAXWORDS': str(mb * L['board_words']), 'MAXK': str(mb * L['board_words'] // 1024),
+            'UCFILES': ' '.join('"SYS: UCADR; %s LISP"' % f.upper() for f in ucode_files(tree)),
+            # the herald's case, filled for each board count
+            'BOARDS': '32', 'KWORDS': str(32 * L['board_words'] // 1024), 'HINT': '(T T)'}
+
+
+def render(path, values, **extra):
+    text = slurp(path)
+    v = dict(values, **extra)
+    for k, x in v.items():
+        text = text.replace('@%s@' % k, str(x))
+    left = re.findall(r'@[A-Z]+@', text)
+    if left:
+        raise Fault('%s: %s not filled' % (path, ', '.join(sorted(set(left)))))
+    return text
+
+
+# --------------------------------------------------------------------------
+# Driving a machine: TELNET forms, the RFB keyboard, start and stop.
+
+def telnet_forms(port, forms, logpath, per_form=14400):
+    """Send each form over ozd's TELNET gateway and wait for a marker printed
+    after it.  The debugger (>>ERROR or >>TRAP at a line's start) stops the
+    run.  True if every form completed."""
+    log = open(logpath, 'a', buffering=1)
+    try:
+        s = socket.create_connection(('127.0.0.1', port), timeout=30)
+    except OSError as e:
+        log.write('\n*** no connection: %s ***\n' % e)
+        log.close()
+        return False
+    s.settimeout(30)
+    buf = ''
+
+    def drain(until, deadline):
+        nonlocal buf
+        while True:
+            # a marker echoed inside FORMAT is not completion: the echoed form
+            # has ~% after the marker, the output does not (System 1000's ~%
+            # starts no line, so no line anchor)
+            if (re.search(re.escape(until) + r'[^~]', buf) if until.startswith('STAGE-') else until in buf):
+                return True
+            if time.time() > deadline:
+                log.write('\n*** TIMEOUT waiting for %s ***\n' % until)
+                return False
+            try:
+                data = s.recv(4096).decode('latin-1')
+            except socket.timeout:
+                continue
+            except OSError as e:
+                log.write('\n*** %s ***\n' % e)
+                return False
+            if not data:
+                log.write('\n*** connection closed ***\n')
+                return False
+            buf += data
+            log.write(data)
+            m = re.search(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)', buf)
+            if m:
+                log.write('\n*** ERROR: %s ***\n' % m.group(1).strip())
+                return False
+    try:
+        time.sleep(3)
+        if not drain('Telnet server here', time.time() + 60):
+            return False
+        for i, form in enumerate(forms):
+            mark = 'STAGE-%d-DONE' % i
+            log.write('\n=== [%s] %s\n' % (time.strftime('%H:%M:%S'), form[:120]))
+            buf = ''
+            s.sendall((form + '\r\n').encode('latin-1'))
+            time.sleep(1)
+            s.sendall(('(format t "~%%%s~%%")\r\n' % mark).encode('latin-1'))
+            if not drain(mark, time.time() + per_form):
+                log.write('\n*** stopping at form %d ***\n' % i)
+                return False
+            log.write('\n=== [%s] done\n' % time.strftime('%H:%M:%S'))
+        return True
+    finally:
+        s.close()
+        log.close()
+
+
+def run_forms(port, text, logpath, tries=40, per_form=14400, pause=15):
+    """telnet_forms, again every PAUSE seconds while the machine boots (its
+    TELNET server is not up yet), but not after a form has failed."""
+    forms = [l.rstrip('\n') for l in text.splitlines() if l.strip() and not l.lstrip().startswith(';')]
+    for i in range(tries):
+        start = os.path.getsize(logpath) if os.path.exists(logpath) else 0
+        if telnet_forms(port, forms, logpath, per_form):
+            return True
+        with open(logpath, 'rb') as f:
+            f.seek(start)
+            if b'stopping at form' in f.read():
+                return False
+        time.sleep(pause)
+    return False
+
+
+KEYSYMS = {'Control_L': 0xffe3, 'Alt_L': 0xffe9, 'Return': 0xff0d, 'Delete': 0xffff}
+
+
+def rfb_connect(port):
+    s = socket.create_connection(('127.0.0.1', port), timeout=30)
+
+    def need(n):
+        b = b''
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise Fault('RFB on %d closed' % port)
+            b += c
+        return b
+    need(12)
+    s.sendall(b'RFB 003.008\n')
+    n = need(1)[0]
+    if n == 0:
+        raise Fault('RFB refused')
+    if 1 not in need(n):
+        raise Fault('RFB offers no None security')
+    s.sendall(b'\x01')
+    if struct.unpack('>I', need(4))[0]:
+        raise Fault('RFB security failed')
+    s.sendall(b'\x01')                     # shared
+    need(4); need(16); need(struct.unpack('>I', need(4))[0])
+    return s
+
+
+def rfb_chord(port, keys):
+    """Press KEYS in order, release them in reverse (Control Meta Return)."""
+    s = rfb_connect(port)
+    ks = [KEYSYMS[k] for k in keys]
+    for k in ks:
+        s.sendall(struct.pack('>BBxxI', 4, 1, k)); time.sleep(0.2)
+    time.sleep(0.5)
+    for k in reversed(ks):
+        s.sendall(struct.pack('>BBxxI', 4, 0, k)); time.sleep(0.2)
+    time.sleep(1)
+    s.close()
+
+
+def rfb_type(port, text):
+    """Type TEXT and Return at the console, slowly: a cold load's wired
+    keyboard buffer is small."""
+    s = rfb_connect(port)
+    for ch in list(text) + [None]:
+        k = 0xff0d if ch is None else ord(ch)
+        for down in (1, 0):
+            s.sendall(struct.pack('>BBxxI', 4, down, k)); time.sleep(0.03)
+        time.sleep(0.15)
+    time.sleep(1)
+    s.close()
+
+
+class Machine:
+    """ozd and the machine, in their own directory with their own ports:
+    machine.json records the commands and the process IDs."""
+
+    def __init__(self, d, bins, ports, tree, engine='micro', extra=(), ozd_extra=(), pack='pack.img'):
+        self.d, self.bins, self.tree, self.engine = d, bins, tree, engine
+        self.telnet, self.rfb, self.ozd_udp, self.muir_udp = range(ports[0], ports[0] + 4)
+        self.extra, self.ozd_extra, self.pack = list(extra), list(ozd_extra), os.path.join(d, pack)
+        self.ozd = self.muir = None
+        os.makedirs(os.path.join(d, 'lispm'), exist_ok=True)
+
+    def start(self, tries=6, settle=2.0):
+        """Start ozd and the machine.  A port of ours can be held for a moment
+        by another program's connection (the build's range may lie inside the
+        kernel's ephemeral ports), and then ozd or the machine exits at once
+        with "Address already in use": stop both and start again, a few
+        times."""
+        for i in range(tries):
+            logs = [os.path.join(self.d, n) for n in ('ozd.log', 'muir.log')]
+            sizes = [os.path.getsize(l) if os.path.exists(l) else 0 for l in logs]
+            self.start_once()
+            time.sleep(settle)
+            if self.ozd.poll() is None and self.muir.poll() is None:
+                return
+            said = ''
+            for l, s in zip(logs, sizes):
+                with open(l, 'rb') as f:
+                    f.seek(s)
+                    said += f.read().decode('latin-1')
+            self.stop()
+            if 'Address already in use' not in said:
+                raise Fault('machine %s did not start: %s' % (self.d, said.strip()[-300:]))
+            time.sleep(5)
+        raise Fault('machine %s: its ports stayed in use (%d tries)' % (self.d, tries))
+
+    def start_once(self):
+        if self.muir and self.muir.poll() is None:
+            raise Fault('machine %s is running' % self.d)
+        ozd = [self.bins['ozd'], '-c', '/dev/null', '--address', '177200', '--name', 'OZ,system=UNIX',
+               '--listen', '127.0.0.1:%d' % self.ozd_udp,
+               '--root', 'sys=%s' % os.path.join(self.tree, 'sys'),
+               '--root', 'site=%s' % os.path.join(self.tree, 'site'),
+               '--root', 'lispm=%s' % os.path.join(self.d, 'lispm'),
+               '--host', '177201,LISPM-1,system=LISPM', '--peer', '177201@127.0.0.1:%d' % self.muir_udp,
+               '--tcp', '127.0.0.1:%d,TELNET@177201' % self.telnet,
+               '--log-file', '--log-simple', '--log-mini', '--log-tcp', *self.ozd_extra]
+        muir = [self.bins['cadr'], '-c', '/dev/null', '--' + self.engine, *self.extra,
+                '--disk-pack', self.pack, '--chaos-address', '177201',
+                '--chaos-udp', '127.0.0.1:%d' % self.muir_udp,
+                '--chaos-udp-peer', '177200@127.0.0.1:%d' % self.ozd_udp,
+                '--chaos-udp-default-peer', '127.0.0.1:%d' % self.ozd_udp,
+                '--terminal', '127.0.0.1:%d' % self.rfb, '--no-debug-cable-listen']
+        with open(os.path.join(self.d, 'ozd.log'), 'ab', buffering=0) as out:
+            self.ozd = subprocess.Popen(ozd, cwd=self.d, stdin=subprocess.DEVNULL, stdout=out,
+                                        stderr=out, start_new_session=True)
+        with open(os.path.join(self.d, 'muir.log'), 'ab', buffering=0) as out:
+            self.muir = subprocess.Popen(muir, cwd=self.d, stdin=subprocess.PIPE, stdout=out,
+                                         stderr=out, start_new_session=True)
+        with open(os.path.join(self.d, 'machine.json'), 'w') as f:
+            json.dump({'ozd': ozd, 'muir': muir, 'pids': {'ozd': self.ozd.pid, 'muir': self.muir.pid},
+                       'started': now()}, f, indent=1)
+        RUNNING.add(self)
+
+    def command(self, line):
+        if self.muir and self.muir.poll() is None:
+            self.muir.stdin.write((line + '\n').encode())
+            self.muir.stdin.flush()
+
+    def stop(self):
+        if self.muir and self.muir.poll() is None:
+            try:
+                self.command('quit')
+                self.muir.wait(20)
+            except (subprocess.TimeoutExpired, BrokenPipeError, OSError):
+                self.muir.terminate()
+                try:
+                    self.muir.wait(10)
+                except subprocess.TimeoutExpired:
+                    self.muir.kill()
+        if self.ozd and self.ozd.poll() is None:
+            self.ozd.terminate()
+            try:
+                self.ozd.wait(10)
+            except subprocess.TimeoutExpired:
+                self.ozd.kill()
+        RUNNING.discard(self)
+
+
+RUNNING = set()
+
+
+def stop_all(*_):
+    for m in list(RUNNING):
+        m.stop()
+
+
+def watch_qld(ozd_log, offset, deadline):
+    seen = False
+    while time.time() < deadline:
+        with open(ozd_log, 'rb') as f:
+            f.seek(offset)
+            text = f.read().decode('latin-1')
+        for line in text.splitlines():
+            if 'report: qld-complete' in line:
+                seen = True
+            if 'report: script-ends' in line:
+                return seen, 'script ended, qld-complete seen: %s' % seen
+        time.sleep(20)
+    return False, 'timed out'
+
+
+# --------------------------------------------------------------------------
+# The build: its arguments, directories, record and steps.
+
+class Build:
+    def __init__(self, a):
+        self.a = a
+        self.line = line_of(a.system, a.microcode)
+        self.L = LINES[self.line]
+        self.top = 'release-%d' % a.system
+        self.out = os.path.abspath(a.out)
+        self.logs = os.path.join(self.out, 'logs')
+        self.dist = os.path.join(self.out, 'dist')
+        self.repo = os.path.abspath(a.repo)
+        self.work = None
+        self.ports = None
+        self.rec_path = os.path.join(self.out, 'record.json')
+        self.txt_path = os.path.join(self.out, 'record.txt')
+        self.rec = json.loads(slurp(self.rec_path)) if os.path.exists(self.rec_path) else {}
+        self.lock = threading.Lock()
+
+    # paths --------------------------------------------------------------
+    def w(self, *p):
+        return os.path.join(self.work, *p)
+
+    def log(self, name):
+        return os.path.join(self.logs, name)
+
+    def tool(self, name):
+        return os.path.join(TOOLS, name)
+
+    @property
+    def bins(self):
+        return {k: self.w('bin', k) for k in ('cadr', 'diskpack', 'ozd')}
+
+    def exe(self, boards=None):
+        return self.w('bin', 'cadr-%d' % boards) if boards else self.w('bin', 'cadr')
+
+    # the record ---------------------------------------------------------
+    def say(self, msg):
+        line = '%s %s' % (now(), msg)
+        with self.lock:
+            print(line, flush=True)
+            with open(self.txt_path, 'a') as f:
+                f.write(line + '\n')
+
+    def save(self):
+        with self.lock:
+            tmp = self.rec_path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(self.rec, f, indent=1, sort_keys=False)
+            os.replace(tmp, self.rec_path)
+
+    def note(self, step, **kw):
+        with self.lock:
+            self.rec.setdefault('steps', {}).setdefault(step, {}).update(kw)
+        self.save()
+
+    # running things -----------------------------------------------------
+    def sh(self, cmd, log=None, env=None, cwd=None, check=True, input=None):
+        if log:
+            with open(log, 'a') as f:
+                f.write('$ %s\n' % ' '.join(cmd))
+                f.flush()
+                r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env, cwd=cwd, input=input)
+        else:
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=cwd)
+        if check and r.returncode:
+            raise Fault('%s exited %d%s' % (' '.join(cmd[:3]), r.returncode,
+                                            (' (log %s)' % log) if log else ': ' + (r.stderr or '')[-400:]))
+        return r
+
+    def lispm_check(self, slot, xdg, cases, args, log, exe=None, band=None, tree=None, ubin=None):
+        """One lispm-check run; returns (exit status, run directory kept, summary)."""
+        env = dict(os.environ, XDG_CACHE_HOME=xdg, LISPM_CHECK_PORTS='%d-%d' % self.ports[slot])
+        cmd = [sys.executable, self.tool('lispm-check'), '--band', band, '--ubin', ubin, '--tree', tree,
+               self.L['exe_flag'], exe or self.exe(), '--ozd', self.bins['ozd'], '--file-server', 'ozd',
+               '--keep', *args, cases]
+        with open(log, 'w') as f:
+            f.write('# %s\n$ %s\n' % (now(), ' '.join(cmd)))
+            f.flush()
+            r = subprocess.run(cmd, env=env, stdout=f, stderr=subprocess.STDOUT)
+            f.write('# exit %d, %s\n' % (r.returncode, now()))
+        text = slurp(log, encoding='latin-1')
+        run = re.search(r'run files kept in (\S+)', text)
+        summ = re.search(r'lispm-check: (\d+ passed, \d+ failed, \d+ errors, of \d+)', text)
+        return r.returncode, run.group(1) if run else None, summ.group(1) if summ else 'no summary'
+
+    def write_case(self, name, text):
+        p = self.w('cases', name)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, 'w') as f:
+            f.write(text)
+        return p
+
+    def case(self, name, **extra):
+        return self.write_case(name, render(os.path.join(HERE, 'cases', name), self.values, **extra))
+
+    def forms(self, name, **extra):
+        return render(os.path.join(HERE, 'forms', name), self.values, **extra)
+
+    @property
+    def values(self):
+        return template_values(self.a.system, self.a.microcode, self.line, self.w('asm-tree'))
+
+
+# -- the tools ----------------------------------------------------------------
+
+def resolve_tool(b, spec, names, kind, log):
+    """A git checkout built at a commit (PATH or PATH@COMMIT), or a directory
+    holding the executables.  Copies them into WORK/bin; returns the record."""
+    path, _, commit = spec.partition('@')
+    path = os.path.abspath(os.path.expanduser(path))
+    rec = {'given': kind}
+    is_repo = subprocess.run(['git', '-C', path, 'rev-parse', '--git-dir'], capture_output=True).returncode == 0 \
+        and os.path.exists(os.path.join(path, 'Cargo.toml'))
+    os.makedirs(b.w('bin'), exist_ok=True)
+    if is_repo:
+        sha = b.sh(['git', '-C', path, 'rev-parse', '--verify', (commit or 'HEAD') + '^{commit}']).stdout.strip()
+        src = b.w('src', '%s-%s' % (kind, sha[:12]))
+        if not os.path.isdir(src):
+            os.makedirs(src)
+            a = subprocess.run(['git', '-C', path, 'archive', '--format=tar', sha], check=True,
+                               capture_output=True).stdout
+            subprocess.run(['tar', '-x', '-C', src], input=a, check=True)
+        env = dict(os.environ, CARGO_TARGET_DIR=b.w('target-' + kind))
+        b.sh(['cargo', 'build', '--release', '--locked'] + sum((['--bin', n] for n in names), []),
+             log=log, env=env, cwd=src)
+        for n in names:
+            shutil.copy2(os.path.join(b.w('target-' + kind), 'release', n), b.w('bin', n))
+        rec.update(commit=sha, built_from='git archive of the commit, cargo build --release --locked')
+    else:
+        for n in names:
+            p = os.path.join(path, n)
+            if not os.access(p, os.X_OK):
+                raise Fault('--%s %s: no executable %s, and not a git checkout' % (kind, path, n))
+            shutil.copy2(p, b.w('bin', n))
+        rec.update(commit=commit or 'not given (executables given)')
+    rec['sha256'] = {n: sha256_file(b.w('bin', n)) for n in names}
+    return rec
+
+
+# -- the steps ----------------------------------------------------------------
+
+def step_inputs(b):
+    a = b.a
+    st = {}
+    st['commit'] = b.sh(['git', '-C', b.repo, 'rev-parse', '--verify', a.commit + '^{commit}']).stdout.strip()
+    st['subject'] = b.sh(['git', '-C', b.repo, 'log', '-1', '--format=%s', st['commit']]).stdout.strip()
+    busy = busy_ports(*b.a.port_range)
+    if busy:
+        raise Fault('ports in use in %d-%d: %s' % (*b.a.port_range, busy[:10]))
+    for d in (b.work, b.out):
+        u = shutil.disk_usage(d)
+        if u.used / u.total > 0.9 or u.free < 10 << 30:
+            raise Fault('%s: %.0f%% used, %d GB free; a build needs 10 GB and the disk under 90%%'
+                        % (d, 100 * u.used / u.total, u.free >> 30))
+        st.setdefault('disk', {})[d] = '%d GB free' % (u.free >> 30)
+    st['builder'] = {'pack': os.path.abspath(a.builder), 'band': a.builder_band,
+                     'sha256': check_digest(a.builder, a.builder_sha256, 'the builder')}
+    if not os.path.isfile(os.path.join(a.builder_ubin, 'ucadr.tbl')):
+        raise Fault('--builder-ubin %s has no ucadr.tbl' % a.builder_ubin)
+    st['builder']['ubin'] = {n: sha256_file(os.path.join(a.builder_ubin, n))
+                             for n in sorted(os.listdir(a.builder_ubin))}
+    st['muir-sim'] = resolve_tool(b, a.muir_sim, ['cadr', 'diskpack'], 'muir-sim', b.log('tools-build.log'))
+    st['ozd'] = resolve_tool(b, a.ozd, ['ozd'], 'ozd', b.log('tools-build.log'))
+    parts = partitions(b.bins['diskpack'], a.builder)
+    if a.builder_band not in parts:
+        raise Fault('the builder has no %s' % a.builder_band)
+    st['builder']['label'] = '%s "%s"' % (a.builder_band, parts[a.builder_band][2])
+    # the machine at a number of memory boards, for lispm-check's --cadr
+    for n in sorted(set(b.L['herald_boards'] + [32, b.L['max_boards']])):
+        p = b.exe(n)
+        with open(p, 'w') as f:
+            f.write('#!/bin/sh\nexec "%s" --main-memory-boards %d "$@"\n' % (b.w('bin', 'cadr'), n))
+        os.chmod(p, 0o755)
+    st['ports'] = '%d-%d' % b.a.port_range
+    try:
+        lo, hi = (int(x) for x in slurp('/proc/sys/net/ipv4/ip_local_port_range').split())
+        if b.a.port_range[0] <= hi and b.a.port_range[1] >= lo:
+            st['ports note'] = ('inside the kernel\'s ephemeral ports %d-%d: a port can be taken for a '
+                                'moment by any connection; machines are started again when it is' % (lo, hi))
+    except (OSError, ValueError):
+        pass
+    b.rec['commit'] = st['commit']
+    b.say('commit %s (%s); builder %s %s; muir-sim %s; ozd %s'
+          % (st['commit'][:12], st['subject'], st['builder']['label'], st['builder']['sha256'][:16],
+             st['muir-sim']['commit'][:12], st['ozd']['commit'][:12]))
+    return st
+
+
+def commit(b):
+    return b.rec['commit']
+
+
+def step_export(b):
+    t = export_tree(b.repo, commit(b), b.w('asm-tree'))
+    check_asm_tree(t)
+    n = sum(len(f) for _, _, f in os.walk(t))
+    return {'tree': t, 'files': n, 'sys/ubin': 'empty, made'}
+
+
+def step_assemble(b):
+    """UCADR twice, PROMH, DCFU and MEMD, each on the builder band freshly
+    booted (a second assembly in one band reuses the sources it read)."""
+    t = b.w('asm-tree')
+    check_asm_tree(t)
+    xdg = b.w('xdg', 'asm')
+    runs = {}
+    jobs = [('ucadr-1', 'asm-ucadr-1', b.case('ucadr.cases')), ('ucadr-2', 'asm-ucadr-2', b.case('ucadr.cases')),
+            ('prom', 'asm-prom', b.case('prom.cases')), ('dcfu', 'asm-dcfu', b.case('dcfu.cases')),
+            ('memd', 'asm-memd', b.case('memd.cases'))]
+
+    def one(name, slot, cases):
+        runs[name] = b.lispm_check(slot, xdg, cases, ['--timeout', '3000'], b.log('asm-%s.out' % name),
+                                   band=b.a.builder, tree=t, ubin=b.a.builder_ubin)
+    th = []
+    for i, j in enumerate(jobs):
+        if i:
+            time.sleep(20)
+        x = threading.Thread(target=one, args=j)
+        x.start()
+        th.append(x)
+    for x in th:
+        x.join()
+    st = {n: {'exit': r[0], 'summary': r[2]} for n, r in runs.items()}
+    bad = [n for n, r in runs.items() if r[0] != 0 or not r[1]]
+    if bad:
+        raise Fault('assembly %s failed (logs/asm-%s.out)' % (', '.join(bad), bad[0]))
+    u1 = os.path.join(runs['ucadr-1'][1], 'served', 'sys', 'ubin')
+    u2 = os.path.join(runs['ucadr-2'][1], 'served', 'sys', 'ubin')
+    diff = compare_files(u1, u2, UCADR_FILES)
+    st['twice'] = 'the same: ' + ', '.join(UCADR_FILES) if not diff else 'DIFFERENT: ' + ', '.join(diff)
+    if diff:
+        raise Fault('the second assembly of the microcode differs from the first: %s' % ', '.join(diff))
+    ub = b.w('ubin')
+    shutil.rmtree(ub, ignore_errors=True)
+    os.makedirs(ub)
+    for n in UCADR_FILES:
+        shutil.copy2(os.path.join(u1, n), ub)
+    for n in PROM_FILES:
+        shutil.copy2(os.path.join(runs['prom'][1], 'served', 'sys', 'ucadr', n), ub)
+    shutil.copy2(os.path.join(runs['dcfu'][1], 'served', 'sys', 'ubin', 'dcfu.uload'), ub)
+    shutil.copy2(os.path.join(runs['memd'][1], 'served', 'sys', 'ubin', 'memd.uload'), ub)
+    st['sha256'] = {n: sha256_file(os.path.join(ub, n)) for n in UBIN_FILES}
+    with open(os.path.join(b.out, 'ubin.sha256'), 'w') as f:
+        f.writelines('%s  %s\n' % (st['sha256'][n], n) for n in sorted(UBIN_FILES))
+    notes = os.path.join(t, 'docs', 'release-%d.md' % b.a.system)
+    want = notes_digests(notes)
+    mm = digest_mismatches(ub, {n: want[n] for n in NOTES_DIGESTED})
+    st['notes'] = 'equal to the last digests in docs/release-%d.md' % b.a.system if not mm else mm
+    if mm:
+        raise Fault('the microcode is not the one the notes give: %s' % '; '.join('%s %s, notes %s' % m for m in mm))
+    same = compare_files(ub, b.a.builder_ubin, PROM_SAME)
+    st['prom'] = {n: ('differs' if n in same else 'same') for n in PROM_SAME}
+    st['prom'].update({n: ('differs (recorded)' if compare_files(ub, b.a.builder_ubin, [n]) else 'same')
+                       for n in PROM_RECORDED})
+    if same:
+        raise Fault('the PROM differs from the builder release\'s: %s' % ', '.join(same))
+    b.say('microcode %d assembled twice, the same; equal to the notes; PROM as the builder\'s'
+          % b.a.microcode)
+    return st
+
+
+COLDRUN = '''(si:qld '(:noconfirm :no-reload-system-declaration) nil)
+(si:mini-report "qld-complete")
+'''
+
+
+def step_tree(b):
+    t = b.w('build', b.top)
+    export_tree(b.repo, commit(b), t)
+    for n in UBIN_FILES:
+        shutil.copy2(b.w('ubin', n), os.path.join(t, 'sys', 'ubin', n))
+    # local build input, ignored by Git, read by MINI untranslated: spaces only
+    with open(os.path.join(t, 'site', 'coldrun.lisp'), 'w') as f:
+        f.write(COLDRUN)
+    assert '\t' not in COLDRUN
+    tracked = b.sh(['git', '-C', b.repo, 'ls-tree', '-r', '--name-only', commit(b)]).stdout.split('\n')
+    qf = sorted(os.path.relpath(os.path.join(r, f), t) for r, _, fs in os.walk(t) for f in fs if f.endswith('.qfasl'))
+    extra = [q for q in qf if q not in tracked]
+    if extra:
+        raise Fault('the build tree holds untracked QFASLs: %s' % extra[:3])
+    if sorted(os.listdir(os.path.join(t, 'sys', 'ubin'))) != sorted(UBIN_FILES):
+        raise Fault('the build tree\'s sys/ubin is not the ten assembled files')
+    return {'tree': t, 'tracked qfasls': len(qf), 'coldrun': COLDRUN.strip().replace('\n', ' | ')}
+
+
+def build_machine(b):
+    return Machine(b.w('machine', 'build'), b.bins, b.ports['build'], b.w('build', b.top))
+
+
+def step_machine(b):
+    d = b.w('machine', 'build')
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    m = build_machine(b)
+    b.sh(['cp', '--sparse=always', b.a.builder, m.pack])
+    os.chmod(m.pack, 0o644)
+    dp = b.bins['diskpack']
+    diskpack(dp, m.pack, 'load', b.L['mcr'], b.w('ubin', 'ucadr.mcr'))
+    diskpack(dp, m.pack, 'modify', b.L['mcr'], 'keep', 'UCADR %d' % b.a.microcode)
+    diskpack(dp, m.pack, 'current', b.a.builder_band)
+    diskpack(dp, m.pack, 'current', b.L['mcr'])
+    parts = partitions(dp, m.pack)
+    for p in (b.L['cold'], b.L['save']):
+        s, n, _ = parts[p]
+        if any(read_region(m.pack, s, n)):
+            raise Fault('the builder\'s %s is not empty: the cold load and the save need empty partitions' % p)
+    label = diskpack(dp, m.pack, 'show')
+    spit(b.log('build-label-before.txt'), label)
+    return {'pack': m.pack, 'label': [l for l in label.splitlines() if 'MCR1' in l or b.a.builder_band in l]}
+
+
+def step_compile(b):
+    m = build_machine(b)
+    m.start()
+    try:
+        t0 = time.time()
+        ok = run_forms(m.telnet, b.forms('compile.forms'), b.log('compile.log'))
+        dt = time.time() - t0
+    finally:
+        m.stop()
+    if not ok:
+        raise Fault('the compile stopped (logs/compile.log)')
+    return {'seconds': round(dt), 'forms': 'forms/compile.forms'}
+
+
+def step_cold(b):
+    m = build_machine(b)
+    m.start()                   # the builder rebooted: the compile used its address space
+    try:
+        t0 = time.time()
+        ok = run_forms(m.telnet, b.forms('cold.forms'), b.log('cold.log'))
+        dt = time.time() - t0
+    finally:
+        m.stop()
+    if not ok:
+        raise Fault('MAKE-COLD stopped (logs/cold.log)')
+    c = partitions(b.bins['diskpack'], m.pack)[b.L['cold']][2]
+    if not c.lower().startswith('cold'):
+        raise Fault('%s\'s comment is "%s", not "cold" and a date' % (b.L['cold'], c))
+    return {'seconds': round(dt), 'comment': c}
+
+
+def step_qld(b):
+    m = build_machine(b)
+    diskpack(b.bins['diskpack'], m.pack, 'current', b.L['cold'])
+    log = os.path.join(m.d, 'ozd.log')
+    off = os.path.getsize(log) if os.path.exists(log) else 0
+    spit(os.path.join(m.d, 'qld-start-offset.txt'), '%d\n' % off)
+    m.start()
+    t0 = time.time()
+    try:
+        ok, why = watch_qld(log, off, time.time() + 3 * 3600)
+    except BaseException:
+        m.stop()
+        raise
+    dt = time.time() - t0
+    if not ok:
+        m.stop()
+        raise Fault('QLD did not complete: %s' % why)
+    BUILD_MACHINE[0] = m        # left running for the save
+    return {'seconds': round(dt), 'ozd log offset': off, 'result': why}
+
+
+BUILD_MACHINE = [None]
+
+
+def wait_answer(port, logpath, minutes):
+    """Until the machine answers (+ 1 2) over TELNET, or MINUTES pass."""
+    end = time.time() + 60 * minutes
+    while time.time() < end:
+        if telnet_forms(port, ['(+ 1 2)'], logpath, per_form=120):
+            return True
+        time.sleep(15)
+    return False
+
+
+def step_save(b):
+    m = BUILD_MACHINE[0]
+    if m is None or m.muir.poll() is not None:
+        raise Fault('the cold load is not running: run qld and save together (--from qld)')
+    try:
+        t0 = time.time()
+        run_forms(m.telnet, b.forms('save.forms'), b.log('save.log'), tries=3)
+        # the save resets the network and boots the saved world: its answer
+        # over TELNET says the save is done
+        time.sleep(60)
+        if not wait_answer(m.telnet, b.log('save.log'), 20):
+            raise Fault('the saved band did not answer after the save (logs/save.log)')
+        dt = time.time() - t0
+    finally:
+        m.stop()
+        BUILD_MACHINE[0] = None
+    dp = b.bins['diskpack']
+    diskpack(dp, m.pack, 'current', b.L['save'])
+    c = partitions(dp, m.pack)[b.L['save']][2]
+    if str(b.a.system) not in c:
+        raise Fault('%s\'s comment after the save is "%s"' % (b.L['save'], c))
+    after = b.w('pack-after-save.img')
+    if os.path.exists(after):
+        os.chmod(after, 0o644)
+        os.remove(after)
+    b.sh(['cp', '--sparse=always', m.pack, after])
+    os.chmod(after, 0o444)
+    return {'seconds': round(dt), 'comment': c, 'pack after save sha256': sha256_file(after)}
+
+
+def step_verify(b):
+    m = build_machine(b)
+    m.start()
+    try:
+        ok = run_forms(m.telnet, b.forms('verify.forms'), b.log('verify.log'))
+    finally:
+        m.stop()
+    if not ok:
+        raise Fault('the saved band did not verify (logs/verify.log)')
+    label = diskpack(b.bins['diskpack'], m.pack, 'show')
+    spit(b.log('build-label-after.txt'), label)
+    return {'forms': 'forms/verify.forms', 'result': 'passed'}
+
+
+def pack_name(b):
+    return '%s-pack.img' % b.top
+
+
+def step_package(b):
+    os.makedirs(b.dist, exist_ok=True)
+    raw = b.w(pack_name(b))
+    if os.path.exists(raw):
+        os.chmod(raw, 0o644)
+        os.remove(raw)
+    dp = b.bins['diskpack']
+    write_release_pack(dp, b.w('pack-after-save.img'), b.L['save'], b.w('ubin', 'ucadr.mcr'), raw,
+                       b.a.system, b.a.microcode)
+    p = check_release_pack(dp, raw, b.w('pack-after-save.img'), b.L['save'], b.w('ubin', 'ucadr.mcr'))
+    if p:
+        raise Fault('the release pack: ' + '; '.join(p))
+    label = diskpack(dp, raw, 'show')
+    spit(os.path.join(b.out, 'release-pack-label.txt'), label)
+    gz = os.path.join(b.dist, pack_name(b) + '.gz')
+    gzip_file(raw, gz)
+    return {'label': label.splitlines()[:3], 'checks': 'begins LABL; MCR1 the microcode; LOD1 the saved '
+            'band block for block; everything else zero',
+            pack_name(b): {'bytes': os.path.getsize(raw), 'sha256': sha256_file(raw)},
+            os.path.basename(gz): {'bytes': os.path.getsize(gz), 'sha256': sha256_file(gz)}}
+
+
+def step_sources(b):
+    os.makedirs(b.dist, exist_ok=True)
+    gz = os.path.join(b.dist, '%s-sys.tar.gz' % b.top)
+    if os.path.exists(gz):
+        os.remove(gz)
+    make_sources(b.repo, commit(b), b.w('ubin'), gz, b.top)
+    p = check_sources(gz, b.top)
+    if p:
+        raise Fault('the sources tarball: ' + '; '.join(p))
+    with tarfile.open(gz) as t:
+        n = len(t.getmembers())
+    return {os.path.basename(gz): {'bytes': os.path.getsize(gz), 'sha256': sha256_file(gz), 'members': n},
+            'checks': 'every member root\'s; one top directory; sys/ubin the ten files; no coldrun; '
+                      'gzip with no name or date'}
+
+
+def step_sums(b):
+    names = sorted(os.listdir(b.dist))
+    want = sorted(['%s-pack.img.gz' % b.top, '%s-sys.tar.gz' % b.top])
+    if [n for n in names if n != 'SHA256SUMS'] != want:
+        raise Fault('dist holds %s, not %s' % (names, want))
+    b.sh([sys.executable, b.tool('release-sums'), b.dist], log=b.log('sums.log'))
+    b.sh([sys.executable, b.tool('release-sums'), '--check', b.dist], log=b.log('sums.log'))
+    return {'SHA256SUMS': slurp(os.path.join(b.dist, 'SHA256SUMS')).splitlines()}
+
+
+def step_scan(b):
+    extra = [p for p in (b.a.body, b.a.tag_msg) if p]
+    r = b.sh([sys.executable, b.tool('release-scan'), b.dist, *extra], log=b.log('scan.log'), check=False)
+    tail = slurp(b.log('scan.log'), encoding='latin-1').strip().splitlines()[-2:]
+    if r.returncode:
+        raise Fault('release-scan failed (logs/scan.log): %s' % ' / '.join(tail))
+    gz = os.path.join(b.dist, '%s-sys.tar.gz' % b.top)
+    lines = {}
+    for name, cmd in [('owners not root/root', "tar -tvzf '%s' | awk '$2 != \"root/root\"'" % gz),
+                      ('owners not 0/0', "tar --numeric-owner -tvzf '%s' | awk '$2 != \"0/0\"'" % gz),
+                      ('top directories', "tar -tzf '%s' | cut -d/ -f1 | sort -u" % gz),
+                      ('pack begins', "gzip -dc '%s' | head -c 4; echo"
+                       % os.path.join(b.dist, pack_name(b) + '.gz'))]:
+        lines[name] = subprocess.run(['bash', '-c', cmd], capture_output=True, text=True).stdout.strip()
+    if lines['owners not root/root'] or lines['owners not 0/0'] or lines['top directories'] != b.top \
+            or lines['pack begins'] != 'LABL':
+        raise Fault('owners, top directory or label: %s' % lines)
+    return {'release-scan': tail, 'scanned': ['dist'] + ([os.path.basename(p) for p in extra] or
+                                                          ['body and tag message not given, not scanned']),
+            'tar lines': lines}
+
+
+def step_unpack(b):
+    u = b.w('unpacked')
+    shutil.rmtree(u, ignore_errors=True)
+    os.makedirs(u)
+    with tarfile.open(os.path.join(b.dist, '%s-sys.tar.gz' % b.top)) as t:
+        t.extractall(u, filter='tar') if hasattr(tarfile, 'tar_filter') else t.extractall(u)
+    pk = b.w('check-pack.img')
+    if os.path.exists(pk):
+        os.chmod(pk, 0o644)
+        os.remove(pk)
+    with gzip.open(os.path.join(b.dist, pack_name(b) + '.gz')) as s, open(pk, 'wb') as o:
+        shutil.copyfileobj(s, o, 1 << 20)
+    os.chmod(pk, 0o444)
+    sums = dict(reversed(l.split('  ', 1)) for l in slurp(os.path.join(b.dist, 'SHA256SUMS')).splitlines())
+    got = sha256_file(pk)
+    if sums.get(pack_name(b)) != got:
+        raise Fault('the decompressed pack is %s, SHA256SUMS says %s' % (got, sums.get(pack_name(b))))
+    return {'tree': os.path.join(u, b.top), 'check pack': got}
+
+
+def step_gates(b):
+    """G1-G5 (docs/building.md, The gates after QLD)."""
+    md = b.w('machine', 'build')
+    tree = b.w('build', b.top)
+    off = int(slurp(os.path.join(md, 'qld-start-offset.txt')))
+    log = slurp(os.path.join(md, 'ozd.log'), 'rb')
+    sysdcl = slurp(os.path.join(tree, 'sys', 'sys', 'sysdcl.lisp'), 'rb').decode('latin-1')
+    verdicts = gates_from_log(log, off, sysdcl)
+    ct = b.w('gates-tree')
+    shutil.rmtree(ct, ignore_errors=True)
+    shutil.copytree(tree, ct, symlinks=True)              # copy2: the mtimes G3 reads
+    if os.path.exists(os.path.join(ct, 'site', 'coldrun.lisp')):
+        os.remove(os.path.join(ct, 'site', 'coldrun.lisp'))
+    os.makedirs(os.path.join(ct, 'lispm'), exist_ok=True)
+    pk = b.w('check-pack.img')
+    xdg = b.w('xdg', 'gates')
+    q12 = os.path.join(HERE, 'lisp', 'q12check.lisp')
+    rc, run, summ = b.lispm_check('gates', xdg, b.case('gates.cases'),
+                                  ['--files', q12, '--compile', '--timeout', '300'], b.log('gates-ids.log'),
+                                  band=pk, tree=ct, ubin=os.path.join(ct, 'sys', 'ubin'))
+    if rc != 0 or not run:
+        verdicts.append(('G3', False, 'lispm-check exit %d (logs/gates-ids.log)' % rc))
+    else:
+        ids = slurp(os.path.join(run, 'served', 'lispm', 'ids.text'), encoding='latin-1').splitlines()
+        ok, why = gate_ids(ids, ct)
+        verdicts.append(('G3', ok, why))
+        tl = slurp(os.path.join(run, 'telnet.log'), encoding='latin-1')
+        po = re.findall(r'^.*needs to be.*$', tl, re.M)
+        verdicts.append(('G4', not po, ':print-only lines %d%s' % (len(po), (': ' + po[0].strip()) if po else '')))
+    # G5: the date check on the fixtures, written here with their mtimes
+    fx = os.path.join(ct, 'sys', 'q12d')
+    write_date_fixtures(fx)
+    os.makedirs(os.path.join(ct, 'sys', 'q12o'), exist_ok=True)
+    pre = check_date_fixtures(fx)
+    res, notes = {}, list(pre)
+    for site in ('berlin', 'm1'):
+        cases = b.write_case('dates-%s.cases' % site, dates_cases(site, b.L['site_zone']))
+        for dates, flags in (('utc', []), ('mit', ['--ozd-file-dates', 'mit', '--ozd-timezone', '-1'])):
+            name = '%s-%s' % (site, dates)
+            rc, run, summ = b.lispm_check('gates', xdg, cases, ['--files', q12, '--compile', '--timeout', '300'] + flags,
+                                          b.log('gates-dates-%s.log' % name), band=pk, tree=ct,
+                                          ubin=os.path.join(ct, 'sys', 'ubin'))
+            text = slurp(b.log('gates-dates-%s.log' % name), encoding='latin-1')
+            host = []
+            if run:
+                notes += ['%s: served %s' % (name, p) for p in check_date_fixtures(os.path.join(run, 'served', 'sys', 'q12d'))]
+                for fname, t in DATE_FIXTURES:
+                    p = os.path.join(run, 'served', 'sys', 'q12o', fname + '.text')
+                    host.append(int(os.stat(p).st_mtime) - t if os.path.exists(p) else None)
+            jul = re.search(r'^\S+\s+\(- \(q12-listed-date "jul"\) \d+\)\s+-> (-?\d+)', text, re.M)
+            res[name] = {'summary': summ, 'exit': rc, 'host mtime less T': host,
+                         'jul host to band': jul.group(1) if jul else None}
+    utc_ok = all(res[r]['exit'] == 0 and res[r]['host mtime less T'] == [0] * len(DATE_FIXTURES)
+                 for r in ('berlin-utc', 'm1-utc'))
+    mit_off = all(res[r]['jul host to band'] not in (None, '0') for r in ('berlin-mit', 'm1-mit'))
+    verdicts.append(('G5', utc_ok and mit_off and not notes,
+                     'utc: %s; mit control, 15 July host to band: %s%s'
+                     % ({r: res[r]['summary'] for r in ('berlin-utc', 'm1-utc')},
+                        {r: res[r]['jul host to band'] for r in ('berlin-mit', 'm1-mit')},
+                        ('; fixtures: ' + '; '.join(notes[:3])) if notes else '')))
+    for g, ok, why in verdicts:
+        b.say('%s  %s  %s' % (g, 'PASS' if ok else 'FAIL', why))
+    st = {g: {'pass': ok, 'why': why} for g, ok, why in verdicts}
+    st['dates runs'] = res
+    b.note('gates', **st)
+    failed = [g for g, ok, _ in verdicts if not ok]
+    if failed:
+        raise Fault('gates failed: %s' % ', '.join(failed))
+    return st
+
+
+def step_boot(b):
+    """The published files booted as a user would: the pack decompressed, the
+    sources untarred and served by ozd at its defaults, the machine with no
+    flag but its ports."""
+    st = {}
+    for engine in ('micro', 'rtl'):
+        d = b.w('boot', engine)
+        shutil.rmtree(d, ignore_errors=True)
+        os.makedirs(d)
+        with gzip.open(os.path.join(b.dist, pack_name(b) + '.gz')) as s, open(os.path.join(d, pack_name(b)), 'wb') as o:
+            shutil.copyfileobj(s, o, 1 << 20)
+        with tarfile.open(os.path.join(b.dist, '%s-sys.tar.gz' % b.top)) as t:
+            t.extractall(d, filter='tar') if hasattr(tarfile, 'tar_filter') else t.extractall(d)
+        m = Machine(d, b.bins, b.ports['boot-' + engine], os.path.join(d, b.top), engine=engine,
+                    pack=pack_name(b))
+        m.start()
+        t0 = time.time()
+        try:
+            ok = run_forms(m.telnet, b.forms('boot.forms'), b.log('boot-%s.log' % engine), tries=80)
+        finally:
+            m.stop()
+        st[engine] = {'passed': ok, 'seconds': round(time.time() - t0)}
+        b.say('boot %s: %s in %d s' % (engine, 'passed' if ok else 'FAILED', time.time() - t0))
+        if not ok:
+            raise Fault('the published files did not boot on %s (logs/boot-%s.log)' % (engine, engine))
+    return st
+
+
+def step_checks(b):
+    """lispm-check's suites on the release pack with the published sources
+    served, in lanes with their own ports and caches: A the arithmetic and the
+    microcode's earlier checks, B the self-test, system-check and
+    microcode-check at 32 boards, C the same at 60, D microcode-check on rtl,
+    H the herald at each board count."""
+    tree = b.w('unpacked', b.top)
+    common = dict(band=b.w('check-pack.img'), tree=tree, ubin=os.path.join(tree, 'sys', 'ubin'))
+    res = {}
+
+    def lc(lane, name, cases, args, boards=32):
+        r = b.lispm_check('lane-' + lane, b.w('xdg', 'lane-' + lane), cases, args,
+                          b.log('check-%s-%s.log' % (lane, name)), exe=b.exe(boards), **common)
+        res['%s %s' % (lane, name)] = {'exit': r[0], 'summary': r[2]}
+        return r
+
+    def runner(lane, name, script, args, boards=32):
+        """tools/system-check/run, microcode-check/run, lispm-check-test/run.sh"""
+        env = dict(os.environ, XDG_CACHE_HOME=b.w('xdg', 'lane-' + lane),
+                   LISPM_CHECK_PORTS='%d-%d' % b.ports['lane-' + lane])
+        flags = ['--band', common['band'], '--ubin', common['ubin'], '--tree', tree,
+                 b.L['exe_flag'], b.exe(boards), '--ozd', b.bins['ozd']]
+        # the self-test's last run checks that --file-server auto chooses ozd,
+        # so it is given no --file-server
+        cmd = [script, *flags] if script.endswith('run.sh') else \
+            [script, '--', *flags, '--file-server', 'ozd', *args]
+        log = b.log('check-%s-%s.log' % (lane, name))
+        with open(log, 'w') as f:
+            f.write('# %s\n$ %s\n' % (now(), ' '.join(cmd)))
+            f.flush()
+            r = subprocess.run(['bash', *cmd] if script.endswith('.sh') else cmd, env=env, stdout=f,
+                               stderr=subprocess.STDOUT)
+            f.write('# exit %d, %s\n' % (r.returncode, now()))
+        text = slurp(log, encoding='latin-1')
+        res['%s %s' % (lane, name)] = {'exit': r.returncode, 'summary': re.findall(
+            r'lispm-check: (\d+ passed, \d+ failed, \d+ errors, of \d+)', text) or 'see the log'}
+
+    lisp = lambda n: os.path.join(HERE, 'lisp', n)
+
+    def lane_A():
+        lc('A', 'smoke', b.case('smoke.cases'), [])
+        lc('A', 'rect', b.case('rect.cases'), [])
+        r = lc('A', 'div', b.case('div.cases'), ['--files', lisp('divcheck.lisp'), '--timeout', '3000'])
+        if r[1] and os.path.exists(os.path.join(r[1], 'served', 'lispm', 'div.text')):
+            shutil.copy(os.path.join(r[1], 'served', 'lispm', 'div.text'), b.log('div.text'))
+            ok, why = verify_div(slurp(b.log('div.text')))
+        else:
+            ok, why = False, 'no div.text'
+        res['A div verified'] = {'exit': 0 if ok else 1, 'summary': why}
+        lc('A', 'proceed', b.case('proceed.cases'), ['--timeout', '60'])
+        r = lc('A', 'arith', b.case('arith.cases'), ['--files', lisp('arith-check.lisp'), '--timeout', '3000'])
+        if r[1] and os.path.exists(os.path.join(r[1], 'served', 'lispm', 'arith.text')):
+            shutil.copy(os.path.join(r[1], 'served', 'lispm', 'arith.text'), b.log('arith.text'))
+            ok, why = verify_arith(slurp(b.log('arith.text')))
+        else:
+            ok, why = False, 'no arith.text'
+        res['A arith verified'] = {'exit': 0 if ok else 1, 'summary': why}
+
+    def suite(lane, boards):
+        runner(lane, 'selftest', b.tool('lispm-check-test/run.sh'), [], boards)
+        runner(lane, 'system-check', b.tool('system-check/run'), ['--timeout', '1200'], boards)
+        runner(lane, 'microcode-check', b.tool('microcode-check/run'), ['--timeout', '1200'], boards)
+
+    def lane_D():
+        runner('D', 'microcode-check-rtl', b.tool('microcode-check/run'), ['--engine', 'rtl', '--timeout', '1200'])
+
+    def lane_H():
+        for n in b.L['herald_boards']:
+            hint = '(NIL NIL)' if n >= b.L['max_boards'] else '(T T)'
+            c = b.write_case('herald-%d.cases' % n, render(os.path.join(HERE, 'cases', 'herald.cases'), b.values,
+                             BOARDS=n, KWORDS=n * b.L['board_words'] // 1024, HINT=hint))
+            lc('H', 'herald-%d' % n, c, [], boards=n)
+
+    lanes = [threading.Thread(target=f) for f in
+             (lane_A, lambda: suite('B', 32), lambda: suite('C', b.L['max_boards']), lane_D, lane_H)]
+    for x in lanes:
+        x.start()
+        time.sleep(5)
+    for x in lanes:
+        x.join()
+    for k in sorted(res):
+        b.say('check %-28s exit %d  %s' % (k, res[k]['exit'], res[k]['summary']))
+    b.note('checks', **res)
+    bad = sorted(k for k, v in res.items() if v['exit'] != 0)
+    if bad:
+        raise Fault('checks failed: %s' % ', '.join(bad))
+    return res
+
+
+def step_hand(b):
+    """What lispm-check cannot do: a save at 60 boards that must persist and
+    its boot, a keyboard cold boot, and a warm boot."""
+    d = b.w('machine', 'hand')
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    tree = b.w('unpacked', b.top)
+    pk = os.path.join(d, 'pack.img')
+    shutil.copyfile(b.w('check-pack.img'), pk)
+    os.chmod(pk, 0o644)
+    dp = b.bins['diskpack']
+    st = {}
+
+    def machine(boards):
+        return Machine(d, b.bins, b.ports['hand'], tree, extra=['--main-memory-boards', str(boards)])
+
+    # a save at the most boards, and the saved band booted there
+    mb = b.L['max_boards']
+    diskpack(dp, pk, 'current', 'LOD1')
+    m = machine(mb)
+    m.start()
+    try:
+        run_forms(m.telnet, b.forms('save2.forms'), b.log('hand-save.log'), tries=40)
+        time.sleep(60)
+        saved = wait_answer(m.telnet, b.log('hand-save.log'), 20)
+    finally:
+        m.stop()
+    diskpack(dp, pk, 'current', 'LOD2')
+    m = machine(mb)
+    m.start()
+    try:
+        ok = saved and run_forms(m.telnet, b.forms('saved-verify.forms'), b.log('hand-saved-verify.log'))
+    finally:
+        m.stop()
+    diskpack(dp, pk, 'current', 'LOD1')
+    st['save at %d boards and boot' % mb] = {'passed': bool(ok)}
+    b.say('hand: save at %d boards and its boot: %s' % (mb, 'passed' if ok else 'FAILED'))
+
+    def reboot(kind, keys, want):
+        m = machine(32)
+        m.start()
+        r = {}
+        try:
+            r['before'] = run_forms(m.telnet, b.forms('warm1.forms'), b.log('hand-%s-1.log' % kind))
+            rfb_chord(m.rfb, keys)
+            time.sleep(60)
+            m.command('screenshot %s' % b.log('hand-%s-after.png' % kind))
+            answered = any(telnet_forms(m.telnet, ['(+ 1 2)'], b.log('hand-%s-probe.log' % kind), 90)
+                           or time.sleep(10) for _ in range(2))
+            r['answered at once'] = answered
+            if not answered:            # the warm boot asks "Reset it?" when it caught a process
+                rfb_type(m.rfb, 'Yes')
+                time.sleep(30)
+            r['after'] = run_forms(m.telnet, b.forms('warm2.forms'), b.log('hand-%s-2.log' % kind), tries=8)
+            m.command('screenshot %s' % b.log('hand-%s-end.png' % kind))
+            time.sleep(3)
+        finally:
+            m.stop()
+        text = slurp(b.log('hand-%s-2.log' % kind), encoding='latin-1') \
+            if os.path.exists(b.log('hand-%s-2.log' % kind)) else ''
+        state = re.findall(r'\(STATE (\S+) (\S+)\)', text)
+        r['state'] = state[-1] if state else None
+        r['passed'] = bool(r['before'] and r['after'] and r['state'] == want)
+        return r
+    st['keyboard cold boot'] = reboot('kbcold', ['Control_L', 'Alt_L', 'Delete'], ('NIL', 'NIL'))
+    b.say('hand: keyboard cold boot: %s' % st['keyboard cold boot'])
+    w = reboot('warm', ['Control_L', 'Alt_L', 'Return'], ('T', '4711'))
+    if not w['passed'] and not w['after']:
+        w['known fault'] = ('the machine did not answer after the warm boot: the warm-boot deadlock '
+                            'listed in docs/release-%d.md, Known faults; recorded, not a failure' % b.a.system)
+    st['warm boot'] = w
+    b.say('hand: warm boot: %s' % w)
+    b.note('hand', **st)
+    bad = [k for k in ('save at %d boards and boot' % mb, 'keyboard cold boot') if not st[k]['passed']]
+    if not w['passed'] and 'known fault' not in w:
+        bad.append('warm boot')
+    if bad:
+        raise Fault('hand checks failed: %s' % ', '.join(bad))
+    return st
+
+
+def step_final(b):
+    b.sh([sys.executable, b.tool('release-sums'), '--check', b.dist], log=b.log('sums-final.log'))
+    arts = {n: {'bytes': os.path.getsize(os.path.join(b.dist, n)), 'sha256': sha256_file(os.path.join(b.dist, n))}
+            for n in sorted(os.listdir(b.dist))}
+    b.rec['artifacts'] = arts
+    for n, v in arts.items():
+        b.say('artifact %s  %d bytes  %s' % (n, v['bytes'], v['sha256']))
+    return {'release-sums --check': 'passed after every check', 'dist': sorted(arts)}
+
+
+STEPS = [
+    ('inputs', step_inputs, 'the commit, the builder\'s digest, the ports, the disks; muir-sim and ozd built'),
+    ('export', step_export, 'git archive of the commit, with an empty sys/ubin/'),
+    ('assemble', step_assemble, 'UCADR twice, PROMH, DCFU, MEMD on the builder; compared'),
+    ('tree', step_tree, 'the build tree: the export, the assembled sys/ubin/, site/coldrun.lisp'),
+    ('machine', step_machine, 'the build pack: the builder with the new microcode in MCR1'),
+    ('compile', step_compile, 'stages 1-3: readtables, site, SYSTEM :recompile, WORMCH'),
+    ('cold', step_cold, 'stage 4: the COLD system and MAKE-COLD'),
+    ('qld', step_qld, 'stages 5-6: the cold boot and QLD by COLDRUN'),
+    ('save', step_save, 'stage 7: DISK-SAVE (runs with qld: the cold load is left running for it)'),
+    ('verify', step_verify, 'the saved band booted and checked'),
+    ('package', step_package, 'the release pack and its gzip'),
+    ('sources', step_sources, 'the sources tarball'),
+    ('sums', step_sums, 'tools/release-sums, written and checked'),
+    ('scan', step_scan, 'tools/release-scan and the tar owner lines'),
+    ('unpack', step_unpack, 'the published files, unpacked for the checks'),
+    ('gates', step_gates, 'G1-G5'),
+    ('boot', step_boot, 'the published files booted on micro and rtl'),
+    ('checks', step_checks, 'lispm-check: lanes A, B (32 boards), C (60), D (rtl), H (herald)'),
+    ('hand', step_hand, 'a save at 60 boards, a keyboard cold boot, a warm boot'),
+    ('final', step_final, 'SHA256SUMS checked again; the artifacts recorded'),
+]
+
+
+def step_record(res, **kw):
+    """A step's figures with the run's own (status, end, seconds) added; a
+    figure of the step's with one of those names is kept as 'step NAME'."""
+    out = {('step ' + k if k in kw else k): v for k, v in res.items()}
+    out.update(kw)
+    return out
+
+
+def env_default(name, default=None):
+    return os.environ.get('RELEASE_BUILD_' + name.upper().replace('-', '_'), default)
+
+
+def parse(argv):
+    p = argparse.ArgumentParser(prog='tools/release-build/run', description=__doc__.split('\n')[0])
+    for name, kw in [('system', {'type': int}), ('microcode', {'type': int}), ('commit', {}),
+                     ('builder', {}), ('builder-sha256', {}), ('builder-ubin', {}),
+                     ('builder-band', {'default': 'LOD1'}), ('muir-sim', {}), ('ozd', {}),
+                     ('ports', {}), ('out', {}), ('work', {}), ('repo', {'default': OWN_REPO}),
+                     ('body', {}), ('tag-msg', {})]:
+        d = env_default(name, kw.pop('default', None))
+        if d is not None and kw.get('type') is int:
+            d = int(d)
+        p.add_argument('--' + name, default=d, **kw)
+    p.add_argument('--from', dest='from_step')
+    p.add_argument('--steps')
+    p.add_argument('--list', action='store_true')
+    a = p.parse_args(argv)
+    if a.list:
+        return a
+    missing = [n for n in ('system', 'microcode', 'commit', 'builder', 'builder_sha256', 'builder_ubin',
+                           'muir_sim', 'ozd', 'ports', 'out') if getattr(a, n) is None]
+    if missing:
+        p.error('missing: ' + ', '.join('--' + m.replace('_', '-') for m in missing))
+    m = re.match(r'^(\d+)-(\d+)$', a.ports)
+    if not m:
+        p.error('--ports LO-HI')
+    a.port_range = (int(m.group(1)), int(m.group(2)))
+    for k in PATH_ARGS:
+        if getattr(a, k):
+            setattr(a, k, os.path.abspath(os.path.expanduser(getattr(a, k))))
+    return a
+
+
+# the arguments that name files, made absolute: the machines run in their own
+# directories
+PATH_ARGS = ('builder', 'builder_ubin', 'out', 'work', 'repo', 'body', 'tag_msg')
+
+
+def same_params(recorded, params):
+    r = dict(recorded or {})
+    for k in PATH_ARGS:
+        if r.get(k):
+            r[k] = os.path.abspath(os.path.expanduser(r[k]))
+    return r == params
+
+
+def main(argv):
+    a = parse(argv)
+    if a.list:
+        for n, _, d in STEPS:
+            print('%-9s %s' % (n, d))
+        return 0
+    names = [n for n, _, _ in STEPS]
+    try:
+        b = Build(a)
+    except Fault as e:
+        print('release-build: %s' % e, file=sys.stderr)
+        return 2
+    if a.steps:
+        todo = a.steps.split(',')
+    elif a.from_step:
+        if a.from_step not in names:
+            print('release-build: no step %s (--list)' % a.from_step, file=sys.stderr)
+            return 2
+        todo = names[names.index(a.from_step):]
+    else:
+        todo = names
+    bad = [s for s in todo if s not in names]
+    if bad:
+        print('release-build: no step %s (--list)' % ', '.join(bad), file=sys.stderr)
+        return 2
+    if 'save' in todo and 'qld' not in todo:
+        print('release-build: save runs with qld (the cold load stays running between them)', file=sys.stderr)
+        return 2
+    params = {k: getattr(a, k) for k in ('system', 'microcode', 'commit', 'builder', 'builder_sha256',
+                                         'builder_ubin', 'builder_band', 'muir_sim', 'ozd', 'ports', 'repo')}
+    done = b.rec.get('done', [])
+    first = names.index(todo[0])
+    if first == 0 and done and not a.steps:
+        print('release-build: %s already records a build (%s); give another --out, or --from STEP'
+              % (b.out, ', '.join(done)), file=sys.stderr)
+        return 2
+    if first > 0:
+        if not same_params(b.rec.get('params'), params):
+            print('release-build: --from needs the arguments of the run it continues', file=sys.stderr)
+            return 2
+        need = [n for n in names[:first] if n not in done]
+        if need:
+            print('release-build: steps not recorded as done: %s' % ', '.join(need), file=sys.stderr)
+            return 2
+    os.makedirs(b.logs, exist_ok=True)
+    b.work = os.path.abspath(a.work or os.path.join(
+        os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache'), 'release-build',
+        '%d-%s' % (a.system, re.sub(r'[^0-9A-Za-z]', '', a.commit)[:12])))
+    os.makedirs(b.work, exist_ok=True)
+    b.ports = port_plan(*a.port_range)
+    if first == 0:
+        b.rec = {'params': params, 'line': b.line, 'work': b.work, 'out': b.out, 'started': now(),
+                 'done': [], 'steps': {}}
+    b.rec.setdefault('runs', []).append({'started': now(), 'steps': todo, 'pid': os.getpid()})
+    b.save()
+    signal.signal(signal.SIGTERM, lambda *_: (stop_all(), sys.exit(1)))
+    b.say('release-build: System %d (%s), microcode %d, commit %s; steps %s; out %s; work %s'
+          % (a.system, b.line, a.microcode, a.commit, ','.join(todo), b.out, b.work))
+    try:
+        for name in todo:
+            fn = dict((n, f) for n, f, _ in STEPS)[name]
+            t0 = time.time()
+            b.say('step %s: %s' % (name, dict((n, d) for n, _, d in STEPS)[name]))
+            b.note(name, status='running', start=now())
+            try:
+                res = fn(b) or {}
+            except Fault as e:
+                b.note(name, status='FAILED', end=now(), seconds=round(time.time() - t0), reason=str(e))
+                b.say('step %s FAILED: %s' % (name, e))
+                print('release-build: step %s failed: %s' % (name, e), file=sys.stderr)
+                return 1
+            b.note(name, **step_record(res, status='passed', end=now(), seconds=round(time.time() - t0)))
+            if name not in b.rec['done']:
+                b.rec['done'].append(name)
+            b.save()
+            b.say('step %s passed in %d s' % (name, time.time() - t0))
+        b.rec['finished'] = now()
+        b.save()
+        b.say('release-build: every step passed')
+        return 0
+    finally:
+        stop_all()
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

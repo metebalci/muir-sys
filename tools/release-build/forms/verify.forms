@@ -1,0 +1,12 @@
+; the saved band booted: its system, microcode and band, file access, WORMCH, QLD's state
+(si:print-herald)
+(or (= (si:get-system-version) @SYSTEM@.) (ferror nil "Expected System @SYSTEM@"))
+(or (= %microcode-version-number @MICROCODE@.) (ferror nil "Expected microcode @MICROCODE@"))
+(or (= (ldb #o2010 si:current-loaded-band) #\@SAVECHAR@) (ferror nil "Unexpected loaded band"))
+(login "LISPM" "OZ" t)
+(list si:site-name (si:get-system-version) %microcode-version-number time:*timezone* time:*timezone-name*)
+(with-open-file (s "SYS: SYS; SYSDCL LISP" :direction :input) (readline s))
+(or (equalp fonts:worm (fed::font-descriptor-into-font (fed::read-ast-into-font-descriptor "SYS: DEMO; WORMCH AST" 'fonts:worm))) (ferror nil "WORMCH QFASL differs from its AST source"))
+(+ 1 2)
+(or (and (= (si:get-system-version) @SYSTEM@.) si:qld-mini-done (not si:*in-cold-load-p*) (not si:mini-script-running-p)) (ferror nil "Final QLD state did not pass"))
+(list (si:get-system-version) si:qld-mini-done si:*in-cold-load-p* si:mini-script-running-p (array-length chaos::routing-table))

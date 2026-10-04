@@ -1,0 +1,3 @@
+; before a warm or keyboard cold boot: a variable set
+(login "LISPM" "OZ" t)
+(progn (setq release-build-warm 4711) (list release-build-warm (time:microsecond-time)))

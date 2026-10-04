@@ -1,0 +1,24 @@
+; Proceeding from the traps whose call sat in the microinstruction after a
+; return: SFLPCK1's small-flonum exponent overflow (uc-arith) and XAPDLR's
+; stack frame too large (uc-call-return).  Adapted from main's H8a XTFIXP cases.
+%microcode-version-number => @MICROCODE@
+(progn (defun xt-ovf (x) (list 'a (* x x) 'b)) (compile 'xt-ovf) (condition-bind ((sys:floating-exponent-overflow #'(lambda (c) (values :new-value 2s0)))) (xt-ovf 1s20))) => (A 2.0s0 B)
+(progn (defun xt-ovf2 (x) (let ((y (* x x))) (list 'a y 'b))) (compile 'xt-ovf2) (condition-bind ((sys:floating-exponent-overflow #'(lambda (c) (values :new-value 3s0)))) (xt-ovf2 1s20))) => (A 3.0s0 B)
+(condition-bind ((sys:floating-exponent-overflow #'(lambda (c) (values :new-value 4s0)))) (list 'a (let ((x 1s10)) (* x x x x x)) 'b)) => (A 4.0s10 B)
+(progn (defun xt-ovf3 (x) (* x x)) (compile 'xt-ovf3) (xt-ovf3 1s20)) =>! * produced a result too large
+(let ((x 1s10)) (* x x x x x)) =>! * produced a result too large
+(progn (defun xt-apr (n) (%assure-pdl-room n) 'ok) (compile 'xt-apr) (xt-apr 10)) => OK
+(progn (defun xt-apr2 (n) (%assure-pdl-room n) 'ok) (compile 'xt-apr2) (xt-apr2 300)) =>! Attempt to make a stack frame larger than 256. words
+(* 1.5s0 2s0) => 3.0s0
+(+ 1 2) => 3
+; Where the trap leaves the erring frame's exit PC (the next macroinstruction
+; to fetch): one past the instruction that trapped, as at CAR's trap (control).
+; XT-WHERE returns the exit PC of FN's innermost frame, and the instruction
+; before it in octal.
+(progn (defun xt-where (fn) (let* ((sg current-stack-group) (rp (eh::sg-regular-pdl sg)) (f (%pointer-difference (%stack-frame-pointer) (aloc rp 0)))) (do () ((or (null f) (eq (eh::rp-function-word rp f) fn)) (and f (let ((pc (eh::rp-exit-pc rp f))) (list pc (format nil "~O" (eh::fef-instruction fn (1- pc))))))) (setq f (eh::sg-next-active sg f))))) (compile 'xt-where) t) => T
+; control: 20 CALL LIST, 21 MOVE 'A, 22 CAR ARG|0, 23 MOVE D-LAST 'B
+(progn (defun xt-car (x) (list 'a (car x) 'b)) (compile 'xt-car) (catch 'xt (condition-bind ((error #'(lambda (c) (throw 'xt (xt-where #'xt-car))))) (xt-car 5)))) => (23 "43600")
+; SFLPCK1: 20 CALL LIST, 21 MOVE 'A, 22 MOVE ARG|0, 23 * ARG|0, 24 MOVE D-LAST 'B
+(progn (defun xt-ovf5 (x) (list 'a (* x x) 'b)) (compile 'xt-ovf5) (catch 'xt (condition-bind ((error #'(lambda (c) (throw 'xt (xt-where #'xt-ovf5))))) (xt-ovf5 1s20)))) => (24 "71600")
+; XAPDLR: 16 MOVE D-PDL ARG|0, 17 (MISC) %ASSURE-PDL-ROOM, 18 MOVE D-RETURN 'OK
+(progn (defun xt-apr3 (n) (%assure-pdl-room n) 'ok) (compile 'xt-apr3) (catch 'xt (condition-bind ((error #'(lambda (c) (throw 'xt (xt-where #'xt-apr3))))) (xt-apr3 300)))) => (18 "15536")

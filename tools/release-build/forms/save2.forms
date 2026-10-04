@@ -1,0 +1,2 @@
+; the release band at @MAXBOARDS@ boards saved into LOD2, which must then boot there
+(si:disk-save "LOD2" t)

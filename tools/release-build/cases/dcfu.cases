@@ -1,0 +1,4 @@
+; assemble DCFU and dump its memories, on a freshly booted band
+(progn (make-system (quote cadr-micro-assembler) :compile :noconfirm :nowarn) t) => T
+(let ((*standard-input* (make-string-input-stream "4. NIL")) (old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p #'(lambda (&rest ignore) nil)) (ua:assemble "SYS: UCADR; DCFU TEXT") t) (fset 'y-or-n-p old))) => T
+(let ((*print-base* 8)) (ua:cons-dump-memories)) => T

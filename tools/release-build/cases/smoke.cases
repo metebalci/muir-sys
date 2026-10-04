@@ -1,0 +1,4 @@
+; the band answers, runs this microcode and is a CADR
+(+ 1 2) => 3
+%microcode-version-number => @MICROCODE@
+(si:machine-type)

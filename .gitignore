@@ -34,7 +34,8 @@
 # so are the microcode's checks (tools/microcode-check), the system's checks
 # (tools/system-check) and the release tools:
 # release-scan with its baseline, release-sums, and their self-test
-# release-test (docs/building.md, Publishing a release).
+# release-test (docs/building.md, Publishing a release), and the release
+# builder, release-build, with its tests.
 /tools/*
 !/tools/lispm-check
 !/tools/lispm-check-test/
@@ -44,6 +45,7 @@
 !/tools/release-scan.baseline
 !/tools/release-sums
 !/tools/release-test
+!/tools/release-build/
 
 # Working notes for Claude Code, and its agents' worktrees: local, not for the
 # repository.

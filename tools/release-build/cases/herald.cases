@@ -1,0 +1,8 @@
+; The herald at @BOARDS@ boards: the system, the microcode, the memory the cold
+; boot found, and the hint to use more of it, which the herald prints when the
+; machine has less memory than the band's page tables serve
+; (sys/io/disk.lisp, print-herald): with fewer than @MAXBOARDS@ boards, not at @MAXBOARDS@.
+(si:get-system-version) => @SYSTEM@
+%microcode-version-number => @MICROCODE@
+(truncate (si:system-communication-area si:%sys-com-memory-size) 1024.) => @KWORDS@
+(let ((s (with-output-to-string (o) (si:print-herald o)))) (list (not (null (string-search "This system can use up to @MAXK@K of physical memory:" s))) (not (null (string-search "use --main-memory-boards @MAXBOARDS@ in muir-sim or muir-fpga." s))))) => @HINT@

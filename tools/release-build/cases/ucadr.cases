@@ -1,0 +1,4 @@
+; assemble the microcode as version @MICROCODE@ on a freshly booted band
+(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T
+(setq ua:version-number @MICROCODE@.) => @MICROCODE@
+(let* ((files (mapcar #'(lambda (name) (send (fs:parse-pathname name) :truename)) '(@UCFILES@))) (ua:file-truenames-listified (mapcar #'ua:listify-pathname files)) (old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p #'(lambda (&rest ignore) t)) (ua:assemble-system (send (fs:parse-pathname "SYS: UBIN; UCADR") :new-version @MICROCODE@.) files nil nil t) t) (fset 'y-or-n-p old))) => T

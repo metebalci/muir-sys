@@ -1,0 +1,2 @@
+; stage 7: the loaded cold load saved; the save boots the saved world
+(si:disk-save "@SAVE@" t)

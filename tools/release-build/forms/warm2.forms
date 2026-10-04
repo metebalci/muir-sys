@@ -1,0 +1,5 @@
+; after it: whether the variable survived (a warm boot keeps it, a cold boot does not)
+(si:print-herald)
+(list 'state (boundp (quote release-build-warm)) (and (boundp (quote release-build-warm)) release-build-warm))
+(list (si:get-system-version) %microcode-version-number (si:system-communication-area si:%sys-com-memory-size))
+(+ 1 2)

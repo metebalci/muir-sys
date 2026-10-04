@@ -312,6 +312,15 @@ System 1003 is built by the procedure above, with these differences. A dry
 run on 3 and 4 October 2026, from `cadr` `67b4056`, built and checked it so
 (the figures below are its own).
 
+**`tools/release-build/run` does all of it**, from the commit to the assets
+and their checks: the export, the assembly twice over, stages 1-7, the pack
+and the sources tarball, `tools/release-sums` and `tools/release-scan`, the
+gates and the checks on the published files, and a record of each step
+(`tools/release-build/README.md`). It stops before step 2 of "Publishing a
+release": nothing is tagged or uploaded. Its arguments are the system and
+microcode numbers, the commit, the builder pack and its SHA-256, muir-sim's
+and ozd's commits, a port range and an output directory.
+
 - **The builder is System 1002's release pack**, `release-1002-pack.img`,
   LOD1 ("Exp 1002"), checked by its SHA-256
   `e59b4de908cc744908b56e8166e8def9d6ef1d0173603342d1e8d759b55b3b08` before
