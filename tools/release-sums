@@ -8,8 +8,9 @@ Usage:
 
 DIR holds a release's assets exactly as they are uploaded, and nothing else
 (Q12 contract, sections 1.3 and 1.6): the disk or pack (release-1NNN-pack.img.gz,
-release-2NNN-disk.vhd.gz, dev-system-for-quux-disk.vhd.gz), the sources, QUUX's
-PROM, the rolling release's README.
+release-2NNN-disk.vhd.gz, dev-system-for-quux-disk.vhd.gz, and the fixed names
+of the rolling releases latest-cadr and latest-quux, cadr-pack.img.gz and
+quux-disk.vhd.gz), the sources, QUUX's PROM, the rolling release's README.
 
 Writing: one line for every file in DIR but SHA256SUMS itself, the README
 included, plus one line for the disk or pack uncompressed, under its name
@@ -41,8 +42,13 @@ unreadable file.
 import argparse, gzip, hashlib, json, os, re, sys
 
 SUMS = 'SHA256SUMS'
+# the disk or pack, by its name.  latest-cadr and latest-quux carry the newest
+# numbered release's assets under fixed names; without them here, writing their
+# SHA256SUMS stopped at "0 disks or packs" and --check failed their
+# uncompressed line as missing.
 DISK = re.compile(r'^(?:release-1\d{3}-pack\.img|release-2\d{3}-disk\.vhd'
-                  r'|dev-system-for-quux-disk\.vhd)\.gz$')
+                  r'|dev-system-for-quux-disk\.vhd'
+                  r'|cadr-pack\.img|quux-disk\.vhd)\.gz$')
 LINE = re.compile(r'^([0-9a-f]{64})  ([^/\\\n]+)$')
 
 
