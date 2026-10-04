@@ -1,7 +1,7 @@
 # System 1003
 
-What the CADR's next release changes from System 1002. It is in progress on
-the `cadr` branch: each change is recorded here as it is made. `main` is
+What System 1003, the CADR's release after System 1002, changes from it.
+Each change was recorded here as it was made on the `cadr` branch. `main` is
 QUUX's system, numbered from 2000; what this branch takes from it is a bug fix,
 a change that needs no QUUX hardware, or a feature Mete chose for the CADR.
 Every change to a source file carries a comment in that file saying why.
@@ -99,7 +99,7 @@ Every change to a source file carries a comment in that file saying why.
   same store of a fixnum resumes on both.
 - **An interpreted special binding survives a process switch.** When the
   PDL buffer is refilled from memory (`PDL-BUFFER-REFILL`,
-  `ucadr/uc-page-fault.lisp:1509`), a word that needs the transporter goes
+  `ucadr/uc-page-fault.lisp:1543`), a word that needs the transporter goes
   through `PB-TRANS`, which dispatched on `TRANSPORT-NO-EVCP` and so followed
   a `DTP-ONE-Q-FORWARD`: the word came back into the buffer as a copy of the
   forward's target, cdr code and all. The interpreter forwards a special
@@ -113,7 +113,7 @@ Every change to a source file carries a comment in that file saying why.
   signalled "The argument CONS was 0, which is not a cons." `PB-TRANS` now
   dispatches on `TRANSPORT-NO-EVCP-KEEP-OQF`, the same dispatch with I-ARG
   bit 3, which leaves a one-Q forward as it is
-  (`ucadr/uc-parameters.lisp:327-333`, `ucadr/uc-page-fault.lisp:1576-1581`):
+  (`ucadr/uc-parameters.lisp:327-333`, `ucadr/uc-page-fault.lisp:1610-1615`):
   one control-store word, `PB-TRANS+12`, changes, and nothing moves. MIT's,
   in microcode 323 as well. `tools/microcode-check/run pdl-refill` fails
   three of its four cases on microcode 1000 without the fix, on the micro
@@ -269,7 +269,7 @@ Every change to a source file carries a comment in that file saying why.
     the band's area origins (`GET-AREA-ORIGINS`, now called before the
     memory size is stored), not from a constant. Past them it halted in
     `XCPPG1`, "Bigger than space allocated"
-    (`ucadr/uc-page-fault.lisp:1333`). So a band with 2-megaword tables
+    (`ucadr/uc-page-fault.lisp:1367`). So a band with 2-megaword tables
     uses 2048K of a bigger machine: this system built with MIT's table
     sizes cold-booted, loaded (`QLD`) and saved at 60 boards, and its band
     reports 2048K there, as System 1002's band does on this microcode.
@@ -314,7 +314,7 @@ Every change to a source file carries a comment in that file saying why.
     page's data as a table entry. QUUX's line has the same change.
   - **The cold boot fills all of PHYSICAL-PAGE-DATA with -1 and takes the
     table's unused pages out of the map** (`ucadr/uc-cold-disk.lisp:742-748`,
-    `:854-874`). `COLD-REINIT-PPD-0` and the loop at `BEGCM1` ended at
+    `:878-898`). `COLD-REINIT-PPD-0` and the loop at `BEGCM1` ended at
     REGION-ORIGIN, which `AREA-LIST` (`cold/qcom.lisp:221`) puts below
     PAGE-TABLE-AREA; both now end at ADDRESS-SPACE-MAP, the area after the
     table. The fill wrote -1 only into the word below REGION-ORIGIN, the
@@ -333,7 +333,7 @@ Every change to a source file carries a comment in that file saying why.
     table has no unused pages.
   - **The wired areas keep a level-2 map block only for each 8K words that
     still maps a page** (`COMPACT-WIRED-MAP`,
-    `ucadr/uc-cold-disk.lisp:81-161`, called at `BEGCM4`, `:881`). The cold
+    `ucadr/uc-cold-disk.lisp:81-161`, called at `BEGCM4`, `:905`). The cold
     boot gives every 8K words of the wired areas a level-2 block of its own,
     and those blocks are never reused for paging (`INIMAP7`, `:46-50`); with
     fewer than 60 boards, once the tables' unused pages are out of the map,
@@ -563,6 +563,48 @@ Every change to a source file carries a comment in that file saying why.
     1002's release band; with the fix it passes, the cable showing 0, 1, 2,
     3, on micro (three runs) and rtl, at 32 and at 60 boards.
 
+- **`tools/lispm-check` fails a case that asks a question, at once**
+  (`tools/lispm-check:505-519`, `:522-537`; `docs/lispm-check.md:157-176`).
+  A form that asked a question with no error before it, such as `GC-ON`'s
+  "Try garbage collecting after all? (Y or N)", made the tool wait out
+  `--timeout`. The case's `condition-case` now has a clause for the
+  condition `FQUERY`, which `Y-OR-N-P`, `YES-OR-NO-P` and `FQUERY` signal
+  first: the form ends there, and the case fails naming the question. Over
+  TELNET `YES-OR-NO-P` prints no prompt, only a beep, so only this clause
+  sees it. A bare `(Y or N)` or `(Yes or No)` at the end of a case's output,
+  with no output for 0.5 s after it, is the second line of defence: the case
+  fails and the question is answered No. `SETUP_VERSION` is 2, so a
+  checkpoint made before is not resumed. The self-test's `question.cases`
+  (`tools/lispm-check-test/question.cases`, `tools/lispm-check-test/run.sh:95`)
+  asks each kind and must finish in under 20 s with `--timeout 30`.
+- **`tools/release-build` builds a release of this line from one commit**
+  (`tools/release-build/run`, its `README.md`; tracked by
+  `.gitignore:48`), in place of the untracked scripts System 1002 was built
+  with. One invocation runs 20 steps (`STEPS`,
+  `tools/release-build/run:1663-1684`): the commit exported with an empty
+  `sys/ubin/`; the microcode assembled twice on the builder band, the two
+  compared with each other and with the last digests in this file, and the
+  boot PROM with the builder release's; stages 1-7 of `docs/building.md`;
+  the pack and the sources tarball; `tools/release-sums` and
+  `tools/release-scan`; the gates G1-G5; the published files booted on the
+  micro and rtl engines; lispm-check at 32 and 60 boards, on rtl, and of the
+  herald's memory hint at 32, 33, 59 and 60 boards; a save at 60 boards, a
+  keyboard cold boot and a warm boot. It takes the system and microcode
+  numbers, the commit, the builder pack and its SHA-256, muir-sim's and
+  ozd's commits, a port range and the output and work directories, records
+  every step (`record.txt`, `record.json`), and resumes from a named step
+  (`--from`). It tags and uploads nothing. QUUX's numbers, 2NNN, are refused
+  until that line's steps are written (`LINES`,
+  `tools/release-build/run:95-104`, `:128-144`). `tools/release-build/test`
+  runs 53 tests of its parts, each with a fault planted (a missing or stale
+  `sys/ubin/`, fixtures without their dates, a second assembly that differs
+  in a byte, a sources member not root's, a stray byte in the pack, gate
+  faults, a wrong quotient, a negative GCD, a busy port); all 53 pass.
+  `docs/building.md` says how System 1003's release is built with it
+  ("Building System 1003's release", `docs/building.md:309`): System 1002's
+  release pack is the builder, its MCR1 loaded with the new microcode, and
+  ozd serves FILE dates in UTC throughout.
+
 ## Known faults found, not yet fixed
 
 - **A warm boot that catches the Chaos Background process running hangs the
@@ -592,3 +634,10 @@ Every change to a source file carries a comment in that file saying why.
   heal on their own. They come at the same blocks with and without that
   change, so their cause is another, and it is not established. Listed,
   not fixed: the table is to be redesigned after this release.
+- **System 1002's known faults stand**, but for the negative `GCD`, fixed
+  above: the boot PROM's `PAGE-0-PARITY-FIX` touches one word past page 0
+  (`ucadr/promh.text:403-405`); a date printed MM/DD parses as DD/MM
+  outside the United States (`SET-MONTH-AND-DATE`, `io1/timpar.lisp`); and
+  `(%div 0 0)` returns 0 rather than signalling division by zero. All three
+  are MIT's, as `docs/release-1002.md` describes them, and none of their
+  files changed in this release.
