@@ -80,8 +80,8 @@ def main():
     ap.add_argument('cold_b', metavar='COLD-B')
     ap.add_argument('--keep', action='store_true', help='keep the planted copies')
     args = ap.parse_args()
-    work = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'),
-                        'muir-sys-cold-compare-test')
+    cache = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')
+    work = os.path.join(cache, 'muir-sys-cold-compare-test')
     os.makedirs(work, exist_ok=True)
     A, B = cc.Image(args.cold_a, 'A'), cc.Image(args.cold_b, 'B')
     fa, fb = cc.Files(A), cc.Files(B)
