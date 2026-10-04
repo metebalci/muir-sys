@@ -50,8 +50,14 @@
 	    for tail on times
 	    do (chaos:transmit-int-pkt pkt)
 	       (setf (car tail) (time:fixnum-microsecond-time)))
-      (setq length (chaos:int-pkt-list-length (chaos:int-transmit-list))
-	    window (loop for pkt in pkts always (cto-on-transmit-list-p pkt)))
+      ;; one walk of the list, taken at once: the first frame can end while
+      ;; the list is walked, and a count followed by four searches could see
+      ;; it end in between, so that the window looked not entered with all
+      ;; four pushed inside it
+      (let ((on (loop for pkt = (chaos:int-transmit-list) then (chaos:int-pkt-thread pkt)
+		      while pkt collect pkt)))
+	(setq length (length on)
+	      window (loop for pkt in pkts always (memq pkt on))))
       (loop with start = (time:fixnum-microsecond-time)
 	    with left = pkts
 	    ;; stop at the timeout, and at a wrap of the microsecond clock
