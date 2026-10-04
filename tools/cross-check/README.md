@@ -146,7 +146,8 @@ target changes). A copy of the tree with `PRODEF`'s old macro, which used
 `cases/check3.cases`, `check3.py`, `plant3.py`. The files of
 `SI:COLD-LOAD-FILE-LIST` are compiled for the target, and so are the
 readtables. The cold load's font is written again for the target
-(`cold:cross-redump-value-file`; the tree's is a 32-bit file). `MAKE-COLD`
+(`cold:cross-redump-value-file`; the tree's is the 40-bit file it wrote
+from System 100's 32-bit one, and is written again the same). `MAKE-COLD`
 writes partition `LOD3`, and the band is opened read-only, so the writes stay
 in the run. The partition's pages are then copied to `home/cold40.img`.
 `check3.py` reads the image on the host as the target would (5-byte words,

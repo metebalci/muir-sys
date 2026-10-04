@@ -263,9 +263,11 @@ build:
 (cold:cross-end)
 ```
 
-The tree's `CPTFON` is a 32-bit file: `cross-redump-value-file` loads it
-with `FONTS:CPTFONT` bound, so that the builder's own, larger font does not
-change, and writes it again for the target. The log directory gets
+`cross-redump-value-file` loads the tree's `CPTFON` with `FONTS:CPTFONT`
+bound, so that the builder's own, larger font does not change, and writes
+it again for the target. It took System 100's 32-bit file; the tree's is
+now the 40-bit file it wrote, which it loads and writes again the same,
+byte for byte but for the date in the header. The log directory gets
 `cross-NNNN.txt` for each file compiled: every read of a watched symbol at
 an interpreted point, with its target and builder values, every fold, every
 `#.` with its value, and every expansion of a listed definition without
@@ -324,9 +326,13 @@ the cross build (between `cold:cross-begin` and `cold:cross-end`):
 - **The site files**, `(make-system 'site :compile :noload :noconfirm :nowarn)`.
 - **The readtables**, `SYS: IO; RDTBL QFASL` and `CRDTBL QFASL`, which check 3
   writes with `si:rtc-file`.
-- **The fonts and the demos' data**, which have no source and are 32-bit
-  files: each is loaded here and written again for the target. A font sets a
-  symbol in `FONTS`, which must be special while it loads:
+- **The fonts and the demos' data**, which have no source. System 100's are
+  32-bit files, which a 40-bit world's fasloader refuses; each was loaded
+  here and written again for the target. The tree's compiled fonts and
+  `SYS: DEMO; TVBGAR` are now the files so written, so a build from the tree
+  has them as they are, and this step is needed only from System 100's
+  files (release-2000's sources hold them). A font sets a symbol in `FONTS`,
+  which must be special while it loads:
 
   ```lisp
   (progn (defvar fonts:tvfont)
@@ -338,6 +344,13 @@ the cross build (between `cold:cross-begin` and `cold:cross-end`):
   for each font of the `FONTS` system (`sys/sys/sysdcl.lisp`), and the same
   for `SYS: DEMO; TVBGAR` (`hacks::*tvbug-arrays*`, already special); WORMCH
   is made from its AST source as below, with `compiler:dump-forms-to-file`.
+  The tree's other compiled fonts, which SYSTEM does not load, were written
+  the same way, each with the symbol its file sets; `BIGOLD` and `PRT12B`
+  set `FONTS:BIGFNT` and `FONTS:APL14` and have no attribute list, so they
+  are loaded with no package given (in `FONTS`, their `NIL` reads as
+  `FONTS:NIL` and the load stops). Written again so from System 100's
+  files, `TR8`, `HL12` and `TVFONT` are the tree's byte for byte but for the
+  date in the header.
 - **`SYS: SYS; UCINIT`** is compiled from its source like any other file
   (`sys/sys/ucinit.lisp`, which records no microcompiled function); the
   tracked `ucinit.qfasl` is System 100's 32-bit file and is not used here.
@@ -360,10 +373,12 @@ on `quux` at revision 13 (`MUIR_QUUX_REVISION=13`, PROM 2001 given with
 files served in `SYS: UBIN;`. Contract G2's section 7 calls it step 5, and
 step 6 is the same again from step 5's band. What differs from 2000's:
 
-- **The served tree** is the sources with the 40-bit files that have no
-  source: the 35 fonts of the `FONTS` system, `CPTFON` and `SYS: DEMO;
-  TVBGAR`, as the cross build wrote them ("Loading the 40-bit cold load");
-  the tree's own are 32-bit files, which a 40-bit world's fasloader refuses.
+- **The served tree** is the sources as they are: the files that have no
+  source, the compiled fonts (the 35 of the `FONTS` system, `CPTFON` and the
+  rest) and `SYS: DEMO; TVBGAR`, are the 40-bit files the cross build wrote
+  ("Loading the 40-bit cold load"). Those of the `FONTS` system, `CPTFON`
+  and `TVBGAR` are byte for byte the files System 2001's band was built
+  from.
 - **The whole compile** is 2000's (`SYSDCL`, the `ALLDEFS` files, the site,
   the readtables, `WORMCH` from its AST, then `MAKE-SYSTEM` with
   `:RECOMPILE`), and `MAKE-COLD` runs in the 40-bit world: it moves a page
