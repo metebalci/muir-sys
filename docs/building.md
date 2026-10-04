@@ -217,7 +217,9 @@ checks.
 - **`sys/ubin/`, assembled from that commit's `sys/ucadr/`**: microcode 1000,
   `ua:version-number` 1000 (see "Assembling the microcode"), twice, byte for
   byte, and equal to the four SHA-256 in `docs/release-1002.md`; the PROM
-  files unchanged, `promh.mcr` SHA-256 `2c667f99...`.
+  files unchanged, `promh.mcr` SHA-256 `2c667f99...`. The export has no
+  `sys/ubin/` directory, and the assembler does not make one: give the tree
+  it is served an empty `sys/ubin/` first (see "Assembling the microcode").
 - **The builder: `release-1001-pack.img`, LOD1** ("Exp 1001"), the pack
   checked by its SHA-256 `279e597891a0d8263a82d52898dbc2194e7c0f19cbca194d8aaf5750226b7298`
   before use (LOD1's blocks, 65569 to 114987, `29aefb7e...`), with MCR1
@@ -304,16 +306,44 @@ find <tree> -name '*.qfasl' -newermt '2026-10-26 23:00Z' ! -newermt '2026-10-27 
 and, if there are any, date them to the present (`touch`) once that hour has
 passed.
 
-**From System 1003 on** the builder is a 1002 band, which reads FILE dates in
-UTC, and the whole build runs with ozd at `utc`: there are no two halves, no
-`--timezone`, and no hole.
+## Building System 1003's release
 
-**From System 1003 on** the cold load needs microcode with the change that
-gives it 60 memory boards (`docs/release-1003.md`), so the current microload
-holds that microcode by stage 5, as MCR1 does from the start in the
-procedure above. System 1003's wired areas end past the 64K that earlier
-microcode maps while it cold-boots: on the microcode before that change,
-System 1003's band halts in the cold boot (`XRGN1+2`).
+System 1003 is built by the procedure above, with these differences. A dry
+run on 3 and 4 October 2026, from `cadr` `67b4056`, built and checked it so
+(the figures below are its own).
+
+- **The builder is System 1002's release pack**, `release-1002-pack.img`,
+  LOD1 ("Exp 1002"), checked by its SHA-256
+  `e59b4de908cc744908b56e8166e8def9d6ef1d0173603342d1e8d759b55b3b08` before
+  use (LOD1's blocks, 65569 to 114987, `a5fdf7ea...`). Its MCR1 is loaded
+  from the start with the microcode assembled from the commit (`diskpack
+  <pack> load MCR1 <tree>/sys/ubin/ucadr.mcr`, then `modify MCR1 keep "UCADR
+  <its number>"`), and the served `SYS: UBIN;` holds that microcode's files.
+  The cold load needs it: it has the change that gives the system 60 memory
+  boards (`docs/release-1003.md`), and System 1003's wired areas end past the
+  64K that earlier microcode maps while it cold-boots, so on the microcode
+  before that change System 1003's band halts in the cold boot (`XRGN1+2`).
+  The builder's site is 1002's own, `:MIT`, which every compiled QFASL
+  records (the dry run's 212).
+- **One half, ozd at `utc` throughout**, its default, with no `--timezone`:
+  System 1002 reads FILE dates in UTC. The two ozd settings, the stop and
+  restart between stage 4 and stage 5, and the repeated hour do not apply,
+  so the `find` for QFASLs in that hour is not needed. The two `(or (numberp
+  time:*timezone*) ...)` gates in the stage 1-4 forms pass and check
+  nothing: System 1002's `*TIMEZONE*` is the number `-1` (its site zone is
+  Europe/Berlin, `*TIMEZONE-NAME*`); they may be left out.
+- **ozd**: `52eb6b0` or later, as System 1002's dates need
+  (`docs/release-1002.md`, Time zones), named in the build record with
+  muir-sim's commit. The dry run used ozd `a387333` and muir-sim `91ce0c9`.
+- **The gates after QLD** are the five above, and all five held in the dry
+  run.
+- **Times** on muir-sim's `cadr`, micro engine, 32 boards, with other work
+  on the machine: the four assemblies in parallel, 10 minutes (UCADR 575 s
+  each, PROMH, DCFU and MEMD about 290 s each); the SYSTEM compile 2h57m40s
+  (System 1002's: 2h47m09s); stages 1-4 together 3h18m44s; `MAKE-COLD`
+  6m38s; QLD 27m08s from the script's start to its end; the save and the
+  verifying boot 3m28s. From the builder's first boot to the verified band:
+  3h49m32s.
 
 ## Publishing a release
 
@@ -641,6 +671,11 @@ For an unattended load, generate `site/coldrun.lisp`, served as
 (si:mini-report "qld-complete")
 ```
 
+The forms may also be written without the package prefix, `(qld ...)` and
+`(mini-report ...)`, as the scripts of System 1002's release build and of
+System 1003's dry run were; both ways were run to `qld-complete` and
+`script-ends` on that dry run's cold load (2026-10-04).
+
 The cold load reads and runs this script before entering its listener.
 The script is local build input, ignored by Git and outside the SITE
 compilation list. The runner stays in `sys/cold/mini.lisp`. It resolves the
@@ -744,6 +779,16 @@ layout, preserve their comments, and select LOD2 for subsequent boots.
 `sys/ubin/` is not in the repository; a release carries it, assembled from
 `sys/ucadr/`. Verified on 2026-09-17 on a 1000 band: everything it holds
 was assembled from these sources, and matches System 100's.
+
+**Give the tree an empty `sys/ubin/` first.** Every output below is written
+to `SYS: UBIN;`, and the assembler does not make the directory. A tree
+exported by `git archive` has none, and `tools/lispm-check` serves the tree
+as it is, without its `--ubin` directory (that one serves only the cold boot
+of its checkpoint): on 2026-10-03, on such a tree, the DCFU and MEMD dumps
+stopped with "Directory not found for SYS: UBIN; DCFU ULOAD >" (and `MEMD
+ULOAD`). Git keeps no empty directory, so make it in the exported tree,
+`mkdir <tree>/sys/ubin`, as System 1002's release build and System 1003's
+dry run did.
 
 **Load the assembler.** `(make-system 'cadr-micro-assembler :compile :noconfirm :nowarn)`
 (`sys/sysdcl.lisp:400`). It is not in the band.
