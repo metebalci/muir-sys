@@ -21,8 +21,18 @@
 (SETQ TV:MORE-PROCESSING-GLOBAL-ENABLE T)
 
 (DEFVAR TV:DEFAULT-BACKGROUND-STREAM 'TV:BACKGROUND-STREAM)
-(DEFCONST TV:WHO-LINE-RUN-LIGHT-LOC 51765
-  "Where the run-light goes, in Xbus I//O space")
+;(DEFCONST TV:WHO-LINE-RUN-LIGHT-LOC 51765
+;  "Where the run-light goes, in Xbus I//O space")
+;; quux revision 14 (contract g3 revision 14, 10.8): the run light's address,
+;; two words after the disk run light, which the microcode puts in the
+;; frame buffer at boot; tv::initialize-run-light-locations (sys: sys; ltop)
+;; moves both to the video controller's last line.  an xbus offset no longer
+;; reaches the frame buffer.  the form is evaluated by the interpreter when the
+;; cold load first boots, so it calls the misc instruction %make-pointer-offset
+;; itself: %pointer-plus is a defsubst of sys2; lmmac, which the cold load does
+;; not define as a function.
+(defconst tv:who-line-run-light-loc (%make-pointer-offset dtp-fix %disk-run-light 2)
+  "Where the run-light goes: the address of its word in the frame buffer.")
 (DEFVAR TV:KBD-LAST-ACTIVITY-TIME 0
   "Time user last typed a key or clicked mouse.")
 
@@ -126,11 +136,16 @@ instance variable in INSTANCE."
   )
 
 (DEFMETHOD-IMMEDIATE (COLD-LOAD-STREAM :PRINT-SELF) (STREAM &REST IGNORE)
-  (FORMAT STREAM "#<~A ~O>" (TYPEP SELF) (%POINTER SELF)))
+;  (FORMAT STREAM "#<~A ~O>" (TYPEP SELF) (%POINTER SELF)))
+  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+  (format stream "#<~A ~O>" (typep self) (%pointer-unsigned (%pointer self))))
 
 (DEFMETHOD-IMMEDIATE (COLD-LOAD-STREAM :DESCRIBE) ()
   (FORMAT *STANDARD-OUTPUT* "~&#<~A ~O> is the cold-load stream."
-	  (TYPEP SELF) (%POINTER SELF)))
+;	  (TYPEP SELF) (%POINTER SELF)))
+	  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the
+	  ;; address unsigned
+	  (typep self) (%pointer-unsigned (%pointer self))))
 
 (DEFMETHOD-IMMEDIATE (COLD-LOAD-STREAM :INIT) (PLIST)
   (OR (BOUNDP 'KBD-TRANSLATE-TABLE)

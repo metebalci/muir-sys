@@ -23,11 +23,46 @@
 (defconst inc-band-base-free-pointers-page 4 "The incremental band's page with the base band's region-free-pointer page.")
 (defconst inc-band-bitmap-page 5 "The incremental band's first page of the mask.")
 
+;;; quux revision 14 (contract g3 revision 14, 10.7 item 2; appendix a14.13):
+;;; a page is no longer at its virtual page's place in the paging partition,
+;;; and an address in ephemeral space has a virtual page past 3.4 million, so
+;;; the mask is no longer indexed by virtual page.  it has a bit a page of the
+;;; band, in the band's own order: the pages of the regions, region by region
+;;; from region 0, each region's to the end of the page its free pointer is
+;;; in, as disk-save-regionwise writes a whole band (band-page-index); the
+;;; restore counts the pages as it walks the regions.  the band's format
+;;; numbers move with revision 14 (band-format-incremental, 2011).
+
+;(defun rqb-data-pointer (rqb &optional (page 0))
+;  "A locative to the first word of page PAGE of RQB's data (as wire-disk-rqb finds it)."
+;  (%make-pointer dtp-locative
+;		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- page-size))
+;		    (* (1+ page) page-size))))
+;; quux revision 14 (contract g3 revision 14, 10.10): the rqb's first word and
+;; the page by %pointer-plus, modulo 2^32, as wire-disk-rqb finds them: by - and
+;; + an rqb at or across 2^31 gave a bignum, whose own storage the locative named
 (defun rqb-data-pointer (rqb &optional (page 0))
   "A locative to the first word of page PAGE of RQB's data (as wire-disk-rqb finds it)."
   (%make-pointer dtp-locative
-		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- page-size))
-		    (* (1+ page) page-size))))
+		 (%pointer-plus (logand (%pointer-plus rqb (- (+ (array-leader-length rqb) 2)))
+					(- page-size))
+				(* (1+ page) page-size))))
+
+(defun region-band-pages (region)
+  "The pages REGION takes in a band: to the end of the page its free pointer is in; 0 if free."
+  (if (ldb-test %%region-space-type (region-bits region))
+      (ceiling (region-free-pointer region) page-size)
+    0))
+
+(defun band-page-index (region)
+  "The index, in the band's own order, of the first page of REGION: the pages of
+the regions before it, as disk-save-regionwise writes them."
+  (loop for r from 0 below region
+	sum (region-band-pages r)))
+
+(defun band-page-count ()
+  "The pages the regions take in a band, and the bits of an incremental band's mask."
+  (band-page-index (array-length #'region-origin)))
 
 (defun band-page-block (part-base page)
   "The first disk block of page PAGE of the 40-bit band at PART-BASE."
@@ -190,7 +225,9 @@
   ;; region tables, which the microcode's restore reads before it reads the
   ;; bitmap (disk-restore-regionwise-subr), are always saved: omitted, the
   ;; restore would take the next page saved for them.
-  (let* ((n-mask-bits (ceiling virtual-memory-size page-size))
+;  (let* ((n-mask-bits (ceiling virtual-memory-size page-size))
+  ;; quux revision 14: a bit a page of the band, in its own order (top of the file)
+  (let* ((n-mask-bits (band-page-count))
 	 (n-mask-pages (ceiling n-mask-bits (* 32. page-size)))
 	 (rqb nil)
 	 (region-free-pointer-rqb nil))
@@ -202,8 +239,12 @@
 		 (mask-indirect-array
 		   (make-array (ceiling (array-length mask) 16.) ':type art-16b
 			       ':displaced-to mask)))
+;	    (dolist (area (list region-origin region-length region-bits region-free-pointer))
+;	      (setf (aref mask (floor (region-origin area) page-size)) 0))
+	    ;; quux revision 14: each region table's first page by its index in
+	    ;; the band's order (a fixed area's region is its area's number)
 	    (dolist (area (list region-origin region-length region-bits region-free-pointer))
-	      (setf (aref mask (floor (region-origin area) page-size)) 0))
+	      (setf (aref mask (band-page-index area)) 0))
 	    (array-initialize (rqb-buffer rqb) 0)
 	    ;; page 3: the base band's name and the mask's length in bits.
 	    (put-disk-string rqb booted-band-name 0 4)
@@ -318,8 +359,10 @@ pages not currently in use, and pages which have no data in the disk partition."
 	 (make-array (* 2 page-size)
 		     ':type art-16b
 		     ':displaced-to 0))
-	(mask (make-array (ceiling virtual-memory-size page-size)
-			  ':type art-1b)))
+;	(mask (make-array (ceiling virtual-memory-size page-size)
+;			  ':type art-1b)))
+	;; quux revision 14: a bit a page of the band, in its own order
+	(mask (make-array (band-page-count) ':type art-1b)))
     (unwind-protect
         (progn
 	  ;; Get rqb just once, used to read each batch of blocks to compare.
@@ -368,7 +411,10 @@ pages not currently in use, and pages which have no data in the disk partition."
 					(floor (- (region-origin region-bits)
 						  (region-length micro-code-symbol-area))
 					       page-size))))
+	  ;; quux revision 14: mask-index, each region's first page's index in the
+	  ;; band's own order, counts the pages of the regions now
 	  (do ((region-number 0 (1+ region-number))
+	       (mask-index 0 (+ mask-index (region-band-pages region-number)))
 	       (region-page-on-disk part-base))
 	      ((= region-number (array-length #'region-origin)))
 	    (let* ((region-free-pointer-on-disk
@@ -396,13 +442,23 @@ pages not currently in use, and pages which have no data in the disk partition."
 		  (unless (= %region-space-fixed
 			     (ldb %%region-space-type (region-bits region-number)))
 		    (si:page-in-region region-number))
+;		  (compare-range comparison-data-rqb unit region-page-on-disk
+;				 (lsh (region-origin region-number)
+;				      (- 1 (haulong page-size)))
+;				 (+ (lsh (region-origin region-number)
+;					 (- 1 (haulong page-size)))
+;				    region-disk-pages)
+;				 mask)
+		  ;; quux revision 14: the region's pages in the band's order from
+		  ;; mask-index, no more than it has now: a region with fewer
+		  ;; pages now than on disk would mark the next region's bits
 		  (compare-range comparison-data-rqb unit region-page-on-disk
 				 (lsh (region-origin region-number)
 				      (- 1 (haulong page-size)))
 				 (+ (lsh (region-origin region-number)
 					 (- 1 (haulong page-size)))
-				    region-disk-pages)
-				 mask)
+				    (min region-disk-pages (region-band-pages region-number)))
+				 mask mask-index)
 		  (unless (= %region-space-fixed
 			     (ldb %%region-space-type (region-bits region-number)))
 		    ;; This UNLESS avoids a bug in PAGE-OUT-REGION
@@ -459,7 +515,10 @@ pages not currently in use, and pages which have no data in the disk partition."
 ;; words, and a page is the same only if its words' tags are too: the 16-bit
 ;; view compares <31:0>, and the tags, <39:32>, are compared word by word
 ;; (page-tags-equal).
-(defun compare-range (rqb unit address page stop-page mask)
+;(defun compare-range (rqb unit address page stop-page mask)
+;; quux revision 14: a page's bit is MASK-INDEX plus its place from PAGE,
+;; the band's own order, not its virtual page number (top of the file)
+(defun compare-range (rqb unit address page stop-page mask mask-index)
   (let ((data (rqb-data-pointer rqb)))
     (do ((page-number page (+ page-number comparison-page-quantum)))
 	((>= page-number stop-page))
@@ -476,7 +535,8 @@ pages not currently in use, and pages which have no data in the disk partition."
 				(lsh page-size 1))
 		 (page-tags-equal (%make-pointer-offset dtp-locative data (lsh i page-size-bits))
 				  (%make-pointer dtp-locative (lsh (+ i page-number) page-size-bits))))
-	    (setf (aref mask (+ i page-number)) 1))))))
+;	    (setf (aref mask (+ i page-number)) 1))))))
+	    (setf (aref mask (+ mask-index (- (+ i page-number) page))) 1))))))
 
 (defun page-tags-equal (a b)
   "T if the page of words at A and the one at B have the same tags, <39:32>, word for word.
@@ -492,15 +552,19 @@ the word at its pointer as a header and transports it)."
 This will be the number of pages needing to be dumped in an incremental band.
 MASK should be a value returned by COMPARE-MEMORY-WITH-PARTITION.
 A second value is the number of pages in use but not needing to be dumped."
+  ;; quux revision 14: region-start-page, the region's first page's index in
+  ;; the band's own order, as the mask is indexed (top of the file)
   (do ((region-number 0 (1+ region-number))
+       (mask-index 0 (+ mask-index (region-band-pages region-number)))
        (count-zeros 0)
        (count-ones 0))
       ((= region-number (array-length #'region-origin))
        (values count-zeros count-ones))
     (when (ldb-test %%region-space-type (region-bits region-number))  ;Ignore free regions.
-      (let ((region-start-page
-	      (lsh (region-origin region-number)
-		   (- 1 (haulong page-size))))
+;      (let ((region-start-page
+;	      (lsh (region-origin region-number)
+;		   (- 1 (haulong page-size))))
+      (let ((region-start-page mask-index)
 	    (region-n-pages
 	      (ceiling (region-free-pointer region-number) page-size)))
 	;; Loop over pages in this region.
@@ -514,7 +578,9 @@ A second value is the number of pages in use but not needing to be dumped."
   "Print a region-by-region accounting of pages marked with 0 or 1 in MASK.
 For debugging only.
 Intended for use with MASK as returned by COMPARE-MEMORY-WITH-PARTITION."
+  ;; quux revision 14: by the band's own order, as count-changed-pages
   (do ((region-number 0 (1+ region-number))
+       (mask-index 0 (+ mask-index (region-band-pages region-number)))
        (count-zeros 0)
        (count-ones 0))
       ((= region-number (array-length #'region-origin))
@@ -522,9 +588,10 @@ Intended for use with MASK as returned by COMPARE-MEMORY-WITH-PARTITION."
 	       count-ones count-zeros)
        nil)
     (when (ldb-test %%region-space-type (region-bits region-number))	;Ignore free regions.
-      (let ((region-start-page
-	      (lsh (region-origin region-number)
-		   (- 1 (haulong page-size))))
+;      (let ((region-start-page
+;	      (lsh (region-origin region-number)
+;		   (- 1 (haulong page-size))))
+      (let ((region-start-page mask-index)
 	    (region-n-pages
 	      (ceiling (region-free-pointer region-number) page-size))
 	    (region-start-zeros count-zeros)

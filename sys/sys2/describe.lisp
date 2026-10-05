@@ -373,10 +373,18 @@ Trapping is ~A.~%"
     (COND (AREA
 	   (FORMAT T "~%~S is a locative pointer into area ~S~%It points "
 		     X (AREA-NAME AREA))
+;	   (LET* ((STRUC (%FIND-STRUCTURE-HEADER X))
+;		  (BASEP (%POINTER (%FIND-STRUCTURE-LEADER STRUC)))
+;		  (BOUND (+ (%STRUCTURE-TOTAL-SIZE STRUC) BASEP)))
+;	     (IF (AND ( BASEP (%POINTER X)) (< (%POINTER X) BOUND))
+	   ;; quux revision 14 (contract g3 revision 14, 10.10): the locative's
+	   ;; offset from the structure's first word, compared with 0 and the
+	   ;; size: the bound by + of an address was a bignum at or across
+	   ;; 2^31, and the two signed compares put a locative into a structure
+	   ;; across 2^31 outside it
 	   (LET* ((STRUC (%FIND-STRUCTURE-HEADER X))
-		  (BASEP (%POINTER (%FIND-STRUCTURE-LEADER STRUC)))
-		  (BOUND (+ (%STRUCTURE-TOTAL-SIZE STRUC) BASEP)))
-	     (IF (AND ( BASEP (%POINTER X)) (< (%POINTER X) BOUND))
+		  (offset (%pointer-difference x (%find-structure-leader struc))))
+	     (IF (AND ( 0 offset) (< offset (%structure-total-size struc)))
 		 (FORMAT T "to word ~D. of ~S~%" (%POINTER-DIFFERENCE X STRUC) STRUC)
 		 (FORMAT T "at some sort of forwarded version of ~S~%" STRUC))
 	     (DESCRIBE-1 STRUC)))
@@ -477,7 +485,10 @@ describing themselves."
 	(barf nil))
     (format t "~&~S is a bignum.~&It is ~R word~:P long.  It is ~[positive~;negative~].  ~
                  It is stored starting at location: #o~O~&Its contents:~2%"
-	    x len (%p-ldb-offset #o2201 x 0) (%pointer x))
+;	    x len (%p-ldb-offset #o2201 x 0) (%pointer x))
+	    ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the
+	    ;; address unsigned
+	    x len (%p-ldb-offset #o2201 x 0) (%pointer-unsigned (%pointer x)))
     (do ((i 1 (1+ i)))
 	((> i len))
       (unless (zerop (%p-ldb-offset #o3701 x i))
@@ -628,40 +639,73 @@ NIL as arg means print a header but mention no areas."
 		(CEILING LENGTH #o2000) (CEILING USED #o2000)))))
   T)
 
-(DEFUN COUNT-WIRED-PAGES ()
-  (DECLARE (VALUES NUMBER-OF-WIRED-PAGES NUMBER-OF-FIXED-WIRED-PAGES))
-  (DO ((ADR (REGION-ORIGIN PAGE-TABLE-AREA) (+ ADR 2))
-       (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE) 2) (1- N))
-       (N-WIRED 0))
-      ((ZEROP N)
-       (DO ((ADR (REGION-ORIGIN PHYSICAL-PAGE-DATA) (1+ ADR))
-	    (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE) PAGE-SIZE) (1- N))
-	    (N-FIXED-WIRED 0))
-	   ((ZEROP N)
-	    (RETURN (VALUES (+ N-WIRED N-FIXED-WIRED)
-			    N-FIXED-WIRED)))
-;	 (AND (= (%P-LDB #o0020 ADR) #o177777)
-;	      ( (%P-LDB #o2020 ADR) #o177777)
-	 ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, the gc data <31:20>
-	 (and (= (%p-ldb #o0024 adr) #o3777777)
-	      ( (%p-ldb #o2414 adr) #o7777)
-	      (SETQ N-FIXED-WIRED (1+ N-FIXED-WIRED)))))
-    (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT ADR)))
-	 (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED)
-	 (INCF N-WIRED))))
+;;; quux revision 14 (contract g3 revision 14, 3.2, 10.5; appendix a14.12):
+;;; no page hash table.  a frame's wired bit is in physical-page-data, read
+;;; through the physical memory window; a frame is fixed wired when it holds
+;;; no page (a table, the slot bitmap) or a page of the low memory the cold
+;;; boot maps virtual = physical (below %sys-com-wired-size).
+(defun count-wired-pages ()
+  (declare (values number-of-wired-pages number-of-fixed-wired-pages))
+  (do ((ppd (system-communication-area %sys-com-physical-page-data))
+       (wired-pages (ceiling (system-communication-area %sys-com-wired-size) page-size))
+       (frame 0 (1+ frame))
+       (n-frames (system-communication-area %sys-com-physical-page-data-size))
+       (n-wired 0)
+       (n-fixed-wired 0)
+       (word))
+      ((>= frame n-frames)
+       (values n-wired n-fixed-wired))
+    (setq word (physical-memory-word (+ ppd (* %ppd-words-per-frame frame))))
+    (when (and (not (= word -1)) (ldb-test %%ppd0-wired word))	;in service, wired
+      (incf n-wired)
+      (when (< (ldb %%ppd0-virtual-page-number word) wired-pages)
+	(incf n-fixed-wired)))))
 
-(DEFUN PRINT-AREAS-OF-WIRED-PAGES ()
-  (DO ((ADR (REGION-ORIGIN PAGE-TABLE-AREA) (+ ADR 2))
-       (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE) 2) (1- N)))
-      ((ZEROP N))
-    (WHEN (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT ADR)))
-	       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED))
-      (FORMAT T "~S " (AREF (SYMBOL-FUNCTION 'SYS:AREA-NAME)
-			    (%AREA-NUMBER
-;			      (ASH (%P-LDB %%PHT1-VIRTUAL-PAGE-NUMBER ADR) 8)))))))
-			      ;; 1024-word pages (contract g2, option (w)): the page
-			      ;; number times 1024
-			      (ash (%p-ldb %%pht1-virtual-page-number adr) 10.)))))))
+(defun print-areas-of-wired-pages ()
+  (loop with ppd = (system-communication-area %sys-com-physical-page-data)
+	for frame from 0 below (system-communication-area %sys-com-physical-page-data-size)
+	as word = (physical-memory-word (+ ppd (* %ppd-words-per-frame frame)))
+	when (and (not (= word -1)) (ldb-test %%ppd0-wired word))
+	  do (format t "~S " (aref (symbol-function 'sys:area-name)
+				   ;; the page's address, by %logdpb, which makes a
+				   ;; fixnum of a page from 2^31 up
+				   (%area-number (%logdpb (ldb %%ppd0-virtual-page-number word)
+							  (byte 22. 10.) 0))))))
+
+;(DEFUN COUNT-WIRED-PAGES ()
+;  (DECLARE (VALUES NUMBER-OF-WIRED-PAGES NUMBER-OF-FIXED-WIRED-PAGES))
+;  (DO ((ADR (REGION-ORIGIN PAGE-TABLE-AREA) (+ ADR 2))
+;       (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE) 2) (1- N))
+;       (N-WIRED 0))
+;      ((ZEROP N)
+;       (DO ((ADR (REGION-ORIGIN PHYSICAL-PAGE-DATA) (1+ ADR))
+;	    (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE) PAGE-SIZE) (1- N))
+;	    (N-FIXED-WIRED 0))
+;	   ((ZEROP N)
+;	    (RETURN (VALUES (+ N-WIRED N-FIXED-WIRED)
+;			    N-FIXED-WIRED)))
+;;	 (AND (= (%P-LDB #o0020 ADR) #o177777)
+;;	      ( (%P-LDB #o2020 ADR) #o177777)
+;	 ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, the gc data <31:20>
+;	 (and (= (%p-ldb #o0024 adr) #o3777777)
+;	      ( (%p-ldb #o2414 adr) #o7777)
+;	      (SETQ N-FIXED-WIRED (1+ N-FIXED-WIRED)))))
+;    (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT ADR)))
+;	 (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED)
+;	 (INCF N-WIRED))))
+
+;(DEFUN PRINT-AREAS-OF-WIRED-PAGES ()
+;  (DO ((ADR (REGION-ORIGIN PAGE-TABLE-AREA) (+ ADR 2))
+;       (N (TRUNCATE (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE) 2) (1- N)))
+;      ((ZEROP N))
+;    (WHEN (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT ADR)))
+;	       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE ADR) %PHT-SWAP-STATUS-WIRED))
+;      (FORMAT T "~S " (AREF (SYMBOL-FUNCTION 'SYS:AREA-NAME)
+;			    (%AREA-NUMBER
+;;			      (ASH (%P-LDB %%PHT1-VIRTUAL-PAGE-NUMBER ADR) 8)))))))
+;			      ;; 1024-word pages (contract g2, option (w)): the page
+;			      ;; number times 1024
+;			      (ash (%p-ldb %%pht1-virtual-page-number adr) 10.)))))))
 
 
 

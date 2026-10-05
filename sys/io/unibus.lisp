@@ -179,19 +179,33 @@ UNIBUS-CHANNEL-ADVANCE, then call this again."
 	(OUT-PTR (%P-LDB-OFFSET %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-OUT-PTR))
 	(START (%P-LDB-OFFSET %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-START))
 	(END (%P-LDB-OFFSET %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-END)))	
-    (IF (> OUT-PTR IN-PTR)
-	(SETQ END (1- OUT-PTR))
-      (IF (= OUT-PTR START)
-	  (SETQ END (1- END))))
-    (VALUES (- IN-PTR (%POINTER CHAN) 1) (- END (%POINTER CHAN) 1))))
+;    (IF (> OUT-PTR IN-PTR)
+;	(SETQ END (1- OUT-PTR))
+;      (IF (= OUT-PTR START)
+;	  (SETQ END (1- END))))
+;    (VALUES (- IN-PTR (%POINTER CHAN) 1) (- END (%POINTER CHAN) 1))))
+    ;; quux revision 14 (contract g3 revision 14, 10.10): addresses ordered
+    ;; unsigned, and offsets in the channel by %pointer-difference.  dead on
+    ;; quux, which has no unibus (rule a6); kept right by reading only.
+    (if (%pointer-lessp in-ptr out-ptr)
+	(setq end (%pointer-plus out-ptr -1))
+      (if (= out-ptr start)
+	  (setq end (%pointer-plus end -1))))
+    (values (1- (%pointer-difference in-ptr chan)) (1- (%pointer-difference end chan)))))
 
 (DEFUN UNIBUS-CHANNEL-ADVANCE (CHAN NEW-INDEX)
   "Advance the storing pointer in unibus channel CHAN."
   (CHECK-ARG CHAN ARRAYP "an array (a Unibus channel)")
   (LET* ((START (%P-LDB-OFFSET %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-START))
 	 (END (%P-LDB-OFFSET %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-END))
-	 (IN-PTR (+ NEW-INDEX (%POINTER CHAN) 1)))
-    (OR ( START IN-PTR END) (FERROR NIL "Index lies outside of buffer"))
+;	 (IN-PTR (+ NEW-INDEX (%POINTER CHAN) 1)))
+;    (OR ( START IN-PTR END) (FERROR NIL "Index lies outside of buffer"))
+	 ;; quux revision 14 (contract g3 revision 14, 10.10): the address by
+	 ;; %pointer-plus, and its place in the buffer by its offset from the
+	 ;; start, compared with 0 and the buffer's length (dead on quux, rule a6)
+	 (in-ptr (%pointer-plus chan (1+ new-index))))
+    (or ( 0 (%pointer-difference in-ptr start) (%pointer-difference end start))
+	(ferror nil "Index lies outside of buffer"))
     (IF (= IN-PTR END) (SETQ IN-PTR START))
     (%P-DPB-OFFSET IN-PTR %%Q-POINTER CHAN %UNIBUS-CHANNEL-BUFFER-IN-PTR)))
 

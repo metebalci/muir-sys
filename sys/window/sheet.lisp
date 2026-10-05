@@ -64,7 +64,10 @@ Negative WIDTH and HEIGHT are not allowed."
   (IF *PRINT-ESCAPE*
       (PRINTING-RANDOM-OBJECT (SELF STREAM :NO-POINTER)	;We do %POINTER explicitly
 	(FORMAT STREAM "~S ~A ~O ~A"
-		(TYPE-OF SELF) NAME (%POINTER SELF)
+;		(TYPE-OF SELF) NAME (%POINTER SELF)
+		;; quux revision 14 (contract g3 revision 14, 10.1, class p):
+		;; the address unsigned
+		(type-of self) name (si:%pointer-unsigned (%pointer self))
 		(IF EXPOSED-P "exposed"
 		    (IF (OR (NULL SUPERIOR)
 			    (MEMQ SELF (SHEET-INFERIORS SUPERIOR)))
@@ -866,7 +869,11 @@ the variables already have their values, and we use those values."
   (SETQ FONT-ALIST (COPYALIST DEFAULT-FONT-ALIST))
   (DOLIST (ELT FONT-ALIST)
     (LET ((SYMBOL (INTERN (FORMAT NIL "~A-~O-~A-FONT"
-				  (TYPE-OF SELF) (%POINTER SELF) (CAR ELT))
+;				  (TYPE-OF SELF) (%POINTER SELF) (CAR ELT))
+				  ;; quux revision 14 (contract g3 revision 14,
+				  ;; 10.1, class p): the address unsigned, so
+				  ;; that the name has no minus sign
+				  (type-of self) (si:%pointer-unsigned (%pointer self)) (car elt))
 			  "TV")))
       (SET SYMBOL (CDR ELT))
       (SETF (CDR ELT) SYMBOL)))

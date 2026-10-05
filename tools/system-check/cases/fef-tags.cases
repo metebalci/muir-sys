@@ -1,0 +1,16 @@
+; An FEF's instruction words are fixnums, tag 005: cdr-normal, dtp-fix
+; (contract G1 2.6; contract G3 revision 14, 8.3 and 10.6).  FASL-OP-FRAME
+; (sys/sys/qfasl.lisp) and compile-to-core (sys/sys/qclap.lisp,
+; LAP-OUTPUT-WORD) stored only the halves of each word, which kept the tag of
+; the word the FEF was filled with.  The cold load writes them so already
+; (sys/cold/coldut.lisp, VWRITE-UNBOXED).  Run with
+;   --compile --files sys/sys/qfasl.lisp,sys/sys/qclap.lisp,tools/system-check/lisp/fef-tags.lisp
+; so that lisp/fef-tags.lisp is fasloaded by the tree's FASL-OP-FRAME.  The
+; first two cases are controls: the FEF has instruction words, and its header
+; keeps its tag.  System 2001 without the changes fails the other two: its
+; instruction words read tags 303 and 203, cdr-next and cdr-nil with
+; dtp-symbol (measured: 195 and 131 decimal).
+(plusp (length (fef-tags-unboxed (fsymeval 'fef-tags-sample)))) => T
+(= (%p-ldb %%q-data-type (fsymeval 'fef-tags-sample)) dtp-header) => T
+(remove dtp-fix (fef-tags-unboxed (fsymeval 'fef-tags-sample))) => NIL
+(progn (compile 'fef-tags-in-core '(lambda (a b) (if (< a b) (list a b) (+ a b 2)))) (remove dtp-fix (fef-tags-unboxed (fsymeval 'fef-tags-in-core)))) => NIL

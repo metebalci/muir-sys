@@ -947,6 +947,11 @@ Usually DEFINITION-TYPE is DEFUN and OBJECT-DEFINED is a function spec."
 	      (%P-DPB-OFFSET DTP-SELF-REF-POINTER %%Q-DATA-TYPE FEF I)))
        (DO ((I Q-COUNT (1+ I)))				;Now store unboxed Qs
 	   (( I SIZE))
+	 ;; quux revision 14 (contract g1 2.6; contract g3 revision 14, 8.3,
+	 ;; 10.6): an instruction word is a fixnum, tag 005 (cdr-normal,
+	 ;; dtp-fix); the halves alone left the tag of the word the fef was
+	 ;; filled with, against g1 2.6, and a marked page's scan reads tags.
+	 (%p-dpb-offset dtp-fix %%q-all-but-pointer fef i)
 	 (%P-DPB-OFFSET (FASL-NEXT-NIBBLE)		;Store low-order halfword
 			%%Q-LOW-HALF FEF I)
 	 (%P-DPB-OFFSET (FASL-NEXT-NIBBLE)		;Then high-order halfword

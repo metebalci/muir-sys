@@ -1,25 +1,26 @@
-; The native control, on System 2000's own tree and QFASLs: its cold load made
-; by System 2000's cold-load generator and by this tree's (served here as
-; SYS: CROSS-CHECK; COLDUT-NEW and COLDLD-NEW), which must be byte for byte the
-; same; then this tree's at 1024-word pages of 32-bit words, 4 blocks a page.
+; The native control, on the builder's own tree and QFASLs (System 2001's,
+; revision 13's parameters): its cold load made by the builder's cold-load
+; generator and by this tree's (served here as SYS: CROSS-CHECK; COLDUT-NEW
+; and COLDLD-NEW), which must be byte for byte the same.  This tree's generator
+; writes revision 14's layout only for parameters without the page hash table
+; area (sys/cold/coldut.lisp, TARGET-HAS-PAGE-HASH-TABLE-P).  G2's control, on
+; System 2000's 32-bit tree, also made the cold load at 1024-word pages of
+; 32-bit words; a 40-bit builder has those pages already.
 (boundp 'si:cold-load-file-list) => T
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDPK LISP"))
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDUT QFASL"))
 (cold:load-parameters)
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDLD QFASL"))
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: CROSS-CHECK; COPY-PARTITION LISP"))
+(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
 (cold:xc-make-cold "LOD3")
-(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-old.img" (ceiling cold:vmem-highest-address si:page-size))
+(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-old.img" (* 5 (ceiling cold:vmem-highest-address 1024)))
 (qc-file "SYS: CROSS-CHECK; COLDUT-NEW LISP" "HOST: //home//lispm//coldut-new.qfasl")
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldut-new.qfasl"))
 (cold:load-parameters)
 (qc-file "SYS: CROSS-CHECK; COLDLD-NEW LISP" "HOST: //home//lispm//coldld-new.qfasl")
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldld-new.qfasl"))
-(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (32 4 1)
+(list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
+(cold:target-has-page-hash-table-p) => T
 (cold:xc-make-cold "LOD3")
-(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-new.img" (ceiling cold:vmem-highest-address si:page-size))
-(setq cold:cold-load-overlays '("SYS: CROSS-CHECK; PAGES32 LISP"))
-(cold:load-parameters)
-(list cold:word-bits cold:word-bytes cold:blocks-per-page cold-symbols:page-size) => (32 4 4 1024)
-(cold:xc-make-cold "LOD3")
-(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-pages.img" (* 4 (ceiling cold:vmem-highest-address 1024)))
+(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-new.img" (* 5 (ceiling cold:vmem-highest-address 1024)))

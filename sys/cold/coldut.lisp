@@ -106,10 +106,18 @@
 
 ;; the first word of rqb's data, its second page (si:get-disk-rqb,
 ;; si:wire-disk-rqb).
+;(defun vmem-rqb-data (rqb)
+;  (%make-pointer dtp-locative
+;		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- si:page-size))
+;		    si:page-size)))
+;; quux revision 14 (contract g3 revision 14, 10.10): the rqb's address and
+;; its page by %pointer-plus, modulo 2^32: by - and + an rqb at or across
+;; 2^31 made a bignum, whose own storage the locative then named.
 (defun vmem-rqb-data (rqb)
   (%make-pointer dtp-locative
-		 (+ (logand (- (%pointer rqb) (array-leader-length rqb) 2) (- si:page-size))
-		    si:page-size)))
+		 (%pointer-plus (logand (%pointer-plus rqb (- (+ (array-leader-length rqb) 2)))
+					(- si:page-size))
+				si:page-size)))
 
 ;; block is the page's first block.  the words are reached by %p-ldb and
 ;; %p-dpb, which neither look at a word's data type nor transport it.
@@ -595,6 +603,16 @@
 ;;; areas in this list get art-q, all other areas get art-32b
 (defvar array-referenced-areas 'sym:(system-communication-area page-table-area))
 
+;;; quux revision 14 (contract g3 revision 14, 3.2, 10.6): the target's own
+;;; parameters (QCOM) say which layout to write.  revision 14's has no page
+;;; hash table and no physical-page-data area, and every difference below is
+;;; made only for it, so that the parameters of revision 13 or before still
+;;; give their cold load byte for byte (the cross build's native control,
+;;; tools/cross-check/README.md).
+(defun target-has-page-hash-table-p ()
+  "T if the target's parameters have revision 13's page hash table area (PAGE-TABLE-AREA)."
+  (and (memq 'sym:page-table-area sym:area-list) t))
+
 (defun create-areas (&aux high-loc the-region-bits)
   (do ((l sym:cold-load-area-sizes (cddr l)))	;Area sizes in pages
       ((null l))
@@ -611,6 +629,14 @@
 	  do (setq quantum sym:%address-space-quantum-size)
 	     (let ((foo (\ (+ loc size) quantum)))	;Start next area on quantum boundary
 	       (or (zerop foo) (setq size (+ (- size foo) quantum))))
+	;; quux revision 14 (contract g3 revision 14, 10.3): the address space
+	;; map on a boundary of its own size, 64 pages, since xrgn deposits the
+	;; word index, vma<31:16>, into its origin.  the pages skipped, 20000 to
+	;; 177777 after the region tables, end region-free-pointer's region
+	;; (area-alloc-bounds), unused.
+	when (and (eq area 'sym:address-space-map) (not (target-has-page-hash-table-p)))
+	  do (let ((align (* (get-area-size area) sym:page-size)))
+	       (setq loc (* (ceiling loc align) align)))
 	do (aset loc area-origins area-number)
 	finally (setq high-loc loc))
   (copy-array-contents area-origins area-alloc-pointers)
@@ -644,7 +670,12 @@
 				((memq (car al) sym:wired-area-list) #o1400)	;rw
 				((memq (car al) sym:pdl-buffer-area-list)
 				 #o500)			;may be in pdl-buffer, no access.
-				(t #o1300))			;rwf
+;				(t #o1300))			;rwf
+				;; quux revision 14 (appendix a14.2): status 3,
+				;; read/write-first, is retired, the hardware
+				;; setting modified: read/write, status 4
+				((target-has-page-hash-table-p) #o1300)	;rwf
+				(t #o1400))			;rw
 			  sym:%%region-map-bits
 			  0)
 		     (dpb 1 sym:%%region-oldspace-meta-bit 0)
@@ -665,6 +696,9 @@
 				(fixed-p	;These usually should be scavenged, except
 						;for efficiency certain ones
 						;that only contain fixnums will be bypassed
+				 ;; quux revision 14: page-table-area and
+				 ;; physical-page-data are no areas; naming them
+				 ;; here is harmless
 				 (if (memq (car al)
 					   'sym:(micro-code-symbol-area page-table-area
 						 physical-page-data region-origin
@@ -1074,6 +1108,15 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 						    sym:%address-space-quantum-size))
 					 (t
 					  (* sym:page-size (get-area-size area))))))))
+    ;; quux revision 14 (contract g3 revision 14, 10.3, 10.7 item 4): the
+    ;; address space map's array, a byte a quantum of the 32-bit space, must
+    ;; fit its area: in system 2001 it claimed 262,144 entries in an area of
+    ;; 16,384.
+    (and (eq area 'sym:address-space-map)
+	 (not (target-has-page-hash-table-p))
+	 (not (= data-length (* 4 sym:page-size (get-area-size area))))
+	 (ferror nil "The address space map's ~D entries do not fill its area of ~D words"
+		 data-length (* sym:page-size (get-area-size area))))
     (setq adr (allocate-block 'sym:control-tables 2))
     (vwrite adr (vfix (get-area-origin area)))
     (vwrite (1+ adr) (vfix data-length))))
@@ -1300,15 +1343,31 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   (store-q-array-leader sg sym:sg-initial-function-index (vfix 3)))
 
 ;This better agree with the order of the list of qs in QCOM
-(defun init-system-communication-area (&aux (nqs 27.) adr)
+;(defun init-system-communication-area (&aux (nqs 27.) adr)
+;; quux revision 14 (contract g3 revision 14, 3.2; appendix a14.12): two
+;; words more, the slot bitmap's address and the commit limit
+(defun init-system-communication-area (&aux (nqs (if (target-has-page-hash-table-p) 27. 30.)) adr)
   (setq adr (allocate-block 'sym:system-communication-area nqs))
   (vwrite (+ adr sym:%sys-com-area-origin-pntr)
 	  (vmake-pointer sym:dtp-locative (get-area-origin 'sym:region-origin)))
   (vwrite (+ adr sym:%sys-com-valid-size) (vfix 0))	;fixed later
-  (vwrite (+ adr sym:%sys-com-page-table-pntr)
-	  (vmake-pointer sym:dtp-locative (get-area-origin 'sym:page-table-area)))
-  (vwrite (+ adr sym:%sys-com-page-table-size)	;Real value put in by microcode
-	  (vfix (* (get-area-size 'sym:page-table-area) sym:page-size)))
+  (cond ((target-has-page-hash-table-p)
+	 (vwrite (+ adr sym:%sys-com-page-table-pntr)
+		 (vmake-pointer sym:dtp-locative (get-area-origin 'sym:page-table-area)))
+	 (vwrite (+ adr sym:%sys-com-page-table-size)	;Real value put in by microcode
+		 (vfix (* (get-area-size 'sym:page-table-area) sym:page-size))))
+	(t
+	 ;; quux revision 14: no page table area.  physical-page-data, the slot
+	 ;; bitmap and the commit limit are the cold boot's, which sizes them
+	 ;; from the memory and the paging partition it finds; 0 until then.
+	 (vwrite (+ adr sym:%sys-com-physical-page-data) (vfix 0))	;put in by the microcode
+	 (vwrite (+ adr sym:%sys-com-physical-page-data-size) (vfix 0))	;put in by the microcode
+	 (vwrite (+ adr sym:%sys-com-slot-bitmap) (vfix 0))	;put in by the microcode
+	 (vwrite (+ adr sym:%sys-com-commit-limit) (vfix 0))	;put in by the microcode
+	 ;; the region floor (contract g3 revision 14, 10.11): its default,
+	 ;; the first unfixed area's address, where make-region starts
+	 (vwrite (+ adr sym:%sys-com-region-floor)
+		 (vfix (aref area-origins (1+ (get-area-number 'sym:init-list-area)))))))
   (vwrite (+ adr sym:%sys-com-obarray-pntr) (qintern 'sym:obarray))
   (vwrite (+ adr sym:%sys-com-ether-free-list) qnil)
   (vwrite (+ adr sym:%sys-com-ether-transmit-list) qnil)
@@ -1320,9 +1379,18 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   ;; and a 32-bit cold load of 1024-word pages is format 1102 (contract g2,
   ;; option (w); appendix a1.12), which its microcode asks for and a 256-word
   ;; page microcode does not know
+;  (vwrite (+ adr sym:%sys-com-band-format)
+;	  ;; not /=, which this readtable reads as = (/ escapes)
+;	  (vfix (cond ((not (= word-bits 32.)) 2002)
+;		      ((= sym:page-size #o2000) 1102)
+;		      (t 0))))
+  ;; quux revision 14 (contract g3 revision 14, 10.6; appendix a14.13): the
+  ;; fixed areas move, so a 40-bit cold load is format 2012, which microcode
+  ;; 2002 asks for, refusing system 2001's 2000-2002
   (vwrite (+ adr sym:%sys-com-band-format)
 	  ;; not /=, which this readtable reads as = (/ escapes)
-	  (vfix (cond ((not (= word-bits 32.)) 2002)
+	  (vfix (cond ((not (= word-bits 32.))
+		       (if (target-has-page-hash-table-p) 2002 2012))
 		      ((= sym:page-size #o2000) 1102)
 		      (t 0))))
   (vwrite (+ adr sym:%sys-com-gc-generation-number) (vfix 0))
@@ -1387,7 +1455,11 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   (init-address-space-map)
   ;; Don't bother setting up the PHT and PPD, the microcode will take care of it
   ;; Cold-booting into this band will then do the right thing with it
-  (init-area-contents 'sym:page-table-area (vfix 0))
+;  (init-area-contents 'sym:page-table-area (vfix 0))
+  ;; quux revision 14 (contract g3 revision 14, 3.2): no page table area; the
+  ;; cold boot builds the tables in frames of its own
+  (when (target-has-page-hash-table-p)
+    (init-area-contents 'sym:page-table-area (vfix 0)))
   ;; Terminate areas which have overlying lists
   (store-nxtnil-cdr-code 'sym:constants-area)
   (store-nxtnil-cdr-code 'sym:scratch-pad-init-area)
@@ -1433,6 +1505,14 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 			  (dpb (aref map (+ j 2)) #o2010
 			       (dpb (aref map (+ j 1)) #o1010
 				    (aref map j))))))
+    ;; quux revision 14 (contract g3 revision 14, 10.3): the rest of the map,
+    ;; the quanta above 16 megawords to 2^32 words, is free, 0: make-region
+    ;; takes a quantum whose byte is 0, and xrgn reads the byte.  the
+    ;; generator writes every word, since a page it never touches keeps what
+    ;; the partition held before.
+    (unless (target-has-page-hash-table-p)
+      (loop for i from #o400 below (* (get-area-size 'sym:address-space-map) sym:page-size)
+	    do (vwrite-unboxed (+ asm i) 0)))
     ;cause address-space-map region to appear full so it gets dumped by band dumper.
     (vwrite (+ (get-area-origin 'sym:region-free-pointer)
 	       (get-area-number 'sym:address-space-map))

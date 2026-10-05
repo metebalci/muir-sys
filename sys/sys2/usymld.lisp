@@ -176,6 +176,12 @@
     (MAKE-ARRAY SI:SIZE-OF-HARDWARE-LEVEL-2-MAP ':TYPE 'ART-16B))
    (UCODE-STATE-UNIBUS-MAP	 	;Data as loaded into unibus map.
     (MAKE-ARRAY SI:SIZE-OF-HARDWARE-UNIBUS-MAP ':TYPE 'ART-16B))
+   ;; quux revision 14 (contract g3 revision 14, 3.2): there is no
+   ;; page-table-area to copy, its tables being frames taken at boot.  the
+   ;; initial value is left as it was: it is evaluated only by
+   ;; make-ucode-state, which nothing calls (the next slot's
+   ;; physical-page-area-number is no symbol with a value either), and a
+   ;; changed structure is one the cross build cannot give the target.
    (UCODE-STATE-PAGE-TABLE		;Copy of PAGE-TABLE-AREA
     (MAKE-ARRAY (SI:ROOM-GET-AREA-LENGTH-USED PAGE-TABLE-AREA)))
    (UCODE-STATE-PHYSICAL-PAGE-AREA-NUMBER;Copy of like named area

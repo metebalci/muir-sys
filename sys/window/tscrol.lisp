@@ -246,7 +246,12 @@
 			(VALUES :NEW-VALUE
 				(FORMAT NIL "#<~S ~O>"
 					(Q-DATA-TYPES (SEND COND :DATA-TYPE))
-					(%POINTER (SEND COND :ADDRESS)))))))
+;					(%POINTER (SEND COND :ADDRESS)))))))
+					;; quux revision 14 (contract g3
+					;; revision 14, 10.1, class p): the
+					;; address unsigned
+					(si:%pointer-unsigned
+					  (%pointer (send cond :address))))))))
     (FUNCALL PRINT-FUNCTION ITEM PRINT-FUNCTION-ARG SELF ITEM-NO)))
 
 

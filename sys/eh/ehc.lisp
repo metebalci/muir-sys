@@ -1053,7 +1053,10 @@ With an argument of -1, displays each word of the regular pdl from the current f
       (let ((dtp (ldb (byte (byte-size %%q-data-type) 0) (aref rp (1+ i)))))
 	(if (memq (car sg-q) si::sg-accumulators)
 	    (format t "#<~:[Data type ~O~;~:*~A~*~] ~O>"
-		    (q-data-types dtp) dtp (%pointer (aref rp i)))
+;		    (q-data-types dtp) dtp (%pointer (aref rp i)))
+		    ;; quux revision 14 (contract g3 revision 14, 10.1, class
+		    ;; p): the address unsigned
+		    (q-data-types dtp) dtp (si:%pointer-unsigned (%pointer (aref rp i))))
 	  (setq dtp (%make-pointer dtp (aref rp i)))
 	  (p-prin1-careful (locf dtp)))))))
 

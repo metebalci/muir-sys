@@ -124,6 +124,10 @@
  A-MEMORY-VIRTUAL-ADDRESS
  IO-SPACE-VIRTUAL-ADDRESS
  UNIBUS-VIRTUAL-ADDRESS
+ ;; quux revision 14 (contract g3 revision 14, 2): the physical memory window
+ ;; and ephemeral space
+ physical-memory-virtual-address
+ ephemeral-space-virtual-address
 
 ;;; "Entries" to DISK
  CLEAR-DISK-FAULT

@@ -60,6 +60,15 @@ Will be NIL by the time YOU get to look at it")
 (DEFVAR UNIBUS-VIRTUAL-ADDRESS :UNBOUND
   "Virtual address mapped into Unibus location 0.")
 
+;;; quux revision 14 (contract g3 revision 14, 2; appendix a14.1): the
+;;; physical memory window, 36000000000, as the three above from qcom; like
+;;; them a fixnum whose field is the address.
+(defvar physical-memory-virtual-address :unbound
+  "Virtual address of physical address 0: physical address P is at this address plus P.")
+
+(defvar ephemeral-space-virtual-address :unbound
+  "Virtual address of ephemeral space's first word, 32000000000, where an ephemeral area's regions lie.")
+
 (ADD-INITIALIZATION "Next boot is a cold boot" '(SETQ COLD-BOOTING T)
 		    '(:BEFORE-COLD))
 
@@ -89,10 +98,19 @@ Will be NIL by the time YOU get to look at it")
     ;; from the main screen, which at boot still has the size the band was
     ;; saved at, until tv:set-screens-to-video moves it; a band saved at a
     ;; bigger size would put them past the end of the buffer.
+;    (setq %disk-run-light
+;	  (+ (- (video-buffer-length) #o15)
+;	     (video-buffer-address)))
+;    (SETQ TV::WHO-LINE-RUN-LIGHT-LOC (+ 2 (LOGAND %DISK-RUN-LIGHT #o777777)))))
+    ;; quux revision 14 (contract g3 revision 14, 10.8, 10.10): the buffer is
+    ;; at 34000000000, below %xbus-read's base, 35760000000, so the process
+    ;; run light is no longer an xbus offset (its offset in the buffer, which
+    ;; reached it while the buffer sat at the i/o region's base) but its
+    ;; address, two words after the disk run light's; both addresses are made
+    ;; by %pointer-plus, the buffer lying above 2^31.
     (setq %disk-run-light
-	  (+ (- (video-buffer-length) #o15)
-	     (video-buffer-address)))
-    (SETQ TV::WHO-LINE-RUN-LIGHT-LOC (+ 2 (LOGAND %DISK-RUN-LIGHT #o777777)))))
+	  (%pointer-plus (video-buffer-address) (- (video-buffer-length) #o15)))
+    (setq tv::who-line-run-light-loc (%pointer-plus %disk-run-light 2))))
 
 (ADD-INITIALIZATION "Put run lights at the bottom of the screen"
 		    '(TV::INITIALIZE-RUN-LIGHT-LOCATIONS)
@@ -119,7 +137,11 @@ Will be NIL by the time YOU get to look at it")
 
 (defun feature-page-field (word ppss)
   "Return the PPSS byte of word WORD (octal, as the page is numbered) of the feature page."
-  (%p-ldb ppss (+ io-space-virtual-address feature-page-xbus-address word)))
+;  (%p-ldb ppss (+ io-space-virtual-address feature-page-xbus-address word)))
+  ;; quux revision 14 (contract g3 revision 14, 10.8): the base is a fixnum
+  ;; whose field lies above 2^31 (qcom), so the address is made by
+  ;; %pointer-plus, the sum of an address and an offset
+  (%p-ldb ppss (%pointer-plus io-space-virtual-address (+ feature-page-xbus-address word))))
 
 ;; the video controller, quux's display: a 1-bit frame buffer.  word 11 is its width in
 ;; bits 31:16 and its height in 15:0, word 12 its bits per pixel and words
@@ -146,11 +168,19 @@ Will be NIL by the time YOU get to look at it")
 ;	#o17000000)))
 ;; quux revision 13 (contract g2 4.1): the i/o region starts at physical
 ;; 1760000000, the frame buffer's window.
+;(defun video-buffer-address ()
+;  "The virtual address of the video controller's frame buffer."
+;  (+ io-space-virtual-address
+;     (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
+;	#o1760000000)))
+;; quux revision 14 (contract g3 revision 14, 10.8; appendix a14.9): word 13
+;; is the buffer's virtual address, 34000000000 in the device window, so it
+;; is returned as it is: its 32-bit field read whole by %p-ldb, a fixnum
+;; whose field is the address (a dpb of the halves into a fixnum would make
+;; a bignum of an address above 2^31).
 (defun video-buffer-address ()
   "The virtual address of the video controller's frame buffer."
-  (+ io-space-virtual-address
-     (- (dpb (feature-page-field #o13 #o2020) #o2020 (feature-page-field #o13 #o0020))
-	#o1760000000)))
+  (feature-page-field #o13 %%q-pointer))
 
 ;; quux: the band's safeguard, as the microcode's machine-not-quux-6 halt is
 ;; the microcode's: a band of system 2000 on a cadr runs mit's microcode 323,
@@ -497,7 +527,11 @@ This does not need to be done on A-memory variables."
 (defun clear-screen-buffer (buffer-address &optional (length (video-buffer-length)))
   (%P-DPB 0 %%Q-LOW-HALF BUFFER-ADDRESS)
   (%P-DPB 0 %%Q-HIGH-HALF BUFFER-ADDRESS)
-  (%BLT BUFFER-ADDRESS (1+ BUFFER-ADDRESS)
+;  (%BLT BUFFER-ADDRESS (1+ BUFFER-ADDRESS)
+;	(1- length) 1))
+  ;; quux revision 14 (contract g3 revision 14, 10.10): the buffer lies above
+  ;; 2^31, so the next word's address is made by %pointer-plus
+  (%blt buffer-address (%pointer-plus buffer-address 1)
 	(1- length) 1))
 
 ;;; This is a temporary function, which turns on the "extra-pdl" feature

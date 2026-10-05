@@ -2,7 +2,7 @@
 """The cross build's check 3: a cold load's partition, read on the host, holds
 NIL's and T's symbols where the cold load's own map says.
 
-Usage: check3.py IMAGE WORD-BITS PAGE-SIZE [QNIL QT]
+Usage: check3.py [--qcom QCOM] IMAGE WORD-BITS PAGE-SIZE [QNIL QT]
 IMAGE is the partition's first blocks as cold:cross-copy-partition writes them:
 word a at byte a * word-bytes, least significant byte first; 4 bytes a word at
 32 bits, 5 at 40 (packed storage, contract G1 4.1 and 4.3: the tag in the fifth
@@ -10,11 +10,14 @@ byte).  The map is the cold load's own: the system communication area on page
 1 (appendix A1.9), whose %SYS-COM-AREA-ORIGIN-PNTR points at REGION-ORIGIN,
 whose entry for RESIDENT-SYMBOL-AREA is where NIL is, T five words after it.
 QNIL and QT, the words MAKE-COLD reports for them (cold:cross-make-cold), are
-compared when given.  Also checks the band format (2002 for 40-bit words, 1102
-for 32-bit words at 1024-word pages, 0 at 256-word pages; A1.12)
-and the pointer width, and prints a census of the words by data type.  The data
-types, areas and array types are read from the tree this script is in
-(sys/cold/qcom.lisp).  Exits 1 on a failure.
+compared when given.  Also checks the band format (for 40-bit words 2012 when
+the parameters have no page hash table area, revision 14's (contract G3
+revision 14, 10.6; appendix A14.13), else 2002; 1102 for 32-bit words at
+1024-word pages, 0 at 256-word pages; A1.12) and the pointer width, and prints
+a census of the words by data type.  The data types, areas and array types are
+read from the parameters the cold load was made with: QCOM, by default the
+tree this script is in (sys/cold/qcom.lisp); the native control gives its own
+tree's.  Exits 1 on a failure.
 """
 import collections
 import os
@@ -33,6 +36,9 @@ def qlist(path, name):
 
 
 QCOM = os.path.join(TREE, 'sys/cold/qcom.lisp')
+if len(sys.argv) > 2 and sys.argv[1] == '--qcom':
+    QCOM = sys.argv[2]
+    del sys.argv[1:3]
 DTP = {n: i for i, n in enumerate(qlist(QCOM, 'Q-DATA-TYPES'))}
 AREAS = qlist(QCOM, 'AREA-LIST')
 SYSCOM = qlist(QCOM, 'SYSTEM-COMMUNICATION-AREA-QS')
@@ -141,8 +147,11 @@ def main():
                    'reported %o, found %o' % (want, got))
     bf = im.fixnum(sc + SYSCOM.index('%SYS-COM-BAND-FORMAT'))
     # 2002 for 40-bit words; 1102 for 32-bit words at 1024-word pages (contract
-    # G2, option (w)); 0 for 32-bit words at 256-word pages (A1.12)
-    want = 0o2002 if bits == 40 else 0o1102 if page == 1024 else 0
+    # G2, option (w)); 0 for 32-bit words at 256-word pages (A1.12).  revision
+    # 14's 40-bit cold load, without the page hash table area, is 2012 (contract
+    # G3 revision 14, 10.6; appendix A14.13)
+    want = ((0o2002 if 'PAGE-TABLE-AREA' in AREAS else 0o2012) if bits == 40
+            else 0o1102 if page == 1024 else 0)
     expect('%%SYS-COM-BAND-FORMAT is %o' % want,
            bf == want, 'octal %o' % bf if bf is not None else 'not a fixnum')
     pw = im.fixnum(sc + SYSCOM.index('%SYS-COM-POINTER-WIDTH'))

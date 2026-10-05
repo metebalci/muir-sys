@@ -1,0 +1,67 @@
+; Unsigned addresses (contract G3 revision 14, 10.1 and 10.10): the
+; primitives on addresses at, above and across 2^31, as fixnums whose 32-bit
+; field is the address, none of them referenced, so that the check runs on
+; any band.  Run with the tree's files compiled first:
+;   --compile --files sys/sys/qrand.lisp,sys/sys2/lmmac.lisp,sys/io/print.lisp,sys/sys/qmisc.lisp
+; The first cases of each group are controls, which pass without the
+; changes.  System 2001 without them fails 17 of the 32 cases: %POINTER-UNSIGNED
+; (qrand, from qmisc) made a negative field more negative, %POINTER-LESSP
+; (lmmac) ordered by the sign of a modular difference, the printer printed an
+; address past 2^31 with a minus sign, and SI::MAP-MAR-PAGES (qmisc), the
+; MAR's page walk, did not exist: the MAR stepped #o200 words, signed.
+
+; %POINTER-UNSIGNED: controls, then 0xD0000000 and -1 (section 12, Y3)
+(si:%pointer-unsigned 5) => 5
+(si:%pointer-unsigned most-positive-fixnum) => 2147483647
+(si:%pointer-unsigned (si:%make-pointer-unsigned #o32000000000)) => 3489660928
+(si:%pointer-unsigned -1) => 4294967295
+
+; %MAKE-POINTER-UNSIGNED, the one function that builds an address constant
+; above 2^31 (clarification 9): a fixnum whose field is the address
+(si:%make-pointer-unsigned #o17777777777) => 2147483647
+(si:%make-pointer-unsigned #o20000000000) => -2147483648
+(fixnump (si:%make-pointer-unsigned #o35760000000)) => T
+(si:%pointer-unsigned (si:%make-pointer-unsigned #o35760000000)) => 4022337536
+; and %POINTER-PLUS of it reaches the intended word: the register page
+(si:%pointer-unsigned (%pointer-plus (si:%make-pointer-unsigned #o35760000000) #o17777400)) => 4026531584
+
+; reading an address back whole, and its page, as the tree's readers do
+; (VIDEO-BUFFER-ADDRESS, SI:PAGE-ENTRY): %P-LDB of the 32-bit field gives the
+; fixnum, an LDB of its bits 10-31 the page number unsigned, and %LOGDPB of
+; the page makes the address again, a fixnum (controls: they hold on System
+; 2001 too)
+(let ((a (make-array 2))) (setf (aref a 0) (si:%make-pointer-unsigned #o32000000000)) (= (%p-ldb #o0040 (aloc a 0)) (si:%make-pointer-unsigned #o32000000000))) => T
+(ldb (byte 22. 10.) (si:%make-pointer-unsigned #o32000001777)) => 3407872
+(= (%logdpb 3407872 (byte 22. 10.) 0) (si:%make-pointer-unsigned #o32000000000)) => T
+
+; the straddle primitives on fixnums and locatives (section 12, Y3)
+(%pointer-difference (%make-pointer dtp-locative (si:%make-pointer-unsigned #o20000000001)) (%make-pointer dtp-locative #o17777777777)) => 2
+(fixnump (%pointer-plus #o17777777777 2)) => T
+(si:%pointer-unsigned (%pointer-plus #o17777777777 2)) => 2147483649
+
+; %POINTER-LESSP, unsigned: controls below 2^31, then across it and above
+(si:%pointer-lessp 5 7) => T
+(si:%pointer-lessp 7 5) => NIL
+(si:%pointer-lessp 5 5) => NIL
+(si:%pointer-lessp #o17777777777 (si:%make-pointer-unsigned #o20000000000)) => T
+(si:%pointer-lessp (si:%make-pointer-unsigned #o32000000000) 0) => NIL
+(si:%pointer-lessp 0 (si:%make-pointer-unsigned #o32000000000)) => T
+(si:%pointer-lessp -1 0) => NIL
+(si:%pointer-lessp (%make-pointer dtp-locative #o17777777777) (%make-pointer dtp-locative (si:%make-pointer-unsigned #o20000000000))) => T
+
+; the printer prints an address unsigned (class P): a control, then above 2^31
+(let ((*print-base* 8) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (%make-pointer dtp-locative #o1234) s))) => "1234"
+(let ((*print-base* 8) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (%make-pointer dtp-locative (si:%make-pointer-unsigned #o32000000000)) s))) => "32000000000"
+(format nil "~O" (si:%pointer-unsigned (%pointer (%make-pointer dtp-locative (si:%make-pointer-unsigned #o32000000005))))) => "32000000005"
+
+; the MAR's pages, each once, unsigned (qmisc, SI::MAP-MAR-PAGES): one page,
+; a control; the latent fault's case, HIGH in the first 127 words of the
+; next page, which the old #o200-word step missed; a range across 2^31; the
+; last page of the space; and the MAR off, LOW -1 above HIGH -2, and the boot
+; values, no page
+(let (r) (si::map-mar-pages #'(lambda (p) (push p r)) 5 5) (nreverse r)) => (0)
+(let (r) (si::map-mar-pages #'(lambda (p) (push p r)) 100 1074) (nreverse r)) => (0 1024)
+(let (r) (si::map-mar-pages #'(lambda (p) (push (si:%pointer-unsigned p) r)) (si:%make-pointer-unsigned #o17777777000) (si:%make-pointer-unsigned #o20000000100)) (nreverse r)) => (2147482624 2147483648)
+(let (r) (si::map-mar-pages #'(lambda (p) (push (si:%pointer-unsigned p) r)) (si:%make-pointer-unsigned #o37777776000) -1) (nreverse r)) => (4294966272)
+(si::map-mar-pages #'(lambda (p) (ferror nil "visited ~S" p)) -1 -2) => NIL
+(si::map-mar-pages #'(lambda (p) (ferror nil "visited ~S" p)) #o1777777777 #o1777777776) => NIL

@@ -615,8 +615,25 @@ since the target's are the cold-load generator's own."
 ;;; its SYS: IO; FDEV stopped this world at an illop in %find-structure-header,
 ;;; while this world's own compile of the same source loads and runs.  a file
 ;;; with no source, such as a font, is data and is loaded as it is.
+;(defun cross-foreign-file-p (file)
+;  (or (cross-marked-file-p file)
+;      (and (not (= sym:page-size si:page-size))
+;	   (probe-file (send file :new-pathname :type :lisp :version :newest))
+;	   t)))
+;;; quux revision 14 (contract g3 revision 14, 10.6): the builder of revision
+;;; 14's cross build is system 2001, a 40-bit world, whose own compiles carry
+;;; the word-width mark too, as the target's do: a marked file is foreign only
+;;; when the target's word is not this world's.  on such a builder every file
+;;; was taken as foreign, this world's own host compiles among them, and
+;;; cross-host-fasl then looked for the source of a host compile (x1-hq-...
+;;; lisp), which does not exist, and waited at its question.
+(defun cross-world-word-bits ()
+  "The bits of this world's word: its cdr code's, data type's and pointer's."
+  (+ (ldb #o0006 si:%%q-cdr-code) (ldb #o0006 si:%%q-data-type) (ldb #o0006 si:%%q-pointer)))
+
 (defun cross-foreign-file-p (file)
-  (or (cross-marked-file-p file)
+  (or (and (not (= word-bits (cross-world-word-bits)))
+	   (cross-marked-file-p file))
       (and (not (= sym:page-size si:page-size))
 	   (probe-file (send file :new-pathname :type :lisp :version :newest))
 	   t)))

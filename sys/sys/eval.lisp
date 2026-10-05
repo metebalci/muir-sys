@@ -2177,8 +2177,13 @@ Encloses a lambda-expression in the current environment"
       (setq newenv (cons (car env) (cdr env)))
       (%p-dpb dtp-one-q-forward %%q-data-type env)
       (%p-dpb newenv %%q-pointer env)
-      (%p-dpb dtp-one-q-forward %%q-data-type (1+ (%pointer env)))
-      (%p-dpb (1+ (%pointer newenv)) %%q-pointer (1+ (%pointer env)))
+;      (%p-dpb dtp-one-q-forward %%q-data-type (1+ (%pointer env)))
+;      (%p-dpb (1+ (%pointer newenv)) %%q-pointer (1+ (%pointer env)))
+      ;; quux revision 14 (contract g3 revision 14, 10.10): the second words'
+      ;; addresses by %pointer-plus: 1+ of an address at 2^31 - 1 made the
+      ;; bignum 2^31, whose own storage %p-dpb then wrote
+      (%p-dpb dtp-one-q-forward %%q-data-type (%pointer-plus env 1))
+      (%p-dpb (%pointer-plus newenv 1) %%q-pointer (%pointer-plus env 1))
     (let* ((frame (car newenv))
 	   (newframe frame))
       (when (stack-list-p frame)
@@ -2207,6 +2212,11 @@ Encloses a lambda-expression in the current environment"
 	  (setf (cdr newenv) newrest)))))
     newenv))
 
+;;; quux revision 14 (contract g3 revision 14, 10.1): right for unsigned
+;;; addresses as it stands, a stack across 2^31 included.  the differences are
+;;; modular (xpdif), and both are positive only when their sum, the stack's
+;;; used length from its base to the frame pointer, which is small, is their
+;;; true sum: when LIST lies inside the stack.
 (defun stack-list-p (list)
   "T if LIST resides in the stack of the current stack group."
   (and (plusp (%pointer-difference list (sg-regular-pdl current-stack-group)))
@@ -2538,7 +2548,10 @@ Encloses a lambda-expression in the current environment"
 			       (this-restf	;This IS the &REST arg.
 				;; If quoted arg, and the list of values is in a pdl, copy it.
 				(and quoteflag
-				     (ldb-test %%pht2-map-access-code
+;				     (ldb-test %%pht2-map-access-code
+				     ;; quux revision 14: the page entry's
+				     ;; name of the same byte (qcom)
+				     (ldb-test %%page-entry-access-code
 					       (area-region-bits (%area-number value-list)))
 				     (let ((default-cons-area background-cons-area))
 				       (setq value-list (copy-list value-list))))

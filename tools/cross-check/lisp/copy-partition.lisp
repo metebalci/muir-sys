@@ -16,11 +16,19 @@
 (defun xc-copy-partition (part-name file n)
   (multiple-value-bind (base size) (si:find-disk-partition part-name)
     (setq n (min n size))
-    (let ((rqb (si:get-disk-rqb 1)))
+    ;; a block a read in a world of 256-word pages; in a 40-bit world, System
+    ;; 2001's, the builder of revision 14's cross build, a page of the rqb is 4
+    ;; blocks, which one read fills, so the copy steps 4 blocks and writes only
+    ;; the blocks asked for (as cold:cross-copy-partition does); a block a read
+    ;; there wrote each block four times over.
+    (let ((rqb (si:get-disk-rqb 1))
+	  (step (if (boundp 'si:disk-blocks-per-packed-page)
+		    (symeval 'si:disk-blocks-per-page)
+		  1)))
       (unwind-protect
 	  (with-open-file (out file :direction :output :characters nil :byte-size 8)
-	    (dotimes (i n)
+	    (do ((i 0 (+ i step))) ((>= i n))
 	      (si:disk-read rqb 0 (+ base i))
-	      (send out :string-out (si:rqb-8-bit-buffer rqb))))
+	      (send out :string-out (si:rqb-8-bit-buffer rqb) 0 (* 1024. (min step (- n i))))))
 	(si:return-disk-rqb rqb))
       (list :blocks n :base base))))

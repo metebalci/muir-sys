@@ -1,0 +1,123 @@
+; Revision 14's Lisp at, above and across 2^31 words (contract G3 revision
+; 14, section 12's Y3 checks and sections 10.1-10.11; M4d's checks,
+; m4d-census.md).  It needs revision 14 and a band of System 2002 (Y4): the
+; page table, the windows and the region floor; run it on Y4's first band and
+; on the high band, with unsigned-addresses and fef-tags beside it.
+; lisp/rev14-addresses.lisp makes an area whose one region lies across 2^31
+; with the region floor (SI:SET-REGION-FLOOR) and places each case's object
+; in it.  Written with Y3 and not yet run: no band of revision 14 exists.
+; BUFFER-RESET's case needs a METR partition on the pack.  Left to Y4's runs,
+; which set them up: the incremental save and restore, PAGE-IN-WORDS after
+; eviction, the stack-list environment across 2^31 (the PDL-AREA straddle
+; run), a list across 2^31 (the compiler's mark, qcp1: one area's region can
+; hold 2^31, and this check's holds structures; the WORKING-STORAGE-AREA
+; straddle run) and the file device's ring RQB across 2^31 (fdev; the
+; DISK-BUFFER-AREA straddle run).
+; The partial fixes the contract names fail: SET-MAR with only %MAR-HIGH
+; fixed sets no page (its loop ends at once), and WIRE-DISK-RQB with only LOW
+; fixed wires a bignum's page or none (lisp/rev14-partial-fixes.lisp, given
+; after this check's own file, plants each).
+
+; the area: its region lies across 2^31, and the region floor is back at its
+; default once the area is made (controls)
+(rev14-region-across-p (rev14-area)) => T
+(= si:%region-floor (si:region-floor-default)) => T
+
+; the region floor's argument errors (10.11): at ephemeral space, not a
+; multiple of the quantum, below the default; then NIL, the default
+(si:set-region-floor (rev14-address #o32000000000)) =>!
+(si:set-region-floor (%pointer-plus (rev14-address #o17777740000) 1)) =>!
+(si:set-region-floor (%pointer-plus (si:region-floor-default) (- #o40000))) =>!
+(= (si:set-region-floor) (si:region-floor-default)) => T
+; the system communication area keeps it, for a saved band (clarification 36)
+(= (si:system-communication-area si:%sys-com-region-floor) si:%region-floor) => T
+
+; the no-region error (clarification 34): a reference to an unallocated page
+; of paged space, a quantum below ephemeral space, which no region holds
+(%p-contents-offset (rev14-address #o31777740000) 0) =>! in no region
+
+; the windows hold no region (rule A5); %XBUS-READ's base and bound (10.8):
+; offset 17777400 is MACHINE-ID, revision 14; %UNIBUS-READ signals (rule A6)
+(%region-number (rev14-address #o34000000000)) => NIL
+(%region-number (rev14-address #o35700000000)) => NIL
+(%region-number (rev14-address #o36000000000)) => NIL
+(list (ldb (byte 16. 16.) (%xbus-read #o17777400)) (ldb (byte 12. 4) (%xbus-read #o17777400))) => (20821 14)
+(%xbus-read #o20000000) =>!
+(%unibus-read 0) =>!
+
+; the address space map: its array fills its area, a byte a quantum, on a
+; 64-page boundary (10.3; 10.7 item 4)
+(array-length #'si:address-space-map) => 262144
+(* 4 (si:region-length si:address-space-map)) => 262144
+(rev14-unsigned (si:region-origin si:address-space-map)) => 65536
+
+; the commit limit (10.5), and the free space (10.7 item 1): an ephemeral
+; region of N words lowers it by N
+(= si:virtual-memory-size (* (si:system-communication-area si:%sys-com-commit-limit) si:page-size)) => T
+(let* ((area (rev14-ephemeral-area)) (free (si:get-free-space-size-1)) (x (make-array 100. :area area))) (- free (si:get-free-space-size-1) (si:region-length (%region-number x)))) => 0
+
+; %REGION-NUMBER of an ephemeral region's address is that region, and a young
+; object prints without a minus sign (section 12, Y3)
+(let ((x (make-array 100. :area (rev14-ephemeral-area)))) (list (not (si:%pointer-lessp (si:region-origin (%region-number x)) si:ephemeral-space-virtual-address)) (= (%region-number x) (%region-number (%pointer-plus x 50.))))) => (T T)
+(let* ((x (make-array 100. :area (rev14-ephemeral-area))) (s (format nil "~S" x))) (list (null (search "-" s :start2 (string-search-char #\space s))) (not (null (search (format nil " ~O>" (rev14-unsigned x)) s))))) => (T T)
+
+; the page table's readers: a page in core across 2^31 is read/write, and its
+; frame's physical-page-data names the page
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777770) 40.))) (setf (aref a 20.) 1) (list (rev14-page-status (aloc a 20.)) (= (ldb si:%%ppd0-virtual-page-number (si:physical-memory-word (+ (si:system-communication-area si:%sys-com-physical-page-data) (* 2 (ldb si:%%page-entry-frame (si:page-entry (aloc a 20.))))))) (ldb (byte 22. 10.) (%pointer (aloc a 20.))))))) => (4 T)
+
+; the straddle checks (section 12): the three primitives on an object across 2^31
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777766) 20.))) (list (%pointer-difference (aloc a 10.) (aloc a 8.)) (rev14-unsigned (%pointer-plus (aloc a 8.) 2)) (si:%pointer-lessp (aloc a 8.) (aloc a 9.)) (si:%pointer-lessp (rev14-address #o32000000000) 0)))) => (2 2147483649 T NIL)
+
+; DESCRIBE of a locative into it says "to word n" (DESCRIBE-LOCATIVE)
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777775) 10.))) (not (null (search "to word 6." (with-output-to-string (*standard-output*) (describe (aloc a 5.)))))))) => T
+
+; ARRAY-INITIALIZE of an array displaced to 2^31 + 1 fills it and leaves the
+; words below 2^31 alone
+(progn (rev14-fresh) (let* ((b (rev14-array-at (rev14-address #o17777777770) 32. 'art-32b)) (d (progn (fill b 7) (make-array 10. :type 'art-32b :displaced-to (rev14-address #o20000000001))))) (array-initialize d 5) (list (aref b 6) (aref b 7) (aref b 8) (aref b 17.) (aref b 18.)))) => (7 7 5 5 7)
+
+; SET-MAR on an object across 2^31 traps a write of its first and its last
+; word, its pages in core; CLEAR-MAR restores every page's status; a range
+; whose end lies in the first 127 words of a page traps a write there
+(progn (rev14-fresh) (setq *rev14-mar* (rev14-array-at (rev14-address #o17777777770) 40.)) (fill *rev14-mar* 0) (set-mar (aloc *rev14-mar* 0) :write 40.) (list (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 0) 1))) (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 39.) 1))))) => (T T)
+(progn (clear-mar) (mapcar #'rev14-page-status (rev14-pages (aloc *rev14-mar* 0) 2))) => (4 4)
+(progn (set-mar (aloc *rev14-mar* 0) :write 30.) (prog1 (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 29.) 1))) (clear-mar))) => T
+(mapcar #'rev14-page-status (rev14-pages (aloc *rev14-mar* 0) 2)) => (4 4)
+
+; WIRE-ARRAY and UNWIRE-ARRAY of an array across 2^31, also from an element
+; past 2^31, and WIRE-STRUCTURE: every page of the range, the last included
+; (M4d sites 10 and 11; WIRE-WORDS)
+(progn (rev14-fresh) (setq *rev14-wire* (rev14-array-at (rev14-address #o17777777770) 3000.)) (si:wire-array *rev14-wire*) (mapcar #'rev14-page-wired-p (rev14-pages (aloc *rev14-wire* 0) 4))) => (T T T T)
+(progn (si:unwire-array *rev14-wire*) (mapcar #'rev14-page-wired-p (rev14-pages (aloc *rev14-wire* 0) 4))) => (NIL NIL NIL NIL)
+(progn (si:wire-array *rev14-wire* '(1500.)) (prog1 (mapcar #'rev14-page-wired-p (rev14-pages (aloc *rev14-wire* 0) 4)) (si:unwire-array *rev14-wire*))) => (NIL NIL T T)
+(progn (si:wire-structure *rev14-wire*) (prog1 (mapcar #'rev14-page-wired-p (rev14-pages (aloc *rev14-wire* 0) 4)) (si:unwire-structure *rev14-wire*))) => (T T T T)
+
+; WIRE-DISK-RQB of an RQB across 2^31 wires exactly its three pages, each CCW
+; names its data page's frame, and a disk read into it compares (M4d sites 1, 2)
+(progn (rev14-fresh) (rev14-fill-to (rev14-address #o17777774000)) (setq *rev14-rqb* (let ((si:disk-buffer-area (rev14-area))) (si:make-disk-rqb nil 2 (length si:disk-rq-leader-qs)))) (si:wire-disk-rqb *rev14-rqb*) (mapcar #'rev14-page-wired-p (rev14-pages (rev14-address #o17777774000) 4))) => (T T T NIL)
+(loop for k below 2 always (= (dpb (aref *rev14-rqb* (+ si:%disk-rq-ccw-list 1 (* 2 k))) (byte 16. 16.) (logand (aref *rev14-rqb* (+ si:%disk-rq-ccw-list (* 2 k))) -2)) (si:%physical-address (%pointer-plus (rev14-address #o17777774000) (* (1+ k) si:page-size))))) => T
+; RQB-DATA-POINTER finds each data page as WIRE-DISK-RQB does (io1/inc.lisp;
+; M4d's site of inc.lisp)
+(loop for p below 2 always (= (%pointer (si::rqb-data-pointer *rev14-rqb* p)) (%pointer-plus (rev14-address #o17777774000) (* (1+ p) si:page-size)))) => T
+(let ((other (si:get-disk-rqb 2))) (unwind-protect (progn (si:disk-read *rev14-rqb* 0 100.) (si:disk-read other 0 100.) (rev14-same-p (si:rqb-buffer *rev14-rqb*) (si:rqb-buffer other))) (si:return-disk-rqb other))) => T
+(progn (si:unwire-disk-rqb *rev14-rqb*) (mapcar #'rev14-page-wired-p (rev14-pages (rev14-address #o17777774000) 4))) => (NIL NIL NIL NIL)
+
+; ADJUST-ARRAY-SIZE of an array whose header is at 2^31 - 1, data from 2^31,
+; at its region's free pointer, shrunk and grown (M4d site 8)
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777777) 100. 'art-q))) (fill a 3) (adjust-array-size a 40.) (list (array-length a) (aref a 39.) (rev14-unsigned (aloc a 0))))) => (40 3 2147483648)
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777777) 40. 'art-q))) (fill a 3) (adjust-array-size a 100.) (list (array-length a) (aref a 39.) (rev14-unsigned (aloc a 0))))) => (100 3 2147483648)
+
+; the micro-compiler's exit vector (sys/mlap.lisp; clarification 10): with the
+; vector's array header at 2^31 - 1, %MC-CODE-EXIT-VECTOR is the fixnum of
+; 2^31 (MA-REBOOT, bound so that the machine's own is kept); an exit vector
+; entry for (SPECIAL x) and (FUNCTION x), x at 2^31 - 1, points at 2^31 and
+; 2^31 + 1 (MA-LOAD-EXIT-VECTOR-Q)
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777777) 10.))) (without-interrupts (let ((compiler::*mc-exit-vector-array* a) (compiler::number-micro-entries nil) (si:%mc-code-exit-vector si:%mc-code-exit-vector)) (compiler::ma-reboot) (list (fixnump si:%mc-code-exit-vector) (rev14-unsigned si:%mc-code-exit-vector)))))) => (T 2147483648)
+(progn (rev14-fresh) (let ((a (rev14-array-at (rev14-address #o17777777777) 10.)) (v (make-array 4 :leader-list '(0)))) (let ((compiler::*mc-exit-vector-array* v)) (compiler::ma-load-exit-vector-q (list 'special a)) (compiler::ma-load-exit-vector-q (list 'function a))) (list (rev14-unsigned (%p-pointer (aloc v 0))) (= (%p-data-type (aloc v 0)) dtp-external-value-cell-pointer) (rev14-unsigned (%p-pointer (aloc v 1)))))) => (2147483648 T 2147483649)
+
+; BUFFER-RESET (io1/meter.lisp) with its buffer array across 2^31: the
+; buffer's address is a fixnum on the page boundary at 2^31, inside the
+; array, and the microcode's buffer pointer holds it.  It needs a METR
+; partition on the pack (the first case, a control).  Last, since metering
+; stops the GC process: the case lets it go again and drops the buffer.
+(not (null (si:find-disk-partition "METR"))) => T
+(progn (rev14-fresh) (rev14-fill-to (rev14-address #o17777777000)) (let ((default-cons-area (rev14-area))) (meter::buffer-reset)) (prog1 (list (fixnump meter::buffer-address) (zerop (logand meter::buffer-address (1- si:page-size))) (rev14-unsigned meter::buffer-address) (%pointer-difference meter::buffer-address meter::buffer-array) (eq meter::%meter-buffer-pointer meter::buffer-address)) (si:unwire-page meter::buffer-address) (makunbound 'meter::buffer-address) (makunbound 'meter::buffer-array) (makunbound 'meter::buffer) (meter::resume-gc-process))) => (T T 2147483648 512 T)

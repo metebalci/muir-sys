@@ -142,7 +142,10 @@ PEEK means to look at the state without pulling anything out of the buffer
 	   ;; quux: the buttons are read from the register page's word 122, with
 	   ;; %p-ldb so that the 32-bit word is never made a bignum.
 	   (VALUES (LOGIOR (IF USE-KBD-BUTTONS KBD-BUTTONS 0)
-			   (%p-ldb #o1403 (+ sys:io-space-virtual-address mouse-reg)))
+;			   (%p-ldb #o1403 (+ sys:io-space-virtual-address mouse-reg)))
+			   ;; quux revision 14 (contract g3 revision 14, 10.10):
+			   ;; the base lies above 2^31, the sum by %pointer-plus
+			   (%p-ldb #o1403 (%pointer-plus sys:io-space-virtual-address mouse-reg)))
 		   (TIME:FIXNUM-MICROSECOND-TIME) MOUSE-X MOUSE-Y))
 	  (T (OR PEEK (SETQ MOUSE-BUTTONS-BUFFER-OUT-INDEX (\ (+ TEM 4) 32.)))
 	     (VALUES (LOGIOR (IF USE-KBD-BUTTONS KBD-BUTTONS 0)
@@ -456,7 +459,10 @@ to get the position to display the blinker."
   ;; Fill the mouse tracker's arrays with NIL instead of the garbage
   ;; that they contain initially.  At least interpreted ASET won't work otherwise.
   (LOOP FOR I FROM #o1640 BELOW #o1740
-	DO (%P-STORE-CONTENTS (+ A-MEMORY-VIRTUAL-ADDRESS I) NIL))
+;	DO (%P-STORE-CONTENTS (+ A-MEMORY-VIRTUAL-ADDRESS I) NIL))
+	;; quux revision 14 (contract g3 revision 14, 10.10): a memory's window
+	;; lies above 2^31, the address by %pointer-plus
+	do (%p-store-contents (%pointer-plus a-memory-virtual-address i) nil))
   ;; Set scaling and speed dependence.
   (MOUSE-SPEED-HACK)
   ;; Make sure at least one blinker of each type exists

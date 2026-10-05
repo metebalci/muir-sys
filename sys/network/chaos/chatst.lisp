@@ -478,7 +478,13 @@ used for everything, rather than the default."
       (CADR:DBG-WRITE ADR DATA)
       (%UNIBUS-WRITE ADR DATA)))
 
-(SET-BASE-ADDRESS)				;was IF-IN-CADR; this system runs only on a CADR.
+;(SET-BASE-ADDRESS)				;was IF-IN-CADR; this system runs only on a CADR.
+;; quux: quux has no unibus, and %unibus-read signals an error there (argtyp
+;; unibus-address), so this load-time read of the chaos interface's number
+;; register stopped the load of the system at this file.  run it only on a
+;; machine that is not quux; set-base-address stays for the cadr.
+(unless (= si:processor-type-code si:quux-type-code)
+  (set-base-address))
 
 (defun chatst-continuous-test (&optional (file)
 					 (record-errors-this-many-packets (* 10. 60. 5))

@@ -562,7 +562,9 @@ The status slot is used by the NCP to remember a small amount of info about the 
 (DEFUN PRINT-CONN (CONN &OPTIONAL (SHORT-PKT-DISPLAY T) &AUX (LAST NIL))
   (FORMAT T
 	  "~%Chn: ~O (~O): Contact: ~S State: ~S From: ~O-~O to ~O-~O .~%"
-	  (LOCAL-INDEX-NUM CONN) (%POINTER CONN)
+;	  (LOCAL-INDEX-NUM CONN) (%POINTER CONN)
+	  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+	  (local-index-num conn) (si:%pointer-unsigned (%pointer conn))
 	  (OR (GETF (CONN-PLIST CONN) 'RFC-CONTACT-NAME)
 	      (GETF (CONN-PLIST CONN) 'LISTEN-CONTACT-NAME))
 	  (STATE CONN)
@@ -614,7 +616,9 @@ The status slot is used by the NCP to remember a small amount of info about the 
   (AND SHORT-DISPLAY (FORMAT T "   "))
   (FORMAT T "Number: #o~O (#o~O)  Opcode: #o~O (~A).  Number of bytes = #o~O ."
 	  (PKT-NUM PKT)
-	  (%POINTER PKT)
+;	  (%POINTER PKT)
+	  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+	  (si:%pointer-unsigned (%pointer pkt))
 	  (PKT-OPCODE PKT)
 	  (COND ((< (PKT-OPCODE PKT) (LENGTH OPCODE-LIST))
 		 (NTH (PKT-OPCODE PKT) OPCODE-LIST))

@@ -368,9 +368,18 @@ for this operation to be meaningful;
 otherwise, their relative position will be changed by GC."
   (%MAKE-POINTER-OFFSET DTP-FIX PTR1 PTR2))
 
-(DEFSUBST %POINTER-LESSP (PTR1 PTR2)
-  "T if PTR1 points to a lower memory address than PTR2"
-  (MINUSP (%POINTER-DIFFERENCE PTR1 PTR2)))
+;(DEFSUBST %POINTER-LESSP (PTR1 PTR2)
+;  "T if PTR1 points to a lower memory address than PTR2"
+;  (MINUSP (%POINTER-DIFFERENCE PTR1 PTR2)))
+;;; quux revision 14 (contract g3 revision 14, 10.1 and 10.10): addresses are
+;;; unsigned.  the sign of a difference orders two addresses only when they lie
+;;; less than 2^31 words apart, as eden's (32000000000 up) and the tenured
+;;; generation's do not; the two 32-bit fields compared signed, each with its
+;;; bit 31 flipped, are compared unsigned.
+(defsubst %pointer-lessp (ptr1 ptr2)
+  "T if PTR1 points to a lower memory address than PTR2, the addresses compared unsigned."
+  (< (logxor (%pointer ptr1) most-negative-fixnum)
+     (logxor (%pointer ptr2) most-negative-fixnum)))
 
 
 (DEFSUBST NEQ (X Y)

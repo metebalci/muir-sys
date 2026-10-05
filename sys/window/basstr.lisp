@@ -8,7 +8,9 @@
 (DEFSELECT ((:PROPERTY IO-BUFFER NAMED-STRUCTURE-INVOKE))
   (:PRINT-SELF (SELF *STANDARD-OUTPUT* IGNORE &OPTIONAL IGNORE)
     (SI:PRINTING-RANDOM-OBJECT (SELF *STANDARD-OUTPUT* :NO-POINTER :TYPE)
-      (FORMAT T "~O: " (%POINTER SELF))
+;      (FORMAT T "~O: " (%POINTER SELF))
+      ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+      (format t "~O: " (si:%pointer-unsigned (%pointer self)))
       (IF (= (IO-BUFFER-INPUT-POINTER SELF)
 	     (IO-BUFFER-OUTPUT-POINTER SELF))
 	  (PRINC "empty, ")

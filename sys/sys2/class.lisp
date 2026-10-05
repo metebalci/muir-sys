@@ -454,7 +454,10 @@ superclass."
 		  (TYO #/  STREAM)
 		  (PRINC (CDR TEM) STREAM)
 		  (AND PRINT-ENTITY-ADDRESSES-FLAG
-		       (FORMAT STREAM " ~O" (%POINTER SELF)))
+;		       (FORMAT STREAM " ~O" (%POINTER SELF)))
+		       ;; quux revision 14 (contract g3 revision 14, 10.1,
+		       ;; class p): the address unsigned
+		       (format stream " ~O" (%pointer-unsigned (%pointer self))))
 		  (TYO #/> STREAM))
 		 (T
 		  ;Unfortunately, this gets rid of self recursions but not mutual recursions
@@ -464,7 +467,10 @@ superclass."
 ;						     (IF (EQ (CDR E) SELF) 'SELF
 ;							 (CDR E))))
 ;			(CLOSURE-ALIST SELF))
-		  (FORMAT STREAM " ~O" (%POINTER SELF))
+;		  (FORMAT STREAM " ~O" (%POINTER SELF))
+		  ;; quux revision 14 (contract g3 revision 14, 10.1, class p):
+		  ;; the address unsigned
+		  (format stream " ~O" (%pointer-unsigned (%pointer self)))
 		  (TYO #/> STREAM)))))
   SELF)
 

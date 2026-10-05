@@ -114,6 +114,12 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %REGION-REPRESENTATION-TYPE-STRUCTURE	1	;2 and 3 reserved for future
   ;; 2202 spare meta bits (1602 before revision 13); 1402 spare
   ;; 1501 spare (formerly unimplemented compact-cons flag)
+  ;; quux revision 14 (contract g3 revision 14, 10.2): bit 13, the former
+  ;; compact-cons flag, says that the area is ephemeral: make-region places its
+  ;; regions in ephemeral space, 32000000000-33777777777 (appendix a14.1), and
+  ;; every other area's below it.  it is not a meta bit: <19:18> of the page
+  ;; entry are the ephemeral-reference bit and software's.
+  %%region-ephemeral		1501
   %%REGION-SPACE-TYPE		1104		;Code for type of space:
   %REGION-SPACE-FREE		0		;0 free region slot
   %REGION-SPACE-OLD		1		;1 oldspace region of dynamic area
@@ -178,8 +184,16 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %SYS-COM-VALID-SIZE			;IN A SAVED BAND, NUMBER OF WORDS USED
   					; note in a new format band, this is
 					; no longer the highest virtual address.
-  %SYS-COM-PAGE-TABLE-PNTR		;ADDRESS OF PAGE-TABLE-AREA
-  %SYS-COM-PAGE-TABLE-SIZE		;NUMBER OF QS
+;  %SYS-COM-PAGE-TABLE-PNTR		;ADDRESS OF PAGE-TABLE-AREA
+;  %SYS-COM-PAGE-TABLE-SIZE		;NUMBER OF QS
+  ;; quux revision 14 (contract g3 revision 14, 3.2; appendix a14.12): no page
+  ;; hash table.  physical-page-data and the slot bitmap are frames the cold
+  ;; boot takes from the memory it finds, with no virtual address; lisp reads
+  ;; them through the physical memory window at these physical addresses.
+  ;; the two words keep the page table's places.
+  %sys-com-physical-page-data		;physical address of physical-page-data,
+					; two words a frame
+  %sys-com-physical-page-data-size	;frames it covers: the memory found at boot
   %SYS-COM-OBARRAY-PNTR			;CURRENT OBARRAY, COULD BE AN ARRAY-POINTER
 					;BUT NOW IS USUALLY A SYMBOL WHOSE VALUE
 					;IS THE CURRENTLY-SELECTED OBARRAY (PACKAGE)
@@ -234,7 +248,17 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 					; room in the paging partition.
   %SYS-COM-POINTER-WIDTH		;Either 24 or 25, as fixnum, or DTP-FREE in old sys.
 					;32 on quux revision 13
-  ;; 6 left
+;  ;; 6 left
+  ;; quux revision 14 (contract g3 revision 14, 9.3; appendix a14.12)
+  %sys-com-slot-bitmap			;physical address of the slot bitmap, a bit a
+					; slot of the paging partition, 1 = taken
+  %sys-com-commit-limit			;pages: the paging partition's slots plus the
+					; pageable frames; make-region refuses beyond
+  ;; quux revision 14 (contract g3 revision 14, 10.11): the region floor, kept
+  ;; here so that a band saved with it set keeps it (the microcode's
+  ;; a-region-floor and lisp's %region-floor are set from it at boot)
+  %sys-com-region-floor			;an address, a multiple of the quantum
+  ;; 3 left
   ))
 
 (AND (> (LENGTH SYSTEM-COMMUNICATION-AREA-QS) 40)
@@ -259,12 +283,19 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   REGION-BITS					;Fixnum, see %%REGION- syms for fields
   REGION-FREE-POINTER				;Fixnum, relative allocation point.
   ;; Below here must not be clobbered by DISK-COPY routines in the ucode.
-  PAGE-TABLE-AREA				;Page hash table
-  PHYSICAL-PAGE-DATA				;GC-DATA,,PHT-INDEX
-						; -1 if out of service
-						; PHT-INDEX=-1 if fixed-wired (no PHT entry)
-						; GC-DATA=0 if not in use
+;  PAGE-TABLE-AREA				;Page hash table
+;  PHYSICAL-PAGE-DATA				;GC-DATA,,PHT-INDEX
+;						; -1 if out of service
+;						; PHT-INDEX=-1 if fixed-wired (no PHT entry)
+;						; GC-DATA=0 if not in use
+  ;; quux revision 14 (contract g3 revision 14, 3.2): the page table and
+  ;; physical-page-data are no longer areas.  they are frames the cold boot
+  ;; takes from the memory it finds (%sys-com-physical-page-data), so every
+  ;; area after this point has a number two lower than on revision 13, and the
+  ;; band's format number moves (band-format-compressed).
   ADDRESS-SPACE-MAP				;See %ADDRESS-SPACE-MAP-BYTE-SIZE below
+						;quux revision 14: on a 64-page boundary,
+						; 200000 (coldut, create-areas)
   ;; End wired areas
   REGION-GC-POINTER				;Gc use, mainly relative dirty/clean boundary
   REGION-LIST-THREAD				;Next region# in area, or 1_23.+area#
@@ -350,7 +381,10 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;  page-table-area		8.		;enough for 2 megawords of main memory
   ;; quux revision 13 (appendix a1.9): 32 megawords of main memory, the
   ;; boards' (g1): 32768 pages, 4 words each, half full
-  page-table-area		128.		;enough for 32 megawords of main memory
+;  page-table-area		128.		;enough for 32 megawords of main memory
+  ;; quux revision 14 (contract g3 revision 14, 3.2, 10.6): no page-table-area
+  ;; and no physical-page-data area (area-list); the tables are frames taken
+  ;; at boot, sized from the memory found.
 ;  physical-page-data		2.		;enough for 2 megawords of main memory
 ;  address-space-map		1		;assuming 8-bit bytes
   ;; quux revision 13: 4 pages, 4 megawords, so that the address space map
@@ -359,8 +393,15 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; pages, a byte for each of the 16,384 quanta of the 28-bit space.
 ;  physical-page-data		4.		;enough for 4 megawords of main memory
   ;; quux revision 13: a word for each of 32 megawords' 32768 pages
-  physical-page-data		32.		;enough for 32 megawords of main memory
-  address-space-map		4		;assuming 8-bit bytes
+;  physical-page-data		32.		;enough for 32 megawords of main memory
+;  address-space-map		4		;assuming 8-bit bytes
+  ;; quux revision 14 (contract g3 revision 14, 10.3; appendix a14.12): a byte
+  ;; for each of the 262,144 quanta of the 32-bit space, 64 pages, so that the
+  ;; area holds the whole array the cold load makes (coldut,
+  ;; make-area-arrays, from the 32-bit pointer mask), on a 64-page boundary
+  ;; (coldut, create-areas), since xrgn deposits the word index into the
+  ;; area's origin.
+  address-space-map		64.		;assuming 8-bit bytes
   linear-pdl-area		20
   linear-bind-pdl-area		2
   pdl-area 			60
@@ -387,9 +428,16 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; quux revision 13: the page table's 120 and physical-page-data's 28 more
   ;; pages move it to 552000; 53 pages end it at 700000, a level-1 block's
   ;; boundary
-  extra-pdl-area		53		;note!! this is carefully calculated to cause
-						; extra-pdl-area to end on a level-2
-  ; map boundary (200000)
+;  extra-pdl-area		53		;note!! this is carefully calculated to cause
+;						; extra-pdl-area to end on a level-2
+;  ; map boundary (200000)
+  ;; quux revision 14 (contract g3 revision 14, 10.6): with the page table and
+  ;; physical-page-data gone and the address space map at 200000, 64 pages,
+  ;; it starts at 422000; 55. pages, 12 more than revision 13's 43., end it
+  ;; at 600000, an address-space quantum's boundary (16 pages), as
+  ;; area-list's note asks.  there are no map blocks on revision 14.
+  extra-pdl-area		55.		;note!! this is carefully calculated to cause
+						; extra-pdl-area to end on a quantum boundary
   fasl-temp-area 		10
   ))
 
@@ -421,10 +469,34 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 ;;; 1760000000-1777777777, virtual equal to physical; no unibus, whose window is
 ;;; past the frame buffer, where nothing answers (the microcode's
 ;;; lowest-*-virtual-address, uc-cadr).
-(defconst a-memory-virtual-address 1757776000)
-(defconst io-space-virtual-address 1760000000)
-(defconst unibus-virtual-address 1770000000)
-(defconst multibus-virtual-address 1770000000)
+;(defconst a-memory-virtual-address 1757776000)
+;(defconst io-space-virtual-address 1760000000)
+;(defconst unibus-virtual-address 1770000000)
+;(defconst multibus-virtual-address 1770000000)
+;;; quux revision 14 (contract g3 revision 14, 2, 10.8; appendix a14.1): 32-bit
+;;; virtual addresses, unsigned.  the windows lie above 2^31, so each base is
+;;; the fixnum whose 32-bit field is the address, negative as a number, built
+;;; by si:%make-pointer-unsigned, the one function that makes such a
+;;; constant (a literal above 2^31 reads as a bignum, and arithmetic or a
+;;; subprimitive given one works on the bignum's own storage).  sums with it
+;;; are made with %pointer-plus.
+;;; a memory's window: 35700000000, a location at <9:0>, emulated by the microcode.
+(defconst a-memory-virtual-address (si:%make-pointer-unsigned #o35700000000))
+;;; %xbus-read's and %xbus-write's base: offset 17777400 + w is register-page
+;;; word w at 35777777400 + w, as every lisp offset has it.
+(defconst io-space-virtual-address (si:%make-pointer-unsigned #o35760000000))
+;;; no unibus and no multibus: the first slice of the device window reserved
+;;; for devices, where nothing answers (nxm), rather than 1770000000, now
+;;; paged space where a region can lie.  nothing in lisp adds to them, and
+;;; %unibus-read and %unibus-write signal an error.
+(defconst unibus-virtual-address (si:%make-pointer-unsigned #o34400000000))
+(defconst multibus-virtual-address (si:%make-pointer-unsigned #o34400000000))
+;;; the physical memory window: physical address p at 36000000000 + p, with no
+;;; translation, for the tables, physical-page-data and the slot bitmap.
+(defconst physical-memory-virtual-address (si:%make-pointer-unsigned #o36000000000))
+;;; ephemeral space, 32000000000-33777777777: the regions of an ephemeral area
+;;; (%%region-ephemeral), and the bound below which every other region lies.
+(defconst ephemeral-space-virtual-address (si:%make-pointer-unsigned #o32000000000))
 
 (DEFCONST HEADER-FIELD-VALUES '(%%HEADER-TYPE-FIELD 2305 %%HEADER-REST-FIELD 0023))
 (DEFCONST HEADER-FIELDS (SI::GET-ALTERNATE HEADER-FIELD-VALUES))
@@ -914,58 +986,119 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 
 ;;;; Page table stuff etc.
 
-;;; Definitions of fields in page hash table
-(DEFCONST PAGE-VALUES '(
-  ;; WORD 1 
-;  %%PHT1-VIRTUAL-PAGE-NUMBER 1020		;ALIGNED SAME AS VMA
-;  %PHT-DUMMY-VIRTUAL-ADDRESS 177777		;ALL ONES MEANS THIS IS DUMMY ENTRY
-  ;; 1024-word pages (contract g2, option (w)): the page number is vma<23:10>
-;  %%pht1-virtual-page-number 1216		;aligned same as vma
-;  %pht-dummy-virtual-address 37777		;all ones means this is dummy entry
-  ;; quux revision 13 (appendix a1.7): vma<27:10>, the 28-bit address's page
-  %%pht1-virtual-page-number 1222		;aligned same as vma
-  %pht-dummy-virtual-address 777777		;all ones means this is dummy entry
-						;WHICH JUST REMEMBERS A FREE CORE PAGE
-  %%PHT1-SWAP-STATUS-CODE 0003
-  %PHT-SWAP-STATUS-NORMAL 1			;ORDINARY PAGE
-  %PHT-SWAP-STATUS-FLUSHABLE 2			;SAFELY REUSABLE TO SWAP PAGES INTO
-						;MAY NEED TO BE WRITTEN TO DISK FIRST
-  %PHT-SWAP-STATUS-PREPAGE 3			;SAME AS FLUSHABLE, BUT CAME IN VIA PREPAGE
-  %PHT-SWAP-STATUS-AGE-TRAP 4			;LIKE NORMAL BUT TRYING TO MAKE FLUSHABLE
-  %PHT-SWAP-STATUS-WIRED 5			;NOT SWAPPABLE
-  %%PHT1-AGE 0302				;NUMBER OF TIMES AGED
-  %%PHT1-MODIFIED-BIT 0501			;1 IF PAGE MODIFIED, BUT THE FACT NOT RECORDED
-						; IN THE MAP-STATUS, BECAUSE IT IS NOMINALLY
-						;  READ-ONLY OR NOMINALLY READ-WRITE-FIRST.
-  %%PHT1-VALID-BIT 0601				;1 IF THIS HASH TABLE SLOT IS OCCUPIED.
-  %%PHT1-SCAVENGER-WS-FLAG 0701			;IF SET, PAGE IN SCAVENGER WORKING SET.
+;;;; Definitions of fields in page hash table
+;(DEFCONST PAGE-VALUES '(
+;  ;; WORD 1 
+;;  %%PHT1-VIRTUAL-PAGE-NUMBER 1020		;ALIGNED SAME AS VMA
+;;  %PHT-DUMMY-VIRTUAL-ADDRESS 177777		;ALL ONES MEANS THIS IS DUMMY ENTRY
+;  ;; 1024-word pages (contract g2, option (w)): the page number is vma<23:10>
+;;  %%pht1-virtual-page-number 1216		;aligned same as vma
+;;  %pht-dummy-virtual-address 37777		;all ones means this is dummy entry
+;  ;; quux revision 13 (appendix a1.7): vma<27:10>, the 28-bit address's page
+;  %%pht1-virtual-page-number 1222		;aligned same as vma
+;  %pht-dummy-virtual-address 777777		;all ones means this is dummy entry
+;						;WHICH JUST REMEMBERS A FREE CORE PAGE
+;  %%PHT1-SWAP-STATUS-CODE 0003
+;  %PHT-SWAP-STATUS-NORMAL 1			;ORDINARY PAGE
+;  %PHT-SWAP-STATUS-FLUSHABLE 2			;SAFELY REUSABLE TO SWAP PAGES INTO
+;						;MAY NEED TO BE WRITTEN TO DISK FIRST
+;  %PHT-SWAP-STATUS-PREPAGE 3			;SAME AS FLUSHABLE, BUT CAME IN VIA PREPAGE
+;  %PHT-SWAP-STATUS-AGE-TRAP 4			;LIKE NORMAL BUT TRYING TO MAKE FLUSHABLE
+;  %PHT-SWAP-STATUS-WIRED 5			;NOT SWAPPABLE
+;  %%PHT1-AGE 0302				;NUMBER OF TIMES AGED
+;  %%PHT1-MODIFIED-BIT 0501			;1 IF PAGE MODIFIED, BUT THE FACT NOT RECORDED
+;						; IN THE MAP-STATUS, BECAUSE IT IS NOMINALLY
+;						;  READ-ONLY OR NOMINALLY READ-WRITE-FIRST.
+;  %%PHT1-VALID-BIT 0601				;1 IF THIS HASH TABLE SLOT IS OCCUPIED.
+;  %%PHT1-SCAVENGER-WS-FLAG 0701			;IF SET, PAGE IN SCAVENGER WORKING SET.
 
-  ;; Pht word 2.  This is identical to the level-2 map
+;  ;; Pht word 2.  This is identical to the level-2 map
 
-;  %%PHT2-META-BITS 1606				;SEE %%REGION-MAP-BITS
-;  %%PHT2-MAP-STATUS-CODE 2403
-  ;; quux revision 13 (appendix a1.7): pht word 2 is the 28-bit level-2 map
-  ;; entry, its ten bits above the 18-bit physical page four bits higher
-  %%pht2-meta-bits 2206				;see %%region-map-bits
-  %%pht2-map-status-code 3003
-  %PHT-MAP-STATUS-MAP-NOT-VALID 0		;LEVEL 1 OR 2 MAP NOT SET UP
-  %PHT-MAP-STATUS-META-BITS-ONLY 1		;HAS META BITS BUT NO PHYSICAL ADDRESS
-  %PHT-MAP-STATUS-READ-ONLY 2			;GARBAGE COLLECTOR CAN STILL WRITE IN IT
-  %PHT-MAP-STATUS-READ-WRITE-FIRST 3		;READ/WRITE BUT NOT MODIFIED
-  %PHT-MAP-STATUS-READ-WRITE 4			;READ/WRITE AND MODIFIED
-  %PHT-MAP-STATUS-PDL-BUFFER 5			;MAY RESIDE IN PDL BUFFER
-  %PHT-MAP-STATUS-MAR 6				;MAR SET SOMEWHERE ON THIS PAGE
-;  %%PHT2-MAP-ACCESS-CODE 2602
-;  %%PHT2-ACCESS-STATUS-AND-META-BITS 1612
-;  %%PHT2-ACCESS-AND-STATUS-BITS 2404 
-;  %%PHT2-PHYSICAL-PAGE-NUMBER 0016
-  %%pht2-map-access-code 3202
-  %%pht2-access-status-and-meta-bits 2212
-  %%pht2-access-and-status-bits 3004 
-  %%pht2-physical-page-number 0022
+;;  %%PHT2-META-BITS 1606				;SEE %%REGION-MAP-BITS
+;;  %%PHT2-MAP-STATUS-CODE 2403
+;  ;; quux revision 13 (appendix a1.7): pht word 2 is the 28-bit level-2 map
+;  ;; entry, its ten bits above the 18-bit physical page four bits higher
+;  %%pht2-meta-bits 2206				;see %%region-map-bits
+;  %%pht2-map-status-code 3003
+;  %PHT-MAP-STATUS-MAP-NOT-VALID 0		;LEVEL 1 OR 2 MAP NOT SET UP
+;  %PHT-MAP-STATUS-META-BITS-ONLY 1		;HAS META BITS BUT NO PHYSICAL ADDRESS
+;  %PHT-MAP-STATUS-READ-ONLY 2			;GARBAGE COLLECTOR CAN STILL WRITE IN IT
+;  %PHT-MAP-STATUS-READ-WRITE-FIRST 3		;READ/WRITE BUT NOT MODIFIED
+;  %PHT-MAP-STATUS-READ-WRITE 4			;READ/WRITE AND MODIFIED
+;  %PHT-MAP-STATUS-PDL-BUFFER 5			;MAY RESIDE IN PDL BUFFER
+;  %PHT-MAP-STATUS-MAR 6				;MAR SET SOMEWHERE ON THIS PAGE
+;;  %%PHT2-MAP-ACCESS-CODE 2602
+;;  %%PHT2-ACCESS-STATUS-AND-META-BITS 1612
+;;  %%PHT2-ACCESS-AND-STATUS-BITS 2404 
+;;  %%PHT2-PHYSICAL-PAGE-NUMBER 0016
+;  %%pht2-map-access-code 3202
+;  %%pht2-access-status-and-meta-bits 2212
+;  %%pht2-access-and-status-bits 3004 
+;  %%pht2-physical-page-number 0022
+;  ))
+;(SI::ASSIGN-ALTERNATE PAGE-VALUES)
+;(DEFCONST PAGE-HASH-TABLE-FIELDS (SI::GET-ALTERNATE PAGE-VALUES))
+
+;;; quux revision 14 (contract g3 revision 14, 3, 9.1, 10.5; appendix a14.2,
+;;; a14.3, a14.12): the page hash table goes.  every page of a region has an
+;;; entry in a two-level page table, walked by the hardware behind a tlb: a
+;;; directory of 4,096 entries in four frames, each naming a page-table page
+;;; of 1,024 entries.  the entry keeps the level-2 map's fields where revision
+;;; 13's pht word 2 had them, and adds the hardware's accessed, modified and
+;;; ephemeral-reference bits and, for a page not in core, its disk slot.
+;;; physical-page-data holds two words a frame.  the tables are frames taken
+;;; at boot, read by lisp through the physical memory window
+;;; (physical-memory-virtual-address, %sys-com-physical-page-data); the old
+;;; definitions are kept above as comments.
+(defconst page-entry-values '(
+  ;; the page entry, a fixnum (tag 005).  in core: status 2, 4, 5 or 6.
+  %%page-entry-modified 3501			;set by the hardware's first write
+  %%page-entry-accessed 3401			;set by the hardware's first reference
+  %%page-entry-access-code 3202			;<27> read, <26> write (with <27>)
+  %%page-entry-status 3003			;<26:24>, bit 26 shared with the access code
+  %%page-entry-access-status-and-meta-bits 2212	;<27:18>, as %%region-map-bits
+  %%page-entry-access-and-status-bits 3004	;<27:24>
+  %%page-entry-meta-bits 2206			;<23:18>, as the region's
+  %%page-entry-ephemeral-reference 2301		;<19>: set by the hardware, kept by a flip
+  %%page-entry-frame 0022			;<17:0>, the frame of a page in core
+  ;; not in core (status 1): the page's slot of the paging partition, 22
+  ;; bits, <21:18> at <31:28> and <17:0> at <17:0>; all ones is no slot, a
+  ;; fresh page, zero-filled when first touched.
+  %%page-entry-slot-high 3404
+  %%page-entry-slot-low 0022
+  %page-entry-no-slot 17777777
+  ;; the status, <26:24> (a14.2).  3, read/write-first, is retired: the
+  ;; hardware sets modified.  7 is a memory's window's fixed entry, never in
+  ;; a table.
+  %page-entry-status-no-entry 0			;no page: an address in no region
+  %page-entry-status-not-in-core 1		;has meta bits and maybe a slot, no frame
+  %page-entry-status-read-only 2		;garbage collector can still write in it
+  %page-entry-status-read-write 4
+  %page-entry-status-pdl-buffer 5		;may reside in pdl buffer
+  %page-entry-status-mar 6			;mar set somewhere on this page
+  %page-entry-status-a-memory 7			;a memory's window, a fixed entry
+  ;; a directory entry: status 4 present, 0 none; the page-table page's frame.
+  ;; the directory's first frame, a multiple of 4, is register-page word 220.
+  %%directory-entry-status 3003
+  %%directory-entry-frame 0022
+  %directory-entry-status-present 4
+  ;; physical-page-data, two words a frame: word 0, the page's virtual page
+  ;; number, vma<31:10>, with wired and free; all ones, -1, out of service.  a
+  ;; wired frame without a page (a table, the slot bitmap) has wired set and
+  ;; page 0.  word 1, the page's slot, or %page-entry-no-slot.
+  %%ppd0-virtual-page-number 0026
+  %%ppd0-wired 2601
+  %%ppd0-free 2701
+  %ppd-words-per-frame 2
+  ;; the swap status %change-page-status takes, with revision 13's values:
+  ;; normal clears the frame's wired bit, wired sets it, flushable offers the
+  ;; frame to findcore (its accessed bit cleared).
+  %page-swap-status-normal 1
+  %page-swap-status-flushable 2
+  %page-swap-status-wired 5
   ))
-(SI::ASSIGN-ALTERNATE PAGE-VALUES)
-(DEFCONST PAGE-HASH-TABLE-FIELDS (SI::GET-ALTERNATE PAGE-VALUES))
+(si::assign-alternate page-entry-values)
+(defconst page-entry-fields (si::get-alternate page-entry-values))
 
 ;;; See SYS2;SGDEFS
 (DEFCONST STACK-GROUP-HEAD-LEADER-QS '(
@@ -1189,6 +1322,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 					;4 => QUUX
   AR-1-ARRAY-POINTER-1			;Array whose data is cached for AR-1-CACHED-1.
   AR-1-ARRAY-POINTER-2			;Array whose data is cached for AR-1-CACHED-2.
+  ;; quux revision 14 (contract g3 revision 14, 10.11): the region floor, a
+  ;; fixnum whose field is an address, a multiple of the quantum: make-region
+  ;; places a region of an area that is not ephemeral in the lowest free
+  ;; quanta at or above it, below ephemeral space.  set by si:set-region-floor
+  ;; (sys: sys; qfctns); the microcode's a-region-floor, after
+  ;; a-ar-1-array-pointer-2, which the cold boot sets to the first unfixed
+  ;; area's address unless the band holds one.
+  %region-floor
   ))
 
 (DEFCONST A-MEMORY-COUNTER-BLOCK-NAMES '(
@@ -1254,14 +1395,25 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   %METER-MICRO-ENABLES
   ))
 
+;(PUTPROP '%MODE-FLAGS
+;	 (+ A-MEMORY-VIRTUAL-ADDRESS 26)
+;	 'FORWARDING-VIRTUAL-ADDRESS)
+;(PUTPROP '%SEQUENCE-BREAK-SOURCE-ENABLE
+;	 (+ A-MEMORY-VIRTUAL-ADDRESS 34)
+;	 'FORWARDING-VIRTUAL-ADDRESS)
+;(PUTPROP '%METER-MICRO-ENABLES
+;	 (+ A-MEMORY-VIRTUAL-ADDRESS 35)
+;	 'FORWARDING-VIRTUAL-ADDRESS)
+;;; quux revision 14 (contract g3 revision 14, 10.10): a memory's window lies
+;;; above 2^31, so the locations' addresses are made by %pointer-plus.
 (PUTPROP '%MODE-FLAGS
-	 (+ A-MEMORY-VIRTUAL-ADDRESS 26)
+	 (global:%pointer-plus a-memory-virtual-address 26)
 	 'FORWARDING-VIRTUAL-ADDRESS)
 (PUTPROP '%SEQUENCE-BREAK-SOURCE-ENABLE
-	 (+ A-MEMORY-VIRTUAL-ADDRESS 34)
+	 (global:%pointer-plus a-memory-virtual-address 34)
 	 'FORWARDING-VIRTUAL-ADDRESS)
 (PUTPROP '%METER-MICRO-ENABLES
-	 (+ A-MEMORY-VIRTUAL-ADDRESS 35)
+	 (global:%pointer-plus a-memory-virtual-address 35)
 	 'FORWARDING-VIRTUAL-ADDRESS)
 
 (DEFCONST DISK-RQ-LEADER-QS '(

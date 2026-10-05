@@ -3,19 +3,23 @@
 ; Miscellaneous functions not worthy of being in qfctns, or not able to be in the cold load.
 ;	** (c) Copyright 1980 Massachusetts Institute of Technology **
 
-(DEFUN %POINTER-UNSIGNED (N)
-  "Convert the fixnum N, regarded as unsigned number, into number (maybe big) with same value.
-If the argument is negative (if regarded as signed), it is expanded into a bignum."
-  (IF (MINUSP N) (+ N (ASH (%LOGDPB 1 %%Q-BOXED-SIGN-BIT 0) 1)) N))
+;;; quux revision 14 (contract g3 revision 14, 10.1): %pointer-unsigned and
+;;; %make-pointer-unsigned are in the cold load now, in sys: sys; qrand, since
+;;; the printer prints an address with the first and the window addresses
+;;; built with the second are read before this file is loaded.
+;(DEFUN %POINTER-UNSIGNED (N)
+;  "Convert the fixnum N, regarded as unsigned number, into number (maybe big) with same value.
+;If the argument is negative (if regarded as signed), it is expanded into a bignum."
+;  (IF (MINUSP N) (+ N (ASH (%LOGDPB 1 %%Q-BOXED-SIGN-BIT 0) 1)) N))
 
-(DEFUN %MAKE-POINTER-UNSIGNED (N)
-  "Convert N to a fixnum which, regarded as unsigned, has same value as N.
-Thus, a number just too big to be a signed fixnum
-becomes a fixnum which, if regarded as signed, would be negative."
-  (IF (FIXNUMP N)
-      N
-    (LOGIOR (LDB (1- %%Q-POINTER) N)
-	    (ROT (LDB (BYTE 1 (1- %%Q-POINTER)) N) -1))))
+;(DEFUN %MAKE-POINTER-UNSIGNED (N)
+;  "Convert N to a fixnum which, regarded as unsigned, has same value as N.
+;Thus, a number just too big to be a signed fixnum
+;becomes a fixnum which, if regarded as signed, would be negative."
+;  (IF (FIXNUMP N)
+;      N
+;    (LOGIOR (LDB (1- %%Q-POINTER) N)
+;	    (ROT (LDB (BYTE 1 (1- %%Q-POINTER)) N) -1))))
 
 (DEFUN SET-MEMORY-SIZE (NEW-SIZE)
   "Specify how much main memory is to be used, in words.
@@ -29,9 +33,14 @@ memory board construction starts; in the meantime, the machine crashes."
      L  (SETQ OLD-SIZE (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
         (SETQ OLDP (CEILING OLD-SIZE PAGE-SIZE))
         (SETQ NEWP (CEILING NEW-SIZE PAGE-SIZE))
-	(COND ((OR (> NEWP (REGION-LENGTH PHYSICAL-PAGE-DATA))
-		   (> NEWP (TRUNCATE (* 4 (REGION-LENGTH PAGE-TABLE-AREA)) 9)))
-	       (FERROR NIL "#o~O is bigger than page tables allow"  NEW-SIZE))
+;	(COND ((OR (> NEWP (REGION-LENGTH PHYSICAL-PAGE-DATA))
+;		   (> NEWP (TRUNCATE (* 4 (REGION-LENGTH PAGE-TABLE-AREA)) 9)))
+;	       (FERROR NIL "#o~O is bigger than page tables allow"  NEW-SIZE))
+	;; quux revision 14 (contract g3 revision 14, 3.2): no page hash table
+	;; to fill; physical-page-data covers the frames of the memory found at
+	;; boot, and no more can be put in service
+	(cond ((> newp (system-communication-area %sys-com-physical-page-data-size))
+	       (ferror nil "#o~O is bigger than the memory found at boot" new-size))
 	      ((= NEWP OLDP) (RETURN T))
               ((< NEWP OLDP) (GO FLUSH)))
      MORE
@@ -805,12 +814,42 @@ The symbol :UNBOUND-FUNCTION is treated specially."
 
 ;;;; MAR-hacking functions
 
-(DEFUN CLEAR-MAR ()
+;;; quux revision 14 (contract g3 revision 14, 10.10): addresses are unsigned,
+;;; and the mar's range may lie at or across 2^31.  FUNCTION is called with the
+;;; address of each page from LOW's to HIGH's, once each, the pages counted and
+;;; the address stepped by %pointer-plus; with none when HIGH is below LOW,
+;;; compared unsigned, as when the mar is off (LOW -1, HIGH -2).  the old loops
+;;; stepped #o200 words and compared signed: past 2^31 they ended at once, and
+;;; they could miss the page holding HIGH when HIGH lay in its first 127
+;;; words, depending on LOW modulo 128.
+(defun map-mar-pages (function low high)
+  (unless (%pointer-lessp high low)
+    (do ((p (logand low (- page-size)) (%pointer-plus p page-size))
+	 ;; the pages, from the unsigned difference of the two pages' addresses
+	 (n (1+ (ldb (byte (- 32. 10.) 10.)
+		     (%pointer-difference (logand high (- page-size))
+					  (logand low (- page-size)))))
+	    (1- n)))
+	((zerop n))
+      (funcall function p))))
+
+;(DEFUN CLEAR-MAR ()
+;  "Clear out the mar setting."
+;  (DO ((P %MAR-LOW (+ P #o200)))
+;      ((> P %MAR-HIGH)) ;TROUBLE WITH NEGATIVE NUMBERS HERE!
+;    (%CHANGE-PAGE-STATUS P NIL (LDB %%REGION-MAP-BITS
+;				    (REGION-BITS (%REGION-NUMBER P)))))
+;  (SETQ %MAR-LOW -1
+;	%MAR-HIGH -2
+;	%MODE-FLAGS (%LOGDPB 0 %%M-FLAGS-MAR-MODE %MODE-FLAGS))
+;  NIL)
+(defun clear-mar ()
   "Clear out the mar setting."
-  (DO ((P %MAR-LOW (+ P #o200)))
-      ((> P %MAR-HIGH)) ;TROUBLE WITH NEGATIVE NUMBERS HERE!
-    (%CHANGE-PAGE-STATUS P NIL (LDB %%REGION-MAP-BITS
-				    (REGION-BITS (%REGION-NUMBER P)))))
+  ;; quux revision 14: each page of the range once, unsigned (map-mar-pages)
+  (map-mar-pages #'(lambda (p)
+		     (%change-page-status p nil (ldb %%region-map-bits
+						     (region-bits (%region-number p)))))
+		 %mar-low %mar-high)
   (SETQ %MAR-LOW -1
 	%MAR-HIGH -2
 	%MODE-FLAGS (%LOGDPB 0 %%M-FLAGS-MAR-MODE %MODE-FLAGS))
@@ -826,12 +865,21 @@ N-WORDS defaults to 1.  CYCLE-TYPE is T, :READ or :WRITE."
 		     (:WRITE 2)
 		     ((T) 3)))
   (CLEAR-MAR)					;Clear old mar
-  (SETQ %MAR-HIGH (+ (1- N-WORDS) (SETQ %MAR-LOW (%POINTER LOCATION))))
+;  (SETQ %MAR-HIGH (+ (1- N-WORDS) (SETQ %MAR-LOW (%POINTER LOCATION))))
+;  ;; If MAR'ed pages are in core, set up their traps
+;  (DO ((P %MAR-LOW (+ P #o200)))
+;      ((> P %MAR-HIGH))
+;    (%CHANGE-PAGE-STATUS P NIL (DPB 6 #o0604 (LDB %%REGION-MAP-BITS  ;CHANGE MAP-STATUS
+;						  (REGION-BITS (%REGION-NUMBER P))))))
+  ;; quux revision 14 (contract g3 revision 14, 10.10): the last word's
+  ;; address by %pointer-plus (by + it was a bignum from 2^31 up, which
+  ;; a-mar-high then held as a pointer), and each page once, unsigned
+  (setq %mar-high (%pointer-plus (setq %mar-low (%pointer location)) (1- n-words)))
   ;; If MAR'ed pages are in core, set up their traps
-  (DO ((P %MAR-LOW (+ P #o200)))
-      ((> P %MAR-HIGH))
-    (%CHANGE-PAGE-STATUS P NIL (DPB 6 #o0604 (LDB %%REGION-MAP-BITS  ;CHANGE MAP-STATUS
-						  (REGION-BITS (%REGION-NUMBER P))))))
+  (map-mar-pages #'(lambda (p)
+		     (%change-page-status p nil (dpb 6 #o0604 (ldb %%region-map-bits	;change map-status
+								   (region-bits (%region-number p))))))
+		 %mar-low %mar-high)
   (SETQ %MODE-FLAGS (%LOGDPB CYCLE-TYPE %%M-FLAGS-MAR-MODE %MODE-FLAGS))	;Energize!
   T)
 
@@ -1859,6 +1907,14 @@ will take a few minutes.")
 ;      (FERROR NIL "Cannot save, partition too small.  Need at least ~D. pages.~@[~@
       (ferror nil "Cannot save, partition too small.  Need at least ~D. blocks.~@[~@
                       Warm Boot please.~]" DUMP-SIZE EXPOSE-P))
+    ;; quux revision 14 (contract g3 revision 14, 9.3, 10.6): a band is
+    ;; restored into the paging partition's slots, its page k into slot k, the
+    ;; wired areas' pages too, so it must fit that partition as well.
+    (when (and (boundp 'page-partition-size) (> dump-size page-partition-size))
+      (and expose-p (send tv:main-screen :expose))
+      (ferror nil "Cannot save, the paging partition is too small for the band: ~D. blocks, ~
+		   ~D. needed.~@[~@
+                   Warm Boot please.~]" page-partition-size dump-size expose-p))
     DUMP-SIZE))
 
 (DEFUN ESTIMATE-DUMP-SIZE NIL
