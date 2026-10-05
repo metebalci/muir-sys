@@ -13,3 +13,279 @@ file carries a comment in that file saying why.
   2026-10-04). As for 2000 and 2001, the version is not in the sources but
   given to the assembler (`ua:version-number` and the output's version for
   `UCADR`, the version asked for `PROMH`), so no source changed for it.
+
+## Revision 14
+
+QUUX's revision 14 (contract G3, revision 14, and its appendix A14) gives the
+machine a 32-bit virtual address space with untranslated windows at its top,
+a two-level page table that the hardware walks through a TLB, and the
+microcode only for the faults the walk leaves.
+
+### The micro-assembler
+
+- **The micro-assembler assembles for revision 14** when
+  `ua:*hardware-revision*` is 14 (the default is 13, at which every output is
+  byte for byte what it was): condition 12, M <= A unsigned, with
+  `jump-less-or-equal-unsigned`, `jump-greater-than-unsigned` and their call,
+  return and xct-next forms (`sys/sys/cadsym.lisp`); the write-map operation
+  word's names, `write-map-operation` (`VMA<33:32>`), `write-map-none`,
+  `-direct-write`, `-invalidate`, `-empty`, and `write-map-entry`
+  (`VMA<29:0>`); the pointer-type register's words 222 and 223,
+  `pointer-type-register-0-31` and `pointer-type-register-32-63`, the bits of
+  `ua:*pointer-types*` (`pointer-type-register-word`) (`sys/sys/cadsym.lisp`,
+  `sys/sys/cadrlp.lisp`); all of them refused at revision 13
+  (`cons-lap-symeval` and the jump word, `sys/sys/cadrlp.lisp`).
+  `docs/building.md`, "Assembling the microcode", says how.
+- **A revision-14 `.mcr` starts with section 6**, code 6, start 0, one word,
+  the hardware revision 14 (`write-mcr-file`, `sys/sys/qwmcr.lisp`).
+- **A revision-14 assembly of the microcode is refused before anything is
+  written** when `A-PDL-BUFFER-VIRTUAL-ADDRESS` is not at A 430 or
+  `A-PDL-BUFFER-HEAD` not at A 431 (`check-pinned-a-locations`); when a
+  map-bit dispatch table tells apart a data type outside
+  `ua:*pointer-types*`, A14.5's 19 types, when the register's two words are
+  not that set's bits, or a map-bit dispatch reads another table
+  (`check-map-bit-tables`); when a word writes the location counter through
+  the right shift or by an arithmetic function other than ADD, SUB, M+1 and
+  M-1 (`check-lc-writes`); or when a TLB direct write outside the PDL
+  buffer's dump, its refill and their recovery is followed, on any path
+  before its invalidation, by a second memory start, a MAP(MD) read, a
+  dispatch, a call other than to a halt, a return or another write-map
+  (`check-fiddle-windows`, revision 14's fiddle rule) (`sys/sys/cadrlp.lisp`).
+- **`tools/assembler-check`** checks all of this with planted microcode (its
+  README): `rev13`, `rev14`, `tree`, `bits`, `pinned`, `map-table`,
+  `map-set`, `map-constant`, `lc-shift`, `lc-mm` and `fiddle`. Its `rev13`
+  and `rev14` checks assemble as version 2001, since they compare the
+  outputs with release 2001's `sys/ubin/`.
+
+### The microcode and the boot PROM
+
+Labels are cited rather than lines, since these files are still changing.
+
+- **The microcode pages through the two-level page table.** The page hash
+  table, its search, the level-1 and level-2 map reloads and the old ager are
+  gone, commented out in place (`sys/ucadr/uc-page-fault.lisp`). A TLB miss
+  is the hardware's walk; the microcode sees only the faults it leaves: D-PGF
+  status 0 (no entry: PGF-NO-ENTRY; an address in no region is the error
+  ADDRESS-IN-NO-REGION, one in a region is ILLOP), 1 (not in core:
+  PGF-NOT-IN-CORE, SWAPIN), 2 (read only), 3-5 (ILLOP), 6 (MAR), 7 (the
+  A-memory window, PGF-A-MEMORY). New routines: FIND-PAGE-ENTRY and
+  FIND-PAGE-ENTRY-OR-MAKE (the walk in microcode, taking a page-table frame
+  with TAKE-TABLE-FRAME), the slot bitmap (ALLOCATE-SLOT, FREE-SLOT,
+  SLOT-SET, SLOT-CLEAR), SWAPIN (a run of pages in consecutive slots of one
+  region in one transfer), FINDCORE (a clock over the physical page data: a
+  free frame is taken, a page whose accessed bit is 0 evicted, the ager's lap
+  clearing accessed bits), and EVICT-PAGE (written to its slot only if
+  modified; a fresh page never written leaves with no slot and comes back as
+  CZRR fills it).
+- **Misc ops on the new tables:** %CHANGE-PAGE-STATUS, %CREATE-PHYSICAL-PAGE,
+  %DELETE-PHYSICAL-PAGE, %PAGE-IN, %PAGE-STATUS and %PHYSICAL-ADDRESS read
+  and write page-table entries and the physical page data
+  (`uc-page-fault.lisp`, XCPGS to XPHYADR); freeing a region's pages frees
+  their frames and slots (FREE-PAGE-RESOURCES).
+- **`%FINDCORE` returns the frame as a fixnum** (`uc-page-fault.lisp`,
+  XFINDCORE). It returned FINDCORE's bare `M-B`, data type 0, and
+  PAGE-IN-WORDS's `(* (%findcore) page-size)` halted in ILLOP through
+  QIMUL's D-NUMARG1, so a saved band halted as it booted.
+- **MAKE-REGION** (`uc-storage-allocation.lisp`) refuses a region past the
+  commit limit (VIRTUAL-MEMORY-OVERFLOW), places an ephemeral region in
+  [32000000000, 34000000000) and any other in [the region floor,
+  32000000000), and writes its pages' entries; the region floor is
+  A-REGION-FLOOR (A 142), read from the system communication area at boot.
+  UPDATE-REGION-PHT updates the entries for a flip and keeps the ephemeral
+  reference bit <19>.
+- **The PDL buffer's dump and refill** write the TLB directly and invalidate
+  after (the "fiddle"); the dump sets A 430/431 to their post-dump values
+  before its first write, and a status-6 fault inside the fiddle is
+  recovered (P-B-FIDDLE-AGAIN, P-R-FIDDLE-AGAIN). FORCE-WR-RDONLY is a
+  direct write, the store, and an invalidation.
+- **Address compares are unsigned** where an address may be at or above 2^31
+  (contract G3 revision 14, 10.1): every compare the census of the
+  microcode's address compares marked to change, each with the old line
+  commented out beside it.
+- **Devices:** %XBUS-READ/-WRITE through 35760000000 with a bound check
+  (ARGTYP XBUS-OFFSET); %UNIBUS-READ/-WRITE are errors (ARGTYP
+  UNIBUS-ADDRESS); the register page at 35777777400; disk command lists and
+  error logging through the physical memory window (`uc-disk.lisp`).
+- **Cold boot and bands** (`uc-cold-disk.lisp`): DISK-RESTORE sizes memory
+  through the physical memory window, builds the tables (directory in the
+  last four frames, word 220; the physical page data; the slot bitmap; words
+  222/223, the pointer-type register, before Lisp runs), copies the band into
+  the paging partition's slots page k to slot k, and makes the regions'
+  entries (BUILD-REGION-ENTRIES). Band formats 2010 (saved), 2011
+  (incremental) and 2012 (cold load); 2000-2002 halt at BAND-NOT-REVISION-14,
+  and a machine not at revision 14 halts at MACHINE-NOT-QUUX-14. DISK-SAVE
+  evicts every page first (SWAP-OUT-ALL-PAGES) and copies each region's pages
+  from their slots (DISK-SAVE-REGIONWISE-SUBR), runs of consecutive slots in
+  one transfer. The incremental restore (DISK-RESTORE-INCREMENTAL) copies
+  the base band into slots 0 on and the incremental pages after it.
+- **The boot PROM** (`sys/ucadr/promh.text`): its first act checks the
+  revision (halt ERROR-NOT-REVISION-14); it writes no map, reaches the
+  registers at 35777777400 and its buffer at 36000006000, and refuses a
+  microcode whose section 6 is not revision 14 (halt
+  ERROR-MICROCODE-NOT-REVISION-14).
+- **The sources' microcode assembles only at revision 14**: its paging is
+  revision 14's page table, and the PROM, also assembled at 14, refuses a
+  machine and a microcode of another revision (`docs/building.md`,
+  "Assembling the microcode"). `tools/assembler-check`'s `tree` assembles
+  it, and `fiddle` plants a dispatch in FORCE-WR-RDONLY's window, which is
+  refused.
+
+### The Lisp side
+
+Citations are of the files as this step left them.
+
+- **Addresses are unsigned** (contract G3 revision 14, 10.1, 10.10). An
+  address is the fixnum whose 32-bit field is the address, negative as a
+  number from 2^31 up:
+  - `%POINTER-UNSIGNED` gives N + 2^32 for a negative field; it added
+    -2^32 and made the field more negative (-1 gave -4294967297). It and
+    `%MAKE-POINTER-UNSIGNED` move from `sys/sys/qmisc.lisp` to the cold load,
+    `sys/sys/qrand.lisp:21`, `:29`.
+  - `%POINTER-LESSP` compares the two fields unsigned, each with bit 31
+    flipped, not by the sign of their modular difference
+    (`sys/sys2/lmmac.lisp:379`).
+  - The printer prints an address unsigned (`SI:PRINT-POINTER-FIELD`,
+    `sys/io/print.lisp:574`; `PRINTING-RANDOM-OBJECT`, `sys/io/rddefs.lisp:221`;
+    and the 22 other places that printed `%POINTER` with `~O`, in
+    `sys/eh/ehc.lisp`, `sys/eh/ehf.lisp`, `sys/io/rddefs.lisp`,
+    `sys/io/rtc.lisp`, `sys/network/chaos/chsncp.lisp`, `sys/sys/clpack.lisp`,
+    `sys/sys/qrand.lisp`, `sys/sys2/class.lisp`, `sys/sys2/describe.lisp`,
+    `sys/window/basstr.lisp`, `sys/window/cold.lisp`, `sys/window/inspct.lisp`,
+    `sys/window/sheet.lisp`, `sys/window/tscrol.lisp`).
+  - Generic `+`, `-` and `1+` on an address gave a bignum at or across 2^31,
+    whose own storage a subprimitive then used: the address is made by
+    `%POINTER-PLUS`, an offset by `%POINTER-DIFFERENCE`, a place in an object
+    by its offset compared with 0 and the size, a loop over pages by a count
+    of pages. In `WIRE-DISK-RQB` (`sys/io/disk.lisp:344`), `WIRE-WORDS`
+    (`:1677`), `PAGE-ARRAY-CALCULATE-BOUNDS` (`:2138`), `BUFFER-RESET`
+    (`sys/io1/meter.lisp:28`), `DESCRIBE-LOCATIVE`
+    (`sys/sys2/describe.lisp:371`), `ARRAY-INITIALIZE` and
+    `ADJUST-ARRAY-SIZE` (`sys/sys/qrand.lisp:826`, `:1447`),
+    `UNSTACKIFY-ENVIRONMENT` (`sys/sys/eval.lisp:2173`),
+    `FLAG-ALREADY-OPTIMIZED` and `ALREADY-OPTIMIZED-P`
+    (`sys/sys/qcp1.lisp:979`, `:993`), the micro-compiler's exit vector
+    (`MA-RESET-MICRO-CODE-ENTRY-ARRAYS`, `MA-REBOOT`,
+    `MA-INITIALIZE-EXIT-VECTOR`, `MA-LOAD-EXIT-VECTOR-Q`,
+    `sys/sys/mlap.lisp:475`, `:500`, `:526`, `:545`), `FILE-DEVICE-STATE`
+    (`sys/io/fdev.lisp:501`), `RQB-DATA-POINTER` (`sys/io1/inc.lisp:44`),
+    `VMEM-RQB-DATA` (`sys/cold/coldut.lisp:116`),
+    `VIRTUAL-ADDRESS-TO-PDL-INDEX` and `SYMBOL-FROM-VALUE-CELL-LOCATION`
+    (`sys/eh/eh.lisp:1191`, `:2118`), and the Unibus channel functions
+    (`sys/io/unibus.lisp:169` on; dead on QUUX).
+  - `SET-MAR` and `CLEAR-MAR` (`sys/sys/qmisc.lisp:859`, `:846`) visit each
+    page of the range once, the addresses ordered unsigned
+    (`SI::MAP-MAR-PAGES`, `:825`). The old loops stepped `#o200` words and
+    compared signed: past 2^31 they ended at once, and on any machine they
+    could miss the page holding the range's last word when it lay in that
+    page's first 127 words.
+- **The windows' addresses** (appendix A14.1, contract 10.8), each built by
+  `SI:%MAKE-POINTER-UNSIGNED` (`sys/cold/qcom.lisp:484` on): A memory's window
+  35700000000, the `%XBUS` base 35760000000, the Unibus's 34400000000 (no
+  Unibus; nothing answers there), and two new constants,
+  `PHYSICAL-MEMORY-VIRTUAL-ADDRESS` 36000000000 and
+  `EPHEMERAL-SPACE-VIRTUAL-ADDRESS` 32000000000 (`sys/cold/qcom.lisp:496`,
+  `:499`; `sys/cold/qdefs.lisp:181`, `sys/sys/ltop.lisp:66`,
+  `sys/cold/system.lisp:129`). Sums with them are made by `%POINTER-PLUS`
+  (`FEATURE-PAGE-FIELD`, `sys/sys/ltop.lisp:138`; the mouse,
+  `sys/window/mouse.lisp:148`, `:465`; `FIXNUM-READ-METER-FOR-SCHEDULER`,
+  `sys/sys2/prodef.lisp:175`; the A-memory forwarding addresses,
+  `sys/cold/qcom.lisp:1410`). `VIDEO-BUFFER-ADDRESS` returns feature word 13
+  as it is, the buffer's virtual address (`sys/sys/ltop.lisp:181`). The
+  feature page prints its address unsigned, and word 2 as the TLB's entries
+  (`PRINT-FEATURE-PAGE`, `sys/sys/genric.lisp:1837`, `:1892`).
+- **The process run light is an address in the frame buffer**, two words after
+  the disk run light, read and written whole (`TV:WHO-LINE-RUN-LIGHT-LOC`,
+  `sys/window/cold.lisp:34`; `RUN-LIGHT-FOR-CADR` and a new setter,
+  `SET-RUN-LIGHT-FOR-CADR`, `sys/sys2/prodef.lisp:204`, `:207`, in place of
+  its `SETF` method, which the cross build cannot give the target changed,
+  called by the scheduler, `sys/sys2/proces.lisp:789`, `:800`;
+  `WHO-LINE-UPDATE`, `sys/window/wholin.lisp:109`). It was an `%XBUS`
+  offset, which reached the buffer only while the buffer sat at the i/o
+  region's base; the buffer is now below the `%XBUS` base.
+- **No page hash table** (contract 3.2, 9.1, 10.5): PAGE-TABLE-AREA and
+  PHYSICAL-PAGE-DATA leave the area list, so every later area's number is two
+  lower (`sys/cold/qcom.lisp`, `sys/cold/qdefs.lisp`); the page entry's, the
+  directory's and physical-page-data's fields replace the page hash table's
+  (`PAGE-ENTRY-VALUES`, `sys/cold/qcom.lisp:1053`); the system communication
+  area's page-table words become `%SYS-COM-PHYSICAL-PAGE-DATA` and `-SIZE`,
+  with `%SYS-COM-SLOT-BITMAP` and `%SYS-COM-COMMIT-LIMIT` new (`:194` on);
+  `%COMPUTE-PAGE-HASH` goes (`sys/cold/defmic.lisp:246`). Lisp reads the
+  tables through the physical memory window (`SI:PHYSICAL-MEMORY-WORD`,
+  `SI:PAGE-ENTRY`, `SI:PAGE-ENTRY-SLOT`, `SI:FRAME-WIRED-P`,
+  `sys/io/disk.lisp:1594`, `:1598`, `:1612`, `:1619`), and their users are
+  rewritten over them: `WIRE-PAGE`, `UNWIRE-PAGE` (`sys/io/disk.lisp:1627`,
+  `:1658`), `PAGE-OUT-WORDS` (`:2217`), `PAGE-IN-WORDS` (by runs of slots,
+  `:2356`), `SET-MEMORY-SIZE` and `SET-MAR` (`sys/sys/qmisc.lisp:24`, `:859`),
+  `DEALLOCATE-PAGES` and `SET-SCAVENGER-WS` (`sys/sys2/gc.lisp:913`, `:985`),
+  `COUNT-WIRED-PAGES` and `PRINT-AREAS-OF-WIRED-PAGES`
+  (`sys/sys2/describe.lisp:647`, `:664`), `MAKE-AREA`
+  (`sys/sys/qfctns.lisp:2862`, a writable area's pages status 4,
+  read/write-first being retired).
+- **The address space map** is 64 pages, a byte for each of the 32-bit space's
+  262,144 quanta, as long as the array the cold load makes, on a 64-page
+  boundary, at 200000 (`sys/cold/qcom.lisp:404`; `CREATE-AREAS`,
+  `sys/cold/coldut.lisp:616`); the cold load writes all of it
+  (`INIT-ADDRESS-SPACE-MAP`, `:1483`), and stops if the array does not fill
+  the area (`:1118`). EXTRA-PDL-AREA is 55 pages, ending on a quantum
+  boundary at 600000.
+- **Band formats 2010 saved, 2011 incremental, 2012 cold load** (appendix
+  A14.13; `sys/io/disk.lisp:1261`, `sys/cold/coldut.lisp:1393`).
+- **The commit limit**: `VIRTUAL-MEMORY-SIZE` is the paging partition's slots
+  plus the pageable frames, from the cold boot (`DISK-INIT`,
+  `sys/io/disk.lisp:1489`); the collector's free space is it less the words
+  of every region that is not free, the fixed areas' and eden's included, as
+  the microcode's commit check at `MAKE-REGION` counts them, since a fixed
+  area's pages own paging slots too (`GET-FREE-SPACE-SIZE-1`,
+  `sys/sys2/gc.lisp:219`). `MEASURED-SIZE-OF-PARTITION`
+  (`sys/io/disk.lisp:1444`) gives the band's own size as the paging partition
+  it needs, and `SYS-COM-PAGE-NUMBER` (`:1294`) takes an address's page from
+  its 32 bits.
+- **The incremental band's mask** has a bit a page of the band, in the band's
+  own order, region by region (`BAND-PAGE-INDEX`, `sys/io1/inc.lisp:57`),
+  not a bit a virtual page (contract 10.7 item 2).
+- **Errors for revision 14's microcode**: `ADDRESS-IN-NO-REGION`, a reference
+  to a page with no entry (`sys/eh/ehf.lisp:2363`); the argument types
+  `XBUS-OFFSET`, a fixnum from 0 to 17777777, and `UNIBUS-ADDRESS`, which
+  nothing is, QUUX having no Unibus (`:1600` on). The error handler saves a
+  register's pointer as a locative unless it is in no region; it saved one
+  with <31:28> set as its field, untransported, which ephemeral space's are
+  (`SG-SAVE-STATE`, `sys/eh/eh.lisp:242`).
+- **The Chaosnet test program loads on QUUX.** `chatst.lisp` read the Chaos
+  interface's number register through `%UNIBUS-READ` at load time
+  (`SET-BASE-ADDRESS`), which is an error on QUUX, so the load of the system
+  stopped at that file; it now runs only on a machine that is not QUUX
+  (`sys/network/chaos/chatst.lisp:486`).
+- **A band must fit the paging partition** too, since it is restored into its
+  slots (`CHECK-PARTITION-SIZE`, `sys/sys/qmisc.lisp:1895`;
+  `PAGE-PARTITION-SIZE`, `sys/io/disk.lisp:45`).
+- **The region floor** (contract 10.11): `SI:REGION-FLOOR-DEFAULT`,
+  `SI:REGION-FLOOR-P` and `SI:SET-REGION-FLOOR` (`sys/sys/qfctns.lisp:3012`,
+  `:3019`, `:3027`), over the A-memory variable `%REGION-FLOOR`
+  (`sys/cold/qcom.lisp:1332`), kept for a saved band in
+  `%SYS-COM-REGION-FLOOR`, which the cold load sets to the first unfixed
+  area's address; and `%%REGION-EPHEMERAL`, region bit 13, an ephemeral
+  area's flag (`sys/cold/qcom.lisp:122`).
+- **FEF instruction words are fixnums, tag 005** (contract G1 2.6; contract
+  8.3, 10.6), fasloaded (`FASL-OP-FRAME`, `sys/sys/qfasl.lisp:954`) or
+  compiled to core (`LAP-OUTPUT-WORD`, `sys/sys/qclap.lisp:388`); they were
+  tagged as symbols (303 and 203). The cold load wrote them so already.
+  REL's loader stores raw words and writes no tag at all.
+- **Faults fixed that System 2001 has too**: `WIRE-WORDS` never wired the
+  last page of its range, nor any page of a range within one page, and
+  `WIRE-STRUCTURE` stopped with an argument error on every call
+  (`sys/io/disk.lisp:1677`; measured on System 2001); `PAGE-OUT-WORDS`
+  offered its range's first page every time (`:2217`); `SYS-COM-PAGE-NUMBER`
+  made a bignum of an address from 2^31 up (`:1294`); `SET-MAR` could miss
+  the page holding its range's last word (above; measured on System 2001).
+  The CADR's line has the same code for the first three and `SET-MAR`.
+- **The cold-load generator keys revision 14's layout on the target's
+  parameters** (`TARGET-HAS-PAGE-HASH-TABLE-P`, `sys/cold/coldut.lisp:612`),
+  so that revision 13's still give their cold load byte for byte; the cross
+  build's builder is System 2001's band, and a file carrying the word-width
+  mark is foreign only when the target's word is not the builder's
+  (`CROSS-FOREIGN-FILE-P`, `sys/cold/cross.lisp:634`) (`tools/cross-check/run`,
+  `crossdefs.py`, `check3.py`, `cases/native.cases`; `sys/cold/crossdefs.lisp`
+  against System 2001's tree).
+- **Checks**: `tools/system-check` gains `unsigned-addresses`, `fef-tags`,
+  `mar-range` and `rev14-addresses` (its README); `rev14-addresses` needs
+  revision 14.
