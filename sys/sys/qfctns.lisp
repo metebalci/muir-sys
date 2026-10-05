@@ -2857,6 +2857,12 @@ a local declaration.  If it is encapsulated, unencapsulate it."
 
 (DEFUN MAKE-AREA-TEMPORARY (AREA-NUMBER)
   "Mark an area (specified by number) as temporary."
+  ;; the generational collector (contract g3 step 2, 3.3): a temporary area
+  ;; is never ephemeral; a reset would drop young objects that tenured ones
+  ;; may point to through marked pages
+  (when (ldb-test %%region-ephemeral (area-region-bits area-number))
+    (ferror nil "The area ~S is ephemeral, and cannot be made temporary."
+	    (area-name area-number)))
   (SETF (AREF AREA-TEMPORARY-FLAG-ARRAY AREA-NUMBER) 1))
 
 (DEFUN MAKE-AREA (&REST KEYWORDS
@@ -2873,7 +2879,9 @@ Takes keyword argument pairs as follows:
 :SIZE - maximum size (default=infinite)
 :REGION-SIZE - size for regions, defaults to :SIZE if specified else medium-size.
 :REPRESENTATION (:LIST, :STRUCTURE, number) - just for the initial region, default=struc
-:GC (:STATIC, :TEMPORARY, :DYNAMIC) - default = dynamic
+:GC (:STATIC, :TEMPORARY, :DYNAMIC, :EPHEMERAL) - default = dynamic.
+ :EPHEMERAL is dynamic, with new objects made young, in eden, and collected
+ by young collections; not with :PDL.
 :READ-ONLY, :PDL - attributes
 :ROOM - if specified, push this area onto ROOM, so that (ROOM) will list it.
 :SWAP-RECOMMENDATIONS - swapin quantum size for area minus 1.
@@ -2906,8 +2914,12 @@ SYS:%%REGION-SCAVENGE-ENABLE - default 1, 0 disables scavenger."
 	      (COND ((EQ ARG ':LIST) %REGION-REPRESENTATION-TYPE-LIST)
 		    ((EQ ARG ':STRUCTURE) %REGION-REPRESENTATION-TYPE-STRUCTURE)
 		    (T ARG))))
-      (:GC (CHECK-TYPE ARG (MEMBER :STATIC :TEMPORARY :DYNAMIC)
-		       "a GC mode (:STATIC, :TEMPORARY, or :DYNAMIC)")
+;      (:GC (CHECK-TYPE ARG (MEMBER :STATIC :TEMPORARY :DYNAMIC)
+;		       "a GC mode (:STATIC, :TEMPORARY, or :DYNAMIC)")
+      ;; the generational collector (contract g3 step 2, 3.3): :ephemeral, as
+      ;; genera's make-area has it
+      (:gc (check-type arg (member :static :temporary :dynamic :ephemeral)
+		       "a GC mode (:STATIC, :TEMPORARY, :DYNAMIC or :EPHEMERAL)")
 	   (SETQ GC ARG))
       (:READ-ONLY (SETQ READ-ONLY ARG))
       (:PDL (SETQ PDL ARG))
@@ -2919,12 +2931,20 @@ SYS:%%REGION-SCAVENGE-ENABLE - default 1, 0 disables scavenger."
       (OTHERWISE (FERROR NIL "~S is not a valid keyword for ~S" (CAR L) 'MAKE-AREA))))
   ;; Perform defaulting and concordance
   (CHECK-TYPE NAME (NOT (NULL NAME)) "specified explicitly")
+  ;; the generational collector (contract g3 step 2, 3.3): a pdl area is
+  ;; never ephemeral
+  (when (and (eq gc :ephemeral) pdl)
+    (ferror nil "The area ~S cannot be both ephemeral and a pdl area." name))
   (AND (NULL THE-REGION-SIZE)
        (SETQ THE-REGION-SIZE (IF (= SIZE (%LOGDPB 0 %%Q-BOXED-SIGN-BIT -1))
 				 #o40000	;Size unspecified
 			         SIZE)))	;If specified, assume user wants single region
   (AND (NULL SPACE-TYPE)
-       (SETQ SPACE-TYPE (IF (EQ GC ':DYNAMIC) %REGION-SPACE-NEW %REGION-SPACE-STATIC)))
+;       (SETQ SPACE-TYPE (IF (EQ GC ':DYNAMIC) %REGION-SPACE-NEW %REGION-SPACE-STATIC)))
+       ;; the generational collector (contract g3 step 2, 3.3): an
+       ;; ephemeral area is dynamic
+       (setq space-type (if (memq gc '(:dynamic :ephemeral))
+			    %region-space-new %region-space-static)))
   (AND (NULL SCAV-ENB)
        (SETQ SCAV-ENB (SELECT SPACE-TYPE
 			;; What happens if the user specifies a random space type?
@@ -2987,7 +3007,17 @@ SYS:%%REGION-SCAVENGE-ENABLE - default 1, 0 disables scavenger."
     (STORE (AREA-REGION-LIST AREA-NUMBER) (%LOGDPB 1 %%Q-BOXED-SIGN-BIT AREA-NUMBER))
     (STORE (AREA-REGION-SIZE AREA-NUMBER) THE-REGION-SIZE)
     (STORE (AREA-MAXIMUM-SIZE AREA-NUMBER) SIZE)
-    (STORE (AREA-REGION-BITS AREA-NUMBER) THE-REGION-BITS)
+;    (STORE (AREA-REGION-BITS AREA-NUMBER) THE-REGION-BITS)
+    ;; the generational collector (contract g3 step 2, 3.1, 3.3): an
+    ;; ephemeral area's bits carry %%region-ephemeral, so that its new
+    ;; objects go to eden; its first region is a tenured one, below
+    ;; ephemeral space, which keeps the area a region when young collections
+    ;; free every eden region (the cold load gives working-storage-area the
+    ;; same)
+    (store (area-region-bits area-number)
+	   (if (eq gc :ephemeral)
+	       (%logdpb 1 %%region-ephemeral the-region-bits)
+	     the-region-bits))
     (SETQ REGION-NUMBER (%MAKE-REGION THE-REGION-BITS THE-REGION-SIZE))
     (STORE (AREA-REGION-LIST AREA-NUMBER) REGION-NUMBER)
     (STORE (REGION-LIST-THREAD REGION-NUMBER) (%LOGDPB 1 %%Q-BOXED-SIGN-BIT AREA-NUMBER))

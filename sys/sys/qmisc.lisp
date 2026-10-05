@@ -1821,6 +1821,17 @@ you should not save this environment."
 		  (SUBSTRING VERS 0 (MIN (LENGTH VERS) MAX)))
 	      (GET-NEW-SYSTEM-VERSION MAX :INCREMENTAL INCREMENTAL))))
 
+    ;; the generational collector (contract g3 step 2, 8.3, 17 q-gcc): no
+    ;; band holds a young object or a collection in progress.  any
+    ;; collection is finished and every young object tenured, and from here
+    ;; on nothing consed is young (gc; gc-prepare-for-disk-save); if the
+    ;; save does not happen, the world is given its young collections back.
+    ;; a band saved before SYS: SYS2; GC is loaded (the cold load's) has no
+    ;; collector to prepare
+    (when (fboundp 'gc-prepare-for-disk-save)
+      (gc-prepare-for-disk-save))
+    (unwind-protect (progn
+
     ;; Cause cold boot initializations to happen when rebooted
     ;; and do the BEFORE-COLD initializations now
     (INITIALIZATIONS 'BEFORE-COLD-INITIALIZATION-LIST T)
@@ -1888,7 +1899,9 @@ will take a few minutes.")
 	(%DISK-SAVE (IF INCREMENTAL
 			(- (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
 		      (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
-		    (CAR L) (CADR L))))))
+		    (CAR L) (CADR L)))))
+      (when (fboundp 'gc-after-disk-save-abort)
+	(gc-after-disk-save-abort)))))
 
 ;;; 1024-word pages (contract g2, option (w)): PART-SIZE is blocks, as a
 ;;; partition's size is, and a page dumped takes disk-blocks-per-page of them.

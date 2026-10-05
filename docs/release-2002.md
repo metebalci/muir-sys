@@ -295,3 +295,87 @@ Citations are of the files as this step left them.
 - **Checks**: `tools/system-check` gains `unsigned-addresses`, `fef-tags`,
   `mar-range` and `rev14-addresses` (its README); `rev14-addresses` needs
   revision 14.
+
+## The generational collector
+
+Step 2 (contract G3 step 2): MIT's incremental copying collector, extended
+with generations. An ephemeral area's new objects are made in eden; a young
+collection flips eden and both survivor spaces and copies each survivor one
+step on, to survivor space 1, survivor space 2, then the tenured generation;
+a tenured collection is MIT's collection over every dynamic region.
+
+### The Lisp side
+
+Written before the microcode and the cold load that it needs; compiled on
+System 2001's band, not yet run. Citations are of the files as this step
+left them.
+
+- **The generation field and the collector's A-memory variables**
+  (`sys/cold/qcom.lisp:155`, `:1355`): `%%REGION-GENERATION`, region bits
+  `<6:5>`, spare before: 0 tenured, 1 eden, 2 survivor space 1, 3 survivor
+  space 2; after `%REGION-FLOOR`, `%GC-WORDS-CONSED-SINCE-FLIP` (the words
+  consed since the last flip, which a flip clears), `%GC-PROMOTION` (the
+  promotion table, two bits a source generation) and
+  `%GC-PRETENURE-THRESHOLD`.
+- **Young and tenured collections** (`sys/sys2/gc.lisp`): `GC-FLIP-NOW`
+  takes the kind, `:TENURED` by default, and a tenure-all flag (`:336`); a
+  young flip runs no next-flip list, resets no static region's scan pointer,
+  deallocates no region's end and makes no notification, and both write the
+  promotion table, computed before the pause from survivor space 1's words
+  against the soft cap (`GC-PROMOTION-TABLE`, `:208`). The GC process
+  (`:859`) reclaims a collection when the scavenger is done, then starts a
+  tenured collection by MIT's free-space rule or after the tenured
+  generation's growth by `GC-TENURED-GROWTH-LIMIT`, else a young one when the
+  words consed since the last flip reach eden's size (`GC-COLLECTION-DUE`,
+  `:889`); young collections report nothing (`GC-RECLAIM-OLDSPACE`, `:673`).
+  `GC-STATUS` prints the generations and the collections by kind (`:589`;
+  `GC-GET-GENERATION-SIZES`, `:191`).
+- **The settings** (`:94`-`:125`): `GC-EDEN-SIZE` (NIL, 1/16 of main
+  memory), `GC-SURVIVOR-CAP` (NIL, eden's size), `GC-TENURED-GROWTH-LIMIT`
+  (`:DEFAULT`, 1/4 of main memory) and `GC-PRETENURE-THRESHOLD` (32 K words),
+  each read at the next flip; and the answers to the contract's three
+  questions, one variable each: `GC-ON-AT-BOOT` (Q-GCa: `GC-BOOT`, `:1008`,
+  turns automatic collection on at every boot; `GC-ON` takes `NO-QUERY`,
+  `:943`, and `GC-OFF` no longer removes the boot's initialization),
+  `GC-TENURED-AUTOMATIC` (Q-GCb) and `GC-SAVE-TENURES-ALL` (Q-GCc), all T.
+- **DISK-SAVE saves no young object** (`sys/sys/qmisc.lisp:1831`;
+  `GC-PREPARE-FOR-DISK-SAVE`, `sys/sys2/gc.lisp:1045`): it finishes any
+  collection, makes the ephemeral areas not ephemeral until the save, so that
+  nothing consed meanwhile is young, and tenures every young object in a
+  young collection with the tenure-all table; the boot makes the areas
+  ephemeral again, as does a save that does not happen.
+- **Areas** (`sys/sys/qfctns.lisp:2868`; `sys/sys2/gc.lisp:1070`-`:1107`):
+  `MAKE-AREA` takes `:GC :EPHEMERAL`, which gives the area's bits
+  `%%REGION-EPHEMERAL` and a tenured first region, and refuses it with
+  `:PDL`; `MAKE-AREA-STATIC` and `MAKE-AREA-TEMPORARY` (`:2858`) refuse an
+  ephemeral area, `MAKE-AREA-DYNAMIC` (so `CLEAN-UP-STATIC-AREA` too) refuses
+  `MACRO-COMPILED-PROGRAM`; `MAKE-AREA-STATIC-INTERNAL` and
+  `MAKE-AREA-REGIONS-STATIC` (`:1279`) change tenured regions only.
+  `FULL-GC` (`:1154`) finishes any collection, flips every region with the
+  tenure-all table, and turns automatic collection back on if it was on.
+- **The first-object table's Lisp writers** (`sys/sys/qrand.lisp:1448`):
+  `REGION-HAS-FIRST-OBJECT-TABLE-P` names the regions that have one (tenured
+  structure regions not free, fixed or extra-pdl); `GC-RESET-FREE-POINTER`
+  (`:1495`) writes the entries of the pages it newly covers with the growing
+  object's start, which `ADJUST-ARRAY-SIZE` passes (`:1636`), and refuses to
+  move up in such a region without it; `FILL-UP-REGION`
+  (`sys/sys2/gc.lisp:1305`) writes each filler page's own start;
+  `RESET-TEMPORARY-AREA` (`sys/sys/qrand.lisp:1423`) resets to the table's
+  end.
+- **Hash tables rehash after a young flip only if they hold a young key**
+  (`sys/sys2/hash.lisp:87`-`:114`): `HASH-TABLE-GC-GENERATION-NUMBER` keeps
+  the generation and, negated, the young flag (n >= 0 none, -1 rehash at the
+  next miss, n <= -2 young at generation -2 - n), with the leader unchanged;
+  `%GC-TENURED-FLIP-GENERATION` is the generation after the last tenured
+  flip. `SXHASH` notes a young object hashed by address
+  (`SXHASH-HASHED-YOUNG-ADDRESS`, `sys/sys/qrand.lisp:201`;
+  `YOUNG-POINTER-P`, `:196`), `:PUT-HASH` and `PUTHASH-BOOTSTRAP` mark the
+  table (`sys/sys2/hashfl.lisp:179`, `sys/sys2/hash.lisp:394`), a rehash
+  finds the flag again (`:268`, `:301`), and `:GET-HASH`, `:REM-HASH` and
+  `INSTANCE-HASH-FAILURE` (`sys/sys2/flavor.lisp:2843`) test staleness so.
+- **The incremental save is refused after a tenured flip only**
+  (`sys/io1/inc.lisp:125`; `GC-TENURED-FLIP-SINCE-P`,
+  `sys/sys2/gc.lisp:231`).
+- **Checks**: `tools/system-check` gains `generational-collector`, with the
+  table checker and the reclaim checker and three files of planted partial
+  fixes (its README); it needs step 2's microcode and band.

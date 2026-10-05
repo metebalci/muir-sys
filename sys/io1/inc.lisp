@@ -111,12 +111,23 @@ the regions before it, as disk-save-regionwise writes them."
 	  ;; If a flip has happened since the time we booted the band,
 	  ;; our regions now and then are not really comparable,
 	  ;; and an incremental disk-save has no chance of winning.
-	  (unless (= %gc-generation-number
-		     (%logdpb (aref (rqb-buffer system-communication-area-rqb)
-				    (1+ (* 2 %sys-com-gc-generation-number)))
-			      2010
-			      (aref (rqb-buffer system-communication-area-rqb)
-				    (* 2 %sys-com-gc-generation-number))))
+;	  (unless (= %gc-generation-number
+;		     (%logdpb (aref (rqb-buffer system-communication-area-rqb)
+;				    (1+ (* 2 %sys-com-gc-generation-number)))
+;			      2010
+;			      (aref (rqb-buffer system-communication-area-rqb)
+;				    (* 2 %sys-com-gc-generation-number))))
+	  ;; the generational collector (contract g3 step 2, 8.3): a tenured
+	  ;; flip, that is.  a young flip moves only young objects, and the band
+	  ;; held none (disk-save tenures them all), so the regions it was booted
+	  ;; with stay in place; with young collections on there is one after
+	  ;; every few megawords consed.
+	  (when (gc-tenured-flip-since-p
+		  (%logdpb (aref (rqb-buffer system-communication-area-rqb)
+				 (1+ (* 2 %sys-com-gc-generation-number)))
+			   2010
+			   (aref (rqb-buffer system-communication-area-rqb)
+				 (* 2 %sys-com-gc-generation-number))))
 	    (ferror nil "A garbage collection has been done since band ~A was booted."
 		    booted-band-name)))
       (and system-communication-area-rqb

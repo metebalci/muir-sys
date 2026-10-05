@@ -74,6 +74,164 @@ Tells hash tables when they must rehash.") ; Indirected to SYS-COM area.
 This is to take account of extra space used
 because regions are allocated bigger than their data.")
 
+;;;; The generational collector (contract g3 step 2)
+
+;;; MIT's incremental copying collector, extended with generations.  An
+;;; ephemeral area (%%region-ephemeral in its area bits; working storage, and
+;;; MAKE-AREA's :GC :EPHEMERAL) makes its new objects in eden, regions in
+;;; ephemeral space.  A young collection flips eden and both survivor spaces
+;;; and copies each survivor one step on: eden, survivor space 1, survivor
+;;; space 2, the tenured generation (%%region-generation, the promotion
+;;; table).  Its roots are the machine's state, transported at the flip, and
+;;; the tenured pages the hardware marked when a young pointer was stored in
+;;; them, which the scavenger's marked-page walk scans.  A tenured collection
+;;; is MIT's collection over every dynamic region.  Both are the same flip,
+;;; transporter, scavenger and reclaim, incremental per cons and in idle
+;;; time; GC-FLIP-NOW takes the kind.
+
+;;; The three questions for Mete (contract 17), answered as recommended until
+;;; he confirms; each default is the one setting here.
+(defvar gc-on-at-boot t
+  "Q-GCa: T turns automatic garbage collection, young collections included, on at every
+cold and warm boot (GC-BOOT).  NIL: on at boot only if it was on (GC-ON), as before.")
+
+(defvar gc-tenured-automatic t
+  "Q-GCb: T lets the GC process start tenured collections, by MIT's free-space rule and
+by GC-TENURED-GROWTH-LIMIT.  NIL: tenured collections only by explicit calls
+/(GC-FLIP-NOW, FULL-GC, GC-IMMEDIATELY).")
+
+(defvar gc-save-tenures-all t
+  "Q-GCc: T makes DISK-SAVE finish any collection and tenure every young object first, so
+that no band holds an object in ephemeral space.  NIL leaves the collector as it is, as
+DISK-SAVE did before; a band saved so with young objects is not safe, since the marks
+of its pages are not saved (the contract's alternative, every tenured page marked at boot,
+is not built).")
+
+;;; The settings (contract 10).  Each may be set at any time and takes effect
+;;; at the next flip.
+(defvar gc-eden-size nil
+  "Eden's size in words: the GC process starts a young collection when the words consed
+since the last flip reach it.  NIL: 1//16 of main memory (GC-EDEN-WORDS).")
+
+(defvar gc-survivor-cap nil
+  "Survivor space 1's soft cap in words: when it holds more at a flip, its objects are
+tenured rather than copied to survivor space 2.  NIL: eden's size.")
+
+(defvar gc-tenured-growth-limit :default
+  "The growth in words of the tenured generation's new and copy regions since the last
+tenured collection at which the GC process starts another; :DEFAULT, 1//4 of main memory;
+NIL, MIT's free-space rule alone.")
+
+(defvar gc-pretenure-threshold 32768.
+  "A cons of more words than this in an ephemeral area is made in the tenured generation
+at once, never copied by young collections.")
+
+(defun gc-main-memory-words ()
+  "Main memory's size in words."
+  (system-communication-area %sys-com-memory-size))
+
+(defun gc-eden-words ()
+  "Eden's size in words: GC-EDEN-SIZE, or 1//16 of main memory."
+  (or gc-eden-size (floor (gc-main-memory-words) 16.)))
+
+(defun gc-survivor-cap-words ()
+  "Survivor space 1's soft cap in words: GC-SURVIVOR-CAP, or eden's size."
+  (or gc-survivor-cap (gc-eden-words)))
+
+(defun gc-tenured-growth-limit-words ()
+  "The tenured generation's growth in words that starts a tenured collection, or NIL."
+  (if (eq gc-tenured-growth-limit :default)
+      (floor (gc-main-memory-words) 4)
+    gc-tenured-growth-limit))
+
+;;; The state.
+(defvar gc-collection-kind nil
+  "While a collection runs, from its flip to its reclaim, :YOUNG or :TENURED; else NIL.")
+
+(defvar gc-young-collection-count 0
+  "The young collections started since the system was built.")
+
+(defvar gc-tenured-collection-count 0
+  "The tenured collections started since the system was built.")
+
+(defvar gc-tenured-words-at-last-tenured-collection nil
+  "The tenured generation's words in new and copy regions after the last tenured
+collection, from which its growth is counted; NIL until measured.")
+
+(defvar gc-report-allowance nil
+  "T after a tenured collection, until the GC process has reported how much more may be
+consed before the next one.")
+
+(defun region-generation (region)
+  "The generation REGION holds: the value of its %%REGION-GENERATION."
+  (%logldb %%region-generation (region-bits region)))
+
+(defun gc-young-region-p (region)
+  "T if REGION is eden's or a survivor space's."
+  (not (= (region-generation region) %region-generation-tenured)))
+
+(defun gc-dynamic-space-type-p (space-type)
+  "T if SPACE-TYPE, a region's %%REGION-SPACE-TYPE, is newspace or copyspace."
+  (select space-type
+    ((%region-space-new %region-space-copy %region-space-new1 %region-space-new2
+      %region-space-new3 %region-space-new4 %region-space-new5 %region-space-new6)
+     t)
+    (otherwise nil)))
+
+(defun gc-generation-words (generation)
+  "The words in GENERATION's newspace and copyspace regions."
+  (do ((region (1- size-of-area-arrays) (1- region))
+       (words 0))
+      ((minusp region) words)
+    (let ((bits (region-bits region)))
+      (when (and (= (%logldb %%region-generation bits) generation)
+		 (gc-dynamic-space-type-p (%logldb %%region-space-type bits)))
+	(incf words (%pointer-unsigned (region-free-pointer region)))))))
+
+(defun gc-get-generation-sizes ()
+  "The words in each generation's newspace and copyspace regions."
+  (declare (values tenured-words eden-words survivor-1-words survivor-2-words))
+  (values (gc-generation-words %region-generation-tenured)
+	  (gc-generation-words %region-generation-eden)
+	  (gc-generation-words %region-generation-survivor-1)
+	  (gc-generation-words %region-generation-survivor-2)))
+
+;;; The promotion table (contract 5): bits <2g+1:2g> hold the generation into
+;;; which the transporter copies an object of generation g.
+;;;   source            young or tenured collection     tenure-all
+;;;   eden              survivor space 1                tenured
+;;;   survivor space 1  survivor space 2, or tenured    tenured
+;;;                     when it holds more than the
+;;;                     soft cap at the flip
+;;;   survivor space 2  tenured                         tenured
+;;;   tenured           tenured                         tenured
+(defun gc-promotion-table (tenure-all)
+  "The promotion table for a flip now, from survivor space 1's words; TENURE-ALL tenures
+every generation."
+  (if tenure-all
+      0
+    (logior (lsh %region-generation-survivor-1 (* 2 %region-generation-eden))
+	    (lsh (if (> (gc-generation-words %region-generation-survivor-1)
+			(gc-survivor-cap-words))
+		     %region-generation-tenured
+		   %region-generation-survivor-2)
+		 (* 2 %region-generation-survivor-1))
+	    (lsh %region-generation-tenured (* 2 %region-generation-survivor-2))
+	    (lsh %region-generation-tenured (* 2 %region-generation-tenured)))))
+
+(defun gc-promotion-destination (table generation)
+  "The generation into which promotion table TABLE copies an object of GENERATION."
+  (ldb (byte 2 (* 2 generation)) table))
+
+(defun gc-install-settings (promotion)
+  "Give the microcode the promotion table PROMOTION and the pretenuring threshold."
+  (setq %gc-promotion promotion
+	%gc-pretenure-threshold gc-pretenure-threshold))
+
+(defun gc-tenured-flip-since-p (generation)
+  "T if a tenured flip happened after %GC-GENERATION-NUMBER was GENERATION."
+  (> %gc-tenured-flip-generation generation))
+
 ;;; Args like FORMAT, but stream comes from GC-REPORT-STREAM
 (DEFUN GC-REPORT (FORMAT-CONTROL &REST FORMAT-ARGS)
   (COND ((NULL GC-REPORT-STREAM))
@@ -120,48 +278,123 @@ because regions are allocated bigger than their data.")
 ;;; This function performs a flip.  It can be called either by the user
 ;;; or by the GC process, at any time (much faster if scavenger is done already!)
 ;;; Must return T for GC-FLIP-MAYBE.
-(DEFUN GC-FLIP-NOW ()
-  (WITH-LOCK (GC-FLIP-LOCK)
-    (IF (NOT %GC-FLIP-READY) (GC-RECLAIM-OLDSPACE))	;In case not reclaimed already
-    (SETQ %PAGE-CONS-ALARM 0 %REGION-CONS-ALARM 0)	;avoid overflow in these fixnums
-    (DOLIST (ELEM GC-DAEMON-QUEUE)
-      (GC-DAEMON-QUEUE (FIRST ELEM) (SECOND ELEM) 1 1 ELEM))
-    (MULTIPLE-VALUE-BIND (DYNAMIC-SIZE STATIC-SIZE EXITED-SIZE FREE-SIZE)
-	(GC-GET-SPACE-SIZES)
-      (GC-REPORT			;separate static from exited when exited exists?
-	"GC: About to flip.  Dynamic space=~D. Static space=~D. Free space=~D."
-	DYNAMIC-SIZE (+ STATIC-SIZE EXITED-SIZE) FREE-SIZE)
-      (WITHOUT-INTERRUPTS
-	(PROCESS-WAIT "Flip inhibited" #'(LAMBDA () (NOT INHIBIT-GC-FLIPS)))
+;(DEFUN GC-FLIP-NOW ()
+;  (WITH-LOCK (GC-FLIP-LOCK)
+;    (IF (NOT %GC-FLIP-READY) (GC-RECLAIM-OLDSPACE))	;In case not reclaimed already
+;    (SETQ %PAGE-CONS-ALARM 0 %REGION-CONS-ALARM 0)	;avoid overflow in these fixnums
+;    (DOLIST (ELEM GC-DAEMON-QUEUE)
+;      (GC-DAEMON-QUEUE (FIRST ELEM) (SECOND ELEM) 1 1 ELEM))
+;    (MULTIPLE-VALUE-BIND (DYNAMIC-SIZE STATIC-SIZE EXITED-SIZE FREE-SIZE)
+;	(GC-GET-SPACE-SIZES)
+;      (GC-REPORT			;separate static from exited when exited exists?
+;	"GC: About to flip.  Dynamic space=~D. Static space=~D. Free space=~D."
+;	DYNAMIC-SIZE (+ STATIC-SIZE EXITED-SIZE) FREE-SIZE)
+;      (WITHOUT-INTERRUPTS
+;	(PROCESS-WAIT "Flip inhibited" #'(LAMBDA () (NOT INHIBIT-GC-FLIPS)))
+;	;; Perform whatever actions other programs need to do on flips
+;	(MAPC #'EVAL GC-EVERY-FLIP-LIST)
+;	(MAPC #'EVAL (PROG1 GC-NEXT-FLIP-LIST
+;			    (SETQ GC-NEXT-FLIP-LIST GC-SECOND-NEXT-FLIP-LIST
+;				  GC-SECOND-NEXT-FLIP-LIST NIL)))
+;	;; Reset the GC scan pointers of all regions, actually only in static and fixed areas
+;	;; is it necessary.
+;	(DO ((REGION (1- SIZE-OF-AREA-ARRAYS) (1- REGION)))
+;	    ((MINUSP REGION))
+;	  (%GC-SCAV-RESET REGION)
+;	  (STORE (REGION-GC-POINTER REGION) 0))
+;	;; Invalidate AR-1's cache.
+;	(SETQ AR-1-ARRAY-POINTER-1 NIL)
+;	(SETQ AR-1-ARRAY-POINTER-2 NIL)
+;	;; Don't forget to actually flip! (Change newspace to oldspace in all dynamic areas)
+;	(%GC-FLIP T)
+;	;; Deallocate space at the end of the oldspace regions, if we can.
+;	(DOTIMES (REGION SIZE-OF-AREA-ARRAYS)
+;	  (IF (= %REGION-SPACE-OLD
+;		 (%LOGLDB %%REGION-SPACE-TYPE (REGION-BITS REGION)))
+;	      (DEALLOCATE-END-OF-REGION REGION)))
+;	(INCF %GC-GENERATION-NUMBER)
+;	(WHEN GC-AFTER-FLIP-LIST
+;	  (GC-REPORT
+;	    "GC: something is using SI::GC-AFTER-FLIP-LIST; please send a bug report.")
+;	  (MAPC #'EVAL GC-AFTER-FLIP-LIST))
+;	(INITIALIZATIONS 'AFTER-FLIP-INITIALIZATION-LIST T))
+;      (SETQ GC-OLDSPACE-EXISTS T)
+;      T)))
+
+;;; the generational collector (contract g3 step 2, 4.2, 5, 7): a young flip
+;;; or a tenured one.  a tenured flip is the flip above: every new and copy
+;;; region, ephemeral ones too, becomes oldspace, static and fixed regions
+;;; are scanned whole, and the next-flip lists run.  a young flip turns only
+;;; eden's and the survivor spaces' regions into oldspace; its roots beyond
+;;; the machine's state are the tenured pages the setter marked, which the
+;;; scavenger's marked-page walk scans; it makes no notification, runs no
+;;; next-flip list and no gc daemon, and deallocates no region's end, since
+;;; young regions are freed whole at the reclaim.  both write the promotion
+;;; table, computed before the pause from survivor space 1's words, and the
+;;; pretenuring threshold.  %gc-flip takes T for a tenured flip and -1 for a
+;;; young one (a region number for one region, as before).
+(defun gc-flip-now (&optional (kind :tenured) tenure-all)
+  "Start a collection.  KIND :TENURED, the default, flips every dynamic region, as MIT's
+flip did; :YOUNG flips eden and both survivor spaces.  TENURE-ALL copies every survivor
+into the tenured generation (FULL-GC, DISK-SAVE).  Finishes any collection first.
+Returns T."
+  (check-arg kind (memq kind '(:young :tenured)) ":YOUNG or :TENURED")
+  (with-lock (gc-flip-lock)
+    (if (not %gc-flip-ready) (gc-reclaim-oldspace))	;In case not reclaimed already
+    (let ((tenured (eq kind :tenured))
+	  ;; before the pause: nothing conses into a survivor space between
+	  ;; collections, so survivor space 1's words stay right
+	  (promotion (gc-promotion-table tenure-all)))
+      (when tenured
+	(setq %page-cons-alarm 0 %region-cons-alarm 0)	;avoid overflow in these fixnums
+	(dolist (elem gc-daemon-queue)
+	  (gc-daemon-queue (first elem) (second elem) 1 1 elem))
+	(multiple-value-bind (dynamic-size static-size exited-size free-size)
+	    (gc-get-space-sizes)
+	  (gc-report				;separate static from exited when exited exists?
+	    "GC: About to flip.  Dynamic space=~D. Static space=~D. Free space=~D."
+	    dynamic-size (+ static-size exited-size) free-size)))
+      (without-interrupts
+	(process-wait "Flip inhibited" #'(lambda () (not inhibit-gc-flips)))
 	;; Perform whatever actions other programs need to do on flips
-	(MAPC #'EVAL GC-EVERY-FLIP-LIST)
-	(MAPC #'EVAL (PROG1 GC-NEXT-FLIP-LIST
-			    (SETQ GC-NEXT-FLIP-LIST GC-SECOND-NEXT-FLIP-LIST
-				  GC-SECOND-NEXT-FLIP-LIST NIL)))
-	;; Reset the GC scan pointers of all regions, actually only in static and fixed areas
-	;; is it necessary.
-	(DO ((REGION (1- SIZE-OF-AREA-ARRAYS) (1- REGION)))
-	    ((MINUSP REGION))
-	  (%GC-SCAV-RESET REGION)
-	  (STORE (REGION-GC-POINTER REGION) 0))
+	(mapc #'eval gc-every-flip-list)
+	(when tenured
+	  ;; these make areas static, which waits for a tenured flip
+	  (mapc #'eval (prog1 gc-next-flip-list
+			      (setq gc-next-flip-list gc-second-next-flip-list
+				    gc-second-next-flip-list nil)))
+	  ;; Reset the GC scan pointers of all regions, actually only in static and fixed areas
+	  ;; is it necessary.
+	  (do ((region (1- size-of-area-arrays) (1- region)))
+	      ((minusp region))
+	    (%gc-scav-reset region)
+	    (store (region-gc-pointer region) 0)))
 	;; Invalidate AR-1's cache.
-	(SETQ AR-1-ARRAY-POINTER-1 NIL)
-	(SETQ AR-1-ARRAY-POINTER-2 NIL)
-	;; Don't forget to actually flip! (Change newspace to oldspace in all dynamic areas)
-	(%GC-FLIP T)
-	;; Deallocate space at the end of the oldspace regions, if we can.
-	(DOTIMES (REGION SIZE-OF-AREA-ARRAYS)
-	  (IF (= %REGION-SPACE-OLD
-		 (%LOGLDB %%REGION-SPACE-TYPE (REGION-BITS REGION)))
-	      (DEALLOCATE-END-OF-REGION REGION)))
-	(INCF %GC-GENERATION-NUMBER)
-	(WHEN GC-AFTER-FLIP-LIST
-	  (GC-REPORT
+	(setq ar-1-array-pointer-1 nil)
+	(setq ar-1-array-pointer-2 nil)
+	(gc-install-settings promotion)
+	;; Don't forget to actually flip!
+	(%gc-flip (if tenured t -1))
+	(when tenured
+	  ;; Deallocate space at the end of the oldspace regions, if we can.
+	  (dotimes (region size-of-area-arrays)
+	    (if (= %region-space-old
+		   (%logldb %%region-space-type (region-bits region)))
+		(deallocate-end-of-region region))))
+	(incf %gc-generation-number)
+	(when tenured
+	  (setq %gc-tenured-flip-generation %gc-generation-number))
+	(setq gc-collection-kind kind)
+	(when gc-after-flip-list
+	  (gc-report
 	    "GC: something is using SI::GC-AFTER-FLIP-LIST; please send a bug report.")
-	  (MAPC #'EVAL GC-AFTER-FLIP-LIST))
-	(INITIALIZATIONS 'AFTER-FLIP-INITIALIZATION-LIST T))
-      (SETQ GC-OLDSPACE-EXISTS T)
-      T)))
+	  (mapc #'eval gc-after-flip-list))
+	(initializations 'after-flip-initialization-list t))
+      (if tenured
+	  (incf gc-tenured-collection-count)
+	(incf gc-young-collection-count))
+      (setq gc-oldspace-exists t)
+      t)))
 
 ;;;; Compute statistics needed for GC decisions.
 
@@ -415,6 +648,19 @@ Ratio scavenging work//free space = ~3F~]"
 			 (GET-DIRECT-GC-WORK-REMAINING) WORK FREE-SIZE COPYING
 			 (PLUSP (- FREE-SIZE COPYING))
 		       (// (FLOAT WORK) (- FREE-SIZE COPYING)))))))))
+  ;; the generational collector (contract g3 step 2, 9 lisp 2): the
+  ;; generations, and the collections by kind
+  (multiple-value-bind (tenured eden survivor-1 survivor-2)
+      (gc-get-generation-sizes)
+    (format stream "~&Eden ~:D words, full at ~:D consed since the last flip (now ~:D).
+Survivor space 1 ~:D words (soft cap ~:D), survivor space 2 ~:D, tenured (new and copy) ~:D."
+	    eden (gc-eden-words) %gc-words-consed-since-flip
+	    survivor-1 (gc-survivor-cap-words) survivor-2 tenured))
+  (format stream "~&~:D young and ~:D tenured collections~@[, a ~(~A~) one running~].
+Tenured collections ~:[by explicit calls only~;automatic, by the free-space rule~@[ and after growth of ~:D words~]~]."
+	  gc-young-collection-count gc-tenured-collection-count
+	  gc-collection-kind
+	  gc-tenured-automatic (gc-tenured-growth-limit-words))
   (FORMAT STREAM "~&Scavenging during cons ~:[On~;Off~], Idle scavenging ~:[On~;Off~],~%"
 	  INHIBIT-SCAVENGING-FLAG INHIBIT-IDLE-SCAVENGING-FLAG)
   (FORMAT STREAM "Automatic garbage collection ~:[Off~;On~].~%"
@@ -440,7 +686,10 @@ while running me, do so as a batch process/"."
       ;; This is what processes weak links.
       (MAPC #'EVAL GC-BEFORE-RECLAIM-LIST)
       ;; Report oldspace statistics
-      (WHEN GC-REPORT-STREAM
+;      (WHEN GC-REPORT-STREAM
+      ;; the generational collector (contract g3 step 2, 9 lisp 2): young
+      ;; collections are quiet
+      (when (and gc-report-stream (neq gc-collection-kind :young))
 	(DO ((REGION (1- SIZE-OF-AREA-ARRAYS) (1- REGION))
 	     (OLD-TOTAL-SIZE 0)
 	     (OLD-USED-SIZE 0))
@@ -458,6 +707,13 @@ while running me, do so as a batch process/"."
 	       (FERROR NIL "Area-symbol ~S clobbered" AREA))	;don't get grossly faked out
 	  (GC-RECLAIM-OLDSPACE-AREA AREA-NUMBER)))
       (SETQ GC-DAEMON-PAGE-CONS-ALARM -1)	;Wake up daemon process
+      ;; the generational collector (contract g3 step 2, 7): the tenured
+      ;; generation's growth is counted from the end of a tenured collection
+      (unless (eq gc-collection-kind :young)
+	(setq gc-tenured-words-at-last-tenured-collection
+	      (gc-generation-words %region-generation-tenured)
+	      gc-report-allowance t))
+      (setq gc-collection-kind nil)
       (SETQ GC-OLDSPACE-EXISTS NIL))))
 
 ;;; GC-RECLAIM-OLDSPACE-AREA - deletes all old-space regions of a specified area,
@@ -552,53 +808,145 @@ while running me, do so as a batch process/"."
 ;;; This function runs in a separate process.  It wakes up when oldspace needs
 ;;; to be reclaimed and when a flip is required, and does them.
 ;;;*** Doesn't yet know about finite number of regions ***
-(DEFUN GC-PROCESS ()
-  (DO-FOREVER
-    (UNLESS (OR GC-RECLAIM-IMMEDIATELY
+;(DEFUN GC-PROCESS ()
+;  (DO-FOREVER
+;    (UNLESS (OR GC-RECLAIM-IMMEDIATELY
+;		;; Possibly reclaim now if not enough space left to do it incrementally.
+;		(AND GC-RECLAIM-IMMEDIATELY-IF-NECESSARY
+;		     (MULTIPLE-VALUE-BIND (COMMITTED-FREE-SPACE FREE-SPACE)
+;			 (GC-GET-COMMITTED-FREE-SPACE NIL)
+;		       (SETQ COMMITTED-FREE-SPACE
+;			     (FLOOR (* GC-FLIP-RATIO
+;				       (+ COMMITTED-FREE-SPACE COMMITTED-FREE-SPACE-FUDGE))))
+;		       ( COMMITTED-FREE-SPACE FREE-SPACE))))
+;      ;; If incremental reclaim ok, wait until microcode gets thru with it.
+;      (PROCESS-WAIT "Await scavenge" #'SYMBOL-VALUE '%GC-FLIP-READY))
+;    ;; Then flush oldspace and print "flushing oldspace" message.  A complete
+;    ;; scavenge will take place here if %GC-FLIP-READY is NIL.
+;    (GC-RECLAIM-OLDSPACE)
+;    (DO-FOREVER					;May iterate a few times before flipping
+;      (OR %GC-FLIP-READY (RETURN NIL))		;Some other process must have flipped first
+;      (MULTIPLE-VALUE-BIND (COMMITTED-FREE-SPACE FREE-SPACE)
+;	     (GC-GET-COMMITTED-FREE-SPACE)
+;	;; Hook to let the user influence how conservative the garbage
+;	;; collector will be.  GC-FLIP-RATIO may be a flonum.
+;	(SETQ COMMITTED-FREE-SPACE
+;	      (FLOOR (* GC-FLIP-RATIO (+ COMMITTED-FREE-SPACE COMMITTED-FREE-SPACE-FUDGE))))
+;	(COND (( COMMITTED-FREE-SPACE FREE-SPACE)	;Better flip now
+;	       (WITH-LOCK (GC-FLIP-LOCK)
+;		 (WHEN %GC-FLIP-READY (GC-FLIP-NOW))
+;		 (RETURN)))
+;	      (T			;Wait a while before flipping, then compute frob again
+;	       (GC-REPORT "GC: Allowing ~D. words more consing before flip."
+;			  (- FREE-SPACE COMMITTED-FREE-SPACE))
+;	       (SETQ GC-PAGE-CONS-ALARM-MARK
+;		     (+ %PAGE-CONS-ALARM
+;			(TRUNCATE (- FREE-SPACE COMMITTED-FREE-SPACE) PAGE-SIZE)))
+;	       (PROCESS-WAIT "Await need for flip"
+;			     #'(LAMBDA () (OR (NOT %GC-FLIP-READY)
+;					      (> %PAGE-CONS-ALARM
+;						 GC-PAGE-CONS-ALARM-MARK))))))))))
+
+;;; the generational collector (contract g3 step 2, 2, 4.1, 7): the gc
+;;; process runs both collections.  it reclaims a collection once the
+;;; scavenger is done, then waits until one is due: a tenured collection
+;;; (if gc-tenured-automatic) by mit's free-space rule or when the tenured
+;;; generation has grown by gc-tenured-growth-limit since the last one, else
+;;; a young collection when the words consed since the last flip reach
+;;; eden's size.  a young collection never starts while another runs, and a
+;;; tenured one is started in its place when both are due.  young
+;;; collections make no notification.
+(defun gc-process ()
+  (do-forever
+    (unless (or gc-reclaim-immediately
 		;; Possibly reclaim now if not enough space left to do it incrementally.
-		(AND GC-RECLAIM-IMMEDIATELY-IF-NECESSARY
-		     (MULTIPLE-VALUE-BIND (COMMITTED-FREE-SPACE FREE-SPACE)
-			 (GC-GET-COMMITTED-FREE-SPACE NIL)
-		       (SETQ COMMITTED-FREE-SPACE
-			     (FLOOR (* GC-FLIP-RATIO
-				       (+ COMMITTED-FREE-SPACE COMMITTED-FREE-SPACE-FUDGE))))
-		       ( COMMITTED-FREE-SPACE FREE-SPACE))))
+		(and gc-reclaim-immediately-if-necessary
+		     (multiple-value-bind (committed-free-space free-space)
+			 (gc-get-committed-free-space nil)
+		       (setq committed-free-space
+			     (floor (* gc-flip-ratio
+				       (+ committed-free-space committed-free-space-fudge))))
+		       (not (< committed-free-space free-space)))))
       ;; If incremental reclaim ok, wait until microcode gets thru with it.
-      (PROCESS-WAIT "Await scavenge" #'SYMBOL-VALUE '%GC-FLIP-READY))
-    ;; Then flush oldspace and print "flushing oldspace" message.  A complete
-    ;; scavenge will take place here if %GC-FLIP-READY is NIL.
-    (GC-RECLAIM-OLDSPACE)
-    (DO-FOREVER					;May iterate a few times before flipping
-      (OR %GC-FLIP-READY (RETURN NIL))		;Some other process must have flipped first
-      (MULTIPLE-VALUE-BIND (COMMITTED-FREE-SPACE FREE-SPACE)
-	     (GC-GET-COMMITTED-FREE-SPACE)
-	;; Hook to let the user influence how conservative the garbage
-	;; collector will be.  GC-FLIP-RATIO may be a flonum.
-	(SETQ COMMITTED-FREE-SPACE
-	      (FLOOR (* GC-FLIP-RATIO (+ COMMITTED-FREE-SPACE COMMITTED-FREE-SPACE-FUDGE))))
-	(COND (( COMMITTED-FREE-SPACE FREE-SPACE)	;Better flip now
-	       (WITH-LOCK (GC-FLIP-LOCK)
-		 (WHEN %GC-FLIP-READY (GC-FLIP-NOW))
-		 (RETURN)))
-	      (T			;Wait a while before flipping, then compute frob again
-	       (GC-REPORT "GC: Allowing ~D. words more consing before flip."
-			  (- FREE-SPACE COMMITTED-FREE-SPACE))
-	       (SETQ GC-PAGE-CONS-ALARM-MARK
-		     (+ %PAGE-CONS-ALARM
-			(TRUNCATE (- FREE-SPACE COMMITTED-FREE-SPACE) PAGE-SIZE)))
-	       (PROCESS-WAIT "Await need for flip"
-			     #'(LAMBDA () (OR (NOT %GC-FLIP-READY)
-					      (> %PAGE-CONS-ALARM
-						 GC-PAGE-CONS-ALARM-MARK))))))))))
+      (process-wait "Await scavenge" #'symbol-value '%gc-flip-ready))
+    ;; Then flush oldspace.  A complete scavenge will take place here if
+    ;; %GC-FLIP-READY is NIL.
+    (gc-reclaim-oldspace)
+    (do-forever					;May iterate a few times before flipping
+      (or %gc-flip-ready (return nil))		;Some other process must have flipped first
+      (let ((kind (gc-collection-due)))
+	(cond (kind
+	       (with-lock (gc-flip-lock)
+		 (when %gc-flip-ready (gc-flip-now kind))
+		 (return)))
+	      (t
+	       (process-wait "Await need for flip" #'gc-flip-wait-function)))))))
+
+(defvar gc-wait-eden-words 0
+  "Eden's size when the GC process last decided, which GC-FLIP-WAIT-FUNCTION compares
+the words consed since the last flip with.")
+
+(defun gc-collection-due ()
+  "The collection the GC process is to start now, :TENURED or :YOUNG, or NIL.
+It also sets what GC-FLIP-WAIT-FUNCTION waits for."
+  (setq gc-wait-eden-words (gc-eden-words))
+  (unless gc-tenured-automatic
+    (setq gc-page-cons-alarm-mark most-positive-fixnum))
+  (cond ((and gc-tenured-automatic (gc-tenured-collection-due-p)) :tenured)
+	((not (< %gc-words-consed-since-flip gc-wait-eden-words)) :young)))
+
+(defun gc-tenured-collection-due-p ()
+  "T if a tenured collection is due: by MIT's free-space rule (GC-FLIP-RATIO), or by the
+tenured generation's growth since the last one (GC-TENURED-GROWTH-LIMIT).  If not, sets
+GC-PAGE-CONS-ALARM-MARK to when the free-space rule is next to be computed."
+  (multiple-value-bind (committed-free-space free-space)
+      (gc-get-committed-free-space)
+    ;; Hook to let the user influence how conservative the garbage
+    ;; collector will be.  GC-FLIP-RATIO may be a flonum.
+    (setq committed-free-space
+	  (floor (* gc-flip-ratio (+ committed-free-space committed-free-space-fudge))))
+    (cond ((not (< committed-free-space free-space)) t)	;Better flip now
+	  ((gc-tenured-growth-exceeded-p) t)
+	  (t
+	   (when gc-report-allowance
+	     (gc-report "GC: Allowing ~D. words more consing before a tenured collection."
+			(- free-space committed-free-space))
+	     (setq gc-report-allowance nil))
+	   (setq gc-page-cons-alarm-mark
+		 (+ %page-cons-alarm
+		    (truncate (- free-space committed-free-space) page-size)))
+	   nil))))
+
+(defun gc-tenured-growth-exceeded-p ()
+  "T if the tenured generation's dynamic words have grown by GC-TENURED-GROWTH-LIMIT since
+the last tenured collection."
+  (let ((limit (gc-tenured-growth-limit-words)))
+    (and limit
+	 (let ((words (gc-generation-words %region-generation-tenured)))
+	   (or gc-tenured-words-at-last-tenured-collection
+	       (setq gc-tenured-words-at-last-tenured-collection words))
+	   (not (< (- words gc-tenured-words-at-last-tenured-collection) limit))))))
+
+;;; the scheduler calls it often: it only compares numbers
+(defun gc-flip-wait-function ()
+  (or (not %gc-flip-ready)
+      (not (< %gc-words-consed-since-flip gc-wait-eden-words))
+      (> %page-cons-alarm gc-page-cons-alarm-mark)))
 
 (DEFVAR GC-ON NIL
   "Set to T or NIL by the system when automatic garbage collection is turned on or off.")
 
-(DEFUN GC-ON ()
-  "Turn on automatic garbage collection.
-It is batch if SI:GC-RECLAIM-IMMEDIATELY is T, incremental if that is NIL."
+;(DEFUN GC-ON ()
+;; the generational collector (contract g3 step 2, 17 q-gca): NO-QUERY for
+;; the boot, which asks nothing; young collections need little free space,
+;; and the question is about a tenured collection
+(defun gc-on (&optional no-query)
+  "Turn on automatic garbage collection: young collections, and tenured ones if
+SI:GC-TENURED-AUTOMATIC.  It is batch if SI:GC-RECLAIM-IMMEDIATELY is T, incremental if
+that is NIL.  NO-QUERY: do not ask whether there is free space enough."
   (LET ((FLIP-RATIO (OR GC-FLIP-MINIMUM-RATIO GC-FLIP-RATIO)))
-    (WHEN (AND %GC-FLIP-READY
+;    (WHEN (AND %GC-FLIP-READY
+    (when (and (not no-query) %gc-flip-ready
 	       ( (* FLIP-RATIO (GC-GET-COMMITTED-FREE-SPACE))
 		  (GET-FREE-SPACE-SIZE)))
       (FORMAT *QUERY-IO*
@@ -622,11 +970,20 @@ is possible only if there is a lot of garbage; but it has a better chance.")
 	     (Y-OR-N-P "Set ~S to get a better chance? " 'GC-RECLAIM-IMMEDIATELY)
 	     (SETQ GC-RECLAIM-IMMEDIATELY T))))
     (GC-MAYBE-SET-FLIP-READY)			;if no oldspace regions
+    ;; the generational collector (contract g3 step 2): the microcode's
+    ;; settings, and the tenured generation's size the growth limit counts
+    ;; from, if not yet measured
+    (gc-install-settings (gc-promotion-table nil))
+    (unless gc-tenured-words-at-last-tenured-collection
+      (setq gc-tenured-words-at-last-tenured-collection
+	    (gc-generation-words %region-generation-tenured)))
     (PROCESS-PRESET GC-PROCESS 'GC-PROCESS)
     (SETQ GC-ON T)
     (PROCESS-ENABLE GC-PROCESS)			;Start flipper process
     (SETQ INHIBIT-SCAVENGING-FLAG NIL)		;Enable scavenging during cons
-    (ADD-INITIALIZATION "GC-PROCESS" '(GC-ON) '(:WARM))	;Do this on future warm boots
+;    (ADD-INITIALIZATION "GC-PROCESS" '(GC-ON) '(:WARM))	;Do this on future warm boots
+    ;; the generational collector (contract g3 step 2, 17 q-gca): GC-BOOT, on
+    ;; the warm list, turns it on at every boot if GC-ON-AT-BOOT or GC-ON
     T))
 
 (DEFUN GC-OFF ()
@@ -634,12 +991,72 @@ is possible only if there is a lot of garbage; but it has a better chance.")
   (WHEN (OR (NEQ (CAR GC-FLIP-LOCK) GC-PROCESS)
 	    (YES-OR-NO-P
 	      "The GC process is currently locking the GC lock.  Turn it off anyway? "))
-    (DELETE-INITIALIZATION "GC-PROCESS" '(:WARM))	;Don't start GC on warm boots anymore
+;    (DELETE-INITIALIZATION "GC-PROCESS" '(:WARM))	;Don't start GC on warm boots anymore
+    ;; the generational collector (contract g3 step 2, 17 q-gca): GC-BOOT
+    ;; turns it on at boot if GC-ON-AT-BOOT, else only if GC-ON, which this
+    ;; makes NIL
     (PROCESS-DISABLE GC-PROCESS)		;Disable flipper process
     (IF (EQ (CAR GC-FLIP-LOCK) GC-PROCESS)	;Unlock the lock so user can SI:FULL-GC.
 	(SETQ GC-FLIP-LOCK NIL))
     (SETQ INHIBIT-SCAVENGING-FLAG T)		;Disable scavenging during cons
     (SETQ GC-ON NIL)))
+
+;;; the generational collector (contract g3 step 2, 8.3, 17 q-gca): at every
+;;; boot, the areas DISK-SAVE made not ephemeral are ephemeral again, the
+;;; microcode has the pretenuring threshold, and automatic garbage
+;;; collection is turned on if GC-ON-AT-BOOT, or if it was on.
+(defun gc-boot ()
+  (gc-restore-ephemeral-areas)
+  (setq %gc-pretenure-threshold gc-pretenure-threshold)
+  (when (or gc-on-at-boot gc-on)
+    (gc-on t)))
+(add-initialization "GC-BOOT" '(gc-boot) '(:warm))
+
+;;; the generational collector (contract g3 step 2, 8.3, 17 q-gcc): DISK-SAVE
+;;; calls GC-PREPARE-FOR-DISK-SAVE before it saves, so that no band holds a
+;;; young object: any collection is finished, the ephemeral areas are made
+;;; not ephemeral, so that nothing consed until the save is young, and a
+;;; young collection with the tenure-all promotion table copies every young
+;;; object into the tenured generation and frees eden and the survivor
+;;; spaces.  the GC process is stopped, so that no flip starts before the
+;;; save.  GC-BOOT makes the areas ephemeral again in the saved band, and
+;;; GC-AFTER-DISK-SAVE-ABORT in this world if the save does not happen.
+(defvar gc-saved-ephemeral-areas nil
+  "The areas that DISK-SAVE made not ephemeral, to be made ephemeral again at boot.")
+
+(defun gc-make-ephemeral-areas-tenured ()
+  (without-interrupts
+    (dolist (name area-list)
+      (let ((area (symbol-value name)))
+	(when (ldb-test %%region-ephemeral (area-region-bits area))
+	  (push area gc-saved-ephemeral-areas)
+	  (setf (area-region-bits area)
+		(%logdpb 0 %%region-ephemeral (area-region-bits area))))))))
+
+(defun gc-restore-ephemeral-areas ()
+  (without-interrupts
+    (dolist (area gc-saved-ephemeral-areas)
+      (setf (area-region-bits area)
+	    (%logdpb 1 %%region-ephemeral (area-region-bits area)))
+      ;; empty the cons caches, which may hold the area's tenured region
+      (%gc-scav-reset (area-region-list area)))
+    (setq gc-saved-ephemeral-areas nil)))
+
+(defun gc-prepare-for-disk-save ()
+  "Make the world ready to be saved: no young object, no collection running (Q-GCc)."
+  (when gc-save-tenures-all
+    (with-lock (gc-flip-lock)
+      (process-disable gc-process)
+      (gc-reclaim-oldspace)			;finish any collection
+      (gc-make-ephemeral-areas-tenured)
+      (gc-flip-now :young t)
+      (gc-reclaim-oldspace))))
+
+(defun gc-after-disk-save-abort ()
+  "Undo GC-PREPARE-FOR-DISK-SAVE when the save does not happen."
+  (gc-restore-ephemeral-areas)
+  (when gc-on
+    (process-enable gc-process)))
 
 ;;; Set flip-ready if no oldspace anywhere.
 (DEFUN GC-MAYBE-SET-FLIP-READY NIL
@@ -653,6 +1070,10 @@ is possible only if there is a lot of garbage; but it has a better chance.")
 (DEFUN MAKE-AREA-STATIC (AREA)
   "Make a dynamic area static.  Takes affect at next flip."
   (CHECK-ARG AREA (AND (NUMBERP AREA) ( 0 AREA SIZE-OF-AREA-ARRAYS)) "an area number")
+  ;; the generational collector (contract g3 step 2, 3.3): a static area is
+  ;; never ephemeral; its new objects would be young and never collected
+  (when (ldb-test %%region-ephemeral (area-region-bits area))
+    (ferror nil "The area ~S is ephemeral, and cannot be made static." (area-name area)))
   (PUSH `(MAKE-AREA-STATIC-INTERNAL ,AREA) GC-NEXT-FLIP-LIST)
   T)
 
@@ -668,7 +1089,13 @@ is possible only if there is a lot of garbage; but it has a better chance.")
     (DO ((REGION (AREA-REGION-LIST AREA) (REGION-LIST-THREAD REGION)))
 	((MINUSP REGION))
       (LET ((BITS (REGION-BITS REGION)))
-	(SELECT (LDB %%REGION-SPACE-TYPE BITS)
+;	(SELECT (LDB %%REGION-SPACE-TYPE BITS)
+	;; the generational collector (contract g3 step 2, 8.1): tenured
+	;; regions only.  an eden or survivor region made static would never be
+	;; flipped, and the young pointers in it never walked
+	(select (if (= (%logldb %%region-generation bits) %region-generation-tenured)
+		    (ldb %%region-space-type bits)
+		  -1)
 	  ((%REGION-SPACE-NEW %REGION-SPACE-COPY %REGION-SPACE-NEW1 %REGION-SPACE-NEW2
 	    %REGION-SPACE-NEW3 %REGION-SPACE-NEW4 %REGION-SPACE-NEW5 %REGION-SPACE-NEW6)
 	   (SETF (REGION-BITS REGION)
@@ -682,6 +1109,11 @@ is possible only if there is a lot of garbage; but it has a better chance.")
 The area remains dynamic permanently unless you change it back.
 To change it temporarily, use SI:CLEAN-UP-STATIC-AREA."
   (CHECK-ARG AREA (AND (NUMBERP AREA) ( 0 AREA SIZE-OF-AREA-ARRAYS)) "an area number")
+  ;; the generational collector (contract g3 step 2, 8.1): compiled code
+  ;; stays in static space, so that no fef moves under a running function
+  ;; (this also refuses CLEAN-UP-STATIC-AREA of it)
+  (when (= area macro-compiled-program)
+    (ferror nil "The area ~S holds compiled code and stays static." (area-name area)))
   ;; Cancel any plans to make this area static at next flip,
   ;; for otherwise they would override what we do now.
   (SETQ GC-NEXT-FLIP-LIST (GLOBAL:REMOVE `(MAKE-AREA-STATIC-INTERNAL ,AREA)
@@ -760,7 +1192,13 @@ unless there is a lot of garbage to be freed.")
     (PROCESS-DISABLE GC-PROCESS)
     ;; We assume that incremental GC has not been being used,
     ;; so if oldspace exists, we are already after a (GC-FLIP-NOW).
-    (OR GC-OLDSPACE-EXISTS (GC-FLIP-NOW))
+;    (OR GC-OLDSPACE-EXISTS (GC-FLIP-NOW))
+    ;; the generational collector (contract g3 step 2, 8.1): oldspace now is
+    ;; usually a young collection's, so finish whichever runs, then flip
+    ;; every region with the tenure-all table, so that every survivor is
+    ;; tenured and MAKE-AREA-REGIONS-STATIC below finds it so
+    (gc-reclaim-oldspace)
+    (gc-flip-now :tenured t)
     ;; Touch all interned symbols and their pnames,
     ;; to get them in a good order for paging.
     ;; This is really only necessary if NR-SYM and P-N-STRING are being GC'd.
@@ -772,7 +1210,11 @@ unless there is a lot of garbage to be freed.")
     (UNLESS NO-RECOPYING
       (INITIALIZATIONS 'AFTER-FULL-GC-INITIALIZATION-LIST T))
     (UNLESS NO-STATIC-REGIONS
-      (MAKE-AREA-REGIONS-STATIC WORKING-STORAGE-AREA))))
+      (MAKE-AREA-REGIONS-STATIC WORKING-STORAGE-AREA))
+    ;; the generational collector (contract g3 step 2, 17 q-gca): automatic
+    ;; collection, young collections with it, goes on if it was on
+    (when gc-on
+      (process-enable gc-process))))
 
 (DEFVAR WORTHLESS-SYMBOL-AREA
 	(MAKE-AREA :NAME 'WORTHLESS-SYMBOL-AREA
@@ -839,7 +1281,12 @@ unless there is a lot of garbage to be freed.")
   (WITHOUT-INTERRUPTS
     (DO ((REGION (AREA-REGION-LIST AREA) (REGION-LIST-THREAD REGION)))
 	((MINUSP REGION))
-      (UNLESS (< (REGION-FREE-POINTER REGION) %ADDRESS-SPACE-QUANTUM-SIZE)
+;      (UNLESS (< (REGION-FREE-POINTER REGION) %ADDRESS-SPACE-QUANTUM-SIZE)
+      ;; the generational collector (contract g3 step 2, 8.1): tenured
+      ;; regions only; an eden or survivor region made static would never be
+      ;; flipped, and the young pointers in it never walked
+      (unless (or (gc-young-region-p region)
+		  (< (region-free-pointer region) %address-space-quantum-size))
 	;;; Would crash if region completyely empty;
 	;;; if nearly empty it's not worth making static.
 	(DEALLOCATE-END-OF-REGION REGION)
@@ -873,6 +1320,15 @@ unless there is a lot of garbage to be freed.")
 		       (%POINTER-PLUS ORIGIN (1+ FREE-POINTER))
 		       (- SIZE FREE-POINTER 1) 1)))
 	      (T
+	       ;; the generational collector (contract g3 step 2, 6.2): each
+	       ;; page-long array below starts at its page's first word, which
+	       ;; is that page's entry in the first-object table; the page
+	       ;; holding the free pointer keeps its entry
+	       (when (region-has-first-object-table-p region)
+		 (do ((table (region-first-object-table region))
+		      (page (ceiling free-pointer page-size) (1+ page)))
+		     ((not (< (* page page-size) size)))
+		   (setf (aref table page) (* page page-size))))
 	       ;; Fill structure region up to page boundary with zero-length arrays.
 	       (DO ((I FREE-POINTER (1+ I)))
 		   ((= (\ I PAGE-SIZE) 0))
