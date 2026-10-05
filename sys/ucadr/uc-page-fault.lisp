@@ -54,14 +54,75 @@
 						;the rest are just for software to look at
 (def-data-field map-status-code 3 24.)
 (def-data-field map-access-code 2 26.)		;note bit 26 is in two fields
-(def-data-field map-first-level-map 7 32.)	;where it writes too, at 40 bits
-(def-data-field map-second-level-map 28. 0)
+;(def-data-field map-first-level-map 7 32.)	;where it writes too, at 40 bits
+;(def-data-field map-second-level-map 28. 0)
+;; quux revision 14 (contract g3 revision 14, 5; appendix a14.2, a14.5): no
+;; map levels.  map(md) reads <39:32> 0, the fault bits <31:30> as before, and
+;; <29:0> the page entry for md's address, looked up in the tlb and walked for
+;; on a miss.  the entry keeps the level-2 entry's fields where revision 13 had
+;; them (the definitions above and below), and adds accessed <28>, modified
+;; <29> and ephemeral-reference <19>, which the hardware sets.
+(def-data-field map-entry 30. 0)
 (def-data-field map-access-status-and-meta-bits 10. 18.)
 (def-data-field map-hardware-read-access 1 27.)	;hardware permits (at least) read access
 						; if this bit set.
 (def-data-field map-representation-type 2 20.)
 (def-data-field map-extra-pdl-meta-bit 1 22.)
 (def-data-field map-oldspace-meta-bit 1 23.)
+;; quux revision 14 (appendix a14.2): the entry's new bits, and the fields the
+;; paging writes: <27:20>, the region's access, status and meta bits less
+;; <19:18>, which are the entry's own (ephemeral-reference and software's);
+;; <23:20>, the meta bits alone, which a not-in-core entry carries.
+(def-data-field map-accessed-bit 1 28.)
+(def-data-field map-modified-bit 1 29.)
+(def-data-field map-ephemeral-reference-bit 1 19.)
+(def-data-field map-access-and-status-code 4 24.)
+(def-data-field map-access-status-and-high-meta 8 20.)
+(def-data-field map-meta-bits-high 4 20.)
+;; a page not in core (status 1) holds its slot of the paging partition, 22
+;; bits, <21:18> at <31:28> and <17:0> at <17:0>; all ones is no slot, a fresh
+;; page, filled when it is first touched.
+(def-data-field page-entry-slot-low 18. 0)
+(def-data-field page-entry-slot-high 4 28.)
+(def-data-field slot-number-low 18. 0)
+(def-data-field slot-number-high 4 18.)
+(assign page-entry-no-slot 17777777)
+;; the entry of a page of a new region: not in core, no slot; with the
+;; region's meta bits ored in.  every table word is a fixnum (tag 005).
+(assign page-entry-fresh (plus (byte-value q-data-type dtp-fix)
+			       (byte-value page-entry-slot-high 17)
+			       (byte-value page-entry-slot-low 777777)
+			       (byte-value map-status-code 1)))
+;; a page wired virtual equal to physical: read/write (access 11, status 4),
+;; not oldspace, not extra pdl, structure, as inimap3 had it; the frame ored in.
+(assign page-entry-wired (plus (byte-value q-data-type dtp-fix)
+			       (byte-value map-access-status-and-meta-bits 1464)))
+;; a directory entry (appendix a14.3): status 4 present, 0 none, and the
+;; page-table page's frame.
+(def-data-field directory-entry-status 3 24.)
+(def-data-field directory-entry-frame 18. 0)
+(assign directory-entry-present (plus (byte-value q-data-type dtp-fix)
+				      (byte-value directory-entry-status 4)))
+;; physical-page-data (appendix a14.12), two words a frame: word 0 the page's
+;; virtual page number, <22> wired, <23> free, or all ones, out of service (a
+;; frame findcore handed out and nothing has made known yet, or one deleted);
+;; word 1 the page's slot.  a wired frame with no page (a table) is wired,
+;; page 0.
+(def-data-field ppd-virtual-page-number 22. 0)
+(def-data-field ppd-wired-bit 1 22.)
+(def-data-field ppd-free-bit 1 23.)
+(assign ppd-out-of-service 37777777777)
+(assign ppd-free (plus (byte-value q-data-type dtp-fix) (byte-value ppd-free-bit 1)))
+(assign ppd-wired-table (plus (byte-value q-data-type dtp-fix) (byte-value ppd-wired-bit 1)))
+;; the windows (appendix a14.1): an address with vma<31:29> 111 is untranslated;
+;; the physical memory window is 36000000000 plus the physical address, made by
+;; depositing ones into <31:28>.
+(def-data-field vma-window-bits 3 29.)
+(def-data-field physical-memory-window-bits 4 28.)
+;; the walk's indexes (appendix a14.3): the directory by vma<31:20>, a
+;; page-table page by vma<19:10>.
+(def-data-field vma-directory-index 12. 20.)
+(def-data-field vma-table-index 10. 10.)
 
 ;these definitions reduce need to conditionalize things per processor as well as being
 ; more modular.
@@ -85,10 +146,13 @@
 ;; layout: the level-1 entry in <38:32>, the level-2 entry in <27:0>, and the
 ;; enables in <29> (level 1) and <28> (level 2); a store with both writes
 ;; level 1 only.  the level-1 entry is written whole, so there is no high part.
-(def-data-field map-write-second-level-map 28. 0)
-(def-data-field map-write-enable-second-level-write 1 28.)
-(def-data-field map-write-enable-first-level-write 1 29.)
-(def-data-field map-write-first-level-map 7 32.)
+;(def-data-field map-write-second-level-map 28. 0)
+;(def-data-field map-write-enable-second-level-write 1 28.)
+;(def-data-field map-write-enable-first-level-write 1 29.)
+;(def-data-field map-write-first-level-map 7 32.)
+;; quux revision 14 (appendix a14.4): a store to write-map is an operation on
+;; the tlb named by vma<33:32> (the assembler's write-map-operation names):
+;; direct write, invalidate, empty.  revision 13's map-write word does nothing.
 
 ; DEFINITIONS OF FIELDS IN PAGE HASH TABLE
 
@@ -99,19 +163,19 @@
 ;; four map entries finds the page's one entry; bits 8 and 9 are unused.
 ;(def-data-field pht1-virtual-page-number 14. 10.)	;aligned same as vma
 ;; quux revision 13 (appendix a1.7): the 28-bit address's page, vma<27:10>
-(def-data-field pht1-virtual-page-number 18. 10.)	;aligned same as vma
-(DEF-DATA-FIELD PHT1-SWAP-STATUS-CODE 3 0)
+;(def-data-field pht1-virtual-page-number 18. 10.)	;aligned same as vma
+;(DEF-DATA-FIELD PHT1-SWAP-STATUS-CODE 3 0)
 ;(DEF-DATA-FIELD PHT1-ALL-BUT-SWAP-STATUS-CODE 29. 3)
 ;; quux revision 13 (contract g1 2.1): "all but" reaches the word's top, <39>,
 ;; so that a selective deposit keeps pht1's tag (dtp-fix), as lisp reads the
 ;; word as a fixnum (sys2; gc, deallocate-pages); stopping at <31> took the
 ;; tag from the background, 000.
- (def-data-field pht1-all-but-swap-status-code 37. 3)
-(DEF-DATA-FIELD PHT1-AGE 2 3)
+; (def-data-field pht1-all-but-swap-status-code 37. 3)
+;(DEF-DATA-FIELD PHT1-AGE 2 3)
 ;(DEF-DATA-FIELD PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE 27. 5)
- (def-data-field pht1-all-but-age-and-swap-status-code 35. 5)	;quux revision 13: to <39>
-(DEF-DATA-FIELD PHT1-MODIFIED-BIT 1 5)		;SET IF PAGE MODIFIED
-(DEF-DATA-FIELD PHT1-VALID-BIT 1 6)
+; (def-data-field pht1-all-but-age-and-swap-status-code 35. 5)	;quux revision 13: to <39>
+;(DEF-DATA-FIELD PHT1-MODIFIED-BIT 1 5)		;SET IF PAGE MODIFIED
+;(DEF-DATA-FIELD PHT1-VALID-BIT 1 6)
  ;WORD 2  THESE ARE NOW THE SAME BIT POSITIONS AS IN THE SECOND LEVEL MAP
 ;(DEF-DATA-FIELD PHT2-META-BITS 6 14.)
 ;(DEF-DATA-FIELD PHT2-MAP-STATUS-CODE 3 20.)
@@ -120,12 +184,12 @@
 ;(DEF-DATA-FIELD PHT2-ACCESS-STATUS-AND-META-BITS 10. 14.)
 ;(DEF-DATA-FIELD PHT2-PHYSICAL-PAGE-NUMBER 14. 0) 
 ;; quux revision 13 (appendix a1.7): pht2 is the 28-bit level-2 entry
-(def-data-field pht2-meta-bits 6 18.)
-(def-data-field pht2-map-status-code 3 24.)
-(def-data-field pht2-map-access-code 2 26.)
-(def-data-field pht2-map-access-and-status-code 4 24.)
-(def-data-field pht2-access-status-and-meta-bits 10. 18.)
-(def-data-field pht2-physical-page-number 18. 0) 
+;(def-data-field pht2-meta-bits 6 18.)
+;(def-data-field pht2-map-status-code 3 24.)
+;(def-data-field pht2-map-access-code 2 26.)
+;(def-data-field pht2-map-access-and-status-code 4 24.)
+;(def-data-field pht2-access-status-and-meta-bits 10. 18.)
+;(def-data-field pht2-physical-page-number 18. 0) 
 ;; 1024-word pages (contract g2, option (w)): a page frame is four
 ;; consecutive map entries of 256 words, aligned on 1024 words, and pht2 is
 ;; the level-2 map word of the frame's first entry, so its physical page
@@ -134,7 +198,10 @@
 ;(def-data-field pht2-page-frame-number 12. 2)
 ;; quux revision 13: the map maps 1024-word pages natively, one entry a page,
 ;; so pht2's physical page number is the frame's number.
-(def-data-field pht2-page-frame-number 18. 0)
+;(def-data-field pht2-page-frame-number 18. 0)
+
+;; quux revision 14 (contract g3 revision 14, 9.1): no page hash table, so no
+;; pht fields (above, commented out).
 
 ; DEFINITIONS OF FIELDS IN THE ADDRESS
 
@@ -160,8 +227,13 @@
 ;; field of revision 12 is gone.  level 1 is indexed by vma<27:15>, a block of
 ;; 32 pages.  a disk block is no longer a whole number of words (a packed page
 ;; is 5 blocks), so nothing takes an address's block.
-(def-data-field vma-map-block-part 13. 15.)	;address block of 32. pages
-(def-data-field vma-page-addr-part 18. 10.)	;virtual page number (1024 words)
+;(def-data-field vma-map-block-part 13. 15.)	;address block of 32. pages
+;(def-data-field vma-page-addr-part 18. 10.)	;virtual page number (1024 words)
+;; quux revision 14 (contract g3 revision 14, 10.1): 32-bit virtual
+;; addresses: the virtual page is vma<31:10>, 22 bits.  the physical fields
+;; stay 18 bits: physical space is main memory, up to 2^28 words.  no map
+;; blocks.
+(def-data-field vma-page-addr-part 22. 10.)	;virtual page number (1024 words)
 (def-data-field vma-phys-page-addr-part 18. 10.) ;physical page (frame) number
 (def-data-field vma-phys-map-entry-part 18. 10.) ;physical page number of a map entry
 (def-data-field vma-page-offset 10. 0)		;address within the page
@@ -259,14 +331,29 @@ PGF-W-1	((A-PGF-WMD) MD)			;SAVE DATA BEING WRITTEN
 
 (LOCALITY D-MEM)
 (START-DISPATCH 3 0)		;DISPATCH ON MAP STATUS
-D-PGF	(P-BIT PGF-MAP-MISS)	;0 LEVEL 1 OR 2 MAP NOT VALID
-	(P-BIT PGF-MAP-MISS)	;1 META BITS ONLY, TAKE AS MAP MISS
+;D-PGF	(P-BIT PGF-MAP-MISS)	;0 LEVEL 1 OR 2 MAP NOT VALID
+;	(P-BIT PGF-MAP-MISS)	;1 META BITS ONLY, TAKE AS MAP MISS
+;	(PGF-RDONLY)		;2 WRITE IN READ ONLY
+;	(P-BIT PGF-RWF)		;3 WRITE IN READ/WRITE FIRST
+;	(P-BIT ILLOP)		;4 READ/WRITE
+;	(PGF-PDL)		;5 MAY BE IN PDL BUFFER
+;	(PGF-MAR)		;6 POSSIBLE MAR BREAK
+;	(P-BIT ILLOP)		;7 NOT USED
+
+;; quux revision 14 (contract g3 revision 14, 4.2, 9.1, 9.2): the status of
+;; the entry the walk loaded.  0, no entry: an address in no region, or a
+;; broken table (pgf-no-entry); 1, not in core: page it in (swapin); 3 is
+;; retired (modified is the hardware's); 5, the pdl buffer, never faults: the
+;; redirect serves or passes on every reference through it; 7 is a memory's
+;; window's fixed entry, straight to its emulation (pgf-a-memory).
+D-PGF	(P-BIT PGF-NO-ENTRY)	;0 no entry
+	(P-BIT PGF-NOT-IN-CORE)	;1 not in core
 	(PGF-RDONLY)		;2 WRITE IN READ ONLY
-	(P-BIT PGF-RWF)		;3 WRITE IN READ/WRITE FIRST
+	(P-BIT ILLOP)		;3 retired
 	(P-BIT ILLOP)		;4 READ/WRITE
-	(PGF-PDL)		;5 MAY BE IN PDL BUFFER
+	(P-BIT ILLOP)		;5 pdl buffer: the redirect's
 	(PGF-MAR)		;6 POSSIBLE MAR BREAK
-	(P-BIT ILLOP)		;7 NOT USED
+	(P-BIT PGF-A-MEMORY)	;7 a memory's window
 (END-DISPATCH)
 (LOCALITY I-MEM)
 
@@ -274,46 +361,61 @@ D-PGF	(P-BIT PGF-MAP-MISS)	;0 LEVEL 1 OR 2 MAP NOT VALID
 ;WHAT IT POINTS TO.  SMASHES VMA.
 (LOCALITY D-MEM)
 (START-DISPATCH 3 0)
+;; quux revision 14 (contract g3 revision 14, 4.1; appendix a14.5): map(md)
+;; always holds valid meta bits: every page of a region has an entry, a
+;; not-in-core one included, and the walk loads it; no entry and the windows
+;; read "not oldspace, not extra pdl".  so nothing is reloaded, and every
+;; status returns.  the dispatch stays at its callers.
 D-GET-MAP-BITS
-	(P-BIT INHIBIT-XCT-NEXT-BIT GET-MAP-BITS) ;0 LEVEL 1 OR 2 MAP NOT VALID
-	(P-BIT R-BIT)				;1 GOT MAP BITS ANYWAY
+;	(P-BIT INHIBIT-XCT-NEXT-BIT GET-MAP-BITS) ;0 LEVEL 1 OR 2 MAP NOT VALID
+;	(P-BIT R-BIT)				;1 GOT MAP BITS ANYWAY
+;	(P-BIT R-BIT)				;2 READ ONLY
+;	(P-BIT R-BIT)				;3 READ/WRITE FIRST
+;	(P-BIT R-BIT)				;4 READ/WRITE
+;	(P-BIT R-BIT)				;5 MAY BE IN PDL BUFFER
+;	(P-BIT R-BIT)				;6 POSSIBLE MAR BREAK
+;	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;7 NOT USED
+	(P-BIT R-BIT)				;0 no entry
+	(P-BIT R-BIT)				;1 not in core
 	(P-BIT R-BIT)				;2 READ ONLY
-	(P-BIT R-BIT)				;3 READ/WRITE FIRST
+	(P-BIT R-BIT)				;3 retired
 	(P-BIT R-BIT)				;4 READ/WRITE
 	(P-BIT R-BIT)				;5 MAY BE IN PDL BUFFER
 	(P-BIT R-BIT)				;6 POSSIBLE MAR BREAK
-	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;7 NOT USED
+	(P-BIT R-BIT)				;7 a memory's window
 (END-DISPATCH)
 (LOCALITY I-MEM)
 
 ;MAP MISS WHEN TRYING TO GET META BITS.  GET FROM REGION TABLE, SET UP META-BITS-ONLY STATUS
-GET-MAP-BITS
-	((A-META-BITS-MAP-RELOADS) ADD M-ZERO A-META-BITS-MAP-RELOADS ALU-CARRY-IN-ONE)
-	(CALL-XCT-NEXT PGF-SAVE-1)		;Save MD, M-A, M-B, M-T
-       ((A-PGF-VMA) MD)				;Address of reference, also saves MD
-	((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;Check for level 1 map miss
-	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;77, quux's invalid entry
-	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
-	(JUMP-GREATER-OR-EQUAL-XCT-NEXT		;Check for A-memory or I/O address
-		M-A A-LOWEST-DIRECT-VIRTUAL-ADDRESS
-		GET-MAP-BITS-1)
-       ((MD) (A-CONSTANT (PLUS (BYTE-MASK %%REGION-OLDSPACE-META-BIT)
-			       (BYTE-MASK %%REGION-EXTRA-PDL-META-BIT)
-			       (BYTE-VALUE %%REGION-REPRESENTATION-TYPE
-					   %REGION-REPRESENTATION-TYPE-STRUCTURE))))
-	(CALL-XCT-NEXT XRGN1)			;Normal address, get meta bits from region
-       ((M-A) Q-POINTER M-A (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(CALL-EQUAL M-T A-V-NIL ILLOP)		;Region not found
-	((VMA-START-READ) ADD M-T A-V-REGION-BITS)	;Fetch meta bits
-	(ILLOP-IF-PAGE-FAULT)
-GET-MAP-BITS-1
-	((VMA) SELECTIVE-DEPOSIT READ-MEMORY-DATA MAP-META-BITS
-		(A-CONSTANT (PLUS (BYTE-VALUE MAP-STATUS-CODE %PHT-MAP-STATUS-META-BITS-ONLY)
-				  (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE))))
-	((MD-WRITE-MAP) A-PGF-VMA)
-	(JUMP-XCT-NEXT PGF-RESTORE)			;Restore M-A, M-B, M-T
-       ((VMA) A-V-NIL)		;Don't leave garbage in VMA.
+;GET-MAP-BITS
+;	((A-META-BITS-MAP-RELOADS) ADD M-ZERO A-META-BITS-MAP-RELOADS ALU-CARRY-IN-ONE)
+;	(CALL-XCT-NEXT PGF-SAVE-1)		;Save MD, M-A, M-B, M-T
+;       ((A-PGF-VMA) MD)				;Address of reference, also saves MD
+;	((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;Check for level 1 map miss
+;	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;77, quux's invalid entry
+;	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
+;	(JUMP-GREATER-OR-EQUAL-XCT-NEXT		;Check for A-memory or I/O address
+;		M-A A-LOWEST-DIRECT-VIRTUAL-ADDRESS
+;		GET-MAP-BITS-1)
+;       ((MD) (A-CONSTANT (PLUS (BYTE-MASK %%REGION-OLDSPACE-META-BIT)
+;			       (BYTE-MASK %%REGION-EXTRA-PDL-META-BIT)
+;			       (BYTE-VALUE %%REGION-REPRESENTATION-TYPE
+;					   %REGION-REPRESENTATION-TYPE-STRUCTURE))))
+;	(CALL-XCT-NEXT XRGN1)			;Normal address, get meta bits from region
+;       ((M-A) Q-POINTER M-A (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	(CALL-EQUAL M-T A-V-NIL ILLOP)		;Region not found
+;	((VMA-START-READ) ADD M-T A-V-REGION-BITS)	;Fetch meta bits
+;	(ILLOP-IF-PAGE-FAULT)
+;GET-MAP-BITS-1
+;	((VMA) SELECTIVE-DEPOSIT READ-MEMORY-DATA MAP-META-BITS
+;		(A-CONSTANT (PLUS (BYTE-VALUE MAP-STATUS-CODE %PHT-MAP-STATUS-META-BITS-ONLY)
+;				  (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE))))
+;	((MD-WRITE-MAP) A-PGF-VMA)
+;	(JUMP-XCT-NEXT PGF-RESTORE)			;Restore M-A, M-B, M-T
+;       ((VMA) A-V-NIL)		;Don't leave garbage in VMA.
 
+;; quux revision 14: get-map-bits (above) goes: every page has an entry.
+
 ;PDL BUFFER HANDLING CONVENTIONS:
 ;  THE LINEAR PUSHDOWN LIST MUST ALWAYS BE COMPOSED OF PAGES FROM AN AREA WHOSE
 ;REGION-BITS Q HAS %PHT-MAP-STATUS-PDL-BUFFER IN THE MAP STATUS PORTION OF ITS
@@ -334,15 +436,26 @@ PGF-R-PDL
 	((M-PGF-TEM) ADD M-PGF-TEM (A-CONSTANT 1))	;*** THIS CODE COULD USE BUMMING ***
 	((m-pgf-tem) pdl-buffer-address-mask m-pgf-tem)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
 					;the pdl buffer's own width, not 10 bits: quux's buffer can be bigger
-	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS)
-	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
-	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-R-NOT-REALLY-IN-PDL-BUFFER)
-	(JUMP-GREATER-THAN M-PGF-TEM A-PGF-B PGF-R-NOT-REALLY-IN-PDL-BUFFER) ;GREATER BECAUSE 
+;	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS)
+;	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
+;	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-R-NOT-REALLY-IN-PDL-BUFFER)
+;	(JUMP-GREATER-THAN M-PGF-TEM A-PGF-B PGF-R-NOT-REALLY-IN-PDL-BUFFER) ;GREATER BECAUSE 
 							;(PP) IS A VALID WD.
+;; quux revision 14 (contract g3 revision 14, 6; appendix a14.7): the pdl
+;; buffer redirect does in hardware what this did for a reference through a
+;; pdl page, so this is reached only from pgf-mar1, simulating the cycle a
+;; false alarm of the mar stopped.  the test is the redirect's, unsigned:
+;; inside when (va - base) mod 2^32 <= (pp - head + 1) and 37777, which admits
+;; the word one past pp, as the signed compares here did.
+	((a-pgf-b) m-pgf-tem)		;n, the words past the head that are in the buffer
+	((m-pgf-tem) q-pointer vma)	;the address referenced sans extra bits
+	((m-pgf-tem) sub m-pgf-tem a-pdl-buffer-virtual-address)	;off, mod 2^32
+	(jump-greater-than-unsigned m-pgf-tem a-pgf-b pgf-r-not-really-in-pdl-buffer)
 	;READ REFERENCE TO LOCATION THAT IS IN THE PDL BUFFER
 	((A-PDL-BUFFER-READ-FAULTS) ADD A-PDL-BUFFER-READ-FAULTS M-ZERO ALU-CARRY-IN-ONE)
-	((M-PGF-TEM) SUB M-PGF-TEM 
-		A-PDL-BUFFER-VIRTUAL-ADDRESS)  ;GET RELATIVE PDL LOC REFERENCED
+;	((M-PGF-TEM) SUB M-PGF-TEM 
+;		A-PDL-BUFFER-VIRTUAL-ADDRESS)  ;GET RELATIVE PDL LOC REFERENCED
+	;; quux revision 14: m-pgf-tem is the relative location already (off)
 	((A-PGF-A) PDL-BUFFER-INDEX)	;DON'T CLOBBER PDL-BUFFER-INDEX
 	((PDL-BUFFER-INDEX) ADD M-PGF-TEM A-PDL-BUFFER-HEAD)	;TRUNCATES TO 10 BITS
 	;; quux (contract h8a, see qstloc in uc-macrocode): pdl-index is
@@ -354,10 +467,28 @@ PGF-R-PDL
 
 ;READ REFERENCE TO LOCATION NOT IN THE PDL BUFFER, BUT IT MIGHT HAVE BEEN.
 PGF-R-NOT-REALLY-IN-PDL-BUFFER	
-	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;SAVE CORRECT MAP CONTENTS
-	((VMA-WRITE-MAP) IOR M-PGF-TEM		;TURN ON ACCESS
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+;	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;SAVE CORRECT MAP CONTENTS
+;	((VMA-WRITE-MAP) IOR M-PGF-TEM		;TURN ON ACCESS
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+;Maybe putting this insn here will avoid hardware lossage??
+;	((A-PDL-BUFFER-MEMORY-FAULTS) ADD A-PDL-BUFFER-MEMORY-FAULTS M-ZERO ALU-CARRY-IN-ONE)
+;	((VMA-START-READ) MD)			;READ OUT THAT LOCATION
+;	(ILLOP-IF-PAGE-FAULT)			;I THOUGHT WE JUST TURNED ON ACCESS
+;	((A-PGF-WMD) READ-MEMORY-DATA)		;SAVE CONTENTS 
+;Deleted Q-POINTER from next insn.  It caused data type of VMA to be clobbered by page faults.
+;  - RMS 8/3/83
+;	((MD) VMA)				;ADDRESS THE MAP
+;	((VMA-WRITE-MAP) DPB M-PGF-TEM		;RESTORE THE MAP
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;; quux revision 14 (contract g3 revision 14, 6.2, 9.1): the fiddle is a tlb
+;; direct write of the page's entry with access 11, so that the reference
+;; neither faults nor is redirected, and then an invalidation, so that the
+;; next reference walks and loads the entry as the table holds it.
+	((m-pgf-tem) map-entry memory-map-data)	;the page's entry
+	((vma-write-map) ior m-pgf-tem		;turn on access
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
 ;Maybe putting this insn here will avoid hardware lossage??
 	((A-PDL-BUFFER-MEMORY-FAULTS) ADD A-PDL-BUFFER-MEMORY-FAULTS M-ZERO ALU-CARRY-IN-ONE)
 	((VMA-START-READ) MD)			;READ OUT THAT LOCATION
@@ -366,9 +497,7 @@ PGF-R-NOT-REALLY-IN-PDL-BUFFER
 ;Deleted Q-POINTER from next insn.  It caused data type of VMA to be clobbered by page faults.
 ;  - RMS 8/3/83
 	((MD) VMA)				;ADDRESS THE MAP
-	((VMA-WRITE-MAP) DPB M-PGF-TEM		;RESTORE THE MAP
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	((vma-write-map) (a-constant write-map-invalidate))	;forget the fiddled entry
 	(POPJ-AFTER-NEXT			;RESTORE REGISTERS AND RETURN
 	 (VMA) MD)
        ((MD) A-PGF-WMD)
@@ -379,15 +508,26 @@ PGF-W-PDL
 	((M-PGF-TEM) ADD M-PGF-TEM (A-CONSTANT 1))	;*** THIS CODE COULD USE BUMMING ***
 	((m-pgf-tem) pdl-buffer-address-mask m-pgf-tem)	;COMPUTE # ACTIVE WDS IN PDL-BUFFER
 					;the pdl buffer's own width, not 10 bits: quux's buffer can be bigger
-	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS) ;HIGHEST VIRT LOC IN P.B,
-	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
-	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-W-NOT-REALLY-IN-PDL-BUFFER)
-	(JUMP-GREATER-THAN M-PGF-TEM A-PGF-B PGF-W-NOT-REALLY-IN-PDL-BUFFER) ;GREATER BECAUSE
+;	((A-PGF-B) ADD M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS) ;HIGHEST VIRT LOC IN P.B,
+;	((M-PGF-TEM) Q-POINTER VMA)	;GET ADDRESS BEING REFERENCED SANS EXTRA BITS
+;	(JUMP-LESS-THAN M-PGF-TEM A-PDL-BUFFER-VIRTUAL-ADDRESS PGF-W-NOT-REALLY-IN-PDL-BUFFER)
+;	(JUMP-GREATER-THAN M-PGF-TEM A-PGF-B PGF-W-NOT-REALLY-IN-PDL-BUFFER) ;GREATER BECAUSE
 							;(PP) IS A VALID WD
+;; quux revision 14 (contract g3 revision 14, 6; appendix a14.7): the pdl
+;; buffer redirect does in hardware what this did for a reference through a
+;; pdl page, so this is reached only from pgf-mar1, simulating the cycle a
+;; false alarm of the mar stopped.  the test is the redirect's, unsigned:
+;; inside when (va - base) mod 2^32 <= (pp - head + 1) and 37777, which admits
+;; the word one past pp, as the signed compares here did.
+	((a-pgf-b) m-pgf-tem)		;n, the words past the head that are in the buffer
+	((m-pgf-tem) q-pointer vma)	;the address referenced sans extra bits
+	((m-pgf-tem) sub m-pgf-tem a-pdl-buffer-virtual-address)	;off, mod 2^32
+	(jump-greater-than-unsigned m-pgf-tem a-pgf-b pgf-w-not-really-in-pdl-buffer)
 	;WRITE REFERENCE TO LOCATION THAT IS IN THE PDL BUFFER
 	((A-PDL-BUFFER-WRITE-FAULTS) ADD A-PDL-BUFFER-WRITE-FAULTS M-ZERO ALU-CARRY-IN-ONE)
-	((M-PGF-TEM) SUB M-PGF-TEM 
-		A-PDL-BUFFER-VIRTUAL-ADDRESS)  ;GET RELATIVE PDL LOC REFERENCED
+;	((M-PGF-TEM) SUB M-PGF-TEM 
+;		A-PDL-BUFFER-VIRTUAL-ADDRESS)  ;GET RELATIVE PDL LOC REFERENCED
+	;; quux revision 14: m-pgf-tem is the relative location already (off)
 	((A-PGF-A) PDL-BUFFER-INDEX)	;DON'T CLOBBER PDL-BUFFER-INDEX
 	((PDL-BUFFER-INDEX) ADD M-PGF-TEM A-PDL-BUFFER-HEAD)	;TRUNCATES TO 10 BITS
 	((MD) A-PGF-WMD)
@@ -400,18 +540,29 @@ PGF-W-PDL
 
 ;WRITE REFERENCE TO LOCATION NOT IN THE PDL BUFFER, BUT IT MIGHT HAVE BEEN
 PGF-W-NOT-REALLY-IN-PDL-BUFFER	
+;	((A-PDL-BUFFER-MEMORY-FAULTS) ADD A-PDL-BUFFER-MEMORY-FAULTS M-ZERO ALU-CARRY-IN-ONE)
+;	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;SAVE CORRECT MAP CONTENTS
+;	((VMA-WRITE-MAP) IOR M-PGF-TEM		;TURN ON ACCESS
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+;	((VMA) MD)				;WRITE INTO THAT LOCATION
+;	((WRITE-MEMORY-DATA-START-WRITE) A-PGF-WMD)
+;	(ILLOP-IF-PAGE-FAULT)			;I THOUGHT WE JUST TURNED ON ACCESS
+;	((MD) VMA)				;ADDRESS THE MAP
+;	((VMA-WRITE-MAP) DPB M-PGF-TEM		;RESTORE THE MAP
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;; quux revision 14: the fiddle as a tlb direct write and an invalidation,
+;; as pgf-r-not-really-in-pdl-buffer's.
 	((A-PDL-BUFFER-MEMORY-FAULTS) ADD A-PDL-BUFFER-MEMORY-FAULTS M-ZERO ALU-CARRY-IN-ONE)
-	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;SAVE CORRECT MAP CONTENTS
-	((VMA-WRITE-MAP) IOR M-PGF-TEM		;TURN ON ACCESS
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+	((m-pgf-tem) map-entry memory-map-data)	;the page's entry
+	((vma-write-map) ior m-pgf-tem		;turn on access
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
 	((VMA) MD)				;WRITE INTO THAT LOCATION
 	((WRITE-MEMORY-DATA-START-WRITE) A-PGF-WMD)
 	(ILLOP-IF-PAGE-FAULT)			;I THOUGHT WE JUST TURNED ON ACCESS
 	((MD) VMA)				;ADDRESS THE MAP
-	((VMA-WRITE-MAP) DPB M-PGF-TEM		;RESTORE THE MAP
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	((vma-write-map) (a-constant write-map-invalidate))	;forget the fiddled entry
 	(POPJ-AFTER-NEXT			;RESTORE REGISTERS AND RETURN
 	 (VMA) MD)
        ((MD) A-PGF-WMD)
@@ -459,16 +610,16 @@ DISK-PGF-RESTORE
 
 ;ROUTINE TO HANDLE LEVEL-1 MAP MISSES.  CALLED FROM PGF-MAP-MISS AND FROM GET-MAP-BITS.
 ;ADDRESS IN MD ON CALL AND RETURN, VMA CLOBBERED.  PGF-SAVE MUST HAVE BEEN CALLED.
-LEVEL-1-MAP-MISS
+;LEVEL-1-MAP-MISS
 	;; quux revision 13 (contract g2 2.6; appendix a1.7): an address with
 	;; <31:28> set is past the 28-bit space.  the level-1 map reads the
 	;; invalid block for it, and a map write there writes nothing, so it
 	;; would come here for ever: halt at address-past-28-bits instead.
-	((m-tem) (byte-field 4 28.) md)
-	(jump-not-equal m-tem a-zero address-past-28-bits)
-	((A-FIRST-LEVEL-MAP-RELOADS) ADD A-FIRST-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
-	((M-T) A-SECOND-LEVEL-MAP-REUSE-POINTER)	;ALLOCATE A BLOCK OF LVL 2 MAP
-	((MD M-A) SELECTIVE-DEPOSIT MD VMA-MAP-BLOCK-PART A-ZERO) ;-> 1ST ENTRY IN BLOCK
+;	((m-tem) (byte-field 4 28.) md)
+;	(jump-not-equal m-tem a-zero address-past-28-bits)
+;	((A-FIRST-LEVEL-MAP-RELOADS) ADD A-FIRST-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
+;	((M-T) A-SECOND-LEVEL-MAP-REUSE-POINTER)	;ALLOCATE A BLOCK OF LVL 2 MAP
+;	((MD M-A) SELECTIVE-DEPOSIT MD VMA-MAP-BLOCK-PART A-ZERO) ;-> 1ST ENTRY IN BLOCK
 	;; point 1st lvl at it.  quux: the block number is 6 bits, and its bit 5
 	;; is written from vma<24>, apart from the other five.  m-tem is
 	;; free: page faults clobber it, and the callers
@@ -490,38 +641,38 @@ LEVEL-1-MAP-MISS
 	;; quux revision 13 (appendix a1.7, a1.8): the level-1 entry, 7 bits, is
 	;; written whole from vma<38:32>, and the reverse level-1 map has 128
 	;; entries, at offsets 400-577 of the system communication area.
-	((vma-write-map) dpb m-t map-write-first-level-map	;point 1st lvl at it
-		(a-constant (byte-mask map-write-enable-first-level-write)))
-	((m-pgf-tem) add m-t (a-constant 400))		;reverse 1st lvl map in 400-577 of
-	((vma-start-read) add m-pgf-tem a-v-system-communication-area)  ;sys com area.
-	(illop-if-page-fault)				;this points md at the old map
-	(jump-less-than read-memory-data a-zero pgf-l1c) ;don't write map if no previous
-	((vma-write-map) dpb				;and invalidate old 1st lvl map
-		(m-constant -1) map-write-first-level-map	;entry so will fault if used:
-		(a-constant (byte-mask map-write-enable-first-level-write)))	;all ones, 177
-	((VMA) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)
-PGF-L1C	((WRITE-MEMORY-DATA-START-WRITE) M-A)		;UPDATE REVERSE FIRST LVL MAP
-	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT 1ST ENTRY IN BLOCK
-	((M-T) (M-CONSTANT 40))				;DO ALL 32. ENTRIES IN BLOCK
-PGF-L1A	((VMA-WRITE-MAP)				;FILL 2ND-LEVEL MAP WITH MAP-MISS (0)
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	((vma-write-map) dpb m-t map-write-first-level-map	;point 1st lvl at it
+;		(a-constant (byte-mask map-write-enable-first-level-write)))
+;	((m-pgf-tem) add m-t (a-constant 400))		;reverse 1st lvl map in 400-577 of
+;	((vma-start-read) add m-pgf-tem a-v-system-communication-area)  ;sys com area.
+;	(illop-if-page-fault)				;this points md at the old map
+;	(jump-less-than read-memory-data a-zero pgf-l1c) ;don't write map if no previous
+;	((vma-write-map) dpb				;and invalidate old 1st lvl map
+;		(m-constant -1) map-write-first-level-map	;entry so will fault if used:
+;		(a-constant (byte-mask map-write-enable-first-level-write)))	;all ones, 177
+;	((VMA) ADD M-PGF-TEM A-V-SYSTEM-COMMUNICATION-AREA)
+;PGF-L1C	((WRITE-MEMORY-DATA-START-WRITE) M-A)		;UPDATE REVERSE FIRST LVL MAP
+;	(ILLOP-IF-PAGE-FAULT)				;THIS POINTS MD AT 1ST ENTRY IN BLOCK
+;	((M-T) (M-CONSTANT 40))				;DO ALL 32. ENTRIES IN BLOCK
+;PGF-L1A	((VMA-WRITE-MAP)				;FILL 2ND-LEVEL MAP WITH MAP-MISS (0)
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
 ;	((MD M-A) ADD M-A (A-CONSTANT (BYTE-VALUE VMA-PAGE-ADDR-PART 1)))
 	;; the block's 32 map entries, not its pages: 1024-word pages (contract
 	;; g2, option (w)) are four entries each
-	((md m-a) add m-a (a-constant map-entry-size))
-	(JUMP-GREATER-THAN-XCT-NEXT M-T (A-CONSTANT 1) PGF-L1A)
-       ((M-T) SUB M-T (A-CONSTANT 1))
-	((VMA) A-V-NIL)		;Don't leave garbage in VMA.
-	((MD) A-PGF-VMA)				;RESTORE MD (ADDRESS OF REFERENCE)
+;	((md m-a) add m-a (a-constant map-entry-size))
+;	(JUMP-GREATER-THAN-XCT-NEXT M-T (A-CONSTANT 1) PGF-L1A)
+;       ((M-T) SUB M-T (A-CONSTANT 1))
+;	((VMA) A-V-NIL)		;Don't leave garbage in VMA.
+;	((MD) A-PGF-VMA)				;RESTORE MD (ADDRESS OF REFERENCE)
 	;DROP THROUGH ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER, AND RETURN
 
 ;ROUTINE TO ADVANCE SECOND LEVEL MAP REUSE POINTER, WITH CARE.  CLOBBERS Q-R
-ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER	
-	((Q-R A-SECOND-LEVEL-MAP-REUSE-POINTER)
-		ADD M-ZERO A-SECOND-LEVEL-MAP-REUSE-POINTER ALU-CARRY-IN-ONE)
-	(popj-after-next popj-less-than q-r a-level-1-map-invalid) ;wrap before the invalid block
-       ((A-SECOND-LEVEL-MAP-REUSE-POINTER)
-		A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)	;WRAP AROUND TO AFTER THE WIRED ONES
+;ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER	
+;	((Q-R A-SECOND-LEVEL-MAP-REUSE-POINTER)
+;		ADD M-ZERO A-SECOND-LEVEL-MAP-REUSE-POINTER ALU-CARRY-IN-ONE)
+;	(popj-after-next popj-less-than q-r a-level-1-map-invalid) ;wrap before the invalid block
+;       ((A-SECOND-LEVEL-MAP-REUSE-POINTER)
+;		A-SECOND-LEVEL-MAP-REUSE-POINTER-INIT)	;WRAP AROUND TO AFTER THE WIRED ONES
 
 ;; quux revision 13: level-1-map-miss jumps here for a reference whose address
 ;; has <31:28> set, past the 28-bit space (contract g2 2.6); it is placed past
@@ -542,56 +693,100 @@ ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER
 ;; so the trap's own state save and the reload pass it.  the call into
 ;; level-1-map-miss is popped, as write-in-read-only's stack has none, and m-a,
 ;; m-b and m-t are as at the reference before m-t takes the address.
-address-past-28-bits
-	((m-garbage) micro-stack-data-pop)	;the call into level-1-map-miss
-	(call pgf-restore)
-	((m-t) dpb m-zero q-all-but-pointer a-pgf-vma)	;the address's field
-	((m-t) q-pointer m-t (a-constant (byte-value q-data-type dtp-fix)))
-	((vma) a-v-nil)
-	(call trap)
-    (error-table address-past-28-bits m-t)
+;address-past-28-bits
+;	((m-garbage) micro-stack-data-pop)	;the call into level-1-map-miss
+;	(call pgf-restore)
+;	((m-t) dpb m-zero q-all-but-pointer a-pgf-vma)	;the address's field
+;	((m-t) q-pointer m-t (a-constant (byte-value q-data-type dtp-fix)))
+;	((vma) a-v-nil)
+;	(call trap)
+;    (error-table address-past-28-bits m-t)
 
 ;MAP MISS COMES HERE.  ADDRESS IN VMA AND MD BOTH.
 ;SET UP FIRST-LEVEL MAP IF NECESSARY.  THEN DEAL WITH PAGE-FAULT.
-PGF-MAP-MISS
-	(CALL-XCT-NEXT PGF-SAVE)	;SAVE A,B,T,VMA
-       ((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;CHECK FOR 1ST-LEVEL MISS
-	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;77, quux's invalid entry
+;PGF-MAP-MISS
+;	(CALL-XCT-NEXT PGF-SAVE)	;SAVE A,B,T,VMA
+;       ((M-TEM) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)	;CHECK FOR 1ST-LEVEL MISS
+;	(call-equal m-tem a-level-1-map-invalid level-1-map-miss) ;77, quux's invalid entry
 	;; MD HAS ADDRESS, VMA SAVED AND CLOBBERED.  HANDLE 2ND-LEVEL MISS
-	((A-SECOND-LEVEL-MAP-RELOADS) ADD A-SECOND-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
-	((M-T) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA) ;ADDRESS SANS EXTRA BITS
-	(JUMP-LESS-THAN M-T A-LOWEST-DIRECT-VIRTUAL-ADDRESS PGF-L2A)
-	(JUMP-LESS-THAN M-T (A-CONSTANT LOWEST-A-MEM-VIRTUAL-ADDRESS) PGF-MM0)
-	(JUMP-LESS-THAN M-T (A-CONSTANT LOWEST-IO-SPACE-VIRTUAL-ADDRESS)
-		PGF-SPECIAL-A-MEMORY-REFERENCE)
+;	((A-SECOND-LEVEL-MAP-RELOADS) ADD A-SECOND-LEVEL-MAP-RELOADS M-ZERO ALU-CARRY-IN-ONE)
+;	((M-T) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA) ;ADDRESS SANS EXTRA BITS
+;	(JUMP-LESS-THAN M-T A-LOWEST-DIRECT-VIRTUAL-ADDRESS PGF-L2A)
+;	(JUMP-LESS-THAN M-T (A-CONSTANT LOWEST-A-MEM-VIRTUAL-ADDRESS) PGF-MM0)
+;	(JUMP-LESS-THAN M-T (A-CONSTANT LOWEST-IO-SPACE-VIRTUAL-ADDRESS)
+;		PGF-SPECIAL-A-MEMORY-REFERENCE)
 ;REFERENCE TO UNIBUS OR X-BUS IO VIRTUAL ADDRESS.  FAKE UP PAGE HASH TABLE ENTRY
 ;PGF-MM0	((M-T) VMA-PHYS-PAGE-ADDR-PART M-T
 ;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
 	;; the map entry's physical page, 256 words, not the 1024-word page
 	;; (contract g2, option (w)): i/o pages are mapped an entry at a time
-pgf-mm0	((m-t) vma-phys-map-entry-part m-t
-		(a-constant (byte-mask map-write-enable-second-level-write)))
-	((M-A) (A-CONSTANT 1460))		;RW ACCESS, STATUS=4, NO AREA TRAPS, REP TYPE 0
-	(JUMP-XCT-NEXT PGF-RESTORE)		;GO RETRY REFERENCE
-       ((VMA-WRITE-MAP) DPB M-A MAP-ACCESS-STATUS-AND-META-BITS A-T)
+;pgf-mm0	((m-t) vma-phys-map-entry-part m-t
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;	((M-A) (A-CONSTANT 1460))		;RW ACCESS, STATUS=4, NO AREA TRAPS, REP TYPE 0
+;	(JUMP-XCT-NEXT PGF-RESTORE)		;GO RETRY REFERENCE
+;       ((VMA-WRITE-MAP) DPB M-A MAP-ACCESS-STATUS-AND-META-BITS A-T)
 	;; Returning to PGF-R or PGF-W, which will reload VMA with good data.
 
 ;REFERENCE TO ORDINARY VIRTUAL ADDRESS.  LOOK IN PAGE HASH TABLE
-PGF-L2A	(CALL SEARCH-PAGE-HASH-TABLE)
-	(DISPATCH PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-PGF-PHT) ;FOUND, CHK SW STS
+;PGF-L2A	(CALL SEARCH-PAGE-HASH-TABLE)
+;	(DISPATCH PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-PGF-PHT) ;FOUND, CHK SW STS
+
+
+;; quux revision 14 (contract g3 revision 14, 4, 9.1, 9.2): no map reloads.
+;; the hardware walks the page table on a tlb miss and loads what it finds, so
+;; a fault is the entry's own: d-pgf's status.  level-1-map-miss, its reuse
+;; pointer, address-past-28-bits (no address is past the space now),
+;; pgf-map-miss with pgf-mm0 (the windows are untranslated) and the hash
+;; table's search went; they are kept above, commented out.
+
+;; status 1, not in core: page it in.  the walk loaded the entry, so swapin
+;; finds it in the table, with its slot.
+PGF-NOT-IN-CORE
+	(CALL PGF-SAVE)			;SAVE A,B,T,VMA
+	(JUMP SWAPIN)
+
+;; status 7, a memory's window (contract g3 revision 14, 7): its fixed entry
+;; faults every reference, and the emulation is today's, without pgf-map-miss's
+;; detour.  m-t has the address, as pgf-map-miss gave it.
+PGF-A-MEMORY
+	(CALL PGF-SAVE)			;SAVE A,B,T,VMA
+	(JUMP-XCT-NEXT PGF-SPECIAL-A-MEMORY-REFERENCE)
+       ((M-T) SELECTIVE-DEPOSIT M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA) ;ADDRESS SANS EXTRA BITS
+
+;; status 0, no entry (contract g3 revision 14, 9.2): every page of a region
+;; has an entry, so an address with none is in no region, and the reference is
+;; lisp's error address-in-no-region (G3's one error for it; on revision 13 it
+;; halted in swapin below 2^28, and was address-past-28-bits above).  it is
+;; signalled as address-past-28-bits was: the address's field a fixnum in m-t,
+;; vma nil (a stack group's resume would read memory at its saved vma), m-a,
+;; m-b and m-t restored first.  not continuable.  an address that is in a
+;; region has an entry, so finding a region means the table is wrong: illop.
+PGF-NO-ENTRY
+	(CALL PGF-SAVE)			;SAVE A,B,T,VMA
+	(CALL-XCT-NEXT XRGN1)		;the region, or nil (a window's address too)
+       ((M-A) Q-POINTER VMA (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	(CALL-NOT-EQUAL M-T A-V-NIL ILLOP)	;in a region with no entry: a broken table
+	(CALL PGF-RESTORE)
+	((M-T) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)	;the address's field
+	((M-T) Q-POINTER M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	((VMA) A-V-NIL)
+	(CALL TRAP)
+    (ERROR-TABLE ADDRESS-IN-NO-REGION M-T)
 
 (LOCALITY D-MEM)
-(START-DISPATCH 3 INHIBIT-XCT-NEXT-BIT)	;DISPATCH ON SWAP STATUS
-D-PGF-PHT	
-	(SWAPIN)		;0 PHT ENTRY INVALID, GET PAGE FROM DISK
-	(PGF-RL)		;1 NORMAL, RELOAD PAGE MAP
-	(PGF-FL)		;2 FLUSHABLE, CHANGE BACK TO NORMAL
-	(PGF-PRE)		;3 PREPAGED, CHANGE TO NORMAL, WE WANT IT NOW
-	(PGF-AG)		;4 AGE, CHANGE BACK TO NORMAL
-	(PGF-RL)		;5 WIRED DOWN, RELOAD PAGE MAP
-	(P-BIT ILLOP)		;6 NOT USED
-	(P-BIT ILLOP)		;7 NOT USED
-(END-DISPATCH)
+;(START-DISPATCH 3 INHIBIT-XCT-NEXT-BIT)	;DISPATCH ON SWAP STATUS
+;D-PGF-PHT	
+;	(SWAPIN)		;0 PHT ENTRY INVALID, GET PAGE FROM DISK
+;	(PGF-RL)		;1 NORMAL, RELOAD PAGE MAP
+;	(PGF-FL)		;2 FLUSHABLE, CHANGE BACK TO NORMAL
+;	(PGF-PRE)		;3 PREPAGED, CHANGE TO NORMAL, WE WANT IT NOW
+;	(PGF-AG)		;4 AGE, CHANGE BACK TO NORMAL
+;	(PGF-RL)		;5 WIRED DOWN, RELOAD PAGE MAP
+;	(P-BIT ILLOP)		;6 NOT USED
+;	(P-BIT ILLOP)		;7 NOT USED
+;(END-DISPATCH)
+;; quux revision 14: d-pgf-pht goes with the hash table.
+
 
 (START-DISPATCH 3 0)	;DROP THROUGH (SKIPPING) IF MAR BREAK NOT TO GO OFF, ELSE CALL TRAP
 D-MAR	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;0 READ, MAR DISABLED
@@ -617,8 +812,12 @@ D-MAR	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;0 READ, MAR DISABLED
 PGF-MAR	((M-PGF-TEM) M-FLAGS-NO-SEQUENCE-BREAK)	;If can't take trap now
 	(JUMP-NOT-EQUAL M-PGF-TEM A-ZERO PGF-MAR1) ;then don't take one
 	((M-PGF-TEM) Q-POINTER VMA (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(JUMP-LESS-THAN M-PGF-TEM A-MAR-LOW PGF-MAR1)	;Check address bounds
-	(JUMP-GREATER-THAN M-PGF-TEM A-MAR-HIGH PGF-MAR1)
+;	(JUMP-LESS-THAN M-PGF-TEM A-MAR-LOW PGF-MAR1)	;Check address bounds
+;	(JUMP-GREATER-THAN M-PGF-TEM A-MAR-HIGH PGF-MAR1)
+	;; quux revision 14 (contract g3 revision 14, 10.1): the bounds unsigned,
+	;; so that a range at or across 2^31 holds; "off", low above high, stays off.
+	(jump-less-than-unsigned m-pgf-tem a-mar-low pgf-mar1)	;check address bounds
+	(jump-greater-than-unsigned m-pgf-tem a-mar-high pgf-mar1)
 	(DISPATCH M-FLAGS-MAR-DISP D-MAR)	;Take MAR break if necessary
     (ERROR-TABLE MAR-BREAK READ)		;otherwise skip to PGF-MAR1
        ((C-PDL-BUFFER-POINTER-PUSH) A-PGF-WMD)
@@ -740,32 +939,53 @@ PGF-RDONLY
 		;drop into FORCE-WR-RDONLY
 ;Forced write in nominally read-only area.
 ;Second-level map is set-up and grants read-only access.
-FORCE-WR-RDONLY
-	(CALL PGF-SAVE)
+;FORCE-WR-RDONLY
+;	(CALL PGF-SAVE)
 ;	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Force read/write access
 ;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
 ;				  (BYTE-VALUE MAP-ACCESS-CODE 3))))
 	;; quux revision 13 (appendix a1.7): the level-2 entry below its access
 	;; code is bits 0-25, where the cadr's was 0-21
-	((vma-write-map) (byte-field 26. 0) memory-map-data	;force read/write access
-		(a-constant (plus (byte-mask map-write-enable-second-level-write)
-				  (byte-value map-access-code 3))))
+;	((vma-write-map) (byte-field 26. 0) memory-map-data	;force read/write access
+;		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+;				  (byte-value map-access-code 3))))
+;	((VMA) A-PGF-VMA)		;Restore original VMA
+;	((MD-START-WRITE) A-PGF-WMD)	;Do the write
+;	(ILLOP-IF-PAGE-FAULT)
+;	((MD) VMA)			;Address map again
+;	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Set read-only access again
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 2))))
+;	((vma-write-map) (byte-field 26. 0) memory-map-data	;set read-only access again
+;		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+;				  (byte-value map-access-code 2))))
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)	;Find PHT entry to mark page as modified
+;       ((VMA M-T) A-PGF-VMA)
+;	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP) ;not found?
+;	((WRITE-MEMORY-DATA-START-WRITE)
+;		IOR READ-MEMORY-DATA (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT)))
+;	(ILLOP-IF-PAGE-FAULT)
+;	(CALL PGF-RESTORE)
+;	(POPJ-AFTER-NEXT		;Memory cycle completed, return
+;	 (VMA) A-PGF-VMA)
+;       ((MD) A-PGF-WMD)
+
+;; quux revision 14 (contract g3 revision 14, 7, 9.1): a direct write of the
+;; tlb entry with access 11 over the read-only entry map(md) reads, the store,
+;; and an invalidation, so that the next reference walks and loads the
+;; read-only entry again.  the store's write-back sets modified in the table
+;; (the guarded or, appendix a14.6), so the hash table's search for the
+;; modified bit goes.
+FORCE-WR-RDONLY
+	(CALL PGF-SAVE)
+	((m-tem) map-entry memory-map-data)	;the page's entry; md is the address
+	((vma-write-map) ior m-tem		;force read/write access
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
 	((VMA) A-PGF-VMA)		;Restore original VMA
 	((MD-START-WRITE) A-PGF-WMD)	;Do the write
 	(ILLOP-IF-PAGE-FAULT)
 	((MD) VMA)			;Address map again
-;	((VMA-WRITE-MAP) (BYTE-FIELD 22. 0) MEMORY-MAP-DATA	;Set read-only access again
-;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-;				  (BYTE-VALUE MAP-ACCESS-CODE 2))))
-	((vma-write-map) (byte-field 26. 0) memory-map-data	;set read-only access again
-		(a-constant (plus (byte-mask map-write-enable-second-level-write)
-				  (byte-value map-access-code 2))))
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)	;Find PHT entry to mark page as modified
-       ((VMA M-T) A-PGF-VMA)
-	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP) ;not found?
-	((WRITE-MEMORY-DATA-START-WRITE)
-		IOR READ-MEMORY-DATA (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT)))
-	(ILLOP-IF-PAGE-FAULT)
+	((vma-write-map) (a-constant write-map-invalidate))	;read-only again, from the table
 	(CALL PGF-RESTORE)
 	(POPJ-AFTER-NEXT		;Memory cycle completed, return
 	 (VMA) A-PGF-VMA)
@@ -773,23 +993,23 @@ FORCE-WR-RDONLY
 
 ;HERE FOR READ-WRITE-FIRST TRAP
 ;FIND PAGE HASH TABLE ENTRY, CHANGE STATUS TO READ/WRITE, AND RELOAD MAP
-PGF-RWF	(CALL-IF-BIT-CLEAR M-PGF-WRITE ILLOP)
-	(CALL PGF-SAVE)
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
-       ((M-T) A-PGF-VMA)
-	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)	;NOT IN PHT??
-	((WRITE-MEMORY-DATA-START-WRITE)		;MARK PAGE MODIFIED
-		IOR READ-MEMORY-DATA (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT)))
-	(ILLOP-IF-PAGE-FAULT)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;GET SECOND WORD
-	(ILLOP-IF-PAGE-FAULT)				;TABLE SUPPOSED TO BE WIRED
-	((M-A) A-PGF-A)					;RESTORE A REG DURING MEM CYCLE
-	((M-T) (A-CONSTANT 4))				;NORMAL STATUS
-	((M-B) READ-MEMORY-DATA)
-	((WRITE-MEMORY-DATA-START-WRITE M-T) DPB M-T
-		PHT2-MAP-STATUS-CODE A-B)
-	(ILLOP-IF-PAGE-FAULT)
-	((M-B) A-PGF-B)
+;PGF-RWF	(CALL-IF-BIT-CLEAR M-PGF-WRITE ILLOP)
+;	(CALL PGF-SAVE)
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
+;       ((M-T) A-PGF-VMA)
+;	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)	;NOT IN PHT??
+;	((WRITE-MEMORY-DATA-START-WRITE)		;MARK PAGE MODIFIED
+;		IOR READ-MEMORY-DATA (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT)))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;GET SECOND WORD
+;	(ILLOP-IF-PAGE-FAULT)				;TABLE SUPPOSED TO BE WIRED
+;	((M-A) A-PGF-A)					;RESTORE A REG DURING MEM CYCLE
+;	((M-T) (A-CONSTANT 4))				;NORMAL STATUS
+;	((M-B) READ-MEMORY-DATA)
+;	((WRITE-MEMORY-DATA-START-WRITE M-T) DPB M-T
+;		PHT2-MAP-STATUS-CODE A-B)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-B) A-PGF-B)
 ;	((MD) A-PGF-VMA)				;ADDRESS THE MAP
 ;	(POPJ-AFTER-NEXT				;PHT2 IS IDENTICAL TO 2ND LVL MAP
 ;	 (VMA-WRITE-MAP) MAP-WRITE-SECOND-LEVEL-MAP M-T
@@ -812,32 +1032,32 @@ PGF-RWF	(CALL-IF-BIT-CLEAR M-PGF-WRITE ILLOP)
 ;       ((vma m-t) a-pgf-t)				;go retry memory cycle
 	;; quux revision 13: the map maps the 1024-word page with one entry, so
 	;; that one entry becomes read/write, as the cadr's did.
-	((md) a-pgf-vma)				;address the map
-	(popj-after-next				;pht2 is identical to 2nd lvl map
-	 (vma-write-map) map-write-second-level-map m-t
-		(a-constant (byte-mask map-write-enable-second-level-write)))
-       ((vma m-t) a-pgf-t)				;go retry memory cycle
+;	((md) a-pgf-vma)				;address the map
+;	(popj-after-next				;pht2 is identical to 2nd lvl map
+;	 (vma-write-map) map-write-second-level-map m-t
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;       ((vma m-t) a-pgf-t)				;go retry memory cycle
 
 ;REFERENCE TO PAGE THAT WAS PREPAGED AND HASN'T BEEN TOUCHED YET.  GRAB IT.
-PGF-PRE
-	((A-DISK-PREPAGE-USED-COUNT) M+A+1 M-ZERO A-DISK-PREPAGE-USED-COUNT)
+;PGF-PRE
+;	((A-DISK-PREPAGE-USED-COUNT) M+A+1 M-ZERO A-DISK-PREPAGE-USED-COUNT)
 ;REFERENCE TO PAGE MARKED FLUSHABLE.  WE WANT THIS PAGE AFTER ALL, CHANGE BACK TO NORMAL
-PGF-FL	;drop through
+;PGF-FL	;drop through
 ;REFERENCE TO PAGE WITH AGE TRAP.  CHANGE BACK TO NORMAL TO INDICATE PAGE
 ;HAS BEEN REFERENCED, AND SHOULDN'T BE SWAPPED OUT OR MADE FLUSHABLE.
-PGF-AG	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
-		PHT1-ALL-BUT-SWAP-STATUS-CODE (A-CONSTANT 1))	;SW STS := NORMAL
-	(ILLOP-IF-PAGE-FAULT)				;THEN DROP THROUGH
+;PGF-AG	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
+;		PHT1-ALL-BUT-SWAP-STATUS-CODE (A-CONSTANT 1))	;SW STS := NORMAL
+;	(ILLOP-IF-PAGE-FAULT)				;THEN DROP THROUGH
 
 ;RELOAD HARDWARE MAP FROM PAGE HASH TABLE
-PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
-	((M-T) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)
-	(call-equal m-t a-level-1-map-invalid illop)	;about to clobber
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;GET SECOND WORD OF PHT ENTRY
-	(ILLOP-IF-PAGE-FAULT)				;TABLE SUPPOSED TO BE WIRED
-	((M-A) A-PGF-A)					;RESTORE REGS DURING MEM CYCLE
-	((M-B) A-PGF-B)
-	(DISPATCH PHT2-MAP-STATUS-CODE READ-MEMORY-DATA D-SWAPAR)	;VERIFY THE BITS
+;PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
+;	((M-T) MAP-FIRST-LEVEL-MAP MEMORY-MAP-DATA)
+;	(call-equal m-t a-level-1-map-invalid illop)	;about to clobber
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;GET SECOND WORD OF PHT ENTRY
+;	(ILLOP-IF-PAGE-FAULT)				;TABLE SUPPOSED TO BE WIRED
+;	((M-A) A-PGF-A)					;RESTORE REGS DURING MEM CYCLE
+;	((M-B) A-PGF-B)
+;	(DISPATCH PHT2-MAP-STATUS-CODE READ-MEMORY-DATA D-SWAPAR)	;VERIFY THE BITS
 		;; This will go to ILLOP if this is a page of a free region
 ;	((VMA) MAP-WRITE-SECOND-LEVEL-MAP READ-MEMORY-DATA	;VALUE TO WRITE INTO MAP
 ;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
@@ -859,11 +1079,11 @@ PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
 ;	(popj-after-next (vma-write-map) add m-t (a-constant 3))	;write the map and return
 ;       ((vma m-t) a-pgf-t)
 	;; quux revision 13: one map entry a page; load it from pht2.
-	((vma) map-write-second-level-map read-memory-data	;value to write into map
-		(a-constant (byte-mask map-write-enable-second-level-write)))
-	(popj-after-next				;comes directly from pht2
-	 (md-write-map) a-pgf-vma)			;write the map and return
-       ((vma m-t) a-pgf-t)
+;	((vma) map-write-second-level-map read-memory-data	;value to write into map
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;	(popj-after-next				;comes directly from pht2
+;	 (md-write-map) a-pgf-vma)			;write the map and return
+;       ((vma m-t) a-pgf-t)
 
 ;ROUTINE TO LOOK FOR PAGE ADDRESSED BY M-T IN THE PAGE HASH TABLE
 ;RETURNS WITH VMA AND READ-MEMORY-DATA POINTING TO PHT1 WORD,
@@ -871,27 +1091,27 @@ PGF-RL	((MD) A-PGF-VMA)				;ADDRESS THE MAP
 ;OF READ-MEMORY-DATA ZERO.  IN THIS CASE, THE SWAP STATUS FIELD
 ;OF READ-MEMORY-DATA WILL ALSO BE ZERO.  CLOBBERS M-A, M-B, M-T, A-TEM1, A-TEM3
 
-SEARCH-PAGE-HASH-TABLE	
-	((A-TEM3) M-T)				;SAVE FOR COMPARISON BELOW
-	(CALL COMPUTE-PAGE-HASH)		;M-T := HASH (M-T)
-SPHT1	((VMA-START-READ) ADD A-V-PAGE-TABLE-AREA M-T)	;GET PHT ENTRY
-	(ILLOP-IF-PAGE-FAULT)			;SUPPOSED TO BE WIRED
-	((M-T) ADD M-T (A-CONSTANT 2))		;BUMP INDEX FOR NEXT ITERATION
-	(JUMP-LESS-THAN M-T A-PHT-INDEX-LIMIT SPHT2)
-	((M-T) SUB M-T A-PHT-INDEX-LIMIT)	;WRAP AROUND
-SPHT2	(POPJ-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA) ;PAGE NOT IN PHT
-	((M-A) XOR A-TEM3 READ-MEMORY-DATA)	;XOR VIRTUAL ADDRESSES
-	(POPJ-AFTER-NEXT			;(HOPING WE'LL WIN AND RETURN)
-	 (M-B) PHT1-VIRTUAL-PAGE-NUMBER M-A)	;ZERO IF MATCH
-       (CALL-NOT-EQUAL M-B A-ZERO SPHT1)	;IF NOT FOUND, TRY NEXT
+;SEARCH-PAGE-HASH-TABLE	
+;	((A-TEM3) M-T)				;SAVE FOR COMPARISON BELOW
+;	(CALL COMPUTE-PAGE-HASH)		;M-T := HASH (M-T)
+;SPHT1	((VMA-START-READ) ADD A-V-PAGE-TABLE-AREA M-T)	;GET PHT ENTRY
+;	(ILLOP-IF-PAGE-FAULT)			;SUPPOSED TO BE WIRED
+;	((M-T) ADD M-T (A-CONSTANT 2))		;BUMP INDEX FOR NEXT ITERATION
+;	(JUMP-LESS-THAN M-T A-PHT-INDEX-LIMIT SPHT2)
+;	((M-T) SUB M-T A-PHT-INDEX-LIMIT)	;WRAP AROUND
+;SPHT2	(POPJ-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA) ;PAGE NOT IN PHT
+;	((M-A) XOR A-TEM3 READ-MEMORY-DATA)	;XOR VIRTUAL ADDRESSES
+;	(POPJ-AFTER-NEXT			;(HOPING WE'LL WIN AND RETURN)
+;	 (M-B) PHT1-VIRTUAL-PAGE-NUMBER M-A)	;ZERO IF MATCH
+;       (CALL-NOT-EQUAL M-B A-ZERO SPHT1)	;IF NOT FOUND, TRY NEXT
 
-XCPH (MISC-INST-ENTRY %COMPUTE-PAGE-HASH)
-	(CALL-XCT-NEXT COMPUTE-PAGE-HASH)
-       ((M-T) Q-POINTER C-PDL-BUFFER-POINTER-POP)
-	(POPJ-AFTER-NEXT (M-T) Q-POINTER M-T
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;XCPH (MISC-INST-ENTRY %COMPUTE-PAGE-HASH)
+;	(CALL-XCT-NEXT COMPUTE-PAGE-HASH)
+;       ((M-T) Q-POINTER C-PDL-BUFFER-POINTER-POP)
+;	(POPJ-AFTER-NEXT (M-T) Q-POINTER M-T
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	;execute one more instruction, clobbering A-TEM1
-COMPUTE-PAGE-HASH				;New algorithm, 3-DEC-80
+;COMPUTE-PAGE-HASH				;New algorithm, 3-DEC-80
 ;	((A-TEM1) (BYTE-FIELD 10. 14.) M-T)	;VMA<23:14>
 ;	((M-T) (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 4) 4) M-T)	;VMA<23:8>x16+C
 	;; 1024-word pages (contract g2, option (w)): the page is vma<23:10>, so
@@ -900,14 +1120,19 @@ COMPUTE-PAGE-HASH				;New algorithm, 3-DEC-80
 ;	((a-tem1) (byte-field 8. 16.) m-t)	;vma<23:16>
 ;	((m-t) (byte-field (difference q-pointer-width 6) 6) m-t)	;vma<23:10>x16+c
 	;; quux revision 13: the page is vma<27:10>; the same hash of it
-	((a-tem1) (byte-field 12. 16.) m-t)	;vma<27:16>
-	((m-t) (byte-field 22. 6) m-t)		;vma<27:10>x16+c
-	((M-T) ANDCA M-T (A-CONSTANT 17))	;-C
-	((M-T) XOR M-T A-TEM1)
-	((M-T) AND M-T A-PHT-INDEX-MASK)
-	(POPJ-AFTER-NEXT POPJ-LESS-THAN M-T A-PHT-INDEX-LIMIT)
-       ((M-T) SUB M-T A-PHT-INDEX-LIMIT)	;Wrap around
+;	((a-tem1) (byte-field 12. 16.) m-t)	;vma<27:16>
+;	((m-t) (byte-field 22. 6) m-t)		;vma<27:10>x16+c
+;	((M-T) ANDCA M-T (A-CONSTANT 17))	;-C
+;	((M-T) XOR M-T A-TEM1)
+;	((M-T) AND M-T A-PHT-INDEX-MASK)
+;	(POPJ-AFTER-NEXT POPJ-LESS-THAN M-T A-PHT-INDEX-LIMIT)
+;       ((M-T) SUB M-T A-PHT-INDEX-LIMIT)	;Wrap around
 
+;; quux revision 14 (contract g3 revision 14, 9.1): the read/write-first and
+;; age traps, the map reload from the hash table, the hash table's search and
+;; %compute-page-hash (above) go: the hardware sets accessed and modified, and
+;; walks the table.
+
 ;COMES HERE WHEN A PAGE NEEDS TO BE READ IN FROM DISK.
 ;
 ;FIRST, FIND SOME MEMORY.  ENTER A LOOP THAT SEARCHES PHYSICAL-PAGE-DATA,
@@ -926,200 +1151,200 @@ COMPUTE-PAGE-HASH				;New algorithm, 3-DEC-80
 ;REFERENCED TO FIND THE FIRST HOLE (MAY HAVE MOVED DUE TO DELETION) AND PUT
 ;IN AN ENTRY FOR THAT PAGE.  RESTART THE REFERENCE (SET UP THE MAP FIRST?)
 
-SWAPIN	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP)	;Uh uh, no paging from interrupts
+;SWAPIN	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP)	;Uh uh, no paging from interrupts
   ;decide how many pages to bring in with one disk op.  Must not bring in again a page
   ;already in.  Must not cross region boundaries. (There is no reason to believe we
   ;will need pages from another region and complications arise in making the pages known.)
-	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
-	((A-DISK-SWAP-IN-CCW-POINTER) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
-	((A-DISK-SWAPIN-SIZE) (A-CONSTANT 1))
-	(JUMP-IF-BIT-SET M-DONT-SWAP-IN SWAPIN-SIZE-X)  ;going to create 0 core, no disk op.
-	((M-TEM) A-DISK-SWITCHES)
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 3) M-TEM SWAPIN-SIZE-X)  ;multi-swapin not enabled
+;	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
+;	((A-DISK-SWAP-IN-CCW-POINTER) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
+;	((A-DISK-SWAPIN-SIZE) (A-CONSTANT 1))
+;	(JUMP-IF-BIT-SET M-DONT-SWAP-IN SWAPIN-SIZE-X)  ;going to create 0 core, no disk op.
+;	((M-TEM) A-DISK-SWITCHES)
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 3) M-TEM SWAPIN-SIZE-X)  ;multi-swapin not enabled
 
 
-	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	(CALL XRGN)				;=> region number in M-T.. no XCT-NEXT.
-	(CALL-EQUAL M-T A-V-NIL ILLOP)		;Swapping in a page not in a region
-	((A-DISK-SAVE-PGF-T) M-T)
-	((VMA-START-READ) ADD M-T A-V-REGION-BITS)
-	(ILLOP-IF-PAGE-FAULT)
-	((A-DISK-SAVE-PGF-A) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-  	((A-DISK-SAVE-1) (LISP-BYTE %%REGION-SWAPIN-QUANTUM) READ-MEMORY-DATA)
+;	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	(CALL XRGN)				;=> region number in M-T.. no XCT-NEXT.
+;	(CALL-EQUAL M-T A-V-NIL ILLOP)		;Swapping in a page not in a region
+;	((A-DISK-SAVE-PGF-T) M-T)
+;	((VMA-START-READ) ADD M-T A-V-REGION-BITS)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((A-DISK-SAVE-PGF-A) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;  	((A-DISK-SAVE-1) (LISP-BYTE %%REGION-SWAPIN-QUANTUM) READ-MEMORY-DATA)
 
-SWAPIN-SIZE-LOOP
-	(JUMP-GREATER-OR-EQUAL M-ZERO A-DISK-SAVE-1 SWAPIN-SIZE-X)
+;SWAPIN-SIZE-LOOP
+;	(JUMP-GREATER-OR-EQUAL M-ZERO A-DISK-SAVE-1 SWAPIN-SIZE-X)
 	;; 1024-word pages (contract g2, option (w)): a page takes four ccws, so
 	;; the swap-in list holds disk-swap-in-max-pages pages; stop there, as the
 	;; list would otherwise run past its end into the system communication
 	;; area (the region's swapin quantum can ask for 32).
-	((m-tem) a-disk-swapin-size)
-	(jump-greater-or-equal m-tem (a-constant disk-swap-in-max-pages) swapin-size-x)
-	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
-	((A-DISK-SAVE-PGF-A) ADD M-A A-DISK-SAVE-PGF-A)
-	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SAVE-PGF-A)
-	(CALL XRGN)
-	(JUMP-NOT-EQUAL M-T A-DISK-SAVE-PGF-T SWAPIN-SIZE-X)		;not same region
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
-       ((M-T) A-DISK-SAVE-PGF-A)
-	(JUMP-IF-BIT-SET PHT1-VALID-BIT READ-MEMORY-DATA SWAPIN-SIZE-X) ;page in core.
+;	((m-tem) a-disk-swapin-size)
+;	(jump-greater-or-equal m-tem (a-constant disk-swap-in-max-pages) swapin-size-x)
+;	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((A-DISK-SAVE-PGF-A) ADD M-A A-DISK-SAVE-PGF-A)
+;	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SAVE-PGF-A)
+;	(CALL XRGN)
+;	(JUMP-NOT-EQUAL M-T A-DISK-SAVE-PGF-T SWAPIN-SIZE-X)		;not same region
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
+;       ((M-T) A-DISK-SAVE-PGF-A)
+;	(JUMP-IF-BIT-SET PHT1-VALID-BIT READ-MEMORY-DATA SWAPIN-SIZE-X) ;page in core.
 	  ;append to transfer
-	((A-DISK-PAGE-READ-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-READ-APPENDS)
-	((A-DISK-SWAPIN-SIZE) M+A+1 M-ZERO A-DISK-SWAPIN-SIZE)
-	(JUMP-XCT-NEXT SWAPIN-SIZE-LOOP)
-       ((A-DISK-SAVE-1) ADD (M-CONSTANT -1) A-DISK-SAVE-1)
+;	((A-DISK-PAGE-READ-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-READ-APPENDS)
+;	((A-DISK-SWAPIN-SIZE) M+A+1 M-ZERO A-DISK-SWAPIN-SIZE)
+;	(JUMP-XCT-NEXT SWAPIN-SIZE-LOOP)
+;       ((A-DISK-SAVE-1) ADD (M-CONSTANT -1) A-DISK-SAVE-1)
 
-SWAPIN-SIZE-X 
-SWAPIN-LOOP 
-	(JUMP-XCT-NEXT SWAPIN0)
-       ((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC SWAPIN1))) ;Continuation after FINDCORE
+;SWAPIN-SIZE-X 
+;SWAPIN-LOOP 
+;	(JUMP-XCT-NEXT SWAPIN0)
+;       ((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC SWAPIN1))) ;Continuation after FINDCORE
 
 
-XFINDCORE (MISC-INST-ENTRY %FINDCORE)
-	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC RETURN-M-B)))
-SWAPIN0	((M-B) A-FINDCORE-SCAN-POINTER)			;Next page frame to consider
-FINDCORE0
-	((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
-FINDCORE1
-	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END FINDCORE2)
-	(ILLOP-IF-PAGE-FAULT)				;Delayed for fencepost error
-	((M-B) ADD M-B (A-CONSTANT 1))
-	(JUMP-EQUAL M-B A-FINDCORE-SCAN-POINTER FINDCORE3)	;Did all pages but 1, no luck
+;XFINDCORE (MISC-INST-ENTRY %FINDCORE)
+;	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC RETURN-M-B)))
+;SWAPIN0	((M-B) A-FINDCORE-SCAN-POINTER)			;Next page frame to consider
+;FINDCORE0
+;	((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
+;FINDCORE1
+;	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END FINDCORE2)
+;	(ILLOP-IF-PAGE-FAULT)				;Delayed for fencepost error
+;	((M-B) ADD M-B (A-CONSTANT 1))
+;	(JUMP-EQUAL M-B A-FINDCORE-SCAN-POINTER FINDCORE3)	;Did all pages but 1, no luck
 ;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
-	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
+;	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
+;	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
 ;	(JUMP-EQUAL-XCT-NEXT M-TEM (A-CONSTANT 177777) FINDCORE0)	;No page here
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	(JUMP-EQUAL-XCT-NEXT M-TEM (a-constant 3777777) FINDCORE0)	;No page here
-       ((A-COUNT-FINDCORE-STEPS) M+A+1 M-ZERO A-COUNT-FINDCORE-STEPS)
-	(ILLOP-IF-PAGE-FAULT)				;Check delayed to make code faster
-	(DISPATCH-XCT-NEXT PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-FINDCORE)
-       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)	;Check next page
+;	(JUMP-EQUAL-XCT-NEXT M-TEM (a-constant 3777777) FINDCORE0)	;No page here
+;       ((A-COUNT-FINDCORE-STEPS) M+A+1 M-ZERO A-COUNT-FINDCORE-STEPS)
+;	(ILLOP-IF-PAGE-FAULT)				;Check delayed to make code faster
+;	(DISPATCH-XCT-NEXT PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-FINDCORE)
+;       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)	;Check next page
     ;Note! The above instruction is logically duplicated near COREFOUND-PRE and COREFOUND.
 
-FINDCORE2	;Reached end of memory.  Wrap around to page zero.  There can be pageable
+;FINDCORE2	;Reached end of memory.  Wrap around to page zero.  There can be pageable
 		;memory in the middle of the wired pages on machines with small memory.
-	(POPJ-AFTER-NEXT (M-B) A-ZERO)
-       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
+;	(POPJ-AFTER-NEXT (M-B) A-ZERO)
+;       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
 
 ;; Searched all of memory (except for the last page brought in), time for emergency measures
 ;; Age all of the pages in memory, which should make some flushable
-FINDCORE3
-	((A-COUNT-FINDCORE-EMERGENCIES) M+A+1 M-ZERO A-COUNT-FINDCORE-EMERGENCIES)	
-	((M-T) M-1)				;Mustn't clobber M-1
-	(CALL-XCT-NEXT AGER)
-       ((M-1) A-FINDCORE-SCAN-POINTER)
-	(JUMP-XCT-NEXT FINDCORE0)		;Try again
-       ((M-1) M-T)
+;FINDCORE3
+;	((A-COUNT-FINDCORE-EMERGENCIES) M+A+1 M-ZERO A-COUNT-FINDCORE-EMERGENCIES)	
+;	((M-T) M-1)				;Mustn't clobber M-1
+;	(CALL-XCT-NEXT AGER)
+;       ((M-1) A-FINDCORE-SCAN-POINTER)
+;	(JUMP-XCT-NEXT FINDCORE0)		;Try again
+;       ((M-1) M-T)
 
-(LOCALITY D-MEM)
-(START-DISPATCH 3 0)		;DISPATCH TABLE TO LOOK FOR FLUSHABLE PAGES
-D-FINDCORE			;DISPATCH ON SWAP STATUS
-	(FINDCORE1)			;0 ILLEGAL
-	(FINDCORE1)			;1 NORMAL
-	(INHIBIT-XCT-NEXT-BIT COREFOUND);2 FLUSHABLE
-	(INHIBIT-XCT-NEXT-BIT COREFOUND-PRE) ;3 PREPAGE
-	(FINDCORE1)			;4 AGE TRAP
-	(FINDCORE1)			;5 WIRED DOWN
-	(FINDCORE1)			;6 NOT USED
-	(FINDCORE1)			;7 NOT USED
-(END-DISPATCH)
+;(LOCALITY D-MEM)
+;(START-DISPATCH 3 0)		;DISPATCH TABLE TO LOOK FOR FLUSHABLE PAGES
+;D-FINDCORE			;DISPATCH ON SWAP STATUS
+;	(FINDCORE1)			;0 ILLEGAL
+;	(FINDCORE1)			;1 NORMAL
+;	(INHIBIT-XCT-NEXT-BIT COREFOUND);2 FLUSHABLE
+;	(INHIBIT-XCT-NEXT-BIT COREFOUND-PRE) ;3 PREPAGE
+;	(FINDCORE1)			;4 AGE TRAP
+;	(FINDCORE1)			;5 WIRED DOWN
+;	(FINDCORE1)			;6 NOT USED
+;	(FINDCORE1)			;7 NOT USED
+;(END-DISPATCH)
 
-(START-DISPATCH 3 0)		;FOR SWAP-OUT CANDIDATE FROM SCAV WORKING-SET
-D-SCAV-SWAPOUT			;DISPATCH ON SWAP STATUS
-	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;0 ILLEGAL
-	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;1 NORMAL - TAKE
-	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;2 FLUSHABLE - TAKE
-	(P-BIT R-BIT)				;3 PREPAGE - TAKE AND METER
-	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;4 AGE TRAP - TAKE
-	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;5 WIRED DOWN
-	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;6 NOT USED
-	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;7 NOT USED
-(END-DISPATCH)
+;(START-DISPATCH 3 0)		;FOR SWAP-OUT CANDIDATE FROM SCAV WORKING-SET
+;D-SCAV-SWAPOUT			;DISPATCH ON SWAP STATUS
+;	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;0 ILLEGAL
+;	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;1 NORMAL - TAKE
+;	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;2 FLUSHABLE - TAKE
+;	(P-BIT R-BIT)				;3 PREPAGE - TAKE AND METER
+;	(P-BIT R-BIT INHIBIT-XCT-NEXT-BIT)	;4 AGE TRAP - TAKE
+;	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;5 WIRED DOWN
+;	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;6 NOT USED
+;	(INHIBIT-XCT-NEXT-BIT SWAPIN0)	;7 NOT USED
+;(END-DISPATCH)
 
-(START-DISPATCH 3 0)		;DISPATCH TABLE TO DROP THROUGH IF PAGE NEEDS WRITING
-D-WRITEBACK-NEEDED		;DISPATCH ON MAP STATUS
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;0 ILLEGAL (LVL 1 MAP)
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;1 ILLEGAL (LVL 2 MAP)
-	(INHIBIT-XCT-NEXT-BIT COREFOUND2)	;2 READ ONLY
-	(INHIBIT-XCT-NEXT-BIT COREFOUND2)	;3 READ/WRITE FIRST
-	(P-BIT R-BIT)				;4 READ/WRITE - INDICATES PAGE MODIFIED
-	(P-BIT R-BIT)				;5 PDL BUFFER, ALWAYS WRITE PDL-BUFFER PAGES
+;(START-DISPATCH 3 0)		;DISPATCH TABLE TO DROP THROUGH IF PAGE NEEDS WRITING
+;D-WRITEBACK-NEEDED		;DISPATCH ON MAP STATUS
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;0 ILLEGAL (LVL 1 MAP)
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;1 ILLEGAL (LVL 2 MAP)
+;	(INHIBIT-XCT-NEXT-BIT COREFOUND2)	;2 READ ONLY
+;	(INHIBIT-XCT-NEXT-BIT COREFOUND2)	;3 READ/WRITE FIRST
+;	(P-BIT R-BIT)				;4 READ/WRITE - INDICATES PAGE MODIFIED
+;	(P-BIT R-BIT)				;5 PDL BUFFER, ALWAYS WRITE PDL-BUFFER PAGES
 						;   SINCE R/W/F MECHANISM NOT AVAILABLE.
-	(P-BIT R-BIT)				;6 MAR BREAK, ALWAYS WRITE FOR SAME REASON
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;7 ILLEGAL (NOT USED)
-(END-DISPATCH)
+;	(P-BIT R-BIT)				;6 MAR BREAK, ALWAYS WRITE FOR SAME REASON
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;7 ILLEGAL (NOT USED)
+;(END-DISPATCH)
 
-(START-DISPATCH 3 0)		;DISPATCH TABLE TO DROP THROUGH IF PAGE NEEDS WRITING
-D-WRITEBACK-NEEDED-CCW		;DISPATCH ON MAP STATUS
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;0 ILLEGAL (LVL 1 MAP)
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;1 ILLEGAL (LVL 2 MAP)
-	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;2 READ ONLY
-	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;3 READ/WRITE FIRST
-	(P-BIT R-BIT)				;4 READ/WRITE - INDICATES PAGE MODIFIED
-	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;5 PDL BUFFER, ALWAYS WRITE PDL-BUFFER PAGES
+;(START-DISPATCH 3 0)		;DISPATCH TABLE TO DROP THROUGH IF PAGE NEEDS WRITING
+;D-WRITEBACK-NEEDED-CCW		;DISPATCH ON MAP STATUS
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;0 ILLEGAL (LVL 1 MAP)
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;1 ILLEGAL (LVL 2 MAP)
+;	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;2 READ ONLY
+;	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;3 READ/WRITE FIRST
+;	(P-BIT R-BIT)				;4 READ/WRITE - INDICATES PAGE MODIFIED
+;	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;5 PDL BUFFER, ALWAYS WRITE PDL-BUFFER PAGES
 						;   SINCE R/W/F MECHANISM NOT AVAILABLE.
 						;HOWEVER, WE DONT APPEND THESE.
-	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;6 MAR BREAK, ALWAYS WRITE FOR SAME REASON
+;	(INHIBIT-XCT-NEXT-BIT COREF-CCW-X)	;6 MAR BREAK, ALWAYS WRITE FOR SAME REASON
 						;HOWEVER, WE DONT APPEND THESE.
-	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;7 ILLEGAL (NOT USED)
-(END-DISPATCH)
-(LOCALITY I-MEM)
+;	(INHIBIT-XCT-NEXT-BIT P-BIT ILLOP)	;7 ILLEGAL (NOT USED)
+;(END-DISPATCH)
+;(LOCALITY I-MEM)
 
 ;Here when we've found a page to evict.  M-B has the PFN+1.
 ;VMA and MD are for the PHT1.  M-T same as VMA.
 
 ;This version for the case where victim was pre-paged in and not used
-COREFOUND-PRE
-	(JUMP-IF-BIT-CLEAR M-SCAVENGE-FLAG COREFOUND-PRE-REALLY)
-	((A-TEM1) DPB M-B VMA-PHYS-PAGE-ADDR-PART A-ZERO)  ;phys adr + page size
-	((M-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-SCAVENGER-WS-ENABLE)
-	(JUMP-LESS-OR-EQUAL M-TEM A-TEM1 COREFOUND-PRE-REALLY)
-	(JUMP-XCT-NEXT FINDCORE1) 
+;COREFOUND-PRE
+;	(JUMP-IF-BIT-CLEAR M-SCAVENGE-FLAG COREFOUND-PRE-REALLY)
+;	((A-TEM1) DPB M-B VMA-PHYS-PAGE-ADDR-PART A-ZERO)  ;phys adr + page size
+;	((M-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-SCAVENGER-WS-ENABLE)
+;	(JUMP-LESS-OR-EQUAL M-TEM A-TEM1 COREFOUND-PRE-REALLY)
+;	(JUMP-XCT-NEXT FINDCORE1) 
 	   ;; Page being brought in by the scavenger but this page not part of SCAV WS.
 	   ;; Continue searching to find another victim instead of kicking out part of
            ;; the user's working set.  Following instruction gets pipeline started again.
-       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)  ;duplicates inst near FINDCORE1
+;       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)  ;duplicates inst near FINDCORE1
 
-COREFOUND-PRE-REALLY
-	(JUMP-XCT-NEXT COREFOUND0)
-       ((A-DISK-PREPAGE-NOT-USED-COUNT) M+A+1 M-ZERO A-DISK-PREPAGE-NOT-USED-COUNT)
+;COREFOUND-PRE-REALLY
+;	(JUMP-XCT-NEXT COREFOUND0)
+;       ((A-DISK-PREPAGE-NOT-USED-COUNT) M+A+1 M-ZERO A-DISK-PREPAGE-NOT-USED-COUNT)
 
 ;This version for the normal case
-COREFOUND	
-	(JUMP-IF-BIT-CLEAR M-SCAVENGE-FLAG COREFOUND-REALLY)  ;see comments above
-	((A-TEM1) DPB M-B VMA-PHYS-PAGE-ADDR-PART A-ZERO)  ;phys adr + page size
-	((M-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-SCAVENGER-WS-ENABLE)
-	(JUMP-LESS-OR-EQUAL M-TEM A-TEM1 COREFOUND-REALLY)
-	(JUMP-XCT-NEXT FINDCORE1) 
-       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
+;COREFOUND	
+;	(JUMP-IF-BIT-CLEAR M-SCAVENGE-FLAG COREFOUND-REALLY)  ;see comments above
+;	((A-TEM1) DPB M-B VMA-PHYS-PAGE-ADDR-PART A-ZERO)  ;phys adr + page size
+;	((M-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-SCAVENGER-WS-ENABLE)
+;	(JUMP-LESS-OR-EQUAL M-TEM A-TEM1 COREFOUND-REALLY)
+;	(JUMP-XCT-NEXT FINDCORE1) 
+;       ((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
 
-COREFOUND-REALLY   
-COREFOUND0
-	((A-FINDCORE-SCAN-POINTER) M-B)		;Next time, start search with page after this
-	((M-B) SUB M-B (A-CONSTANT 1))
-COREFOUND3					;Enter here on %DELETE-PHYSICAL-PAGE.
-	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)
-	((M-A) READ-MEMORY-DATA)			;PHT1
-COREFOUND1
-	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-OUT) ;Trace page eviction
-	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
-		METER-PAGE-OUT)
+;COREFOUND-REALLY   
+;COREFOUND0
+;	((A-FINDCORE-SCAN-POINTER) M-B)		;Next time, start search with page after this
+;	((M-B) SUB M-B (A-CONSTANT 1))
+;COREFOUND3					;Enter here on %DELETE-PHYSICAL-PAGE.
+;	(CALL-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)
+;	((M-A) READ-MEMORY-DATA)			;PHT1
+;COREFOUND1
+;	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-OUT) ;Trace page eviction
+;	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
+;		METER-PAGE-OUT)
 
 	;;*** When there is background writing, will have to synchronize here
 	;;*** This will require dual modified bits or something.
-	((VMA-START-READ) ADD M-T (A-CONSTANT 1))	;Get PHT2
-	(ILLOP-IF-PAGE-FAULT)				;PHT should be addressable
-	(JUMP-IF-BIT-SET PHT1-MODIFIED-BIT M-A COREFOUND1A)
-	(DISPATCH PHT2-MAP-STATUS-CODE
-		 READ-MEMORY-DATA D-WRITEBACK-NEEDED)	;See if needs writing
-COREFOUND1A	;Page needs to be written back to disk
-	((C-PDL-BUFFER-POINTER-PUSH) M-T)		;PHT1 address.
-	((A-DISK-SWAP-OUT-CCW-POINTER) (A-CONSTANT DISK-SWAP-OUT-CCW-BASE))
-	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
+;	((VMA-START-READ) ADD M-T (A-CONSTANT 1))	;Get PHT2
+;	(ILLOP-IF-PAGE-FAULT)				;PHT should be addressable
+;	(JUMP-IF-BIT-SET PHT1-MODIFIED-BIT M-A COREFOUND1A)
+;	(DISPATCH PHT2-MAP-STATUS-CODE
+;		 READ-MEMORY-DATA D-WRITEBACK-NEEDED)	;See if needs writing
+;COREFOUND1A	;Page needs to be written back to disk
+;	((C-PDL-BUFFER-POINTER-PUSH) M-T)		;PHT1 address.
+;	((A-DISK-SWAP-OUT-CCW-POINTER) (A-CONSTANT DISK-SWAP-OUT-CCW-BASE))
+;	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
      ;add main memory page frame number in M-B to CCW list.
-	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
+;	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
 ;	((VMA-START-WRITE) A-DISK-SWAP-OUT-CCW-POINTER)
 ;	(ILLOP-IF-PAGE-FAULT)
 ;	((A-DISK-SWAP-OUT-CCW-POINTER)
@@ -1130,41 +1355,41 @@ COREFOUND1A	;Page needs to be written back to disk
 ;	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
 	;; quux revision 13 (appendix a1.11): one command list entry moves a
 	;; whole page, so a page takes one ccw, as the cadr's did.
-	((vma-start-write) a-disk-swap-out-ccw-pointer)
-	(illop-if-page-fault)
-	((a-disk-swap-out-ccw-pointer)
-	     add a-disk-swap-out-ccw-pointer m-zero alu-carry-in-one)
-	((A-DISK-SAVE-PGF-A) M-A)
-	((A-DISK-SAVE-PGF-B) M-B)
-	((M-TEM) A-DISK-SWITCHES)		;Multiple page swapouts enabled?
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 2) M-TEM COREF-CCW-X)
-	((A-DISK-SAVE-1) M-A)
-COREF-CCW-0
-	((M-T) (A-CONSTANT (EVAL PAGE-SIZE)))
-	((A-DISK-SAVE-1) ADD M-T A-DISK-SAVE-1)
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)   ;Is next higher page in core?
-       ((M-T) A-DISK-SAVE-1)  			 ; virt adr in M-T.
+;	((vma-start-write) a-disk-swap-out-ccw-pointer)
+;	(illop-if-page-fault)
+;	((a-disk-swap-out-ccw-pointer)
+;	     add a-disk-swap-out-ccw-pointer m-zero alu-carry-in-one)
+;	((A-DISK-SAVE-PGF-A) M-A)
+;	((A-DISK-SAVE-PGF-B) M-B)
+;	((M-TEM) A-DISK-SWITCHES)		;Multiple page swapouts enabled?
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 2) M-TEM COREF-CCW-X)
+;	((A-DISK-SAVE-1) M-A)
+;COREF-CCW-0
+;	((M-T) (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((A-DISK-SAVE-1) ADD M-T A-DISK-SAVE-1)
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)   ;Is next higher page in core?
+;       ((M-T) A-DISK-SAVE-1)  			 ; virt adr in M-T.
 		; clobbers m-a m-b m-t a-tem1 a-tem3
-	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA COREF-CCW-X) ;not found.
+;	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA COREF-CCW-X) ;not found.
 		;That page in core, does it need to be written?
-	((M-T) VMA)				;Save PHT1 adr.
-	((M-A) MD)				;Save PHT1.
-	((VMA-START-READ) ADD M-T (A-CONSTANT 1))	;get PHT2
-	(ILLOP-IF-PAGE-FAULT)
-	((M-B) READ-MEMORY-DATA)
-	(JUMP-IF-BIT-SET PHT1-MODIFIED-BIT M-A COREF-CCW-ADD)
-	(DISPATCH PHT2-MAP-STATUS-CODE M-B D-WRITEBACK-NEEDED-CCW)  ;See if needs writing
-COREF-CCW-ADD 
-	((WRITE-MEMORY-DATA M-A) ANDCA M-A
-	   (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT))) ;clear modified flag
-	((VMA-START-WRITE) M-T)
-	(ILLOP-IF-PAGE-FAULT)
-	((M-TEM) PHT2-MAP-STATUS-CODE M-B)
-	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT 4) COREF-CCW-ADD-1)  ;change RW to RWF
-	((M-TEM) (A-CONSTANT 3))
-	((WRITE-MEMORY-DATA M-B) DPB M-TEM PHT2-MAP-STATUS-CODE A-B)
-	((VMA-START-WRITE) ADD M-T (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)
+;	((M-T) VMA)				;Save PHT1 adr.
+;	((M-A) MD)				;Save PHT1.
+;	((VMA-START-READ) ADD M-T (A-CONSTANT 1))	;get PHT2
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-B) READ-MEMORY-DATA)
+;	(JUMP-IF-BIT-SET PHT1-MODIFIED-BIT M-A COREF-CCW-ADD)
+;	(DISPATCH PHT2-MAP-STATUS-CODE M-B D-WRITEBACK-NEEDED-CCW)  ;See if needs writing
+;COREF-CCW-ADD 
+;	((WRITE-MEMORY-DATA M-A) ANDCA M-A
+;	   (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT))) ;clear modified flag
+;	((VMA-START-WRITE) M-T)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-TEM) PHT2-MAP-STATUS-CODE M-B)
+;	(JUMP-NOT-EQUAL M-TEM (A-CONSTANT 4) COREF-CCW-ADD-1)  ;change RW to RWF
+;	((M-TEM) (A-CONSTANT 3))
+;	((WRITE-MEMORY-DATA M-B) DPB M-TEM PHT2-MAP-STATUS-CODE A-B)
+;	((VMA-START-WRITE) ADD M-T (A-CONSTANT 1))
+;	(ILLOP-IF-PAGE-FAULT)
 ;	((MD) M-A)					;address the map
 ;	((M-TEM) MAP-STATUS-CODE MEMORY-MAP-DATA)	;see if map is set up
 ;	(JUMP-LESS-THAN M-TEM (A-CONSTANT 2) COREF-CCW-ADD-1)
@@ -1185,14 +1410,14 @@ COREF-CCW-ADD
 ;	((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
 	;; quux revision 13: one map entry a page, as the cadr's: if it is set
 	;; up, rewrite it from pht2, now read/write-first.
-	((md) m-a)					;address the map
-	((m-tem) map-status-code memory-map-data)	;see if map is set up
-	(jump-less-than m-tem (a-constant 2) coref-ccw-add-1)
-	((vma-write-map) map-write-second-level-map m-b	;pht2 is identical to 2nd lvl map
-		(a-constant (byte-mask map-write-enable-second-level-write)))
-COREF-CCW-ADD-1
-	((A-DISK-PAGE-WRITE-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-WRITE-APPENDS)
-	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
+;	((md) m-a)					;address the map
+;	((m-tem) map-status-code memory-map-data)	;see if map is set up
+;	(jump-less-than m-tem (a-constant 2) coref-ccw-add-1)
+;	((vma-write-map) map-write-second-level-map m-b	;pht2 is identical to 2nd lvl map
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
+;COREF-CCW-ADD-1
+;	((A-DISK-PAGE-WRITE-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-WRITE-APPENDS)
+;	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
    ;add main memory page frame number in M-B to CCW list.
 ;	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
 ;	((VMA-START-WRITE) A-DISK-SWAP-OUT-CCW-POINTER)
@@ -1208,31 +1433,31 @@ COREF-CCW-ADD-1
 ;	((a-disk-swap-out-ccw-pointer) add vma (a-constant 1))
 	;; quux revision 13 (appendix a1.11): pht2's physical page is the page's
 	;; frame; one ccw a page.
-	((write-memory-data) dpb m-b vma-phys-page-addr-part (a-constant 1))
-	((vma-start-write) a-disk-swap-out-ccw-pointer)
-	(illop-if-page-fault)
-	((a-disk-swap-out-ccw-pointer)
-	   m+a+1 a-disk-swap-out-ccw-pointer m-zero)
-	((M-TEM) A-DISK-SWAP-OUT-CCW-POINTER)
-	(JUMP-LESS-THAN M-TEM (A-CONSTANT DISK-SWAP-OUT-CCW-MAX) COREF-CCW-0)
-COREF-CCW-X
-	((VMA-START-READ) ADD A-DISK-SWAP-OUT-CCW-POINTER (M-CONSTANT -1))
-	(ILLOP-IF-PAGE-FAULT)
-	((A-DISK-PAGE-WRITE-OP-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-OP-COUNT)
-	((WRITE-MEMORY-DATA-START-WRITE) SUB READ-MEMORY-DATA (A-CONSTANT 1)) ;last CCW
-	(ILLOP-IF-PAGE-FAULT)
-	((M-A) A-DISK-SAVE-PGF-A)			;get back base virt adr.
-	((M-B) A-DISK-SAVE-PGF-B)			;get back page frame number of first
+;	((write-memory-data) dpb m-b vma-phys-page-addr-part (a-constant 1))
+;	((vma-start-write) a-disk-swap-out-ccw-pointer)
+;	(illop-if-page-fault)
+;	((a-disk-swap-out-ccw-pointer)
+;	   m+a+1 a-disk-swap-out-ccw-pointer m-zero)
+;	((M-TEM) A-DISK-SWAP-OUT-CCW-POINTER)
+;	(JUMP-LESS-THAN M-TEM (A-CONSTANT DISK-SWAP-OUT-CCW-MAX) COREF-CCW-0)
+;COREF-CCW-X
+;	((VMA-START-READ) ADD A-DISK-SWAP-OUT-CCW-POINTER (M-CONSTANT -1))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((A-DISK-PAGE-WRITE-OP-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-OP-COUNT)
+;	((WRITE-MEMORY-DATA-START-WRITE) SUB READ-MEMORY-DATA (A-CONSTANT 1)) ;last CCW
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-A) A-DISK-SAVE-PGF-A)			;get back base virt adr.
+;	((M-B) A-DISK-SAVE-PGF-B)			;get back page frame number of first
 							; page.  It is no longer used by
 							; disk swap handler, but is needed
 							; by COREFOUND2.
-	((C-PDL-BUFFER-POINTER-PUSH) M-C)
-	((M-C) (A-CONSTANT DISK-SWAP-OUT-CCW-BASE))	;M-C
-	(CALL-XCT-NEXT DISK-SWAP-HANDLER)		;Do the write (virt adr in M-A)
-       ((M-T) (A-CONSTANT DISK-WRITE-COMMAND))
-	((M-C) C-PDL-BUFFER-POINTER-POP)
-	((A-DISK-PAGE-WRITE-WAIT-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-WAIT-COUNT)
-	((M-T) C-PDL-BUFFER-POINTER-POP)		;RESTORE PHT ENTRY ADDRESS
+;	((C-PDL-BUFFER-POINTER-PUSH) M-C)
+;	((M-C) (A-CONSTANT DISK-SWAP-OUT-CCW-BASE))	;M-C
+;	(CALL-XCT-NEXT DISK-SWAP-HANDLER)		;Do the write (virt adr in M-A)
+;       ((M-T) (A-CONSTANT DISK-WRITE-COMMAND))
+;	((M-C) C-PDL-BUFFER-POINTER-POP)
+;	((A-DISK-PAGE-WRITE-WAIT-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-WAIT-COUNT)
+;	((M-T) C-PDL-BUFFER-POINTER-POP)		;RESTORE PHT ENTRY ADDRESS
 ;DROPS THROUGH
 ;DROPS IN
 ;AT THIS POINT, M-T HAS ADDR OF PHT ENTRY TO BE DELETED,
@@ -1244,67 +1469,67 @@ COREF-CCW-X
 ;OF BEING IN THE WRONG PLACE, M-PGF-TEM POINTS AT THE UPPERMOST ENTRY IN THE PHT,
 ;M-T POINTS AT WHERE (VMA) SHOULD HAVE HASHED TO. THESE ARE TYPELESS ABSOLUTE ADDRESSES.
 
-COREFOUND2	
-	((C-PDL-BUFFER-POINTER-PUSH) Q-POINTER M-B	;Save page frame number
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	((WRITE-MEMORY-DATA) (M-CONSTANT -1))		;Remove pointer to PHT entry
-	((VMA-START-WRITE) ADD M-B A-V-PHYSICAL-PAGE-DATA)
-	(ILLOP-IF-PAGE-FAULT)
-	((M-B) M-T)					;-> PHT entry to delete
-	((M-PGF-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-V-PAGE-TABLE-AREA)
-	((M-PGF-TEM) ADD M-PGF-TEM A-PHT-INDEX-LIMIT)	;-> last entry in table +2
-PHTDEL1	((WRITE-MEMORY-DATA)
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))	;Delete PHT entry
-	((VMA-START-WRITE M-B) Q-POINTER M-B)
-	(ILLOP-IF-PAGE-FAULT)				;Supposed to be wired
-PHTDEL2	((VMA-START-READ) ADD VMA (A-CONSTANT 2))	;Check location following hole
-	(JUMP-GREATER-OR-EQUAL VMA A-PGF-TEM PHTDEL5)	;Jump if wrap around
-PHTDEL3	(ILLOP-IF-PAGE-FAULT)
-	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA PHTDELX)
-	((M-T) SELECTIVE-DEPOSIT READ-MEMORY-DATA	;Check for dummy entry
-		PHT1-VIRTUAL-PAGE-NUMBER (A-CONSTANT -1))	;which has an address of -1
-	(JUMP-EQUAL-XCT-NEXT M-T (A-CONSTANT -1) PHTDEL7)	;Dummy always hashes
-       ((M-T) M-B)						; to the hole
-	(CALL-XCT-NEXT COMPUTE-PAGE-HASH)		;Something there, rehash it
-       ((M-T) READ-MEMORY-DATA)
-	((M-T) ADD M-T A-V-PAGE-TABLE-AREA)		;Convert fixnum hash to address
-	((M-T) Q-POINTER M-T)				; sans extra bits
-PHTDEL7	(JUMP-LESS-THAN VMA A-T PHTDEL4)		;Jump on funny wrap around case
-	(JUMP-GREATER-THAN M-T A-B PHTDEL2)		;Jump if hole is not between where
-	(JUMP-LESS-THAN VMA A-B PHTDEL2)		; the frob is and where it hashes to
-PHTDEL6	((C-PDL-BUFFER-POINTER-PUSH) READ-MEMORY-DATA)	;Move the cell into the hole
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)
-	((M-T) SUB VMA (A-CONSTANT 1))			;Save pointer to moved cell
-	((WRITE-MEMORY-DATA) READ-MEMORY-DATA)		;Complete the cycle
-	((VMA-START-WRITE) ADD M-B (A-CONSTANT 1))	;Address the hole, store PHT2
-	(ILLOP-IF-PAGE-FAULT)
+;COREFOUND2	
+;	((C-PDL-BUFFER-POINTER-PUSH) Q-POINTER M-B	;Save page frame number
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	((WRITE-MEMORY-DATA) (M-CONSTANT -1))		;Remove pointer to PHT entry
+;	((VMA-START-WRITE) ADD M-B A-V-PHYSICAL-PAGE-DATA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-B) M-T)					;-> PHT entry to delete
+;	((M-PGF-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-V-PAGE-TABLE-AREA)
+;	((M-PGF-TEM) ADD M-PGF-TEM A-PHT-INDEX-LIMIT)	;-> last entry in table +2
+;PHTDEL1	((WRITE-MEMORY-DATA)
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))	;Delete PHT entry
+;	((VMA-START-WRITE M-B) Q-POINTER M-B)
+;	(ILLOP-IF-PAGE-FAULT)				;Supposed to be wired
+;PHTDEL2	((VMA-START-READ) ADD VMA (A-CONSTANT 2))	;Check location following hole
+;	(JUMP-GREATER-OR-EQUAL VMA A-PGF-TEM PHTDEL5)	;Jump if wrap around
+;PHTDEL3	(ILLOP-IF-PAGE-FAULT)
+;	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT READ-MEMORY-DATA PHTDELX)
+;	((M-T) SELECTIVE-DEPOSIT READ-MEMORY-DATA	;Check for dummy entry
+;		PHT1-VIRTUAL-PAGE-NUMBER (A-CONSTANT -1))	;which has an address of -1
+;	(JUMP-EQUAL-XCT-NEXT M-T (A-CONSTANT -1) PHTDEL7)	;Dummy always hashes
+;       ((M-T) M-B)						; to the hole
+;	(CALL-XCT-NEXT COMPUTE-PAGE-HASH)		;Something there, rehash it
+;       ((M-T) READ-MEMORY-DATA)
+;	((M-T) ADD M-T A-V-PAGE-TABLE-AREA)		;Convert fixnum hash to address
+;	((M-T) Q-POINTER M-T)				; sans extra bits
+;PHTDEL7	(JUMP-LESS-THAN VMA A-T PHTDEL4)		;Jump on funny wrap around case
+;	(JUMP-GREATER-THAN M-T A-B PHTDEL2)		;Jump if hole is not between where
+;	(JUMP-LESS-THAN VMA A-B PHTDEL2)		; the frob is and where it hashes to
+;PHTDEL6	((C-PDL-BUFFER-POINTER-PUSH) READ-MEMORY-DATA)	;Move the cell into the hole
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-T) SUB VMA (A-CONSTANT 1))			;Save pointer to moved cell
+;	((WRITE-MEMORY-DATA) READ-MEMORY-DATA)		;Complete the cycle
+;	((VMA-START-WRITE) ADD M-B (A-CONSTANT 1))	;Address the hole, store PHT2
+;	(ILLOP-IF-PAGE-FAULT)
 ;	((M-TEM) PHT2-PHYSICAL-PAGE-NUMBER MD)		;Fix up physical-page-data
 	;; 1024-word pages (contract g2, option (w)): physical-page-data has an
 	;; entry a page frame, a quarter of pht2's physical page number
-	((m-tem) pht2-page-frame-number md)		;fix up physical-page-data
-	((VMA-START-READ) ADD M-TEM A-V-PHYSICAL-PAGE-DATA)
-	(ILLOP-IF-PAGE-FAULT)
-	((M-TEM) SUB M-B A-V-PAGE-TABLE-AREA)		;New PHT index
-	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT
+;	((m-tem) pht2-page-frame-number md)		;fix up physical-page-data
+;	((VMA-START-READ) ADD M-TEM A-V-PHYSICAL-PAGE-DATA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-TEM) SUB M-B A-V-PAGE-TABLE-AREA)		;New PHT index
+;	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT
 ;		READ-MEMORY-DATA (BYTE-FIELD 20 20) A-TEM)
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-		read-memory-data (byte-field 12. 20.) a-tem)
-	(ILLOP-IF-PAGE-FAULT)
-	((VMA) M-B)
-	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-POINTER-POP) ;Store PHT1
-	(ILLOP-IF-PAGE-FAULT)
-	(JUMP-XCT-NEXT PHTDEL1)				;Make the moved cell into new hole
-       ((M-B) M-T)
+;		read-memory-data (byte-field 12. 20.) a-tem)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((VMA) M-B)
+;	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-POINTER-POP) ;Store PHT1
+;	(ILLOP-IF-PAGE-FAULT)
+;	(JUMP-XCT-NEXT PHTDEL1)				;Make the moved cell into new hole
+;       ((M-B) M-T)
 
-PHTDEL4	(JUMP-LESS-OR-EQUAL M-T A-B PHTDEL6)		;Jump if hole is between where the
-	(JUMP-GREATER-OR-EQUAL VMA A-B PHTDEL6)		; frob is and where it hashes to
-	(JUMP PHTDEL2)					;It's not, loop more
+;PHTDEL4	(JUMP-LESS-OR-EQUAL M-T A-B PHTDEL6)		;Jump if hole is between where the
+;	(JUMP-GREATER-OR-EQUAL VMA A-B PHTDEL6)		; frob is and where it hashes to
+;	(JUMP PHTDEL2)					;It's not, loop more
 
-PHTDEL5	(JUMP-XCT-NEXT PHTDEL3)				;Wrap around to beg of PHT
-       ((VMA-START-READ) DPB M-ZERO Q-ALL-BUT-POINTER A-V-PAGE-TABLE-AREA)
+;PHTDEL5	(JUMP-XCT-NEXT PHTDEL3)				;Wrap around to beg of PHT
+;       ((VMA-START-READ) DPB M-ZERO Q-ALL-BUT-POINTER A-V-PAGE-TABLE-AREA)
 
-PHTDELX	((M-B) C-PDL-BUFFER-POINTER-POP)		;Restore found page frame number
+;PHTDELX	((M-B) C-PDL-BUFFER-POINTER-POP)		;Restore found page frame number
 ;	((MD) M-A)		;Access map for virt page deleted
 ;	(POPJ-AFTER-NEXT
 ;         (VMA-WRITE-MAP)					;Flush 2nd lvl map, if any
@@ -1326,17 +1551,17 @@ PHTDELX	((M-B) C-PDL-BUFFER-POINTER-POP)		;Restore found page frame number
 				;note that if we have a first-level map miss, this does no harm
 ;       ((vma) a-v-nil)		;don't leave garbage in vma.
 	;; quux revision 13: one map entry a page, as the cadr's: flush it.
-	((md) m-a)		;access map for virt page deleted
-	(popj-after-next
-         (vma-write-map)					;flush 2nd lvl map, if any
-	 (a-constant (byte-mask map-write-enable-second-level-write)))
+;	((md) m-a)		;access map for virt page deleted
+;	(popj-after-next
+;         (vma-write-map)					;flush 2nd lvl map, if any
+;	 (a-constant (byte-mask map-write-enable-second-level-write)))
 				;note that if we have a first-level map miss, this does no harm
-       ((vma) a-v-nil)		;don't leave garbage in vma.
+;       ((vma) a-v-nil)		;don't leave garbage in vma.
 
 ;We have found one page of core, store it away in the CCW and loop
 ; until we have got enuf for the transfer we intend.
-SWAPIN1	   ;add main memory page frame number in M-B to CCW list.
-	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
+;SWAPIN1	   ;add main memory page frame number in M-B to CCW list.
+;	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
 ;	((VMA-START-WRITE) A-DISK-SWAP-IN-CCW-POINTER)
 ;	(ILLOP-IF-PAGE-FAULT)
 ;	((A-DISK-SWAP-IN-CCW-POINTER) M+A+1 A-DISK-SWAP-IN-CCW-POINTER M-ZERO)
@@ -1345,59 +1570,59 @@ SWAPIN1	   ;add main memory page frame number in M-B to CCW list.
 ;       ((vma-start-write) a-disk-swap-in-ccw-pointer)
 ;	((a-disk-swap-in-ccw-pointer) add vma (a-constant 1))
 	;; quux revision 13 (appendix a1.11): one ccw a page.
-	((vma-start-write) a-disk-swap-in-ccw-pointer)
-	(illop-if-page-fault)
-	((a-disk-swap-in-ccw-pointer) m+a+1 a-disk-swap-in-ccw-pointer m-zero)
-	((A-DISK-PAGE-READ-COUNT) ADD M-ZERO A-DISK-PAGE-READ-COUNT ALU-CARRY-IN-ONE)
-	((A-DISK-SWAPIN-SIZE) ADD A-DISK-SWAPIN-SIZE (M-CONSTANT -1))
-	(JUMP-NOT-EQUAL A-DISK-SWAPIN-SIZE M-ZERO SWAPIN-LOOP)
-	((VMA-START-READ) ADD A-DISK-SWAP-IN-CCW-POINTER (M-CONSTANT -1))  ;finish ccw list
-	(ILLOP-IF-PAGE-FAULT)
-	((WRITE-MEMORY-DATA-START-WRITE) SUB WRITE-MEMORY-DATA (A-CONSTANT 1)) ;last
-	(ILLOP-IF-PAGE-FAULT)
-SWAPIN1-GO
+;	((vma-start-write) a-disk-swap-in-ccw-pointer)
+;	(illop-if-page-fault)
+;	((a-disk-swap-in-ccw-pointer) m+a+1 a-disk-swap-in-ccw-pointer m-zero)
+;	((A-DISK-PAGE-READ-COUNT) ADD M-ZERO A-DISK-PAGE-READ-COUNT ALU-CARRY-IN-ONE)
+;	((A-DISK-SWAPIN-SIZE) ADD A-DISK-SWAPIN-SIZE (M-CONSTANT -1))
+;	(JUMP-NOT-EQUAL A-DISK-SWAPIN-SIZE M-ZERO SWAPIN-LOOP)
+;	((VMA-START-READ) ADD A-DISK-SWAP-IN-CCW-POINTER (M-CONSTANT -1))  ;finish ccw list
+;	(ILLOP-IF-PAGE-FAULT)
+;	((WRITE-MEMORY-DATA-START-WRITE) SUB WRITE-MEMORY-DATA (A-CONSTANT 1)) ;last
+;	(ILLOP-IF-PAGE-FAULT)
+;SWAPIN1-GO
 ;CONTINUE SWAPPING IN.  NEXT STEP IS TO SEARCH REGION TABLES TO FIND META BITS.
-	(CALL PAGE-IN-GET-MAP-BITS)	;note M-B still holds page frame number in path
+;	(CALL PAGE-IN-GET-MAP-BITS)	;note M-B still holds page frame number in path
 					; to CZRR.
-	(JUMP-IF-BIT-SET M-DONT-SWAP-IN CZRR)		;IF FRESH PAGE DON'T REALLY SWAP IN
-	((C-PDL-BUFFER-POINTER-PUSH) M-C)
-	((M-C) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))	;CCW list pointer (CLP)
-	(CALL-XCT-NEXT DISK-SWAP-HANDLER)		;Do actual disk transfer
-       ((M-T) (A-CONSTANT DISK-READ-COMMAND))
-	((M-C) C-PDL-BUFFER-POINTER-POP)
-SWAPIN2
+;	(JUMP-IF-BIT-SET M-DONT-SWAP-IN CZRR)		;IF FRESH PAGE DON'T REALLY SWAP IN
+;	((C-PDL-BUFFER-POINTER-PUSH) M-C)
+;	((M-C) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))	;CCW list pointer (CLP)
+;	(CALL-XCT-NEXT DISK-SWAP-HANDLER)		;Do actual disk transfer
+;       ((M-T) (A-CONSTANT DISK-READ-COMMAND))
+;	((M-C) C-PDL-BUFFER-POINTER-POP)
+;SWAPIN2
 	;; Now loop through ccw list making the pages known.
-	((M-B) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
+;	((M-B) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
 	;; First page in gets normal swap-status
-	((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-						  (BYTE-VALUE PHT1-VALID-BIT 1))
-					    (BYTE-VALUE PHT1-SWAP-STATUS-CODE 1))))
-	((A-DISK-PAGE-READ-OP-COUNT) ADD M-ZERO A-DISK-PAGE-READ-OP-COUNT ALU-CARRY-IN-ONE)
-SWAPIN2-LOOP
-	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-IN) ;Trace page swapin
-	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
-		METER-PAGE-IN)
-	((VMA-START-READ) M-B)
-	(ILLOP-IF-PAGE-FAULT)
-	((A-DISK-SWAPIN-PAGE-FRAME) LDB VMA-PHYS-PAGE-ADDR-PART READ-MEMORY-DATA A-ZERO)
-	((C-PDL-BUFFER-POINTER-PUSH) M-B)
-	(CALL PAGE-IN-MAKE-KNOWN)
-	((M-B) C-PDL-BUFFER-POINTER-POP)
-	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
-	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) ADD M-A A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;						  (BYTE-VALUE PHT1-VALID-BIT 1))
+;					    (BYTE-VALUE PHT1-SWAP-STATUS-CODE 1))))
+;	((A-DISK-PAGE-READ-OP-COUNT) ADD M-ZERO A-DISK-PAGE-READ-OP-COUNT ALU-CARRY-IN-ONE)
+;SWAPIN2-LOOP
+;	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-IN) ;Trace page swapin
+;	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
+;		METER-PAGE-IN)
+;	((VMA-START-READ) M-B)
+;	(ILLOP-IF-PAGE-FAULT)
+;	((A-DISK-SWAPIN-PAGE-FRAME) LDB VMA-PHYS-PAGE-ADDR-PART READ-MEMORY-DATA A-ZERO)
+;	((C-PDL-BUFFER-POINTER-PUSH) M-B)
+;	(CALL PAGE-IN-MAKE-KNOWN)
+;	((M-B) C-PDL-BUFFER-POINTER-POP)
+;	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
+;	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) ADD M-A A-DISK-SWAPIN-VIRTUAL-ADDRESS)
 ;	((M-B) M+A+1 M-B A-ZERO)
 	;; 1024-word pages (contract g2, option (w)): the next page's ccws are
 	;; four on, the first of them naming its frame
 ;	((m-b) add m-b (a-constant blocks-per-page))
 	;; quux revision 13: one ccw a page, so the next page's is the next word
-	((m-b) m+a+1 m-b a-zero)
-	(JUMP-LESS-THAN-XCT-NEXT M-B A-DISK-SWAP-IN-CCW-POINTER SWAPIN2-LOOP)
+;	((m-b) m+a+1 m-b a-zero)
+;	(JUMP-LESS-THAN-XCT-NEXT M-B A-DISK-SWAP-IN-CCW-POINTER SWAPIN2-LOOP)
 	;; Pages after the first get pre-paged swap-status
-       ((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-						 (BYTE-VALUE PHT1-VALID-BIT 1))
-					   (BYTE-VALUE PHT1-SWAP-STATUS-CODE 3))))
-SWAPIN2-X
-	(JUMP PGF-RESTORE)	;TAKE FAULT AGAIN SINCE DISK XFER
+;       ((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;						 (BYTE-VALUE PHT1-VALID-BIT 1))
+;					   (BYTE-VALUE PHT1-SWAP-STATUS-CODE 3))))
+;SWAPIN2-X
+;	(JUMP PGF-RESTORE)	;TAKE FAULT AGAIN SINCE DISK XFER
 				;MAY HAVE FAULTED AND FLUSHED SECOND LEVEL MAP BLOCK.
 
 
@@ -1420,25 +1645,25 @@ SWAPIN2-X
 ;	(popj)
 ;; quux revision 13: gone; one ccw moves a page (appendix a1.11).
 
-PAGE-IN-GET-MAP-BITS   ;Get PHT2 bits and leave them in A-DISK-SWAPIN-PHT2-BITS.
-	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	(CALL XRGN)					;=> region number in M-T
-	(CALL-EQUAL M-T A-V-NIL ILLOP)			;Swapping in a page not in a region
-	((VMA-START-READ) ADD M-T A-V-REGION-BITS)	;Get misc bits word
-	(ILLOP-IF-PAGE-FAULT)				;Should be wired down
-	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	((M-TEM) SELECTIVE-DEPOSIT READ-MEMORY-DATA (LISP-BYTE %%REGION-MAP-BITS)
-	     (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	((A-DISK-SWAPIN-PHT2-BITS) M-TEM)
-	((M-T) A-MAR-LOW)				;Check VMA against MAR
-	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART A-ZERO)
-	(POPJ-LESS-THAN M-A A-T)
-	((M-T) A-MAR-HIGH)
-	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART (A-CONSTANT (EVAL (1- PAGE-SIZE))))
-	(POPJ-GREATER-THAN M-A A-T)	;If MAR to be set, change map status and turn off
-	(POPJ-AFTER-NEXT
-	 (M-T) (A-CONSTANT (EVAL %PHT-MAP-STATUS-MAR)))	; hardware access
-       ((A-DISK-SWAPIN-PHT2-BITS) DPB M-T PHT2-MAP-ACCESS-AND-STATUS-CODE A-TEM)
+;PAGE-IN-GET-MAP-BITS   ;Get PHT2 bits and leave them in A-DISK-SWAPIN-PHT2-BITS.
+;	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	(CALL XRGN)					;=> region number in M-T
+;	(CALL-EQUAL M-T A-V-NIL ILLOP)			;Swapping in a page not in a region
+;	((VMA-START-READ) ADD M-T A-V-REGION-BITS)	;Get misc bits word
+;	(ILLOP-IF-PAGE-FAULT)				;Should be wired down
+;	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	((M-TEM) SELECTIVE-DEPOSIT READ-MEMORY-DATA (LISP-BYTE %%REGION-MAP-BITS)
+;	     (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	((A-DISK-SWAPIN-PHT2-BITS) M-TEM)
+;	((M-T) A-MAR-LOW)				;Check VMA against MAR
+;	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART A-ZERO)
+;	(POPJ-LESS-THAN M-A A-T)
+;	((M-T) A-MAR-HIGH)
+;	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART (A-CONSTANT (EVAL (1- PAGE-SIZE))))
+;	(POPJ-GREATER-THAN M-A A-T)	;If MAR to be set, change map status and turn off
+;	(POPJ-AFTER-NEXT
+;	 (M-T) (A-CONSTANT (EVAL %PHT-MAP-STATUS-MAR)))	; hardware access
+;       ((A-DISK-SWAPIN-PHT2-BITS) DPB M-T PHT2-MAP-ACCESS-AND-STATUS-CODE A-TEM)
 
 ;;; Second part.  Make physical page frame number A-DISK-SWAPIN-PHYSICAL-PAGE-FRAME
 ;;;  known at A-DISK-SWAPIN-VIRTUAL-ADDRESS.  PHT2 bits are in
@@ -1446,46 +1671,46 @@ PAGE-IN-GET-MAP-BITS   ;Get PHT2 bits and leave them in A-DISK-SWAPIN-PHT2-BITS.
 ;;; A-PAGE-IN-PHT1 contains the bits desired in the PHT1 (swap status mainly)
 ;;; Clobbers M-A, M-B, M-T, A-TEM1, A-TEM3
 
-PAGE-IN-MAKE-KNOWN
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)		;Find hole in PHT for it
-       ((M-T) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	(CALL-IF-BIT-SET PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)	;Supposed to be a hole!
-	((M-A) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	((WRITE-MEMORY-DATA-START-WRITE)  ;Construct and store PHT1 word
-	    SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-PAGE-IN-PHT1)
-	(ILLOP-IF-PAGE-FAULT)			;Should be wired
-	((M-PGF-TEM) A-DISK-SWAPIN-PAGE-FRAME)
+;PAGE-IN-MAKE-KNOWN
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)		;Find hole in PHT for it
+;       ((M-T) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	(CALL-IF-BIT-SET PHT1-VALID-BIT READ-MEMORY-DATA ILLOP)	;Supposed to be a hole!
+;	((M-A) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	((WRITE-MEMORY-DATA-START-WRITE)  ;Construct and store PHT1 word
+;	    SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-PAGE-IN-PHT1)
+;	(ILLOP-IF-PAGE-FAULT)			;Should be wired
+;	((M-PGF-TEM) A-DISK-SWAPIN-PAGE-FRAME)
 ;	((WRITE-MEMORY-DATA) SELECTIVE-DEPOSIT M-PGF-TEM 
 ;		PHT2-PHYSICAL-PAGE-NUMBER	;Restore access, status, and meta bits
 ;		A-DISK-SWAPIN-PHT2-BITS)
 	;; 1024-word pages (contract g2, option (w)): pht2's physical page is the
 	;; frame's first map entry, four times the frame's number
-	((write-memory-data) dpb m-pgf-tem
-		pht2-page-frame-number		;restore access, status, and meta bits
-		a-disk-swapin-pht2-bits)
-	(DISPATCH (LISP-BYTE %%PHT2-MAP-STATUS-CODE) MD D-SWAPAR) ;Verify the bits
+;	((write-memory-data) dpb m-pgf-tem
+;		pht2-page-frame-number		;restore access, status, and meta bits
+;		a-disk-swapin-pht2-bits)
+;	(DISPATCH (LISP-BYTE %%PHT2-MAP-STATUS-CODE) MD D-SWAPAR) ;Verify the bits
 		;; This will go to ILLOP if this is a page of a free region
-	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))	;Store PHT2
-	(ILLOP-IF-PAGE-FAULT)				;Should be wired
-	((WRITE-MEMORY-DATA) M-A-1 VMA A-V-PAGE-TABLE-AREA)	;0,,Index in PHT
-	((VMA) A-DISK-SWAPIN-PAGE-FRAME)
-	(POPJ-AFTER-NEXT
-	 (VMA-START-WRITE) ADD VMA A-V-PHYSICAL-PAGE-DATA)
-       (ILLOP-IF-PAGE-FAULT)
+;	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))	;Store PHT2
+;	(ILLOP-IF-PAGE-FAULT)				;Should be wired
+;	((WRITE-MEMORY-DATA) M-A-1 VMA A-V-PAGE-TABLE-AREA)	;0,,Index in PHT
+;	((VMA) A-DISK-SWAPIN-PAGE-FRAME)
+;	(POPJ-AFTER-NEXT
+;	 (VMA-START-WRITE) ADD VMA A-V-PHYSICAL-PAGE-DATA)
+;       (ILLOP-IF-PAGE-FAULT)
 
-(LOCALITY D-MEM)
-(START-DISPATCH 3 0)				;DISPATCH ON MAP-STATUS
-D-SWAPAR					;VERIFY MAP STATUS CODE FROM CORE
-	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;0 MAP NOT SET UP ERRONEOUS
-	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;1 META BITS ONLY ERRONEOUS
-	(P-BIT R-BIT)				;2 READ ONLY
-	(P-BIT R-BIT)				;3 READ WRITE FIRST
-	(P-BIT R-BIT)				;4 READ WRITE
-	(P-BIT R-BIT)				;5 PDL BUFFER
-	(P-BIT R-BIT)				;6 MAR BREAK
-	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;7 UNUSED CODE
-(END-DISPATCH)
-(LOCALITY I-MEM)
+;(LOCALITY D-MEM)
+;(START-DISPATCH 3 0)				;DISPATCH ON MAP-STATUS
+;D-SWAPAR					;VERIFY MAP STATUS CODE FROM CORE
+;	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;0 MAP NOT SET UP ERRONEOUS
+;	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;1 META BITS ONLY ERRONEOUS
+;	(P-BIT R-BIT)				;2 READ ONLY
+;	(P-BIT R-BIT)				;3 READ WRITE FIRST
+;	(P-BIT R-BIT)				;4 READ WRITE
+;	(P-BIT R-BIT)				;5 PDL BUFFER
+;	(P-BIT R-BIT)				;6 MAR BREAK
+;	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;7 UNUSED CODE
+;(END-DISPATCH)
+;(LOCALITY I-MEM)
 
 ;INITIALIZE A FRESH PAGE BY FILLING IT WITH <DTP-TRAP .>
 ; Virtual adr in A-DISK-SWAPIN-VIRTUAL-ADDRESS (no type bits), M-B/ PAGE FRAME NUMBER
@@ -1527,24 +1752,24 @@ D-SWAPAR					;VERIFY MAP STATUS CODE FROM CORE
 ;	(jump-not-equal m-tem a-zero czrr0)		;until all four are done
 	;; quux revision 13: one map entry maps the whole 1024-word page, so map
 	;; 0@2 to it once and fill its 1024 words, as the cadr filled its 256.
-czrr	((md) a-zero)				;clobber map 0 to point to page
-	((m-t) memory-map-data)			;save 0@2
-	((vma-write-map) dpb m-b map-physical-page-number
-		(a-constant (plus (byte-mask map-write-enable-second-level-write)
-				  (byte-value map-access-code 3)))) ;r/w
-	((vma) a-zero)			;compute page base address
-	((a-tem1) selective-deposit m-zero vma-low-bits a-disk-swapin-virtual-address)
-czrr1	((write-memory-data-start-write)	;store traps pointing to self
-		add vma a-tem1)			;note dtp-trap = 0
-	(illop-if-page-fault)
-	(jump-less-than-xct-next vma (a-constant 1777) czrr1)
-       ((vma) add vma (a-constant 1))
-	((A-FRESH-PAGE-COUNT) ADD M-ZERO A-FRESH-PAGE-COUNT ALU-CARRY-IN-ONE)
-	((MD) A-ZERO)
-	((VMA-WRITE-MAP) MAP-WRITE-SECOND-LEVEL-MAP M-T	;RESTORE 0@2
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
-	(JUMP-XCT-NEXT SWAPIN2)			;RETURN TO MAIN SWAP-IN CODE
-       ((VMA) A-V-NIL)
+;czrr	((md) a-zero)				;clobber map 0 to point to page
+;	((m-t) memory-map-data)			;save 0@2
+;	((vma-write-map) dpb m-b map-physical-page-number
+;		(a-constant (plus (byte-mask map-write-enable-second-level-write)
+;				  (byte-value map-access-code 3)))) ;r/w
+;	((vma) a-zero)			;compute page base address
+;	((a-tem1) selective-deposit m-zero vma-low-bits a-disk-swapin-virtual-address)
+;czrr1	((write-memory-data-start-write)	;store traps pointing to self
+;		add vma a-tem1)			;note dtp-trap = 0
+;	(illop-if-page-fault)
+;	(jump-less-than-xct-next vma (a-constant 1777) czrr1)
+;       ((vma) add vma (a-constant 1))
+;	((A-FRESH-PAGE-COUNT) ADD M-ZERO A-FRESH-PAGE-COUNT ALU-CARRY-IN-ONE)
+;	((MD) A-ZERO)
+;	((VMA-WRITE-MAP) MAP-WRITE-SECOND-LEVEL-MAP M-T	;RESTORE 0@2
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	(JUMP-XCT-NEXT SWAPIN2)			;RETURN TO MAIN SWAP-IN CODE
+;       ((VMA) A-V-NIL)
 
 ;Ager. Called from DISK-SWAP-HANDLER, may clobber M-1, A-TEM1, A-TEM2, A-TEM3, M-TEM.
 ;Must be called with A-AGING-SCAN-POINTER in M-1.
@@ -1552,44 +1777,44 @@ czrr1	((write-memory-data-start-write)	;store traps pointing to self
 ;to A-FINDCORE-SCAN-POINTER, skipping over the page which is being read in now.
 ;If a page is found with normal swap-status, it is changed to age trap.
 ;If a page is found with age-trap status, it is changed to flushable.
-AGER	((A-AGING-SCAN-POINTER) A-FINDCORE-SCAN-POINTER)	;Will advance to here
-AGER0	((VMA-START-READ) ADD M-1 A-V-PHYSICAL-PAGE-DATA)
-	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END AGER1)	;If wrap around
-	(ILLOP-IF-PAGE-FAULT)
-	((M-1) ADD M-1 (A-CONSTANT 1))
-	(POPJ-EQUAL M-1 A-FINDCORE-SCAN-POINTER)	;Return if caught up, skipping this one
+;AGER	((A-AGING-SCAN-POINTER) A-FINDCORE-SCAN-POINTER)	;Will advance to here
+;AGER0	((VMA-START-READ) ADD M-1 A-V-PHYSICAL-PAGE-DATA)
+;	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END AGER1)	;If wrap around
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-1) ADD M-1 (A-CONSTANT 1))
+;	(POPJ-EQUAL M-1 A-FINDCORE-SCAN-POINTER)	;Return if caught up, skipping this one
 ;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
+;	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
 ;	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) AGER0)	;No page here
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	(JUMP-EQUAL M-TEM (a-constant 3777777) AGER0)	;No page here
-	((VMA-START-READ) ADD M-TEM A-V-PAGE-TABLE-AREA)
-	(ILLOP-IF-PAGE-FAULT)
-	(DISPATCH PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-AGER)
+;	(JUMP-EQUAL M-TEM (a-constant 3777777) AGER0)	;No page here
+;	((VMA-START-READ) ADD M-TEM A-V-PAGE-TABLE-AREA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	(DISPATCH PHT1-SWAP-STATUS-CODE READ-MEMORY-DATA D-AGER)
 
-AGER1	(POPJ-AFTER-NEXT (M-1) A-ZERO)			;Wrap around to page zero
-       ((VMA-START-READ) ADD M-1 A-V-PHYSICAL-PAGE-DATA)
+;AGER1	(POPJ-AFTER-NEXT (M-1) A-ZERO)			;Wrap around to page zero
+;       ((VMA-START-READ) ADD M-1 A-V-PHYSICAL-PAGE-DATA)
 
-(LOCALITY D-MEM)
-(START-DISPATCH 3 INHIBIT-XCT-NEXT-BIT)
-D-AGER	(AGER0)		;0 PHT ENTRY INVALID, IGNORE
-	(AGER2)		;1 NORMAL, SET AGE TRAP
-	(AGER0)		;2 FLUSHABLE, IGNORE
-	(AGER0)		;3 PREPAGED, IGNORE
-	(AGER3)		;4 AGE TRAP, CHANGE TO FLUSHABLE IF AGED ENOUGH
-	(AGER0)		;5 WIRED, IGNORE
-	(P-BIT ILLOP)	;6 NOT USED, ERROR
-	(P-BIT ILLOP)	;7 NOT USED, ERROR
-(END-DISPATCH)
-(LOCALITY I-MEM)
+;(LOCALITY D-MEM)
+;(START-DISPATCH 3 INHIBIT-XCT-NEXT-BIT)
+;D-AGER	(AGER0)		;0 PHT ENTRY INVALID, IGNORE
+;	(AGER2)		;1 NORMAL, SET AGE TRAP
+;	(AGER0)		;2 FLUSHABLE, IGNORE
+;	(AGER0)		;3 PREPAGED, IGNORE
+;	(AGER3)		;4 AGE TRAP, CHANGE TO FLUSHABLE IF AGED ENOUGH
+;	(AGER0)		;5 WIRED, IGNORE
+;	(P-BIT ILLOP)	;6 NOT USED, ERROR
+;	(P-BIT ILLOP)	;7 NOT USED, ERROR
+;(END-DISPATCH)
+;(LOCALITY I-MEM)
 
 ;CHANGE NORMAL TO AGE-TRAP, ALSO TURN OFF HARDWARE MAP ACCESS, SET AGE TO 0
-AGER2	((A-PAGE-AGE-COUNT) ADD M-ZERO A-PAGE-AGE-COUNT ALU-CARRY-IN-ONE)
-	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
-	    PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE
-	    (A-CONSTANT (EVAL %PHT-SWAP-STATUS-AGE-TRAP)))
-	(ILLOP-IF-PAGE-FAULT)
+;AGER2	((A-PAGE-AGE-COUNT) ADD M-ZERO A-PAGE-AGE-COUNT ALU-CARRY-IN-ONE)
+;	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
+;	    PHT1-ALL-BUT-AGE-AND-SWAP-STATUS-CODE
+;	    (A-CONSTANT (EVAL %PHT-SWAP-STATUS-AGE-TRAP)))
+;	(ILLOP-IF-PAGE-FAULT)
 ;	(JUMP-XCT-NEXT AGER0)
 ;       ((VMA-WRITE-MAP)				;FLUSH 2ND LVL MAP, IF ANY
 ;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
@@ -1607,25 +1832,640 @@ AGER2	((A-PAGE-AGE-COUNT) ADD M-ZERO A-PAGE-AGE-COUNT ALU-CARRY-IN-ONE)
 ;	(jump-xct-next ager0)
 ;       ((vma-write-map) (a-constant (byte-mask map-write-enable-second-level-write)))
 	;; quux revision 13: one map entry a page, as the cadr's
-	(jump-xct-next ager0)
-       ((vma-write-map)				;flush 2nd lvl map, if any
-		(a-constant (byte-mask map-write-enable-second-level-write)))
+;	(jump-xct-next ager0)
+;       ((vma-write-map)				;flush 2nd lvl map, if any
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
 	;; AGER0 will put good data in VMA.
 
 ;CHANGE AGE-TRAP TO FLUSHABLE IF HAS BEEN AGED ENOUGH
-AGER3	((M-TEM) PHT1-AGE READ-MEMORY-DATA)
-	(JUMP-GREATER-OR-EQUAL M-TEM A-AGING-DEPTH AGER4)	;AGED ENOUGH
-	((WRITE-MEMORY-DATA-START-WRITE) ADD READ-MEMORY-DATA	;AGE MORE BEFORE MAKING
-		(A-CONSTANT (BYTE-VALUE PHT1-AGE 1)))		; FLUSHABLE
-	(ILLOP-IF-PAGE-FAULT)
-	(JUMP AGER0)
+;AGER3	((M-TEM) PHT1-AGE READ-MEMORY-DATA)
+;	(JUMP-GREATER-OR-EQUAL M-TEM A-AGING-DEPTH AGER4)	;AGED ENOUGH
+;	((WRITE-MEMORY-DATA-START-WRITE) ADD READ-MEMORY-DATA	;AGE MORE BEFORE MAKING
+;		(A-CONSTANT (BYTE-VALUE PHT1-AGE 1)))		; FLUSHABLE
+;	(ILLOP-IF-PAGE-FAULT)
+;	(JUMP AGER0)
 
-AGER4	((A-PAGE-FLUSH-COUNT) ADD M-ZERO A-PAGE-FLUSH-COUNT ALU-CARRY-IN-ONE)
-	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
-	    PHT1-ALL-BUT-SWAP-STATUS-CODE (A-CONSTANT (EVAL %PHT-SWAP-STATUS-FLUSHABLE)))
-	(ILLOP-IF-PAGE-FAULT)
-	(JUMP AGER0)
+;AGER4	((A-PAGE-FLUSH-COUNT) ADD M-ZERO A-PAGE-FLUSH-COUNT ALU-CARRY-IN-ONE)
+;	((WRITE-MEMORY-DATA-START-WRITE) SELECTIVE-DEPOSIT READ-MEMORY-DATA
+;	    PHT1-ALL-BUT-SWAP-STATUS-CODE (A-CONSTANT (EVAL %PHT-SWAP-STATUS-FLUSHABLE)))
+;	(ILLOP-IF-PAGE-FAULT)
+;	(JUMP AGER0)
 
+;;; quux revision 14 (contract g3 revision 14, 3, 9; appendix a14.2, a14.3,
+;;; a14.12): paging over a page table and slots.
+;;;
+;;; every page of every region has an entry in a two-level page table: a
+;;; directory of 4,096 entries in four frames, register-page word 220 its first
+;;; frame, each naming a page-table page of 1,024 entries.  the tables,
+;;; physical-page-data (two words a frame) and the slot bitmap (a bit a slot of
+;;; the paging partition) are frames the cold boot takes at the top of the
+;;; memory it finds; page-table pages are taken below them, downwards
+;;; (take-table-frame).  the microcode reaches all of them through the physical
+;;; memory window, 36000000000 plus the physical address, so touching them
+;;; never faults.  an entry in core holds its frame; one not in core holds the
+;;; page's slot, where its contents are on the disk, or no slot for a page never
+;;; written, which is filled fresh when first touched.  the hardware walks the
+;;; table on a tlb miss and sets accessed and modified; software's rule
+;;; (appendix a14.6): when an entry changes, its tlb entry is invalidated in
+;;; the same sequence, with no reference to the page between.
+
+;;; find-page-entry: the page entry of the virtual address in a-tem1 (its
+;;; pointer field; the tag is ignored).  returns with vma the entry's window
+;;; address and md the entry; with no page-table page for its megaword, vma 0
+;;; and md 0, which reads as status 0, no entry.  clobbers m-tem only.
+FIND-PAGE-ENTRY
+	((m-tem) a-tem1)
+	((m-tem) vma-directory-index m-tem)
+	((vma-start-read) add m-tem a-directory-window)
+	(illop-if-page-fault)			;the window never faults
+	((m-tem) directory-entry-status md)
+	(jump-not-equal m-tem (a-constant 4) find-page-entry-none)
+	((m-tem) a-tem1)
+	((m-tem) vma-table-index m-tem)
+	((m-tem) dpb md (byte-field 18. 10.) a-tem)	;the page-table page's frame
+	(popj-after-next (vma-start-read) dpb (m-constant -1) physical-memory-window-bits a-tem)
+       (illop-if-page-fault)
+find-page-entry-none
+	((vma) a-zero)
+	(popj-after-next (md) a-zero)
+       (no-op)
+
+;;; find-page-entry-or-make: as find-page-entry, but a megaword with no
+;;; page-table page gets one (take-table-frame), zeroed, all no entry.  only
+;;; make-region and the cold boot make entries.  besides what take-table-frame
+;;; clobbers (an eviction), clobbers a-make-entry-va.
+FIND-PAGE-ENTRY-OR-MAKE
+	(call find-page-entry)
+	(popj-not-equal vma a-zero)
+	((a-make-entry-va) a-tem1)
+	(call take-table-frame)			;its frame in m-b, zeroed
+	((m-tem) a-make-entry-va)
+	((m-tem) vma-directory-index m-tem)
+	((vma) add m-tem a-directory-window)
+	((write-memory-data-start-write) dpb m-b directory-entry-frame
+		(a-constant directory-entry-present))
+	(illop-if-page-fault)
+	(jump-xct-next find-page-entry)
+       ((a-tem1) a-make-entry-va)
+
+;;; take-table-frame: a frame for a page-table page, the one just below those
+;;; taken (a-table-page-frame), with its page evicted if it holds one; wired
+;;; in physical-page-data, page 0, no slot; zeroed.  returns it in m-b.
+;;; clobbers m-a, m-t, m-tem, a-tem1..3, q-r, vma, md, and an eviction's
+;;; (evict-page): page tables are rare, and only make-region and the cold boot
+;;; take them, saving what they keep.
+TAKE-TABLE-FRAME
+	((m-b) a-table-page-frame)
+	((m-b) sub m-b (a-constant 1))
+	(call-less-or-equal m-b a-wired-frames illop)	;tables down to the wired frames: no memory
+	((a-table-page-frame) m-b)
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	(call-equal m-tem (a-constant ppd-out-of-service) illop)	;a frame findcore handed out
+	(jump-if-bit-set ppd-free-bit md take-table-frame-1)
+	(call-if-bit-set ppd-wired-bit md illop)	;a wired page there: no memory for tables
+	((m-tem) ppd-virtual-page-number md)
+	((a-tem1) dpb m-tem vma-page-addr-part a-zero)
+	(call find-page-entry)			;its page: evict it
+	((m-tem) map-status-code md)
+	(call-less-than m-tem (a-constant 2) illop)	;physical-page-data and the table disagree
+	(call evict-page)
+take-table-frame-1
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	((vma) add m-tem a-ppd-window)
+	((write-memory-data-start-write) (a-constant ppd-wired-table))
+	(illop-if-page-fault)
+	((write-memory-data) (a-constant (plus (byte-value q-data-type dtp-fix) page-entry-no-slot)))
+	((vma-start-write) add vma (a-constant 1))
+	(illop-if-page-fault)
+	(jump-xct-next fill-frame)		;zeroed, status 0, and return
+       ((a-tem2) (a-constant (byte-value q-data-type dtp-fix)))
+
+;;; fill-frame: every word of frame m-b gets a-tem2.  clobbers m-tem, a-tem1,
+;;; vma, md.
+FILL-FRAME
+	((m-tem) dpb m-b vma-phys-page-addr-part a-zero)
+	((a-tem1) dpb (m-constant -1) physical-memory-window-bits a-tem)
+	((m-tem) a-zero)
+fill-frame-1
+	((write-memory-data) a-tem2)
+	((vma-start-write) add m-tem a-tem1)
+	(illop-if-page-fault)
+	(jump-less-than-xct-next m-tem (a-constant 1777) fill-frame-1)
+       ((m-tem) add m-tem (a-constant 1))
+	(popj-after-next (vma) a-v-nil)
+       (no-op)
+
+;;; entry-slot: the slot a not-in-core entry, md, holds, in m-tem (22 bits;
+;;; 17777777 is no slot).  clobbers a-tem3.
+ENTRY-SLOT
+	((m-tem) page-entry-slot-low md)
+	((a-tem3) m-tem)
+	((m-tem) page-entry-slot-high md)
+	(popj-after-next (m-tem) dpb m-tem slot-number-high a-tem3)
+       (no-op)
+
+;;; the slot bitmap (appendix a14.12): a bit a slot, 1 taken.
+;;; slot-bit: reads the bitmap word of the slot in a-slot-tem: vma its window
+;;; address, md the word, m-tem the slot's bit, a-slot-bit-tem its position.
+;;; slot-set and slot-clear then write it with the bit 1 or 0.  they clobber
+;;; m-tem, a-slot-word-tem, vma and md, and keep a-slot-tem.
+SLOT-BIT
+	((m-tem) a-slot-tem)
+	((m-tem) (byte-field 27. 5) m-tem)	;the word
+	((vma-start-read) add m-tem a-slot-bitmap-window)
+	(illop-if-page-fault)
+	((m-tem) a-slot-tem)
+	((m-tem) (byte-field 5 0) m-tem)	;the bit
+	((a-slot-bit-tem) m-tem)
+	;; an ldb of the bit: its rotate is (40. - position) mod 40., 50 less the
+	;; position, ored into the next instruction (see xrgn1).
+	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem)
+       ((m-tem) (byte-field 1 0) md)
+
+SLOT-SET
+	((a-slot-word-tem) md)
+	((m-tem) a-slot-bit-tem)
+	;; a dpb's rotate is the position, ored into the next instruction
+	((oa-reg-low) dpb m-tem (byte-field 5 0) a-zero)
+	((write-memory-data-start-write) dpb (m-constant -1) (byte-field 1 0) a-slot-word-tem)
+	(illop-if-page-fault)
+	(popj)
+
+SLOT-CLEAR
+	((a-slot-word-tem) md)
+	((m-tem) a-slot-bit-tem)
+	((oa-reg-low) dpb m-tem (byte-field 5 0) a-zero)
+	((write-memory-data-start-write) dpb m-zero (byte-field 1 0) a-slot-word-tem)
+	(illop-if-page-fault)
+	(popj)
+
+;;; free-slot: frees the slot in a-slot-tem, unless it is no slot.
+FREE-SLOT
+	((m-tem) a-slot-tem)
+	(popj-equal m-tem (a-constant page-entry-no-slot))
+	(call slot-bit)
+	(jump slot-clear)
+
+;;; allocate-slot (contract g3 revision 14, 9.3): the lowest free slot at or
+;;; above a-slot-hint, wrapping round, marked taken; in m-tem, and the hint
+;;; moves past it.  out-of-slots halts when there is none: commit (make-region)
+;;; keeps the regions' pages within the slots and the pageable frames.
+;;; clobbers a-slot-tem, a-slot-count-tem and slot-bit's.
+ALLOCATE-SLOT
+	((a-slot-tem) a-slot-hint)
+	((a-slot-count-tem) a-disk-maximum-pages)	;slots to look at
+allocate-slot-1
+	((m-tem) a-slot-count-tem)
+	(jump-equal m-tem a-zero out-of-slots)
+	((a-slot-count-tem) sub m-tem (a-constant 1))
+	((m-tem) a-slot-tem)
+	(jump-less-than-unsigned m-tem a-disk-maximum-pages allocate-slot-2)
+	((a-slot-tem) a-zero)			;wrap round
+allocate-slot-2
+	(call slot-bit)
+	(jump-equal m-tem a-zero allocate-slot-3)
+	((m-tem) a-slot-tem)
+	(jump-xct-next allocate-slot-1)
+       ((a-slot-tem) add m-tem (a-constant 1))
+allocate-slot-3
+	(call slot-set)
+	((m-tem) a-slot-tem)
+	(popj-after-next (a-slot-hint) add m-tem (a-constant 1))
+       ((m-tem) a-slot-tem)
+
+;; allocate-slot comes here when every slot of the paging partition is taken.
+;; the halt shows this location.
+out-of-slots
+	(call illop)
+
+;;; slot-hint-for-page: the slot allocator takes the lowest free slot above the
+;;; slot of the page before (contract g3 revision 14, 9.3), so that a region
+;;; written out in order gets a run of slots, which prepaging reads in one
+;;; transfer.  sets a-slot-hint from the page before a-evict-va, if that page
+;;; has a slot.  clobbers m-tem, a-tem1, q-r, vma, md.
+SLOT-HINT-FOR-PAGE
+	((m-tem) a-evict-va)
+	((a-tem1) sub m-tem (a-constant (eval page-size)))
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(popj-equal m-tem a-zero)		;no entry
+	(jump-not-equal m-tem (a-constant 1) slot-hint-in-core)
+	(call entry-slot)
+slot-hint-1
+	(popj-equal m-tem (a-constant page-entry-no-slot))
+	(popj-after-next (a-slot-hint) add m-tem (a-constant 1))
+       (no-op)
+slot-hint-in-core				;its frame's physical-page-data word 1
+	((m-tem) map-physical-page-number md)
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((vma-start-read) add vma (a-constant 1))
+	(illop-if-page-fault)
+	(jump-xct-next slot-hint-1)
+       ((m-tem) q-pointer md)
+
+;;; set-findcore-pointer: findcore's next frame, the one after m-b, wrapping.
+SET-FINDCORE-POINTER
+	((m-tem) m+1 m-b)
+	(jump-less-than-unsigned m-tem a-memory-frames set-findcore-pointer-1)
+	((m-tem) a-zero)
+set-findcore-pointer-1
+	(popj-after-next (a-findcore-scan-pointer) m-tem)
+       (no-op)
+
+;;; COMES HERE WHEN A PAGE NEEDS TO BE READ IN FROM DISK.  (quux revision 14.)
+;;; the page's entry is not in core (status 1), and holds its slot, or no slot
+;;; for a fresh page.  findcore gives a frame; the page is read from its slot
+;;; (5 blocks at the paging partition's base plus 5 times the slot, appendix
+;;; a14.12), or filled fresh (czrr) if it has none; the entry gets the frame
+;;; and the region's access, status and meta bits, its <19:18> kept, and the
+;;; tlb entry the faulting walk loaded is invalidated (contract g3 revision 14,
+;;; 9.3).  prepaging (disk switch 3) reads, in the same transfer, the pages
+;;; after it in its region that are not in core and whose slots follow its
+;;; slot: runs only.  the reference is then retried.
+SWAPIN	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP)	;Uh uh, no paging from interrupts
+	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB M-ZERO Q-ALL-BUT-POINTER A-PGF-VMA)
+	((a-tem1) a-disk-swapin-virtual-address)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(call-not-equal m-tem (a-constant 1) illop)	;the walk loaded a not-in-core entry
+	(call entry-slot)
+	((a-swapin-slot) m-tem)
+	((A-DISK-SWAPIN-SIZE) (A-CONSTANT 1))
+	((A-DISK-SWAP-IN-CCW-POINTER) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
+	(JUMP-IF-BIT-SET M-DONT-SWAP-IN SWAPIN-FRESH)  ;going to create 0 core, no disk op.
+	(jump-equal m-tem (a-constant page-entry-no-slot) swapin-fresh)	;never written
+	((M-TEM) A-DISK-SWITCHES)
+	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 3) M-TEM SWAPIN-LOOP)  ;multi-swapin not enabled
+	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+	(CALL XRGN)				;=> region number in M-T.. no XCT-NEXT.
+	(CALL-EQUAL M-T A-V-NIL ILLOP)		;Swapping in a page not in a region
+	((A-DISK-SAVE-PGF-T) M-T)
+	((VMA-START-READ) ADD M-T A-V-REGION-BITS)
+	(ILLOP-IF-PAGE-FAULT)
+	((A-DISK-SAVE-PGF-A) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+  	((A-DISK-SAVE-1) (LISP-BYTE %%REGION-SWAPIN-QUANTUM) READ-MEMORY-DATA)
+	((a-disk-save-2) a-swapin-slot)		;the slot the next page must have, less 1
+SWAPIN-SIZE-LOOP
+	(JUMP-GREATER-OR-EQUAL M-ZERO A-DISK-SAVE-1 SWAPIN-LOOP)
+	;; the swap-in list holds disk-swap-in-max-pages pages
+	((m-tem) a-disk-swapin-size)
+	(jump-greater-or-equal m-tem (a-constant disk-swap-in-max-pages) swapin-loop)
+	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
+	((A-DISK-SAVE-PGF-A) ADD M-A A-DISK-SAVE-PGF-A)
+	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SAVE-PGF-A)
+	(CALL XRGN)
+	(JUMP-NOT-EQUAL M-T A-DISK-SAVE-PGF-T SWAPIN-LOOP)		;not same region
+	((a-tem1) a-disk-save-pgf-a)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(jump-not-equal m-tem (a-constant 1) swapin-loop)	;in core already
+	(call entry-slot)
+	((m-b) a-disk-save-2)
+	((m-b) add m-b (a-constant 1))
+	(jump-not-equal m-tem a-b swapin-loop)	;its slot does not follow: runs only
+	((a-disk-save-2) m-b)
+	  ;append to transfer
+	((A-DISK-PAGE-READ-APPENDS) M+A+1 M-ZERO A-DISK-PAGE-READ-APPENDS)
+	((A-DISK-SWAPIN-SIZE) M+A+1 M-ZERO A-DISK-SWAPIN-SIZE)
+	(JUMP-XCT-NEXT SWAPIN-SIZE-LOOP)
+       ((A-DISK-SAVE-1) ADD (M-CONSTANT -1) A-DISK-SAVE-1)
+
+;We have found one page of core, store it away in the CCW and loop
+; until we have got enuf for the transfer we intend.
+SWAPIN-LOOP
+	(call findcore)				;a frame in m-b
+	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
+	((vma-start-write) a-disk-swap-in-ccw-pointer)	;one ccw a page
+	(illop-if-page-fault)
+	((a-disk-swap-in-ccw-pointer) m+a+1 a-disk-swap-in-ccw-pointer m-zero)
+	((A-DISK-PAGE-READ-COUNT) ADD M-ZERO A-DISK-PAGE-READ-COUNT ALU-CARRY-IN-ONE)
+	((A-DISK-SWAPIN-SIZE) ADD A-DISK-SWAPIN-SIZE (M-CONSTANT -1))
+	(JUMP-NOT-EQUAL A-DISK-SWAPIN-SIZE M-ZERO SWAPIN-LOOP)
+	((VMA-START-READ) ADD A-DISK-SWAP-IN-CCW-POINTER (M-CONSTANT -1))  ;finish ccw list
+	(ILLOP-IF-PAGE-FAULT)
+	((WRITE-MEMORY-DATA-START-WRITE) SUB WRITE-MEMORY-DATA (A-CONSTANT 1)) ;last
+	(ILLOP-IF-PAGE-FAULT)
+	(CALL PAGE-IN-GET-MAP-BITS)		;the region's bits, for every page of it
+	((C-PDL-BUFFER-POINTER-PUSH) M-C)
+	((M-C) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))	;CCW list pointer (CLP)
+	((m-a) a-swapin-slot)			;the first page's slot
+	(CALL-XCT-NEXT DISK-SWAP-HANDLER)		;Do actual disk transfer
+       ((M-T) (A-CONSTANT DISK-READ-COMMAND))
+	((M-C) C-PDL-BUFFER-POINTER-POP)
+	;; Now loop through ccw list making the pages known, their slots in turn.
+	((M-B) (A-CONSTANT DISK-SWAP-IN-CCW-BASE))
+	((A-DISK-PAGE-READ-OP-COUNT) ADD M-ZERO A-DISK-PAGE-READ-OP-COUNT ALU-CARRY-IN-ONE)
+SWAPIN2-LOOP
+	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-IN) ;Trace page swapin
+	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
+		METER-PAGE-IN)
+	((VMA-START-READ) M-B)
+	(ILLOP-IF-PAGE-FAULT)
+	((A-DISK-SWAPIN-PAGE-FRAME) LDB VMA-PHYS-PAGE-ADDR-PART READ-MEMORY-DATA A-ZERO)
+	((C-PDL-BUFFER-POINTER-PUSH) M-B)
+	(CALL PAGE-IN-MAKE-KNOWN)
+	((M-B) C-PDL-BUFFER-POINTER-POP)
+	((M-A) (A-CONSTANT (EVAL PAGE-SIZE)))
+	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) ADD M-A A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+	((m-a) a-swapin-slot)
+	((a-swapin-slot) add m-a (a-constant 1))	;the next page's slot
+	((m-b) m+a+1 m-b a-zero)		;one ccw a page
+	(JUMP-LESS-THAN M-B A-DISK-SWAP-IN-CCW-POINTER SWAPIN2-LOOP)
+	(JUMP PGF-RESTORE)	;TAKE FAULT AGAIN
+
+;; a page with no slot (never written), or one the consing code is about to
+;; fill (m-dont-swap-in): no disk read; the frame is filled as czrr does.
+SWAPIN-FRESH
+	(call findcore)
+	((a-disk-swapin-page-frame) m-b)
+	(CALL PAGE-IN-GET-MAP-BITS)
+	(call czrr)
+	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-IN) ;Trace page swapin
+	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
+		METER-PAGE-IN)
+	(CALL PAGE-IN-MAKE-KNOWN)
+	(JUMP PGF-RESTORE)	;TAKE FAULT AGAIN
+
+XFINDCORE (MISC-INST-ENTRY %FINDCORE)
+	(call findcore)
+;	(jump return-m-b)
+	;; quux revision 14: the frame as a fixnum.  findcore's m-b is a bare
+	;; number (data type 0, dtp-trap), and page-in-words multiplies it by
+	;; the page size, so return-m-b's bare word reached qimul's d-numarg1 and
+	;; halted in illop: a saved band halted as it booted.
+	(popj-after-next (m-t) dpb m-b q-pointer (a-constant (byte-value q-data-type dtp-fix)))
+       (no-op)
+
+;;; findcore (contract g3 revision 14, 9.1, 9.3): a frame to put a page in, in
+;;; m-b.  a clock over physical-page-data's frames from a-findcore-scan-pointer:
+;;; a free frame is taken; one holding a page that is not wired, and whose
+;;; accessed bit the ager has cleared and nothing has set again, is evicted;
+;;; wired and out-of-service frames are passed over, and so, while the
+;;; scavenger runs, are frames below a-scavenger-ws-enable (the scavenger's
+;;; working set), as today.  after a whole lap with none, the emergency: age
+;;; every frame and look again, once.  the frame is out of service until a page
+;;; is made known in it.  clobbers m-a, m-t, m-tem, a-tem1..3, q-r, vma, md,
+;;; a-paging-tem, a-paging-tem2, and an eviction's.
+FINDCORE
+	((m-b) a-findcore-scan-pointer)
+	((a-paging-tem) a-memory-frames)	;frames to look at before the emergency
+	((a-paging-tem2) a-zero)		;emergencies this time
+findcore0
+	(jump-less-than-unsigned m-b a-memory-frames findcore1)
+	((m-b) a-zero)				;wrap round
+findcore1
+	((m-tem) a-paging-tem)
+	(jump-equal m-tem a-zero findcore3)
+	((a-paging-tem) sub m-tem (a-constant 1))
+	((A-COUNT-FINDCORE-STEPS) M+A+1 M-ZERO A-COUNT-FINDCORE-STEPS)
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	(jump-equal m-tem (a-constant ppd-out-of-service) findcore2)
+	(jump-if-bit-set ppd-free-bit md findcore-free)
+	(jump-if-bit-set ppd-wired-bit md findcore2)
+	(jump-if-bit-clear m-scavenge-flag findcore-page)
+	((m-tem) m+1 m-b)
+	((a-tem1) dpb m-tem vma-phys-page-addr-part a-zero)  ;phys adr + page size
+	((m-tem) dpb m-zero q-all-but-pointer a-scavenger-ws-enable)
+	(jump-greater-than m-tem a-tem1 findcore2)	;in the scavenger's working set
+findcore-page
+	((m-tem) ppd-virtual-page-number md)
+	((a-tem1) dpb m-tem vma-page-addr-part a-zero)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(call-less-than m-tem (a-constant 2) illop)	;physical-page-data and the table disagree
+	(jump-if-bit-clear map-accessed-bit md findcore-evict)	;not used since aged: take it
+findcore2
+	(jump-xct-next findcore0)
+       ((m-b) add m-b (a-constant 1))
+
+findcore-free
+	(call set-findcore-pointer)
+	((write-memory-data) (a-constant (plus (byte-value q-data-type dtp-fix) ppd-out-of-service)))
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	(popj-after-next (vma-start-write) add m-tem a-ppd-window)
+       (illop-if-page-fault)
+
+findcore-evict
+	(call set-findcore-pointer)
+	(jump evict-page)			;vma, md the entry, a-tem1 its address
+
+;; Searched all of memory, time for emergency measures: age all of the pages
+;; in memory, which should make some takeable.  a second lap with none halts.
+findcore3
+	((m-tem) a-paging-tem2)
+	(call-not-equal m-tem a-zero illop)	;no frame to be had: all wired
+	((a-paging-tem2) m+a+1 m-zero a-paging-tem2)
+	((A-COUNT-FINDCORE-EMERGENCIES) M+A+1 M-ZERO A-COUNT-FINDCORE-EMERGENCIES)
+	((a-findcore-scan-pointer) m-b)
+	((a-paging-tem) a-memory-frames)
+	((c-pdl-buffer-pointer-push) m-1)	;Mustn't clobber M-1
+	(call-xct-next ager)			;a whole lap: from findcore's pointer round to it
+       ((m-1) m-b)
+	(jump-xct-next findcore0)		;Try again
+       ((m-1) c-pdl-buffer-pointer-pop)
+
+;;; evict-page: the page in frame m-b leaves memory.  vma and md are its entry
+;;; (window address and word), a-tem1 its address.  if modified, it is written
+;;; to its slot, taking one if it has none (a page's first write-out); the
+;;; entry becomes not in core with its slot, or with none for a fresh page never
+;;; written, which stays fresh; meta bits and <19:18> kept; the tlb entry
+;;; invalidated; the frame out of service, returned in m-b (contract g3
+;;; revision 14, 9.3).  clobbers m-a, m-t, m-tem, a-tem1..3, q-r, vma, md and
+;;; the disk's (m-c is saved; m-1 and m-2 by disk-pgf-save).
+EVICT-PAGE
+	((a-evict-va) a-tem1)
+	((a-evict-entry) vma)
+	((m-a) a-tem1)				;the page's address, for the trace and meter
+	(CALL-NOT-EQUAL A-PAGE-TRACE-PTR M-ZERO PAGE-TRACE-OUT) ;Trace page eviction
+	(CALL-IF-BIT-SET (LISP-BYTE %%METER-PAGE-FAULT-ENABLE) M-METER-ENABLES
+		METER-PAGE-OUT)
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)	;the frame's slot, its word 1
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((vma-start-read) add vma (a-constant 1))
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	((a-evict-slot) m-tem)
+	((vma-start-read) a-evict-entry)
+	(illop-if-page-fault)
+	(jump-if-bit-clear map-modified-bit md evict-page-clean)
+	((m-tem) a-evict-slot)
+	(jump-not-equal m-tem (a-constant page-entry-no-slot) evict-page-write)
+	(call slot-hint-for-page)		;its first write-out: a slot
+	(call allocate-slot)
+	((a-evict-slot) m-tem)
+evict-page-write
+	((A-DISK-PAGE-WRITE-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-COUNT)
+	((A-DISK-PAGE-WRITE-OP-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-OP-COUNT)
+	;; one ccw, the frame's, the last
+	((WRITE-MEMORY-DATA) DPB M-B VMA-PHYS-PAGE-ADDR-PART A-ZERO)
+	((vma-start-write) (a-constant disk-swap-out-ccw-base))
+	(illop-if-page-fault)
+	((C-PDL-BUFFER-POINTER-PUSH) M-C)
+	((M-C) (A-CONSTANT DISK-SWAP-OUT-CCW-BASE))
+	((m-a) a-evict-slot)
+	(CALL-XCT-NEXT DISK-SWAP-HANDLER)	;Do the write (the slot in M-A)
+       ((M-T) (A-CONSTANT DISK-WRITE-COMMAND))
+	((M-C) C-PDL-BUFFER-POINTER-POP)
+	((A-DISK-PAGE-WRITE-WAIT-COUNT) M+A+1 M-ZERO A-DISK-PAGE-WRITE-WAIT-COUNT)
+	((vma-start-read) a-evict-entry)	;the entry again
+	(illop-if-page-fault)
+evict-page-clean
+	((m-t) selective-deposit md (byte-field 6 18.)	;meta bits, <19:18>; not in core
+		(a-constant (plus (byte-value q-data-type dtp-fix)
+				  (byte-value map-status-code 1))))
+	((m-tem) a-evict-slot)
+	((m-t) dpb m-tem page-entry-slot-low a-t)
+	((m-tem) slot-number-high m-tem)
+	((write-memory-data) dpb m-tem page-entry-slot-high a-t)
+	((vma-start-write) a-evict-entry)
+	(illop-if-page-fault)
+	((md) a-evict-va)
+	((vma-write-map) (a-constant write-map-invalidate))	;the tlb's copy
+	;; the frame: out of service, no slot
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	((vma) add m-tem a-ppd-window)
+	((write-memory-data-start-write)
+		(a-constant (plus (byte-value q-data-type dtp-fix) ppd-out-of-service)))
+	(illop-if-page-fault)
+	((write-memory-data) (a-constant (plus (byte-value q-data-type dtp-fix) page-entry-no-slot)))
+	(popj-after-next (vma-start-write) add vma (a-constant 1))
+       (illop-if-page-fault)
+
+PAGE-IN-GET-MAP-BITS   ;Get the region's map bits and leave them in A-DISK-SWAPIN-PHT2-BITS.
+	((C-PDL-BUFFER-POINTER-PUSH) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+	(CALL XRGN)					;=> region number in M-T
+	(CALL-EQUAL M-T A-V-NIL ILLOP)			;Swapping in a page not in a region
+	((VMA-START-READ) ADD M-T A-V-REGION-BITS)	;Get misc bits word
+	(ILLOP-IF-PAGE-FAULT)				;Should be wired down
+	((M-A) DPB M-ZERO Q-ALL-BUT-POINTER A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+	((M-TEM) SELECTIVE-DEPOSIT READ-MEMORY-DATA (LISP-BYTE %%REGION-MAP-BITS)
+	     (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	((A-DISK-SWAPIN-PHT2-BITS) M-TEM)
+	;; quux revision 14 (contract g3 revision 14, 10.1): the mar's bounds
+	;; are compared unsigned, so that a range at or across 2^31 holds.
+	((M-T) A-MAR-LOW)				;Check VMA against MAR
+	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART A-ZERO)
+	(popj-less-than-unsigned m-a a-t)
+	((M-T) A-MAR-HIGH)
+	((M-T) SELECTIVE-DEPOSIT M-T VMA-PAGE-ADDR-PART (A-CONSTANT (EVAL (1- PAGE-SIZE))))
+	(popj-greater-than-unsigned m-a a-t)	;If MAR to be set, change map status and turn off
+	(POPJ-AFTER-NEXT
+	 (M-T) (A-CONSTANT 6))		; hardware access: status 6, the mar's, access 01
+       ((A-DISK-SWAPIN-PHT2-BITS) DPB M-T map-access-and-status-code A-TEM)
+
+;;; page-in-make-known: frame a-disk-swapin-page-frame holds the page at
+;;; a-disk-swapin-virtual-address, whose slot is a-swapin-slot: its entry, not
+;;; in core, gets the frame and a-disk-swapin-pht2-bits' access, status and
+;;; meta bits, its own <19:18> kept, accessed and modified clear; the tlb entry
+;;; the faulting walk loaded is invalidated; physical-page-data's words get the
+;;; page and its slot.  clobbers m-t, m-tem, a-tem1, vma, md.
+PAGE-IN-MAKE-KNOWN
+	((a-tem1) a-disk-swapin-virtual-address)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(call-not-equal m-tem (a-constant 1) illop)	;Supposed to be not in core
+	((m-t) selective-deposit md (byte-field 2 18.) a-disk-swapin-pht2-bits)
+	((m-tem) a-disk-swapin-page-frame)
+	((write-memory-data) dpb m-tem map-physical-page-number a-t)
+	(DISPATCH map-status-code MD D-SWAPAR)	;Verify the bits
+		;; This will go to ILLOP if this is a page of a free region
+	((vma-start-write) vma)			;the entry
+	(illop-if-page-fault)
+	((md) a-tem1)
+	((vma-write-map) (a-constant write-map-invalidate))	;the not-in-core entry the walk loaded
+	((m-tem) a-disk-swapin-page-frame)	;physical-page-data
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((vma) add m-tem a-ppd-window)
+	((m-tem) a-tem1)
+	((write-memory-data-start-write) ldb vma-page-addr-part m-tem
+		(a-constant (byte-value q-data-type dtp-fix)))	;the page, not wired, not free
+	(illop-if-page-fault)
+	((m-tem) a-swapin-slot)
+	((write-memory-data) q-pointer m-tem (a-constant (byte-value q-data-type dtp-fix)))
+	(popj-after-next (vma-start-write) add vma (a-constant 1))
+       (illop-if-page-fault)
+
+(LOCALITY D-MEM)
+(START-DISPATCH 3 0)				;DISPATCH ON MAP-STATUS
+D-SWAPAR					;VERIFY MAP STATUS CODE FROM CORE
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;0 no entry
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;1 not in core
+	(P-BIT R-BIT)				;2 READ ONLY
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;3 retired (read/write first)
+	(P-BIT R-BIT)				;4 READ WRITE
+	(P-BIT R-BIT)				;5 PDL BUFFER
+	(P-BIT R-BIT)				;6 MAR BREAK
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)	;7 a memory's window, never in a table
+(END-DISPATCH)
+(LOCALITY I-MEM)
+
+;;; czrr: INITIALIZE A FRESH PAGE BY FILLING IT WITH <DTP-TRAP .> to each word's
+;;; own address, as before (dtp-trap is 0): frame a-disk-swapin-page-frame,
+;;; through the physical memory window, for the page at
+;;; a-disk-swapin-virtual-address.  clobbers m-tem, a-tem1, a-tem2, vma.
+CZRR
+	((m-tem) a-disk-swapin-page-frame)
+	((m-tem) dpb m-tem vma-phys-page-addr-part a-zero)
+	((a-tem2) dpb (m-constant -1) physical-memory-window-bits a-tem)	;the frame's first word
+	((a-tem1) selective-deposit m-zero vma-low-bits a-disk-swapin-virtual-address)
+	((m-tem) a-zero)
+czrr1	((write-memory-data) add m-tem a-tem1)	;store traps pointing to self
+	((vma-start-write) add m-tem a-tem2)
+	(illop-if-page-fault)
+	(jump-less-than-xct-next m-tem (a-constant 1777) czrr1)
+       ((m-tem) add m-tem (a-constant 1))
+	((A-FRESH-PAGE-COUNT) ADD M-ZERO A-FRESH-PAGE-COUNT ALU-CARRY-IN-ONE)
+	(popj-after-next (vma) a-v-nil)
+       (no-op)
+
+;;; Ager (contract g3 revision 14, 9.1): a clock over physical-page-data's
+;;; frames.  called from disk-swap-handler, while the disk works, with
+;;; a-aging-scan-pointer in m-1 when it is behind findcore's pointer, and from
+;;; findcore's emergency with findcore's pointer in m-1, a whole lap.  from m-1
+;;; round to a-findcore-scan-pointer, for each frame holding a page that is not
+;;; wired: if its accessed bit is set, it is cleared and the page's tlb entry
+;;; invalidated, so that the page's next reference sets it again (a
+;;; write-back); findcore takes a page whose bit is still clear.  may clobber
+;;; m-1, a-tem1, a-tem2, a-tem3, m-tem, vma, md.
+AGER
+ager0	(jump-less-than-unsigned m-1 a-memory-frames ager1)
+	((m-1) a-zero)				;Wrap around to page zero
+ager1	((m-tem) dpb m-1 (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((m-1) add m-1 (a-constant 1))
+	((m-tem) q-pointer md)
+	(jump-equal m-tem (a-constant ppd-out-of-service) ager2)
+	(jump-if-bit-set ppd-free-bit md ager2)
+	(jump-if-bit-set ppd-wired-bit md ager2)
+	((m-tem) ppd-virtual-page-number md)
+	((a-tem1) dpb m-tem vma-page-addr-part a-zero)
+	(call find-page-entry)
+	(jump-if-bit-clear map-accessed-bit md ager2)
+	((m-tem) map-status-code md)
+	(jump-less-than m-tem (a-constant 2) ager2)	;not in core
+	((a-tem2) md)
+	((write-memory-data-start-write) dpb m-zero map-accessed-bit a-tem2)
+	(illop-if-page-fault)
+	((md) a-tem1)
+	((vma-write-map) (a-constant write-map-invalidate))
+	((A-PAGE-AGE-COUNT) ADD M-ZERO A-PAGE-AGE-COUNT ALU-CARRY-IN-ONE)
+ager2	(jump-less-than-unsigned m-1 a-memory-frames ager3)
+	((m-1) a-zero)
+ager3	(jump-not-equal m-1 a-findcore-scan-pointer ager1)
+	((a-aging-scan-pointer) m-1)
+	(popj-after-next (vma) a-v-nil)
+       (no-op)
+
 ;GIVEN AN ADDRESS FIND WHAT AREA IT IS IN.  RETURNS THE AREA NUMBER OR NIL.
 ;THIS WORKS BY FINDING THE REGION NUMBER, THEN FINDING WHAT AREA THAT REGION LIES IN.
 XARN (MISC-INST-ENTRY %AREA-NUMBER)
@@ -1647,7 +2487,13 @@ REGION-TO-AREA
 XRGN (MISC-INST-ENTRY %REGION-NUMBER)
 	((M-A) Q-POINTER C-PDL-BUFFER-POINTER-POP	;An address in the region
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-XRGN1	;; Get word from ADDRESS-SPACE-MAP (assuming it starts on proper boundary!)
+XRGN1	;; quux revision 14 (contract g3 revision 14, 10.3; rule a5): an address
+	;; in a window, vma<31:29> 111, is in no region: nil, before the map,
+	;; whose bytes for the windows stay 0.  %region-number of 0xd0000000 gave
+	;; -238 on revision 13.
+	((m-tem) vma-window-bits m-a)
+	(jump-equal m-tem (a-constant 7) xfalse)
+	;; Get word from ADDRESS-SPACE-MAP (assuming it starts on proper boundary!)
 	((VMA-START-READ) ADDRESS-SPACE-MAP-WORD-INDEX-BYTE M-A A-V-ADDRESS-SPACE-MAP)
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) ADDRESS-SPACE-MAP-BYTE-NUMBER-BYTE M-A)	;Byte number in that word
@@ -1663,11 +2509,16 @@ XRGN1	;; Get word from ADDRESS-SPACE-MAP (assuming it starts on proper boundary!
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(POPJ-NOT-EQUAL M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	;; 0 in table, is either free space or fixed area
-	(JUMP-GREATER-OR-EQUAL M-A A-V-FIRST-UNFIXED-AREA XFALSE)	;Free space
+;	(JUMP-GREATER-OR-EQUAL M-A A-V-FIRST-UNFIXED-AREA XFALSE)	;Free space
+	;; quux revision 14 (contract g3 revision 14, 10.1): unsigned, so that an
+	;; address past 2^31 in free space (ephemeral space) is free space, not
+	;; taken for a fixed area's.
+	(jump-greater-or-equal-unsigned m-a a-v-first-unfixed-area xfalse)	;free space
 	;; Search table of area origins.  I guess linear search is fast enough
 	((M-T) (A-CONSTANT (A-MEM-LOC A-V-INIT-LIST-AREA)))
 XRGN2	((OA-REG-HIGH) DPB M-T OAH-A-SRC A-ZERO)
-       (JUMP-LESS-THAN-XCT-NEXT M-A A-GARBAGE XRGN2)
+;       (JUMP-LESS-THAN-XCT-NEXT M-A A-GARBAGE XRGN2)
+       (jump-less-than-unsigned-xct-next m-a a-garbage xrgn2)	;quux revision 14: unsigned
       ((M-T) SUB M-T (A-CONSTANT 1))
 	(POPJ-AFTER-NEXT (M-T) SUB M-T
 		(A-CONSTANT (DIFFERENCE (A-MEM-LOC A-V-RESIDENT-SYMBOL-AREA) 1)))
@@ -1675,24 +2526,24 @@ XRGN2	((OA-REG-HIGH) DPB M-T OAH-A-SRC A-ZERO)
 
 ;;; MISCELLANEOUS FUNCTIONS FOR LISP PROGRAMS TO HACK THE PAGE HASH TABLE
 
-XCPGS (MISC-INST-ENTRY %CHANGE-PAGE-STATUS)
+;XCPGS (MISC-INST-ENTRY %CHANGE-PAGE-STATUS)
 	;ARGS ARE VIRTUAL ADDRESS, SWAP STATUS CODE, ACCESS STATUS AND META BITS
 	;DOESN'T DO ERROR CHECKING, IF YOU DO THE WRONG THING YOU WILL LOSE.
-	((M-E) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Access, status, and meta bits
-	((M-D) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Swap status code
+;	((M-E) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Access, status, and meta bits
+;	((M-D) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Swap status code
 ;Here from UPDATE-REGION-PHT.  Must bash only M-A, M-B, M-T, tems.
 ;Returns address which came in on pdl, in MD.
 ;Note magic kludge -- sign of M-D means get rid of page entirely (for FREE-REGION)
 ;; that path (below) also bashes m-pgf-tem, in phtdel, a-tem1, in
 ;; compute-page-hash, and vma; free-region alone takes it.
-XCPGS0	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
-       ((M-T) Q-POINTER C-PDL-BUFFER-POINTER)	;Virtual address
-	(JUMP-IF-BIT-CLEAR-XCT-NEXT		;If not swapped in, return NIL, and make
-		PHT1-VALID-BIT READ-MEMORY-DATA XCPGS2)	; sure to clear the map
-       ((M-T) A-V-NIL)
-	((M-T) A-V-TRUE)			;Get ready to return T
-	(JUMP-EQUAL M-D A-V-NIL XCPGS1)		;See if should change swap-status
-	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 31.) M-D XCPGS3) ;If sign bit of M-D set,
+;XCPGS0	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
+;       ((M-T) Q-POINTER C-PDL-BUFFER-POINTER)	;Virtual address
+;	(JUMP-IF-BIT-CLEAR-XCT-NEXT		;If not swapped in, return NIL, and make
+;		PHT1-VALID-BIT READ-MEMORY-DATA XCPGS2)	; sure to clear the map
+;       ((M-T) A-V-NIL)
+;	((M-T) A-V-TRUE)			;Get ready to return T
+;	(JUMP-EQUAL M-D A-V-NIL XCPGS1)		;See if should change swap-status
+;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 31.) M-D XCPGS3) ;If sign bit of M-D set,
 ;	((A-TEM2) ANDCA MD (A-CONSTANT (BYTE-MASK PHT1-MODIFIED-BIT))) ;clear modified flag
 ;	((MD) DPB (M-CONSTANT -1) PHT1-VIRTUAL-PAGE-NUMBER A-TEM2) ;and forget virtual page
 	;; free-region: delete the page's entry and enter the frame anew as a
@@ -1704,34 +2555,34 @@ XCPGS0	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
 	;; most of memory free, the entries gathered where the collector's pages
 	;; hash, and after four to eight flips runs of 10,000 entries made a
 	;; miss take 1,000 probes and the collector ten times slower.
-	((m-a) read-memory-data)			;pht1, the page for phtdelx
-	((m-t) vma)					;-> pht entry to delete
-	((vma-start-read) add vma (a-constant 1))	;pht2
-	(illop-if-page-fault)
-	(call-xct-next corefound2)			;delete it: physical-page-data,
-       ((m-b) pht2-page-frame-number read-memory-data)	; pht, map; m-b is the frame
-	((m-t) dpb m-b vma-phys-page-addr-part a-zero)	;the frame's address,
-	((c-pdl-buffer-pointer-push) m-t)		; for xcppg1
-	(call compute-page-hash)			;the frame's hash, xor 4 entries
-	((m-t) xor m-t (a-constant 8.))			; (8 words): cold-reinit-ppd-3 says why
-xcpgs4	((vma-start-read) add m-t a-v-page-table-area)	;the first hole from it
-	(illop-if-page-fault)
-	(jump-if-bit-clear pht1-valid-bit read-memory-data xcpgs5)
-	((m-t) add m-t (a-constant 2))
-	(jump-less-than m-t a-pht-index-limit xcpgs4)
-	(jump-xct-next xcpgs4)
-       ((m-t) sub m-t a-pht-index-limit)		;wrap around
-xcpgs5	(call xcppg1)					;the free page's entry; returns t
-	(jump xcpgs2)
-XCPGS3	((WRITE-MEMORY-DATA-START-WRITE)
-		SELECTIVE-DEPOSIT MD PHT1-ALL-BUT-SWAP-STATUS-CODE A-D)
-	(ILLOP-IF-PAGE-FAULT)
-XCPGS1	(JUMP-EQUAL M-E A-V-NIL XCPGS2)
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)
-	((A-TEM2) READ-MEMORY-DATA)
-	((WRITE-MEMORY-DATA-START-WRITE) DPB M-E PHT2-ACCESS-STATUS-AND-META-BITS A-TEM2)
-	(ILLOP-IF-PAGE-FAULT)
+;	((m-a) read-memory-data)			;pht1, the page for phtdelx
+;	((m-t) vma)					;-> pht entry to delete
+;	((vma-start-read) add vma (a-constant 1))	;pht2
+;	(illop-if-page-fault)
+;	(call-xct-next corefound2)			;delete it: physical-page-data,
+;       ((m-b) pht2-page-frame-number read-memory-data)	; pht, map; m-b is the frame
+;	((m-t) dpb m-b vma-phys-page-addr-part a-zero)	;the frame's address,
+;	((c-pdl-buffer-pointer-push) m-t)		; for xcppg1
+;	(call compute-page-hash)			;the frame's hash, xor 4 entries
+;	((m-t) xor m-t (a-constant 8.))			; (8 words): cold-reinit-ppd-3 says why
+;xcpgs4	((vma-start-read) add m-t a-v-page-table-area)	;the first hole from it
+;	(illop-if-page-fault)
+;	(jump-if-bit-clear pht1-valid-bit read-memory-data xcpgs5)
+;	((m-t) add m-t (a-constant 2))
+;	(jump-less-than m-t a-pht-index-limit xcpgs4)
+;	(jump-xct-next xcpgs4)
+;       ((m-t) sub m-t a-pht-index-limit)		;wrap around
+;xcpgs5	(call xcppg1)					;the free page's entry; returns t
+;	(jump xcpgs2)
+;XCPGS3	((WRITE-MEMORY-DATA-START-WRITE)
+;		SELECTIVE-DEPOSIT MD PHT1-ALL-BUT-SWAP-STATUS-CODE A-D)
+;	(ILLOP-IF-PAGE-FAULT)
+;XCPGS1	(JUMP-EQUAL M-E A-V-NIL XCPGS2)
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((A-TEM2) READ-MEMORY-DATA)
+;	((WRITE-MEMORY-DATA-START-WRITE) DPB M-E PHT2-ACCESS-STATUS-AND-META-BITS A-TEM2)
+;	(ILLOP-IF-PAGE-FAULT)
 ;XCPGS2	((MD) C-PDL-BUFFER-POINTER-POP)		;ADDRESS LOCATION BEING HACKED
 ;	((VMA-WRITE-MAP)			;FLUSH 2ND LVL MAP, IF ANY
 ;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
@@ -1752,112 +2603,305 @@ XCPGS1	(JUMP-EQUAL M-E A-V-NIL XCPGS2)
 			;no harm done if map miss already, either level
 ;	((md) m-a)
 	;; quux revision 13: one map entry a page, as the cadr's
-xcpgs2	((md) c-pdl-buffer-pointer-pop)		;address location being hacked
-	((vma-write-map)			;flush 2nd lvl map, if any
-		(a-constant (byte-mask map-write-enable-second-level-write)))
+;xcpgs2	((md) c-pdl-buffer-pointer-pop)		;address location being hacked
+;	((vma-write-map)			;flush 2nd lvl map, if any
+;		(a-constant (byte-mask map-write-enable-second-level-write)))
 			;no harm done if map miss already, either level
-	(POPJ-XCT-NEXT)				;MUSTN'T POPJ DURING MAP-WRITE CYCLE
-       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
+;	(POPJ-XCT-NEXT)				;MUSTN'T POPJ DURING MAP-WRITE CYCLE
+;       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
 
-XCPPG (MISC-INST-ENTRY %CREATE-PHYSICAL-PAGE)
+;XCPPG (MISC-INST-ENTRY %CREATE-PHYSICAL-PAGE)
 	;ARG IS PHYSICAL ADDRESS
-	((VMA-START-READ) A-V-PAGE-TABLE-AREA)		;FIND FIRST HOLE
-XCPPG0	(ILLOP-IF-PAGE-FAULT)
-	((M-TEM) SUB VMA A-V-PAGE-TABLE-AREA)
-	(CALL-GREATER-OR-EQUAL M-TEM A-PHT-INDEX-LIMIT ILLOP)	;OUT OF BOUNDS
-	(JUMP-IF-BIT-SET-XCT-NEXT PHT1-VALID-BIT READ-MEMORY-DATA XCPPG0)
-       ((VMA-START-READ) ADD VMA (A-CONSTANT 2))
-	(NO-OP)						;USELESS MEM CYCLE
-	((VMA) SUB VMA (A-CONSTANT 2))			;ADDRESS PHT1 OF HOLE
+;	((VMA-START-READ) A-V-PAGE-TABLE-AREA)		;FIND FIRST HOLE
+;XCPPG0	(ILLOP-IF-PAGE-FAULT)
+;	((M-TEM) SUB VMA A-V-PAGE-TABLE-AREA)
+;	(CALL-GREATER-OR-EQUAL M-TEM A-PHT-INDEX-LIMIT ILLOP)	;OUT OF BOUNDS
+;	(JUMP-IF-BIT-SET-XCT-NEXT PHT1-VALID-BIT READ-MEMORY-DATA XCPPG0)
+;       ((VMA-START-READ) ADD VMA (A-CONSTANT 2))
+;	(NO-OP)						;USELESS MEM CYCLE
+;	((VMA) SUB VMA (A-CONSTANT 2))			;ADDRESS PHT1 OF HOLE
 ;Enter here from COLD-REINIT-PHT.  May smash only M-T.
-XCPPG1	((WRITE-MEMORY-DATA-START-WRITE) DPB (M-CONSTANT -1)	;FAKE VIRTUAL ADDRESS
-		PHT1-VIRTUAL-PAGE-NUMBER
-		(A-CONSTANT (PLUS (PLUS (BYTE-VALUE PHT1-SWAP-STATUS-CODE 2) ;FLUSHABLE
-					(BYTE-VALUE PHT1-VALID-BIT 1))
-				  (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
-	(ILLOP-IF-PAGE-FAULT)
-	((M-T) VMA-PHYS-PAGE-ADDR-PART C-PDL-BUFFER-POINTER-POP);PAGE FRAME NUMBER
-	((WRITE-MEMORY-DATA) SUB VMA A-V-PAGE-TABLE-AREA)	;0,,PHT INDEX
-	((VMA-START-WRITE) ADD M-T A-V-PHYSICAL-PAGE-DATA)
-	(ILLOP-IF-PAGE-FAULT)
-	(JUMP-LESS-THAN VMA A-V-PHYSICAL-PAGE-DATA-END XCPPG2)	;See if table getting bigger
-	(CALL-GREATER-OR-EQUAL VMA A-V-ADDRESS-SPACE-MAP ILLOP)	;Bigger than space allocated
-	((A-V-PHYSICAL-PAGE-DATA-END) ADD VMA (A-CONSTANT 1))
-XCPPG2	((VMA) M+A+1 MD A-V-PAGE-TABLE-AREA)		;Address PHT2
-	(JUMP-XCT-NEXT XTRUE)
+;XCPPG1	((WRITE-MEMORY-DATA-START-WRITE) DPB (M-CONSTANT -1)	;FAKE VIRTUAL ADDRESS
+;		PHT1-VIRTUAL-PAGE-NUMBER
+;		(A-CONSTANT (PLUS (PLUS (BYTE-VALUE PHT1-SWAP-STATUS-CODE 2) ;FLUSHABLE
+;					(BYTE-VALUE PHT1-VALID-BIT 1))
+;				  (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-T) VMA-PHYS-PAGE-ADDR-PART C-PDL-BUFFER-POINTER-POP);PAGE FRAME NUMBER
+;	((WRITE-MEMORY-DATA) SUB VMA A-V-PAGE-TABLE-AREA)	;0,,PHT INDEX
+;	((VMA-START-WRITE) ADD M-T A-V-PHYSICAL-PAGE-DATA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	(JUMP-LESS-THAN VMA A-V-PHYSICAL-PAGE-DATA-END XCPPG2)	;See if table getting bigger
+;	(CALL-GREATER-OR-EQUAL VMA A-V-ADDRESS-SPACE-MAP ILLOP)	;Bigger than space allocated
+;	((A-V-PHYSICAL-PAGE-DATA-END) ADD VMA (A-CONSTANT 1))
+;XCPPG2	((VMA) M+A+1 MD A-V-PAGE-TABLE-AREA)		;Address PHT2
+;	(JUMP-XCT-NEXT XTRUE)
 ;       ((WRITE-MEMORY-DATA-START-WRITE) IOR M-T
 ;		(A-CONSTANT (PLUS (BYTE-VALUE PHT2-ACCESS-STATUS-AND-META-BITS 1200) ;RO
 ;				  (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 	;; 1024-word pages (contract g2, option (w)): m-t is the frame; pht2's
 	;; physical page is its first map entry, four times the frame
-       ((write-memory-data-start-write) dpb m-t pht2-page-frame-number
-		(a-constant (plus (byte-value pht2-access-status-and-meta-bits 1200) ;ro
-				  (byte-value q-data-type dtp-fix))))
+;       ((write-memory-data-start-write) dpb m-t pht2-page-frame-number
+;		(a-constant (plus (byte-value pht2-access-status-and-meta-bits 1200) ;ro
+;				  (byte-value q-data-type dtp-fix))))
 
-XDPPG (MISC-INST-ENTRY %DELETE-PHYSICAL-PAGE)
+;XDPPG (MISC-INST-ENTRY %DELETE-PHYSICAL-PAGE)
 	;ARG is physical address
-	((M-B) VMA-PHYS-PAGE-ADDR-PART C-PDL-BUFFER-POINTER-POP);Page frame number
-	((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
-	(ILLOP-IF-PAGE-FAULT)
-	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END ILLOP)	;PFN too big
+;	((M-B) VMA-PHYS-PAGE-ADDR-PART C-PDL-BUFFER-POINTER-POP);Page frame number
+;	((VMA-START-READ) ADD M-B A-V-PHYSICAL-PAGE-DATA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	(CALL-GREATER-OR-EQUAL VMA A-V-PHYSICAL-PAGE-DATA-END ILLOP)	;PFN too big
 ;	((M-TEM) (BYTE-FIELD 20 0) READ-MEMORY-DATA)	;PHT entry index
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
+;	((m-tem) (byte-field 20. 0) read-memory-data)	;PHT entry index
 ;	(JUMP-EQUAL M-TEM (A-CONSTANT 177777) XFALSE)	;Already deleted or wired
 ;; quux revision 13 (appendix a1.9): the pht index is physical-page-data's <19:0>, 32 m words' 131072-word table
-	(JUMP-EQUAL M-TEM (a-constant 3777777) XFALSE)	;Already deleted or wired
-	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
-	(ILLOP-IF-PAGE-FAULT)
-	(CALL COREFOUND3)				;Swap it out, delete PHT entry
-XDPPG1	(POPJ-AFTER-NEXT (M-T) A-V-TRUE)	;Done, return T
-       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
+;	(JUMP-EQUAL M-TEM (a-constant 3777777) XFALSE)	;Already deleted or wired
+;	((VMA-START-READ M-T) ADD M-TEM A-V-PAGE-TABLE-AREA)
+;	(ILLOP-IF-PAGE-FAULT)
+;	(CALL COREFOUND3)				;Swap it out, delete PHT entry
+;XDPPG1	(POPJ-AFTER-NEXT (M-T) A-V-TRUE)	;Done, return T
+;       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
 
-XPAGE-IN (MISC-INST-ENTRY %PAGE-IN)
-	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB	;ARG 2 - VIRTUAL PAGE NUMBER
-		 C-PDL-BUFFER-POINTER-POP VMA-PAGE-ADDR-PART A-ZERO)
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)		;SEE IF ALREADY IN
-       ((M-T) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
-	(JUMP-IF-BIT-SET-XCT-NEXT PHT1-VALID-BIT READ-MEMORY-DATA XFALSE) ;YES, RETURN NIL
-       ((A-DISK-SWAPIN-PAGE-FRAME) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;ARG 1 - PAGE FRAME
-	(CALL PAGE-IN-GET-MAP-BITS)			;NO, PUT IT IN
-	(CALL-XCT-NEXT PAGE-IN-MAKE-KNOWN)
-       ((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
-						 (BYTE-VALUE PHT1-VALID-BIT 1))
-					   (BYTE-VALUE PHT1-SWAP-STATUS-CODE 1))))
-	(JUMP XDPPG1)					;RETURN T, FIX VMA
+;XPAGE-IN (MISC-INST-ENTRY %PAGE-IN)
+;	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB	;ARG 2 - VIRTUAL PAGE NUMBER
+;		 C-PDL-BUFFER-POINTER-POP VMA-PAGE-ADDR-PART A-ZERO)
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)		;SEE IF ALREADY IN
+;       ((M-T) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
+;	(JUMP-IF-BIT-SET-XCT-NEXT PHT1-VALID-BIT READ-MEMORY-DATA XFALSE) ;YES, RETURN NIL
+;       ((A-DISK-SWAPIN-PAGE-FRAME) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;ARG 1 - PAGE FRAME
+;	(CALL PAGE-IN-GET-MAP-BITS)			;NO, PUT IT IN
+;	(CALL-XCT-NEXT PAGE-IN-MAKE-KNOWN)
+;       ((A-PAGE-IN-PHT1) (A-CONSTANT (PLUS (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
+;						 (BYTE-VALUE PHT1-VALID-BIT 1))
+;					   (BYTE-VALUE PHT1-SWAP-STATUS-CODE 1))))
+;	(JUMP XDPPG1)					;RETURN T, FIX VMA
 
 ;NIL if not swapped in, else PHT1 value, except:
 ;the modified bit in our value is always up to date,
 ;even though that in the PHT1 is not.
-XPGSTS (MISC-INST-ENTRY %PAGE-STATUS)
-	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
-       ((M-T) C-PDL-BUFFER-POINTER-POP)
-	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT MD XFALSE)
-	(POPJ-IF-BIT-SET-XCT-NEXT PHT1-MODIFIED-BIT MD)
-       ((M-T) DPB MD Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;XPGSTS (MISC-INST-ENTRY %PAGE-STATUS)
+;	(CALL-XCT-NEXT SEARCH-PAGE-HASH-TABLE)
+;       ((M-T) C-PDL-BUFFER-POINTER-POP)
+;	(JUMP-IF-BIT-CLEAR PHT1-VALID-BIT MD XFALSE)
+;	(POPJ-IF-BIT-SET-XCT-NEXT PHT1-MODIFIED-BIT MD)
+;       ((M-T) DPB MD Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 ;If modified bit is set in PHT1, that must be accurate, so return the PHT1.
 ;Otherwise must check the PHT2 to know for sure.
-	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;Get PHT2
-	(ILLOP-IF-PAGE-FAULT)
-	((M-TEM) PHT2-MAP-STATUS-CODE READ-MEMORY-DATA)
-	(POPJ-AFTER-NEXT POPJ-LESS M-TEM
-				(A-CONSTANT (EVAL %PHT-MAP-STATUS-READ-WRITE)))
+;	((VMA-START-READ) ADD VMA (A-CONSTANT 1))	;Get PHT2
+;	(ILLOP-IF-PAGE-FAULT)
+;	((M-TEM) PHT2-MAP-STATUS-CODE READ-MEMORY-DATA)
+;	(POPJ-AFTER-NEXT POPJ-LESS M-TEM
+;				(A-CONSTANT (EVAL %PHT-MAP-STATUS-READ-WRITE)))
 ;If PHT2 implies page is modified, return value with modified-bit set.
-       ((M-T) DPB (M-CONSTANT -1) PHT1-MODIFIED-BIT A-T)
+;       ((M-T) DPB (M-CONSTANT -1) PHT1-MODIFIED-BIT A-T)
+
+;XPHYADR (MISC-INST-ENTRY %PHYSICAL-ADDRESS)
+;	((VMA-START-READ) C-PDL-BUFFER-POINTER-POP)	;ADDRESS THE MAP
+;	(CHECK-PAGE-READ-NO-INTERRUPT)		;BE SURE INTERRUPT DOESN'T DISTURB MAP
+;	((MD) VMA)				;ADDRESS MAP (DELAYS UNTIL READ CYCLE OVER)
+;	(POPJ-AFTER-NEXT (M-T) DPB MEMORY-MAP-DATA
+;		 VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	;; 1024-word pages (contract g2, option (w)): the map entry's physical
+	;; page, at bit 8, and the address within the entry
+;	(popj-after-next (m-t) dpb memory-map-data
+;		 vma-phys-map-entry-part (a-constant (byte-value q-data-type dtp-fix)))
+;       ((M-T) VMA-LOW-BITS MD A-T)
+
+
+;;; MISCELLANEOUS FUNCTIONS FOR LISP PROGRAMS TO HACK THE PAGE TABLE
+;;; quux revision 14 (contract g3 revision 14, 10.5; the settled readings for
+;;; lisp, r3): the hash table's subprimitives over the page table, the same
+;;; interfaces.
+
+;;; %change-page-status address swap-status access-status-and-meta-bits.
+;;; returns t if the page is in core, nil if not (or has no entry).  the swap
+;;; status: nil leaves it; normal (1) and wired (5) clear and set
+;;; physical-page-data's wired bit; flushable (2) clears accessed, offering the
+;;; frame to findcore; a negative one frees the page, its frame and its slot,
+;;; and writes status 0, no entry (deallocate-pages, and free-region's path).
+;;; the access, status and meta bits (the region's 10-bit field): nil leaves
+;;; them; in core they replace the entry's <27:20>, not in core its meta bits
+;;; <23:20>; <19:18> are kept.  the tlb entry is invalidated.
+;;; DOESN'T DO ERROR CHECKING, IF YOU DO THE WRONG THING YOU WILL LOSE.
+XCPGS (MISC-INST-ENTRY %CHANGE-PAGE-STATUS)
+	((M-E) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Access, status, and meta bits
+	((M-D) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP)	;Swap status code
+	((a-tem1) q-pointer c-pdl-buffer-pointer-pop)	;Virtual address
+	(call find-page-entry)
+	((m-a) md)				;the entry
+	((m-b) vma)				;where it is
+	((m-tem) map-status-code m-a)
+	(jump-equal m-tem a-zero xcpgs-nil)	;no page there
+	((m-t) a-v-nil)
+	(jump-less-than m-tem (a-constant 2) xcpgs-1)
+	((m-t) a-v-true)			;in core: t
+xcpgs-1
+	(jump-equal m-d a-v-nil xcpgs-meta)
+	(jump-if-bit-set boxed-sign-bit m-d xcpgs-free)
+	(jump-less-than m-tem (a-constant 2) xcpgs-meta)	;not in core: no swap status
+	((m-tem) q-pointer m-d)
+	(jump-equal m-tem (a-constant 2) xcpgs-flushable)
+	((a-tem3) m-tem)			;the swap status
+	((m-tem) map-physical-page-number m-a)	;physical-page-data's wired bit
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(illop-if-page-fault)
+	((a-tem2) md)
+	((m-tem) a-tem3)
+	(jump-equal m-tem (a-constant 5) xcpgs-wire)
+	((write-memory-data-start-write) dpb m-zero ppd-wired-bit a-tem2)
+	(illop-if-page-fault)
+	(jump xcpgs-meta)
+xcpgs-wire
+	((write-memory-data-start-write) dpb (m-constant -1) ppd-wired-bit a-tem2)
+	(illop-if-page-fault)
+	(jump xcpgs-meta)
+xcpgs-flushable
+	((m-a) dpb m-zero map-accessed-bit a-a)
+xcpgs-meta
+	(jump-equal m-e a-v-nil xcpgs-write)
+	((m-tem) map-status-code m-a)
+	(jump-less-than m-tem (a-constant 2) xcpgs-meta-not-in-core)
+	((m-tem) (byte-field 8 2) m-e)		;<9:2> of the field: <27:20>
+	(jump-xct-next xcpgs-write)
+       ((m-a) dpb m-tem map-access-status-and-high-meta a-a)
+xcpgs-meta-not-in-core
+	((m-tem) (byte-field 4 2) m-e)		;<5:2> of the field: <23:20>
+	((m-a) dpb m-tem map-meta-bits-high a-a)
+xcpgs-write
+	((md) m-a)
+	((vma-start-write) m-b)
+	(illop-if-page-fault)
+	((md) a-tem1)
+	((vma-write-map) (a-constant write-map-invalidate))
+	(POPJ-XCT-NEXT)				;MUSTN'T POPJ DURING MAP-WRITE CYCLE
+       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
+xcpgs-nil
+	(popj-after-next (m-t) a-v-nil)
+       ((vma) a-v-nil)
+xcpgs-free
+	(call free-page-resources)		;its frame and slot
+	(jump-xct-next xcpgs-write)
+       ((m-a) (a-constant (byte-value q-data-type dtp-fix)))	;status 0, no entry
+
+;;; free-page-resources: the frame (if in core) and the slot of the page whose
+;;; entry is m-a are freed: the frame free in physical-page-data, the slot's
+;;; bit cleared.  the caller writes the entry.  clobbers m-tem, a-tem2,
+;;; a-slot-tem and the slot bitmap's temporaries, q-r, vma, md.
+FREE-PAGE-RESOURCES
+	((m-tem) map-status-code m-a)
+	(jump-less-than m-tem (a-constant 2) free-page-resources-1)
+	((m-tem) map-physical-page-number m-a)	;in core: its frame, and its slot there
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((vma) add m-tem a-ppd-window)
+	((write-memory-data-start-write) (a-constant ppd-free))
+	(illop-if-page-fault)
+	((vma-start-read) add vma (a-constant 1))
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	((a-slot-tem) m-tem)
+	((write-memory-data-start-write) (a-constant (plus (byte-value q-data-type dtp-fix)
+							   page-entry-no-slot)))
+	(illop-if-page-fault)
+	(jump free-slot)
+free-page-resources-1
+	((md) m-a)				;not in core: the entry's slot
+	(call entry-slot)
+	(jump-xct-next free-slot)
+       ((a-slot-tem) m-tem)
+
+;;; %create-physical-page physical-address: the frame there is put in service,
+;;; free.
+XCPPG (MISC-INST-ENTRY %CREATE-PHYSICAL-PAGE)
+	((m-tem) q-pointer c-pdl-buffer-pointer-pop)	;ARG IS PHYSICAL ADDRESS
+	((m-tem) vma-phys-page-addr-part m-tem)		;its frame
+	(call-greater-or-equal-unsigned m-tem a-memory-frames illop)	;no such frame
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((vma) add m-tem a-ppd-window)
+	((write-memory-data-start-write) (a-constant ppd-free))
+	(illop-if-page-fault)
+	((write-memory-data) (a-constant (plus (byte-value q-data-type dtp-fix) page-entry-no-slot)))
+	((vma-start-write) add vma (a-constant 1))
+	(illop-if-page-fault)
+	(popj-after-next (m-t) a-v-true)
+       ((vma) a-v-nil)
+
+;;; %delete-physical-page physical-address: the frame there is taken out of
+;;; service, its page evicted (written out if modified) if it holds one.
+;;; returns t, or nil if it was out of service already or is wired for good
+;;; (the wired areas, virtual equal to physical, and the tables); a page lisp
+;;; wired is evicted, as before.  swap-out-all-pages runs it over every frame.
+XDPPG (MISC-INST-ENTRY %DELETE-PHYSICAL-PAGE)
+	((M-B) VMA-PHYS-PAGE-ADDR-PART C-PDL-BUFFER-POINTER-POP);Page frame number
+	(CALL-GREATER-OR-EQUAL-unsigned M-B A-memory-frames ILLOP)	;PFN too big
+	((m-tem) dpb m-b (byte-field 31. 1) a-zero)
+	((vma-start-read) add m-tem a-ppd-window)
+	(ILLOP-IF-PAGE-FAULT)
+	((m-tem) q-pointer md)
+	(jump-equal m-tem (a-constant ppd-out-of-service) xfalse)	;Already deleted
+	(jump-if-bit-set ppd-free-bit md xdppg-free)
+	((m-tem) ppd-virtual-page-number md)
+	(jump-if-bit-clear ppd-wired-bit md xdppg-page)
+	(jump-equal m-tem a-zero xfalse)	;a table's frame
+	(jump-equal m-tem a-b xfalse)		;the wired areas, virtual equal to physical
+xdppg-page					;a page, wired by lisp or not: Swap it out
+	((a-tem1) dpb m-tem vma-page-addr-part a-zero)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(call-less-than m-tem (a-constant 2) illop)	;physical-page-data and the table disagree
+	(CALL evict-page)
+XDPPG1	(POPJ-AFTER-NEXT (M-T) A-V-TRUE)	;Done, return T
+       ((VMA) A-V-NIL)				;INSTRUCTIONS MUST LEAVE VMA NON-GARBAGE
+xdppg-free
+	((write-memory-data-start-write)
+		(a-constant (plus (byte-value q-data-type dtp-fix) ppd-out-of-service)))
+	(illop-if-page-fault)
+	(jump xdppg1)
+
+;;; %page-in pfn vpn (the settled readings, r3): lisp has read the page, whose
+;;; virtual page number (22 bits) is vpn, from its slot into frame pfn (which
+;;; %findcore gave): make it known there, physical-page-data's word 1 keeping
+;;; the slot.  nil, and nothing done, if the page is no longer not in core.
+XPAGE-IN (MISC-INST-ENTRY %PAGE-IN)
+	((A-DISK-SWAPIN-VIRTUAL-ADDRESS) DPB	;ARG 2 - VIRTUAL PAGE NUMBER
+		 C-PDL-BUFFER-POINTER-POP VMA-PAGE-ADDR-PART A-ZERO)
+	((A-DISK-SWAPIN-PAGE-FRAME) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;ARG 1 - PAGE FRAME
+	((a-tem1) a-disk-swapin-virtual-address)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(jump-not-equal m-tem (a-constant 1) xpage-in-nil)	;no longer not in core
+	(call entry-slot)
+	((a-swapin-slot) m-tem)
+	(CALL PAGE-IN-GET-MAP-BITS)			;NO, PUT IT IN
+	(CALL PAGE-IN-MAKE-KNOWN)
+	(JUMP XDPPG1)					;RETURN T, FIX VMA
+xpage-in-nil
+	(popj-after-next (m-t) a-v-nil)
+       ((vma) a-v-nil)
+
+;;; %page-status address: the page's entry, a fixnum, if it is in core (status
+;;; 2-6), else nil (the settled readings, r3).  modified is the hardware's, in
+;;; the entry.
+XPGSTS (MISC-INST-ENTRY %PAGE-STATUS)
+	((a-tem1) q-pointer c-pdl-buffer-pointer-pop)
+	(call find-page-entry)
+	((m-tem) map-status-code md)
+	(jump-less-than m-tem (a-constant 2) xpage-in-nil)
+	(popj-after-next (m-t) q-pointer md (a-constant (byte-value q-data-type dtp-fix)))
+       ((vma) a-v-nil)
 
 XPHYADR (MISC-INST-ENTRY %PHYSICAL-ADDRESS)
 	((VMA-START-READ) C-PDL-BUFFER-POINTER-POP)	;ADDRESS THE MAP
 	(CHECK-PAGE-READ-NO-INTERRUPT)		;BE SURE INTERRUPT DOESN'T DISTURB MAP
 	((MD) VMA)				;ADDRESS MAP (DELAYS UNTIL READ CYCLE OVER)
-;	(POPJ-AFTER-NEXT (M-T) DPB MEMORY-MAP-DATA
-;		 VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	;; 1024-word pages (contract g2, option (w)): the map entry's physical
-	;; page, at bit 8, and the address within the entry
+	;; quux revision 14: map(md)'s frame, the entry's, at bit 10, and the
+	;; address within the page
 	(popj-after-next (m-t) dpb memory-map-data
-		 vma-phys-map-entry-part (a-constant (byte-value q-data-type dtp-fix)))
+		 vma-phys-page-addr-part (a-constant (byte-value q-data-type dtp-fix)))
        ((M-T) VMA-LOW-BITS MD A-T)
 
-
+
 ;PDL-BUFFER LOADING CONVENTIONS:
 ;   1. THE CURRENT RUNNING FRAME IS ALWAYS COMPLETELY CONTAINED WITHIN THE PDL-BUFFER.
 ;   2. SO IS ITS CALLING ADI (LOCATED IMMEDIATELY BEFORE IT ON PDL).
@@ -1914,10 +2958,17 @@ P-B-MR0	(JUMP-LESS-OR-EQUAL M-PDL-BUFFER-ACTIVE-QS A-2 P-B-X1)	;If nothing to do
 		;even if it turns out to be in the pdl-buffer and no main memory
 		;cycle is made.
 	((MD Q-R) VMA)				;Address the map, Q-R saves addr
-	((M-1) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;Save correct map contents
-	((VMA-WRITE-MAP) IOR M-1		;Turn on access
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+;	((M-1) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;Save correct map contents
+;	((VMA-WRITE-MAP) IOR M-1		;Turn on access
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+	;; quux revision 14 (contract g3 revision 14, 6.2, 9.1): the fiddle is a
+	;; tlb direct write of the page's entry with access 11, so that the dump's
+	;; writes go to memory, not through the redirect into the buffer; an
+	;; invalidation ends it, so that the next reference walks the table.
+	((m-1) map-entry memory-map-data)	;the page's entry
+	((vma-write-map) ior m-1		;turn on access
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
 	((M-TEM) DPB (M-CONSTANT -1) ALL-BUT-VMA-LOW-BITS A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	((A-PDL-FINAL-VMA) SUB M-ZERO A-TEM)	;Number locations left in page
 	((M-TEM) SUB M-PDL-BUFFER-ACTIVE-QS A-2)	;Number locations to do total
@@ -1925,28 +2976,60 @@ P-B-MR0	(JUMP-LESS-OR-EQUAL M-PDL-BUFFER-ACTIVE-QS A-2 P-B-X1)	;If nothing to do
 	((A-PDL-FINAL-VMA) M-TEM)		;Don't do a full page
 P-B-MR3	((PDL-BUFFER-INDEX) A-PDL-BUFFER-HEAD)	;Starting pdl-buffer address
 	((VMA) A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Starting virtual-memory address
+	;; quux revision 14: the redirect's copies of the base and the head (a
+	;; 430, 431) are set now to where the dump will leave them, and the base
+	;; kept in a-pdl-dump-base.  the tlb entry the fiddle wrote can be evicted
+	;; in the loop by gc-write-test's lookup of a pointer whose page shares its
+	;; index (a direct-mapped tlb); the next write would then walk, load the
+	;; pdl page's own entry and be redirected into the buffer, where the word
+	;; came from, and memory would never get it.  with the copies already past
+	;; the words being dumped, those words are outside the buffer, so such a
+	;; write still goes to memory, and the words above them are where the
+	;; copies say.  nothing reads a dumped word through the redirect before the
+	;; loop ends; extra-pdl-trap-0, which the loop can reach, sets the copies
+	;; from vma and the index, as the loop's end does.
+	((a-pdl-dump-base) vma)
+	((m-tem) a-pdl-final-vma)		;the words to dump
+	((a-pdl-buffer-virtual-address) add vma a-tem)
+	((m-tem) add m-tem a-pdl-buffer-head)
+	((a-pdl-buffer-head) pdl-buffer-address-mask m-tem)
 	((A-PDL-FINAL-VMA) ADD VMA A-PDL-FINAL-VMA)	;Ending virtual-memory address +1
+;; quux revision 14: the fiddle's direct write lasts only until the next fill at
+;; its index, and gc-write-test's lookup below can be that fill (a dumped
+;; pointer to a page sharing the index).  then the write walks and loads the
+;; table's entry.  at status 5 the redirect sends it to memory, as the copies
+;; of a 430 and 431 already lie past it (p-b-mr3); a precondition: every
+;; handler reachable from this loop (today only extra-pdl-trap-0, through
+;; gc-write-test) sets the copies to the words actually dumped before its
+;; first reference.  at status 6, the mar's, the write faults:
+;; p-b-fiddle-again fiddles the page again and makes the write, with no mar
+;; check, as the fiddle did on 2001.
 P-B-MR1	((WRITE-MEMORY-DATA-START-WRITE) C-PDL-BUFFER-INDEX)	;Write next Q into memory
-	(ILLOP-IF-PAGE-FAULT)			;Write-access supposedly turned on.
+;	(ILLOP-IF-PAGE-FAULT)			;Write-access supposedly turned on.
+	(call-conditional pg-fault p-b-fiddle-again)	;quux revision 14: an evicted fiddle
 ;Interpreter now puts forwards into stack frames.  So can lexical scoping in compiled code.
 ;	(DISPATCH Q-DATA-TYPE WRITE-MEMORY-DATA D-ILLOP-IF-BAD-DATA-TYPE)
 						;Error-check stuff being written
 	(GC-WRITE-TEST (I-ARG 1))		;Check for writing ptr to extra-pdl
 						;If traps, will clean up & return to P-B-MR0
 	((VMA) ADD VMA (A-CONSTANT 1))		;Close loop
-	(JUMP-LESS-THAN-XCT-NEXT VMA A-PDL-FINAL-VMA P-B-MR1)
+;	(JUMP-LESS-THAN-XCT-NEXT VMA A-PDL-FINAL-VMA P-B-MR1)
+	;; quux revision 14 (contract g3 revision 14, 10.1): addresses, unsigned
+	(jump-less-than-unsigned-xct-next vma a-pdl-final-vma p-b-mr1)
        ((PDL-BUFFER-INDEX) ADD PDL-BUFFER-INDEX (A-CONSTANT 1))
 ;Clean up and restore the map.
-	((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Number of locations dumped
+;	((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Number of locations dumped
+	((m-tem) sub vma a-pdl-dump-base)	;number of locations dumped (quux revision 14)
 	((M-PDL-BUFFER-ACTIVE-QS) SUB M-PDL-BUFFER-ACTIVE-QS A-TEM)
 	((A-PDL-BUFFER-VIRTUAL-ADDRESS) VMA)
 	((A-PDL-BUFFER-HEAD) PDL-BUFFER-INDEX)
 	((MD) Q-R)				;Address the map
 	(JUMP-GREATER-THAN-XCT-NEXT		;Loop back for next page
 		M-PDL-BUFFER-ACTIVE-QS A-2 P-B-MR0)
-       ((VMA-WRITE-MAP) DPB M-1			;Restore the map for this page
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;       ((VMA-WRITE-MAP) DPB M-1			;Restore the map for this page
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+       ((vma-write-map) (a-constant write-map-invalidate))	;quux revision 14: forget the fiddle
 ;Here when we're done
 P-B-X1	((VMA) A-V-NIL)				;Don't leave VMA nil.
 	((M-2) A-QLPDLH)			;Recompute A-PDL-BUFFER-HIGH-WARNING
@@ -1971,22 +3054,63 @@ P-B-X1	((VMA) A-V-NIL)				;Don't leave VMA nil.
 P-B-SL-1(popj-after-next (pdl-buffer-index) a-pdlb-tem)	;restore
        ((a-pdl-buffer-high-warning) add m-2 (a-constant pdl-buffer-high-limit))
 
+;; quux revision 14 (the review of the fiddles against tlb eviction): a dump
+;; write or refill read that faulted because a lookup in the loop evicted the
+;; fiddle's direct write.  the walk reloaded the table's entry: status 6, the
+;; mar's (a pdl page under set-mar), whose access 01 faults every reference;
+;; status 5 never faults here (the words lie outside the copies' range).  the
+;; page is direct-written with access 11 again and the reference made, with no
+;; mar check; any other status halts.  vma is the address; for the write md
+;; is the word.  clobbers m-tem, a-pdl-fiddle-md.
+P-B-FIDDLE-AGAIN
+	((a-pdl-fiddle-md) md)			;the word
+	((md) vma)				;address the map
+	((m-tem) map-status-code memory-map-data)
+	(call-not-equal m-tem (a-constant 6) illop)
+	((m-tem) map-entry memory-map-data)
+	((vma-write-map) ior m-tem		;turn on access again
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
+	((vma) md)
+	((write-memory-data-start-write) a-pdl-fiddle-md)
+	(illop-if-page-fault)
+	(popj)
+P-R-FIDDLE-AGAIN
+	((md) vma)				;address the map
+	((m-tem) map-status-code memory-map-data)
+	(call-not-equal m-tem (a-constant 6) illop)
+	((m-tem) map-entry memory-map-data)
+	((vma-write-map) ior m-tem		;turn on access again
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
+	((vma-start-read) md)
+	(illop-if-page-fault)
+	(popj)
+P-R-FIDDLE-AGAIN-END
+
 ;Attempt to refill pdl-buffer from virtual memory such that
 ;M-PDL-BUFFER-ACTIVE-QS is at least PDL-BUFFER-LOW-WARNING.
 PDL-BUFFER-REFILL	
 	((A-PDLB-TEM) PDL-BUFFER-INDEX)		;Preserve PI
 	((M-2) A-QLPDLO)			;Get base address of pdl into M memory
-P-R-0	(JUMP-GREATER-OR-EQUAL M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS
-				P-R-AT-BOTTOM)	;No more pdl to reload, exit
+;P-R-0	(JUMP-GREATER-OR-EQUAL M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS
+;				P-R-AT-BOTTOM)	;No more pdl to reload, exit
+	;; quux revision 14 (contract g3 revision 14, 10.1): addresses, unsigned
+P-R-0	(jump-greater-or-equal-unsigned m-2 a-pdl-buffer-virtual-address
+				p-r-at-bottom)	;no more pdl to reload, exit
 	(JUMP-GREATER-OR-EQUAL M-PDL-BUFFER-ACTIVE-QS 
 	   (A-CONSTANT PDL-BUFFER-LOW-WARNING) P-R-AT-BOTTOM)	;Enough in there to win
 	((VMA-START-READ) ADD (M-CONSTANT -1) A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	(CHECK-PAGE-READ-NO-INTERRUPT)		;Take cycle to assure 2nd lvl map set up
 	((MD Q-R) VMA)				;Address the map
-	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;Save correct map contents
-	((VMA-WRITE-MAP) IOR M-PGF-TEM		;Turn on access to mem which shadows pdl buf
-		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
-				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+;	((M-PGF-TEM) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;Save correct map contents
+;	((VMA-WRITE-MAP) IOR M-PGF-TEM		;Turn on access to mem which shadows pdl buf
+;		(A-CONSTANT (PLUS (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)
+;				  (BYTE-VALUE MAP-ACCESS-CODE 3)))) ;R/W
+	;; quux revision 14: the fiddle as a tlb direct write, as at p-b-mr0.  the
+	;; refill's words lie below the base, outside the buffer, so a read that
+	;; walks after an eviction is sent to memory by the redirect as well.
+	((m-pgf-tem) map-entry memory-map-data)	;the page's entry
+	((vma-write-map) ior m-pgf-tem		;turn on access to mem which shadows pdl buf
+		(a-constant (plus write-map-direct-write (byte-value map-access-code 3))))
 	((M-TEM) SUB M-PDL-BUFFER-ACTIVE-QS	;Negative number of words to do total
 		(A-CONSTANT PDL-BUFFER-LOW-WARNING))
 	((M-1) SUB M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Negative number of words left in pdl
@@ -1999,7 +3123,12 @@ P-R-2	((M-TEM) SUB M-ZERO A-TEM)		;Max number of words for those reasons
 P-R-3	((VMA) A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Initial virtual-memory address +1
 	((PDL-BUFFER-INDEX) A-PDL-BUFFER-HEAD)	;Initial P.B. address +1
 P-R-1	((VMA-START-READ) SUB VMA (A-CONSTANT 1))
-	(ILLOP-IF-PAGE-FAULT)			;Map should be hacked
+;	(ILLOP-IF-PAGE-FAULT)			;Map should be hacked
+	;; quux revision 14: d-pb-trans's lookup below can evict the fiddle, as
+	;; gc-write-test's can the dump's: at status 5 the read, below the base,
+	;; goes to memory through the redirect; at status 6 it faults, and
+	;; p-r-fiddle-again fiddles the page again and makes the read.
+	(call-conditional pg-fault p-r-fiddle-again)
 	((PDL-BUFFER-INDEX) SUB PDL-BUFFER-INDEX (A-CONSTANT 1))
 	(DISPATCH Q-DATA-TYPE-PLUS-ONE-BIT	;Transport the data just read from memory
 		DISPATCH-ON-MAP-19
@@ -2013,11 +3142,15 @@ P-R-1	((VMA-START-READ) SUB VMA (A-CONSTANT 1))
 	((A-PDL-BUFFER-VIRTUAL-ADDRESS) VMA)
 	((A-PDL-BUFFER-HEAD) PDL-BUFFER-INDEX)
 	((MD) Q-R)				;Address the map
-	(JUMP-LESS-THAN-XCT-NEXT		;Loop back for next page
-		M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS P-R-0)	; unless at bottom of pdl
-       ((VMA-WRITE-MAP) DPB M-PGF-TEM		;Restore the map
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	(JUMP-LESS-THAN-XCT-NEXT		;Loop back for next page
+;		M-2 A-PDL-BUFFER-VIRTUAL-ADDRESS P-R-0)	; unless at bottom of pdl
+;       ((VMA-WRITE-MAP) DPB M-PGF-TEM		;Restore the map
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	;; quux revision 14: unsigned addresses, and the fiddle forgotten
+	(jump-less-than-unsigned-xct-next	;loop back for next page
+		m-2 a-pdl-buffer-virtual-address p-r-0)	; unless at bottom of pdl
+       ((vma-write-map) (a-constant write-map-invalidate))
 P-R-AT-BOTTOM
 	(JUMP-XCT-NEXT P-B-X1)
        (CALL-LESS-THAN M-PDL-BUFFER-ACTIVE-QS (A-CONSTANT 4) ILLOP)	;Over pop
@@ -2032,9 +3165,10 @@ PB-TRANS((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Minus number of Q's move
 	((C-PDL-BUFFER-POINTER-PUSH) A-PDLB-TEM);Save stuff momentarily
 	((C-PDL-BUFFER-POINTER-PUSH) MD)
 	((MD) VMA)				;Address the map
-	((VMA-WRITE-MAP) DPB M-PGF-TEM		;Restore the map
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	((VMA-WRITE-MAP) DPB M-PGF-TEM		;Restore the map
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	((vma-write-map) (a-constant write-map-invalidate))	;quux revision 14: forget the fiddle
 	((VMA) MD)				;Restore VMA
 	((MD) C-PDL-BUFFER-POINTER-POP)		;Restore MD
   ;This used to be just TRANSPORT.  Changed to allow EVCPs on PDL.  There is some loss of

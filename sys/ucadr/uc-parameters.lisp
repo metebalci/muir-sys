@@ -136,11 +136,17 @@
 ;; wider (the map covers the whole 28-bit space, qcom's cold-load-area-sizes).
 (DEF-DATA-FIELD VMA-QUANTUM-BYTE
 ;	(EVAL (- 24. (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))))
-	(eval (- 28. (1- (haulong %address-space-quantum-size))))
+;	(eval (- 28. (1- (haulong %address-space-quantum-size))))
+	;; quux revision 14 (contract g3 revision 14, 10.1, 10.3): 32-bit
+	;; virtual addresses: the quantum number is 18 bits, and the address
+	;; space map's word index 16 bits, a word for each four of the 262,144
+	;; quanta, 64 pages, on a 64-page boundary.
+	(eval (- 32. (1- (haulong %address-space-quantum-size))))
 	(EVAL (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))))
 (DEF-DATA-FIELD ADDRESS-SPACE-MAP-WORD-INDEX-BYTE
 ;	(EVAL (- 24. (+ (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))
-	(eval (- 28. (+ (1- (haulong %address-space-quantum-size))
+;	(eval (- 28. (+ (1- (haulong %address-space-quantum-size))
+	(eval (- 32. (+ (1- (haulong %address-space-quantum-size))
 			(1- (HAULONG (// 32. %ADDRESS-SPACE-MAP-BYTE-SIZE))))))
 	(EVAL (+ (1- (HAULONG %ADDRESS-SPACE-QUANTUM-SIZE))
 		 (1- (HAULONG (// 32. %ADDRESS-SPACE-MAP-BYTE-SIZE))))))
@@ -842,6 +848,17 @@ a-processor-type-code ((plus (byte-value q-data-type dtp-fix) 4))
 A-AR-1-ARRAY-POINTER-1 ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 0)
 ;Similar for XAR-1-CACHED-2.
 A-AR-1-ARRAY-POINTER-2 ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 0)
+;; quux revision 14 (contract g3 revision 14, 10.11): the region floor, lisp's
+;; %region-floor (qcom, the last of a-memory-location-names): a fixnum whose
+;; field is an address, a multiple of the quantum.  make-region places a
+;; region of an area that is not ephemeral in the lowest free quanta at or
+;; above it, below ephemeral space.  the cold boot sets it to the first unfixed
+;; area's address, or to the value the band was saved with (disk-save keeps
+;; it in the system communication area); lisp's si:set-region-floor sets it.
+;; one location more here, as a-v-page-table-area and a-v-physical-page-data
+;; went below and a-swapin-slot came, so a-pdl-buffer-virtual-address and
+;; a-pdl-buffer-head stay at a 430 and 431, where the redirect snoops them.
+a-region-floor ((byte-value q-data-type dtp-fix) 0)
 ;END OF VECTOR AREA
 
 ;Following locations are gc-able but not user-referenceable.
@@ -1015,13 +1032,26 @@ A-LCONS-CACHE-FREE-LIMIT (0)
 A-LCONS-CACHE-REGION-ORIGIN (0)
 
 ;PAGING VARIABLES AND CONSTANTS
-A-PHT-INDEX-MASK (0)		;Mask for page hash table indices
-A-PHT-INDEX-LIMIT (0)		;All valid PHT indices are less than this
+;A-PHT-INDEX-MASK (0)		;Mask for page hash table indices
+;A-PHT-INDEX-LIMIT (0)		;All valid PHT indices are less than this
+;; quux revision 14 (contract g3 revision 14, 3.2, 9; appendix a14.3, a14.12):
+;; no page hash table.  the directory, physical-page-data and the slot bitmap
+;; are frames the cold boot takes at the top of the memory it finds, reached
+;; through the physical memory window, 36000000000 plus the physical address;
+;; these are their window addresses.  they take the hash table's places.
+a-directory-window (0)		;the directory's first entry, window address
+a-ppd-window (0)		;physical-page-data's first word, window address
 A-FINDCORE-SCAN-POINTER (0)	;Page frame number of next page to be looked at by FINDCORE
 A-AGING-SCAN-POINTER (0)	;Page frame number of next page to be looked at by AGER
-A-V-PHYSICAL-PAGE-DATA-END 	;First location after last valid physical-page-data entry
-			(1_31.)	;This has to be initialized to the most negative number!
-A-PAGE-IN-PHT1 (0)		;Argument to PAGE-IN-MAKE-KNOWN
+;A-V-PHYSICAL-PAGE-DATA-END 	;First location after last valid physical-page-data entry
+;			(1_31.)	;This has to be initialized to the most negative number!
+a-memory-frames (0)		;quux revision 14: frames of main memory found, which
+				; physical-page-data covers
+;A-PAGE-IN-PHT1 (0)		;Argument to PAGE-IN-MAKE-KNOWN
+a-slot-bitmap-window (0)	;quux revision 14: the slot bitmap's first word,
+				; window address: a bit a slot of PAGE, 1 = taken
+a-swapin-slot (0)		;quux revision 14: the slot of the page being made
+				; known (page-in-make-known), or 17777777 for none
 
 A-DISK-REGS-BASE (DISK-REGS-ADDRESS-BASE)
 ;These two get set from the PAGE partition's descriptor in the label.
@@ -1136,11 +1166,14 @@ A-V-REGION-ORIGIN	(0)		;VIRTUAL ADDRESS START OF REGION
 A-V-REGION-LENGTH	(0)		;NUMBER OF QS IN REGION
 A-V-REGION-BITS		(0)		;VARIOUS FIELDS, SEE QCOM
 A-V-REGION-FREE-POINTER	(0)		;RELATIVE ALLOCATION POINT.  ALLOCATION IS UPWARDS
-A-V-PAGE-TABLE-AREA	(0)
-A-V-PHYSICAL-PAGE-DATA	(0)		;FOR EACH PAGE FRAME, -1 IF IT IS OUT OF SERVICE, OR
-					; GC DATA,,PHT INDEX FOR PAGE IN IT
-					; -1 IN PHT INDEX IF WIRED PAGE WITH NO PHT ENTRY
-					; GC DATA=0 IF NOT IN USE
+;A-V-PAGE-TABLE-AREA	(0)
+;A-V-PHYSICAL-PAGE-DATA	(0)		;FOR EACH PAGE FRAME, -1 IF IT IS OUT OF SERVICE, OR
+;					; GC DATA,,PHT INDEX FOR PAGE IN IT
+;					; -1 IN PHT INDEX IF WIRED PAGE WITH NO PHT ENTRY
+;					; GC DATA=0 IF NOT IN USE
+;; quux revision 14 (contract g3 revision 14, 3.2): page-table-area and
+;; physical-page-data are no longer areas (qcom, area-list), so their origins
+;; go from this table, which follows area-list.
 A-V-ADDRESS-SPACE-MAP	(0)		;A BYTE FOR EACH ADDRESS SPACE QUANTUM, GIVING REGION#
 					; OR 0 IF FREE OR FIXED-AREA.  BYTE SIZE IS
 					; %ADDRESS-SPACE-MAP-BYTE-SIZE
@@ -1422,6 +1455,95 @@ a-macro-dispatch-generic
 ;; (gpt-done), for make-region's bound on virtual memory.  last, so that no
 ;; earlier location moves.
 a-disk-maximum-pages
+	(0)
+
+;; quux revision 14 (contract g3 revision 14, 9.3, 9.5; appendix a14.12): the
+;; paging's variables over slots, past a 431 so that a 430 and 431 stay put
+;; (uc-page-fault, uc-cold-disk).  a-slot-hint is where the slot allocator's
+;; search starts; a-commit-limit the pages make-region may commit, the paging
+;; partition's slots plus the pageable frames (lisp's %sys-com-commit-limit);
+;; a-wired-frames the frames wired virtual equal to physical, from 0;
+;; a-tables-frame the first frame of the tables the cold boot takes at the top
+;; of memory, and a-table-page-frame the lowest frame taken for a page-table
+;; page, which are taken below them, downwards; a-swapin-entry spare; a-evict-va,
+;; a-evict-entry and a-evict-slot the page evict-page is evicting, its entry's
+;; window address and its slot; a-paging-tem and a-paging-tem2 findcore's
+;; counts; a-make-entry-va find-page-entry-or-make's address; the a-slot-
+;; temporaries the slot bitmap's routines'; a-pdl-dump-base the pdl buffer
+;; dump's base while it runs.  last, so that no earlier location moves.
+a-slot-hint
+	(0)
+a-commit-limit
+	(0)
+a-wired-frames
+	(0)
+a-tables-frame
+	(0)
+a-table-page-frame
+	(0)
+a-swapin-entry
+	(0)
+a-evict-va
+	(0)
+a-evict-entry
+	(0)
+a-evict-slot
+	(0)
+a-paging-tem
+	(0)
+a-paging-tem2
+	(0)
+a-make-entry-va
+	(0)
+a-slot-tem
+	(0)
+a-slot-count-tem
+	(0)
+a-slot-bit-tem
+	(0)
+a-slot-word-tem
+	(0)
+a-pdl-dump-base
+	(0)
+;; quux revision 14: the cold boot's and the save's walk over the regions
+;; (build-region-entries, disk-save-regionwise-subr, cold-swap-in, uc-cold-disk)
+;; and their runs of slots.  last, so that no earlier location moves.
+a-restore-cold
+	(0)
+a-restore-valid-pages
+	(0)
+a-walk-region
+	(0)
+a-walk-index
+	(0)
+a-walk-va
+	(0)
+a-walk-n
+	(0)
+a-walk-pages
+	(0)
+a-walk-i
+	(0)
+a-walk-slot
+	(0)
+a-walk-template
+	(0)
+a-run-frame
+	(0)
+a-run-slot
+	(0)
+a-run-count
+	(0)
+a-run-end
+	(0)
+a-wired-op
+	(0)
+a-mask-k
+	(0)
+a-inc-next-slot
+	(0)
+;; quux revision 14: p-b-fiddle-again's word (uc-page-fault).  last.
+a-pdl-fiddle-md
 	(0)
 
 ;Arrays at fixed locations in A memory, used for the mouse

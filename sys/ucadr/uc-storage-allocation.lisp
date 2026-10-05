@@ -213,7 +213,8 @@ SCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 	(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCONSR)	;Transporter must avoid cache
 	(JUMP-NOT-EQUAL M-S A-SCONS-CACHE-AREA SCONSR)	;Jump if need full SCONS
 	((M-3) ADD M-B A-SCONS-CACHE-FREE-POINTER)	;Proposed new free pointer
-	(JUMP-GREATER-THAN M-3 A-SCONS-CACHE-FREE-LIMIT SCONSR)	;Jump if won't fit
+;	(JUMP-GREATER-THAN M-3 A-SCONS-CACHE-FREE-LIMIT SCONSR)	;Jump if won't fit
+	(jump-greater-than-unsigned m-3 a-scons-cache-free-limit sconsr)	;Jump if won't fit	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-T) A-SCONS-CACHE-FREE-POINTER)		;Allocate it here
 	((A-SCONS-CACHE-FREE-POINTER) M-3)		;Advance free pointer
 	((M-3) SUB M-3 A-SCONS-CACHE-REGION-ORIGIN)	;Exit via scavenger
@@ -260,7 +261,8 @@ LCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 	(JUMP-IF-BIT-SET M-TRANSPORT-FLAG LCONSR)	;Transporter must avoid cache
 	(JUMP-NOT-EQUAL M-S A-LCONS-CACHE-AREA LCONSR)	;Jump if need full LCONS
 	((M-3) ADD M-B A-LCONS-CACHE-FREE-POINTER)	;Proposed new free pointer
-	(JUMP-GREATER-THAN M-3 A-LCONS-CACHE-FREE-LIMIT LCONSR)	;Jump if won't fit
+;	(JUMP-GREATER-THAN M-3 A-LCONS-CACHE-FREE-LIMIT LCONSR)	;Jump if won't fit
+	(jump-greater-than-unsigned m-3 a-lcons-cache-free-limit lconsr)	;Jump if won't fit	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-T) A-LCONS-CACHE-FREE-POINTER)		;Allocate it here
 	((A-LCONS-CACHE-FREE-POINTER) M-3)		;Advance free pointer
 	((M-3) SUB M-3 A-LCONS-CACHE-REGION-ORIGIN)	;Exit via scavenger
@@ -623,8 +625,10 @@ EXTRA-PDL-OV-3
 EXTRA-PDL-PURGE
 	((MD) Q-POINTER M-T	;Start with a cheap test (avoid loading map)
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(POPJ-LESS-THAN MD A-V-EXTRA-PDL-AREA)
-	(POPJ-GREATER-OR-EQUAL MD A-V-MICRO-CODE-ENTRY-AREA)
+;	(POPJ-LESS-THAN MD A-V-EXTRA-PDL-AREA)
+	(popj-less-than-unsigned md a-v-extra-pdl-area)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(POPJ-GREATER-OR-EQUAL MD A-V-MICRO-CODE-ENTRY-AREA)
+	(popj-greater-or-equal-unsigned md a-v-micro-code-entry-area)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((MD) M-T)		;Get full ptr including data type
 ;	((VMA) (A-CONSTANT (EVAL (+ 400 %SYS-COM-TEMPORARY))))
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
@@ -746,8 +750,8 @@ MAKE-REGION
 	((m-tem) add m-tem a-page-cons-alarm)
 	((a-page-cons-alarm) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	;; Search address-space-map for suitable number of consecutive zeros
-	((M-T) A-V-FIRST-UNFIXED-AREA)		;Starting address
-	((M-TEM) A-LOWEST-DIRECT-VIRTUAL-ADDRESS)  ;Avoid losing if additional direct
+;	((M-T) A-V-FIRST-UNFIXED-AREA)		;Starting address
+;	((M-TEM) A-LOWEST-DIRECT-VIRTUAL-ADDRESS)  ;Avoid losing if additional direct
 ;	((M-TEM) VMA-PAGE-ADDR-PART M-TEM)	   ; space created or band allocated too big.
 	;; 1024-word pages (contract g2, option (w)): a-disk-maximum, the paging
 	;; partition's size, is in 256-word blocks, not pages
@@ -761,21 +765,73 @@ MAKE-REGION
 ;	 (a-constant (byte-value q-data-type dtp-fix)))
 	;; quux revision 13 (appendix a1.11): pages again; the paging partition's
 	;; pages are a-disk-maximum-pages (its blocks are 5 a page)
-	((m-tem) vma-page-addr-part m-tem)	   ; space created or band allocated too big.
-	(jump-less-than m-tem a-disk-maximum-pages make-region-0)
-	((m-tem) a-disk-maximum-pages)		;ending address
-make-region-0
-	((m-k) dpb m-tem vma-page-addr-part
-	 (a-constant (byte-value q-data-type dtp-fix)))
+;	((m-tem) vma-page-addr-part m-tem)	   ; space created or band allocated too big.
+;	(jump-less-than m-tem a-disk-maximum-pages make-region-0)
+;	((m-tem) a-disk-maximum-pages)		;ending address
+;make-region-0
+;	((m-k) dpb m-tem vma-page-addr-part
+;	 (a-constant (byte-value q-data-type dtp-fix)))
+;MAKE-REGION-1
+;	((M-E) ADD M-T A-3)			;End of large enough region starting here
+;MAKE-REGION-2	
+;	(CALL-GREATER-OR-EQUAL M-T A-K TRAP)	;Reached end of map, with no luck
+;	    (ERROR-TABLE VIRTUAL-MEMORY-OVERFLOW)
+;	(CALL ADDRESS-SPACE-MAP-LOOKUP)		;This could be optimized to save some mem rds?
+;	(JUMP-NOT-EQUAL-XCT-NEXT M-TEM A-ZERO MAKE-REGION-1)
+;       ((M-T) ADD M-T (A-CONSTANT (EVAL %ADDRESS-SPACE-QUANTUM-SIZE)))
+;	(JUMP-LESS-THAN M-T A-E MAKE-REGION-2)	;Found free space, but not big enough yet
+;	((M-T) SUB M-T A-3)			;Base address of free space found
+;; quux revision 14 (contract g3 revision 14, 9.3, 10.2, 10.11): commit, and
+;; the bounds by space, compared unsigned.
+;; commit: the regions' pages, this one's included, may not exceed the paging
+;; partition's slots plus the pageable frames (a-commit-limit, set at boot);
+;; otherwise virtual-memory-overflow, as the bound by the partition's pages
+;; (above, commented out) gave.
+	((m-e) vma-page-addr-part m-3)		;this region's pages
+	((m-t) (a-constant (eval size-of-area-arrays)))	;every region, from the last
+make-region-commit
+	((vma-start-read) add m-t a-v-region-bits)
+	(check-page-read)
+	((m-tem) (lisp-byte %%region-space-type) read-memory-data)
+	(jump-equal m-tem a-zero make-region-commit-1)	;free
+	((vma-start-read) add m-t a-v-region-length)
+	(check-page-read)
+	((m-tem) add read-memory-data (a-constant (eval (1- page-size))))
+	((m-tem) vma-page-addr-part m-tem)	;its pages
+	((m-e) add m-e a-tem)
+make-region-commit-1
+	(jump-greater-than-xct-next m-t a-zero make-region-commit)
+       ((m-t) sub m-t (a-constant 1))
+	(call-greater-than-unsigned m-e a-commit-limit trap)
+	    (error-table virtual-memory-overflow)
+;; the bounds (10.2): a region of an ephemeral area (region bit 13, the former
+;; compact-cons flag, lisp's %%region-ephemeral) lies in ephemeral space,
+;; 32000000000-33777777777; any other from the region floor up to below
+;; 32000000000.  the floor (10.11), a-region-floor, is the first unfixed
+;; area's address by default; it is never taken below that.  m-k is the bound.
+	(jump-if-bit-set (byte-field 1 13.) m-4 make-region-ephemeral)
+	((m-t) dpb m-zero q-all-but-pointer a-region-floor)
+	((m-tem) dpb m-zero q-all-but-pointer a-v-first-unfixed-area)
+	(jump-greater-or-equal-unsigned m-t a-tem make-region-floor)
+	((m-t) m-tem)				;never below the fixed areas
+make-region-floor
+	(jump-xct-next make-region-1)
+       ((m-k) (a-constant 32000000000))
+make-region-ephemeral
+	((m-t) (a-constant 32000000000))
+	((m-k) (a-constant 34000000000))
+	;; Search address-space-map for suitable number of consecutive zeros:
+	;; m-t the quantum looked at, m-e the end of a region starting where the
+	;; free quanta began.
 MAKE-REGION-1
 	((M-E) ADD M-T A-3)			;End of large enough region starting here
-MAKE-REGION-2	
-	(CALL-GREATER-OR-EQUAL M-T A-K TRAP)	;Reached end of map, with no luck
-	    (ERROR-TABLE VIRTUAL-MEMORY-OVERFLOW)
+	(call-greater-than-unsigned m-e a-k trap)	;reached the bound, with no luck
+	    (error-table virtual-memory-overflow)
+MAKE-REGION-2
 	(CALL ADDRESS-SPACE-MAP-LOOKUP)		;This could be optimized to save some mem rds?
 	(JUMP-NOT-EQUAL-XCT-NEXT M-TEM A-ZERO MAKE-REGION-1)
        ((M-T) ADD M-T (A-CONSTANT (EVAL %ADDRESS-SPACE-QUANTUM-SIZE)))
-	(JUMP-LESS-THAN M-T A-E MAKE-REGION-2)	;Found free space, but not big enough yet
+	(jump-less-than-unsigned m-t a-e make-region-2)	;found free space, but not big enough yet
 	((M-T) SUB M-T A-3)			;Base address of free space found
 	;; M-T has origin, M-3 has length, M-4 has bits.  Put region in tables.
 ;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-FREE-REGION/#-LIST))))
@@ -809,7 +865,39 @@ MAKE-REGION-2
 MAKE-REGION-3
 	(CALL ADDRESS-SPACE-MAP-STORE)
 	((M-T) ADD M-T (A-CONSTANT (EVAL %ADDRESS-SPACE-QUANTUM-SIZE)))
-	(JUMP-LESS-THAN M-T A-E MAKE-REGION-3)
+;	(JUMP-LESS-THAN M-T A-E MAKE-REGION-3)
+	(jump-less-than-unsigned m-t a-e make-region-3)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;; quux revision 14 (contract g3 revision 14, 9.4): every page of the region
+;; gets an entry: not in core, no slot, the region's meta bits, <19> 0.  a
+;; megaword met for the first time gets a page-table page.  the entries were
+;; status 0, which the walk never loads, so no invalidation is needed.
+;; find-page-entry-or-make can evict a page for a page-table page, so the
+;; lettered registers this keeps are saved around it.
+	((c-pdl-buffer-pointer-push) m-a)
+	((c-pdl-buffer-pointer-push) m-b)
+	((c-pdl-buffer-pointer-push) m-d)
+	((c-pdl-buffer-pointer-push) m-k)
+	((c-pdl-buffer-pointer-push) m-3)
+	((c-pdl-buffer-pointer-push) m-4)
+	((m-t) sub m-e a-3)			;the origin
+	((a-paging-tem) m-t)
+	((a-paging-tem2) selective-deposit m-4 map-meta-bits-high (a-constant page-entry-fresh))
+make-region-entries
+	(call-xct-next find-page-entry-or-make)
+       ((a-tem1) a-paging-tem)
+	((md) a-paging-tem2)
+	((vma-start-write) vma)
+	(illop-if-page-fault)
+	((m-t) a-paging-tem)
+	((m-t) add m-t (a-constant (eval page-size)))
+	(jump-not-equal-xct-next m-t a-e make-region-entries)
+       ((a-paging-tem) m-t)
+	((m-4) c-pdl-buffer-pointer-pop)
+	((m-3) c-pdl-buffer-pointer-pop)
+	((m-k) c-pdl-buffer-pointer-pop)
+	((m-d) c-pdl-buffer-pointer-pop)
+	((m-b) c-pdl-buffer-pointer-pop)
+	((m-a) c-pdl-buffer-pointer-pop)
 	;; Finish setting up tables
 	((WRITE-MEMORY-DATA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX))) ;FREE PTR = 0
 	((VMA-START-WRITE) ADD M-K A-V-REGION-FREE-POINTER)
@@ -888,12 +976,14 @@ FREE-REGION
 	;; full gc that freed it after that quantum had passed to a new region left
 	;; the new region out of the map ("the argument area was nil" from
 	;; gc-get-space-sizes, or "region not found" in get-map-bits).
-	(jump-greater-or-equal m-t a-2 free-region-2)
+;	(jump-greater-or-equal m-t a-2 free-region-2)
+	(jump-greater-or-equal-unsigned m-t a-2 free-region-2)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 FREE-REGION-1
 	(CALL-XCT-NEXT ADDRESS-SPACE-MAP-STORE)
        ((M-K) A-ZERO)
 	((M-T) ADD M-T (A-CONSTANT (EVAL %ADDRESS-SPACE-QUANTUM-SIZE)))
-	(JUMP-LESS-THAN M-T A-2 FREE-REGION-1)
+;	(JUMP-LESS-THAN M-T A-2 FREE-REGION-1)
+	(jump-less-than-unsigned m-t a-2 free-region-1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 free-region-2
 	(POPJ-AFTER-NEXT (M-T) A-V-NIL)
        (NO-OP)
@@ -904,15 +994,15 @@ free-region-2
 ; and M-D containing A-V-NIL or the new swap-status.
 ;Sets M-1 and M-2 to the bounds of the region.
 ;Bashes M-A, M-B, M-E, M-T, tems.
-UPDATE-REGION-PHT
-	((M-E) (LISP-BYTE %%REGION-MAP-BITS) MD)	;Arg for XCPGS0
-	((VMA-START-READ) ADD M-K A-V-REGION-ORIGIN)	;Find virtual address range of region
-	(CHECK-PAGE-READ)
-	((M-1) Q-POINTER READ-MEMORY-DATA)
-	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)
-	(CHECK-PAGE-READ)
-	((M-2) Q-POINTER READ-MEMORY-DATA)
-	((MD M-2) ADD M-1 A-2)
+;UPDATE-REGION-PHT
+;	((M-E) (LISP-BYTE %%REGION-MAP-BITS) MD)	;Arg for XCPGS0
+;	((VMA-START-READ) ADD M-K A-V-REGION-ORIGIN)	;Find virtual address range of region
+;	(CHECK-PAGE-READ)
+;	((M-1) Q-POINTER READ-MEMORY-DATA)
+;	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)
+;	(CHECK-PAGE-READ)
+;	((M-2) Q-POINTER READ-MEMORY-DATA)
+;	((MD M-2) ADD M-1 A-2)
 	;; M-1 has lowest address in region, M-2 has highest address in region +1
 	;; Both are necessarily a multiple of the page size.
 	;; Call XCPGS0 on each page, to fix the PHT entry (if any) and the map.
@@ -920,13 +1010,74 @@ UPDATE-REGION-PHT
 	;; called xcpgs0 on the page below such a region's origin, another region's
 	;; page: a flip gave it this region's map bits, and free-region made it
 	;; flushable and forgot it.
-	(popj-less-or-equal m-2 a-1)
-UPDATE-REGION-PHT-0
-	(CALL-XCT-NEXT XCPGS0)
-       ((C-PDL-BUFFER-POINTER-PUSH) SUB MD (A-CONSTANT (EVAL PAGE-SIZE)))
-	(JUMP-GREATER-THAN MD A-1 UPDATE-REGION-PHT-0)
-	(POPJ)
+;	(popj-less-or-equal m-2 a-1)
+;UPDATE-REGION-PHT-0
+;	(CALL-XCT-NEXT XCPGS0)
+;       ((C-PDL-BUFFER-POINTER-PUSH) SUB MD (A-CONSTANT (EVAL PAGE-SIZE)))
+;	(JUMP-GREATER-THAN MD A-1 UPDATE-REGION-PHT-0)
+;	(POPJ)
 
+;Remove all information about the region in M-K from the page map,
+;and fix the page table entries of its pages.
+;Call with MD containing the new REGION-BITS entry for the region,
+; and M-D containing A-V-NIL or, negative, freeing (free-region).
+;Sets M-1 and M-2 to the bounds of the region.
+;Bashes M-A, M-B, M-E, M-T, tems.
+;; quux revision 14 (contract g3 revision 14, 9.3, 9.4): every page of the
+;; region has an entry, which is rewritten in place, a page at a time, with no
+;; hash table to search.  a flip (m-d nil) rewrites <27:20> of an entry in core
+;; from the region's bits, and the meta bits <23:20> of one not in core, and
+;; keeps <29:28> (accessed and modified, or the slot) and <19:18>
+;; (ephemeral-reference and software's).  freeing (m-d negative) frees each
+;; page's frame and slot and writes status 0, no entry.  then the tlb is
+;; emptied once, as every entry of the region may have changed (about 41
+;; microseconds at 4,096 entries).
+UPDATE-REGION-PHT
+	((M-E) (LISP-BYTE %%REGION-MAP-BITS) MD)	;the region's access, status, meta
+	((VMA-START-READ) ADD M-K A-V-REGION-ORIGIN)	;Find virtual address range of region
+	(CHECK-PAGE-READ)
+	((M-1) Q-POINTER READ-MEMORY-DATA)
+	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)
+	(CHECK-PAGE-READ)
+	((M-2) Q-POINTER READ-MEMORY-DATA)
+	((M-2) ADD M-1 A-2)
+	;; M-1 has lowest address in region, M-2 has highest address in region +1
+	;; Both are necessarily a multiple of the page size.
+	;; a region of no length has no page.
+	(popj-equal m-2 a-1)
+	((m-b) m-1)				;the page
+update-region-pht-0
+	(call-xct-next find-page-entry)
+       ((a-tem1) m-b)
+	((m-a) md)
+	((m-tem) map-status-code m-a)
+	(jump-equal m-tem a-zero update-region-pht-next)	;no entry
+	(jump-if-bit-set boxed-sign-bit m-d update-region-pht-free)
+	(jump-less-than m-tem (a-constant 2) update-region-pht-meta)
+	((m-tem) (byte-field 8 2) m-e)		;in core: <27:20>
+	(jump-xct-next update-region-pht-write)
+       ((m-a) dpb m-tem map-access-status-and-high-meta a-a)
+update-region-pht-meta
+	((m-tem) (byte-field 4 2) m-e)		;not in core: the meta bits, <23:20>
+	((m-a) dpb m-tem map-meta-bits-high a-a)
+update-region-pht-write
+	((md) m-a)
+	((vma-start-write) vma)
+	(illop-if-page-fault)
+update-region-pht-next
+	((m-b) add m-b (a-constant (eval page-size)))
+	(jump-not-equal m-b a-2 update-region-pht-0)
+	((md) a-zero)				;not a window's address
+	((vma-write-map) (a-constant write-map-empty))
+	(popj-xct-next)
+       ((vma) a-v-nil)
+update-region-pht-free
+	((a-paging-tem) vma)			;the entry's address
+	(call free-page-resources)
+	((vma) a-paging-tem)
+	(jump-xct-next update-region-pht-write)
+       ((m-a) (a-constant (byte-value q-data-type dtp-fix)))	;status 0, no entry
+
 GET-AREA-ORIGINS
 ;	((VMA-START-READ) (A-CONSTANT (EVAL (PLUS 400 %SYS-COM-AREA-ORIGIN-PNTR))))
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
@@ -1029,7 +1180,8 @@ XAAIA1	((WRITE-MEMORY-DATA-START-WRITE) M-2)	;STORE HEADER
 	(CHECK-PAGE-WRITE)
 	(DISPATCH (LISP-BYTE %%ARRAY-TYPE-FIELD) M-2 SKIP-IF-NUMERIC-ARRAY)
 	 (JUMP XAAIA3)				;ALREADY INITED TO NIL
-	(JUMP-GREATER-OR-EQUAL VMA A-E XAAIA3)	;JUMP IF ZERO-LENGTH ARRAY
+;	(JUMP-GREATER-OR-EQUAL VMA A-E XAAIA3)	;JUMP IF ZERO-LENGTH ARRAY
+	(jump-greater-or-equal-unsigned vma a-e xaaia3)	;JUMP IF ZERO-LENGTH ARRAY	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-3) SELECTIVE-DEPOSIT (LISP-BYTE %%ARRAY-TYPE-FIELD) M-2)
 	(JUMP-NOT-EQUAL-XCT-NEXT
 	      M-3 (A-CONSTANT (BYTE-VALUE %%ARRAY-TYPE-FIELD
@@ -1044,7 +1196,8 @@ XAAIA1	((WRITE-MEMORY-DATA-START-WRITE) M-2)	;STORE HEADER
 	((MD) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 XAAIA2	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
 	(CHECK-PAGE-WRITE)
-	(JUMP-LESS-THAN VMA A-E XAAIA2)
+;	(JUMP-LESS-THAN VMA A-E XAAIA2)
+	(jump-less-than-unsigned vma a-e xaaia2)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 XAAIA3	(POPJ-IF-BIT-CLEAR (LISP-BYTE %%ARRAY-LONG-LENGTH-FLAG) M-2)
 	((VMA) ADD M-T (A-CONSTANT 1))
 ;	(POPJ-AFTER-NEXT
@@ -1235,7 +1388,8 @@ D-FSHSH	(P-BIT ILLOP)	;%HEADER-TYPE-ERROR
 ;%FIND-STRUCTURE-HEADER in structure space
 XFSHS	((VMA-START-READ) M-A)
 XFSHS1	(CHECK-PAGE-READ)
-	(CALL-LESS-THAN M-A A-B ILLOP)		;Dropped off top of region
+;	(CALL-LESS-THAN M-A A-B ILLOP)		;Dropped off top of region
+	(call-less-than-unsigned m-a a-b illop)		;Dropped off top of region	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(DISPATCH Q-DATA-TYPE READ-MEMORY-DATA D-FSHS)	;Leave loop if header,
        ((M-A VMA-START-READ) SUB M-A (A-CONSTANT 1))	; or read preceding word and loop
 
@@ -1328,7 +1482,9 @@ SCAV-STRUCTURE-INFO
 
 STRUCTURE-INFO
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;Ensure validity of meta bits
-	((M-K) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;FOR DISPATCH BELOW, AND
+;	((M-K) MAP-SECOND-LEVEL-MAP MEMORY-MAP-DATA)	;FOR DISPATCH BELOW, AND
+	;; quux revision 14 (appendix a14.5): map(md)'s <29:0>, the page entry
+	((m-k) map-entry memory-map-data)	;for dispatch below, and
 						; RETURNED TO CALLER.  NOTE 0 IN SIGN BIT.
 	((VMA-START-READ) Q-POINTER MD)		;FETCH FIRST WORD
 	(CHECK-PAGE-READ)
@@ -1431,7 +1587,8 @@ SINFS-HFWD
 	((M-B) Q-POINTER M-B)			;Last valid address in region
 	((VMA) Q-POINTER M-A)			;Address of header
 SINFS-HFWD-0
-	(POPJ-GREATER-OR-EQUAL VMA A-B)		;Ran off top of region
+;	(POPJ-GREATER-OR-EQUAL VMA A-B)		;Ran off top of region
+	(popj-greater-or-equal-unsigned vma a-b)		;Ran off top of region	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(CHECK-PAGE-READ)
 	((M-TEM) Q-TYPED-POINTER READ-MEMORY-DATA)

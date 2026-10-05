@@ -1,6 +1,9 @@
 (SETQ UC-DISK '(
 ;;; Here to perform a disk swapping operation.
 ;;; M-A has the virtual memory address, M-T has the command.
+;;; quux revision 14 (contract g3 revision 14, 9.3; appendix a14.12): m-a has
+;;; the first page's slot, not its virtual address: a page's disk address is
+;;; the paging partition's base plus 5 blocks a slot.
 ;;; M-B is no longer an argument at this level.
 ;;; The CCW is already set up starting at location in M-C.  M-C, M-T bashed.
 ;;; Returns with operation successfully completed.
@@ -16,7 +19,8 @@ DISK-SWAP-HANDLER
 ;	((m-1) dpb m-1 (byte-field 16. 2) a-zero)
 	;; quux revision 13 (appendix a1.11): a page is 5 blocks in the packed
 	;; transfer, so its first block is 5 times its number
-	((m-1) vma-page-addr-part m-a)		;convert virtual address to disk address
+;	((m-1) vma-page-addr-part m-a)		;convert virtual address to disk address
+	((m-1) q-pointer m-a)			;quux revision 14: the slot
 	((m-tem) dpb m-1 (byte-field 30. 2) a-zero)
 	((m-1) add m-1 a-tem)			;times 5
 	(CALL-GREATER-OR-EQUAL M-1 A-DISK-MAXIMUM ILLOP)	;Address out of bounds
@@ -86,7 +90,12 @@ START-DISK-N-PAGES
 	;; into cylinder, head and block by the label's geometry.
 	((A-DISK-ADDRESS) M-1)
 	;; Now build the CCW list
-	((VMA) ADD (M-CONSTANT -1) A-DISK-CLP)
+;	((VMA) ADD (M-CONSTANT -1) A-DISK-CLP)
+	;; quux revision 14 (appendix a14.1): the list is at a physical address,
+	;; which the disk takes; it is written through the physical memory window,
+	;; so that the cold boot can run the disk before the page table is made.
+	((m-tem) add (m-constant -1) a-disk-clp)
+	((vma) dpb (m-constant -1) physical-memory-window-bits a-tem)
 ;	((MD) DPB M-B VMA-PHYS-PAGE-ADDR-PART (A-CONSTANT 1))
 	;; 1024-word pages (contract g2, option (w)): the callers count 256-word
 	;; blocks, a ccw each, not pages
@@ -204,7 +213,12 @@ FATAL-DISK-ERROR
 LOG-DISK-ERROR
 	((M-TEM) A-DISK-CLP)
 	((MD) DPB M-TEM (BYTE-FIELD 20 20) A-DISK-COMMAND)
-	((VMA-START-WRITE) A-DISK-ERROR-LOG-POINTER)
+;	((VMA-START-WRITE) A-DISK-ERROR-LOG-POINTER)
+	;; quux revision 14: through the physical memory window, as the cold boot
+	;; runs the disk before the page table is made; the log is at physical
+	;; 2200-2237 (the system communication area), and so is its pointer.
+	((m-tem) a-disk-error-log-pointer)
+	((vma-start-write) dpb (m-constant -1) physical-memory-window-bits a-tem)
 	(ILLOP-IF-PAGE-FAULT)
 	((MD) A-DISK-FINAL-ADDRESS)
 	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))
@@ -222,7 +236,9 @@ LOG-DISK-ERROR
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the log is at
 	;; 2200-2237, the system communication area being at 2000, its offsets
 	;; kept
-	(popj-less-than-xct-next vma (a-constant 2237))
+;	(popj-less-than-xct-next vma (a-constant 2237))
+	((vma) (byte-field 28. 0) vma)		;quux revision 14: the log's physical address
+	(popj-less-than-unsigned-xct-next vma (a-constant 2237))	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
        ((a-disk-error-log-pointer) add vma (a-constant 1))
 	(popj-after-next (a-disk-error-log-pointer) (a-constant 2200))
        (no-op)

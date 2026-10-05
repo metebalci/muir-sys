@@ -26,9 +26,12 @@ STACK-CLOSURE-TRAP
 	((M-TEM) Q-POINTER MD)
 	((M-PGF-TEM) Q-POINTER VMA)
 ;If storing into the same stack and inward from where it points, don't copy.
-	(JUMP-LESS-THAN M-TEM A-QLPDLO STACK-CLOSURE-TRAP-REALLY)
-	(JUMP-LESS-THAN M-PGF-TEM A-TEM STACK-CLOSURE-TRAP-REALLY)
-	(JUMP-LESS-THAN M-PGF-TEM A-QLPDLH TRANS-DROP-THROUGH)
+;	(JUMP-LESS-THAN M-TEM A-QLPDLO STACK-CLOSURE-TRAP-REALLY)
+	(jump-less-than-unsigned m-tem a-qlpdlo stack-closure-trap-really)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-LESS-THAN M-PGF-TEM A-TEM STACK-CLOSURE-TRAP-REALLY)
+	(jump-less-than-unsigned m-pgf-tem a-tem stack-closure-trap-really)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-LESS-THAN M-PGF-TEM A-QLPDLH TRANS-DROP-THROUGH)
+	(jump-less-than-unsigned m-pgf-tem a-qlpdlh trans-drop-through)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 
 ;Here if the stack-closure is being stored into a place it should not be.
 STACK-CLOSURE-TRAP-REALLY
@@ -478,8 +481,10 @@ STACK-CLOSURE-UNSHARE-ALL-3
 	(CHECK-PAGE-READ)
 	((M-2) Q-TYPED-POINTER MD)
 	((M-1) Q-CDR-CODE MD)
-	(JUMP-LESS-THAN M-2 A-K STACK-CLOSURE-UNSHARE-ALL-4)
-	(JUMP-GREATER-OR-EQUAL M-2 A-E STACK-CLOSURE-UNSHARE-ALL-4)
+;	(JUMP-LESS-THAN M-2 A-K STACK-CLOSURE-UNSHARE-ALL-4)
+	(jump-less-than-unsigned m-2 a-k stack-closure-unshare-all-4)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-GREATER-OR-EQUAL M-2 A-E STACK-CLOSURE-UNSHARE-ALL-4)
+	(jump-greater-or-equal-unsigned m-2 a-e stack-closure-unshare-all-4)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-2) SUB VMA M-A)
 	((M-2) ADD M-2 A-J)
 	((M-3) MD)
@@ -741,7 +746,8 @@ XLOAD-FROM-HIGHER-CONTEXT-3
 ; storing into the beginning of the next PDL in memory.
 PDL-FETCH
    ;****
-	(jump-greater-or-equal vma a-qlpdlh pdl-fetch-1)
+;	(jump-greater-or-equal vma a-qlpdlh pdl-fetch-1)
+	(jump-greater-or-equal-unsigned vma a-qlpdlh pdl-fetch-1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((PDL-INDEX M-2) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	(JUMP-NOT-EQUAL PDL-INDEX A-2 PDL-FETCH-1)
 	(POPJ-AFTER-NEXT

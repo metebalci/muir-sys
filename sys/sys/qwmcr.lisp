@@ -31,6 +31,8 @@
 (PROCLAIM '(SPECIAL CONSLP-OUTPUT VERSION-NUMBER CONSLP-OUTPUT-PATHNAME))
 ;; quux: the word width, cadrlp's: 32. or 40. (contract g2).
 (proclaim '(special *word-width*))
+;; quux: the hardware revision, cadrlp's: 13. or 14. (contract g3's revision 14).
+(proclaim '(special *hardware-revision*))
 
 (DEFUN OUT16 (FILE HALFWORD)
   (INCF CONSLP-OUTPUT-CURRENT-FILEPOS)
@@ -60,6 +62,15 @@
       (WITH-OPEN-FILE (FILE PATHNAME :DIRECTION :OUTPUT :CHARACTERS NIL :IF-EXISTS :SUPERSEDE)
 	(LET ((CONSLP-OUTPUT-CURRENT-FILEPOS 0)
 	      (mcr-held-high-half nil))
+	  ;; quux revision 14 (appendix a14.13): the partition's first section is
+	  ;; section 6, start 0, one word, the hardware revision, so that prom
+	  ;; 2002 refuses a revision-13 microcode and prom 2001 a revision-14 one
+	  ;; (it halts at error-bad-section-type).  a revision-13 assembly has none.
+	  (when (and (= *word-width* 40.) (eql *hardware-revision* 14.))
+	    (out32 file 6)			;section code
+	    (out32 file 0)			;start
+	    (out32 file 1)			;one word
+	    (out32 file 14.))			;the hardware revision
 	  (WHEN BASE-VERSION-NUMBER
 	    (OUT32 FILE 3)			;a fake main memory block
 	    (OUT32 FILE 0)			;blocks to xfer

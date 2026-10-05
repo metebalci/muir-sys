@@ -102,6 +102,19 @@ a-10000		(0)	;the first word past the buffer
 a-fixnum-zero	(0)	;005 over 0
 a-5400		(0)	;the register page's word 0, virtual
 a-100000	(0)	;one level-1 entry's worth of addresses, md<15>
+;; quux revision 14 (contract g3 revision 14, 9.5; appendix a14.1): no map.
+;; the prom reaches main memory through the physical memory window,
+;; 36000000000 plus the physical address, and the register page at
+;; 35777777400 in the device window: its buffer, physical page 3, is
+;; 36000006000, the system communication area's first word 36000002000, for
+;; the ccw at its word 377.  6 and 14, fixnums, are section 6's code and the
+;; hardware revision it must hold (appendix a14.13).  last, so that no earlier
+;; location moves.
+a-buffer-window	(0)	;36000006000
+a-sys-com-window (0)	;36000002000
+a-register-page	(0)	;35777777400
+a-6		(0)	;005 over 6
+a-14		(0)	;005 over 14
 
 (LOCALITY I-MEM)
 
@@ -225,7 +238,25 @@ error-buffer-not-loaded
     (error-table error-buffer-not-loaded)
 
 ;;; Program starts here.  Create M-ZERO and M-ONES, and check the hardware a little.
-GO	((M-ZERO Q-R) SETZ)		;Make all zeros.  Result to Q-R, not to depend on M mem
+;; quux revision 14 (contract g3 revision 14, 9.5; appendix a14.13): the prom's
+;; first act is the revision check: machine-id's revision, <15:4>, must be 14
+;; or more, or halt at error-not-revision-14 (prom 2002 on revision 13 is a
+;; build error: it writes no map, and revision 13 translates through one).
+;; by bit tests alone, before anything is made: 14 or more is a bit of <11:4>
+;; of the revision set (16 or more), or its <3:1> all set (14 or 15).
+GO	(jump-if-bit-set (byte-field 1 8.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 9.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 10.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 11.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 12.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 13.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 14.) machine-id go-revision-ok)
+	(jump-if-bit-set (byte-field 1 15.) machine-id go-revision-ok)
+	(jump-if-bit-clear (byte-field 1 7) machine-id error-not-revision-14)
+	(jump-if-bit-clear (byte-field 1 6) machine-id error-not-revision-14)
+	(jump-if-bit-clear (byte-field 1 5) machine-id error-not-revision-14)
+go-revision-ok
+	((M-ZERO Q-R) SETZ)		;Make all zeros.  Result to Q-R, not to depend on M mem
 
 	(JUMP-IF-BIT-SET (BYTE-FIELD 1 0) Q-R ERROR-BAD-BIT)
 	(JUMP-IF-BIT-SET (BYTE-FIELD 1 1) Q-R ERROR-BAD-BIT)
@@ -366,6 +397,13 @@ MAKE-CONSTANTS
 	((a-5400) dpb m-ones (byte-field 2 8.) a-zero)		;1400
 	((a-5400) dpb m-ones (byte-field 1 11.) a-5400)		;5400
 	((a-100000) dpb m-ones (byte-field 1 15.) a-zero)
+	;; quux revision 14: the windows' addresses (see a-buffer-window)
+	((a-buffer-window) dpb m-ones (byte-field 4 28.) a-6000)	;36000006000
+	((a-sys-com-window) dpb m-ones (byte-field 4 28.) a-2000)	;36000002000
+	((a-register-page) dpb m-ones (byte-field 20. 8.) a-zero)	;1777777400
+	((a-register-page) dpb m-ones (byte-field 3 29.) a-register-page)	;35777777400
+	((a-6) dpb m-ones (byte-field 2 1) a-fixnum-zero)
+	((a-14) dpb m-ones (byte-field 3 1) a-fixnum-zero)
 	;;; A-DISK-ERROR/ 4421000
 	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
 	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
@@ -417,23 +455,26 @@ CLEAR-SPC-MEMORY
 ;; by md<27:15>; level 2 has 128 blocks of 32, by the level-1 entry and
 ;; md<14:10>.  level 1 is cleared to block 0; then virtual 0's level-1 entry
 ;; points at each block in turn, and the block's 32 entries are cleared.
-	((MD) SETZ)
-clear-level-1-map
-	((vma-write-map) dpb m-ones (byte-field 1 29.) a-zero)	;clear level-1 map
-	((md) add md a-100000)
-	(jump-if-bit-clear (byte-field 1 28.) md clear-level-1-map)
+;	((MD) SETZ)
+;clear-level-1-map
+;	((vma-write-map) dpb m-ones (byte-field 1 29.) a-zero)	;clear level-1 map
+;	((md) add md a-100000)
+;	(jump-if-bit-clear (byte-field 1 28.) md clear-level-1-map)
 
-	((m-a md) setz)				;the block, 0-177
-	((m-temp-2) dpb m-ones (byte-field 1 29.) a-zero)	;write level 1
-clear-level-2-map
-	((vma-write-map) dpb m-a (byte-field 7 32.) a-temp-2)	;level 1 of 0 is the block
-clear-level-2-entry
-	((vma-write-map) dpb m-ones (byte-field 1 28.) a-zero)	;clear level-2 entry
-	((md) add md a-2000)
-	(jump-if-bit-clear (byte-field 1 15.) md clear-level-2-entry)
-	((md) setz)
-	((m-a) add m-a a-1)
-	(jump-if-bit-clear (byte-field 1 7) m-a clear-level-2-map)
+;	((m-a md) setz)				;the block, 0-177
+;	((m-temp-2) dpb m-ones (byte-field 1 29.) a-zero)	;write level 1
+;clear-level-2-map
+;	((vma-write-map) dpb m-a (byte-field 7 32.) a-temp-2)	;level 1 of 0 is the block
+;clear-level-2-entry
+;	((vma-write-map) dpb m-ones (byte-field 1 28.) a-zero)	;clear level-2 entry
+;	((md) add md a-2000)
+;	(jump-if-bit-clear (byte-field 1 15.) md clear-level-2-entry)
+;	((md) setz)
+;	((m-a) add m-a a-1)
+;	(jump-if-bit-clear (byte-field 1 7) m-a clear-level-2-map)
+
+;; quux revision 14 (contract g3 revision 14, 9.5): the prom writes no map:
+;; revision 14 has none, and its tlb is swept at reset.
 
 	((M-A MD) SETZ)
 (IF (NOT PROM)
@@ -487,18 +528,18 @@ CLEAR-D-MEMORY
 
 ;;; Set up the map.  First, write a 0 into the first location of the level
 ;;; one map.  This is the only location we use.  Read back to be safe.
-SET-UP-THE-MAP
-	((MD) SETZ)
+;SET-UP-THE-MAP
+;	((MD) SETZ)
 ;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 1 26.) A-ZERO)
 ;	(NO-OP)			;Map gets written during this cycle
 ;	((M-A) MEMORY-MAP-DATA)
 ;	((M-B) (BYTE-FIELD 5 24.) M-A)
 ;; quux revision 13 (appendix a1.7): <29> writes level 1; map(md) has it in <38:32>
-	((vma-write-map) dpb m-ones (byte-field 1 29.) a-zero)
-	(NO-OP)			;Map gets written during this cycle
-	((M-A) MEMORY-MAP-DATA)
-	((m-b) (byte-field 7 32.) m-a)
-	(JUMP-NOT-EQUAL M-B A-ZERO ERROR-LEVEL-1-MAP)
+;	((vma-write-map) dpb m-ones (byte-field 1 29.) a-zero)
+;	(NO-OP)			;Map gets written during this cycle
+;	((M-A) MEMORY-MAP-DATA)
+;	((m-b) (byte-field 7 32.) m-a)
+;	(JUMP-NOT-EQUAL M-B A-ZERO ERROR-LEVEL-1-MAP)
 
 ;;; Set up four pages:
 ;;;  Page 0: Mapped to the first page of main memory.
@@ -527,35 +568,35 @@ SET-UP-THE-MAP
 ;;; quux (contract q13): the two no-ops take the places of the two writes that
 ;;; went, so that every later prom address stays where it was; muir-sim's
 ;;; tests and muir-fpga's goldens name them.
-SET-UP-FOUR-PAGES
+;SET-UP-FOUR-PAGES
 ;	((m-a) dpb m-ones (byte-field 4 22.) a-zero)	;Sets bit 24 which is ignored
 ;; quux revision 13 (appendix a1.7): virtual pages of 1024 words, one level-2 entry
 ;; each: page 0 the buffer, physical page 3; page 1 the system communication
 ;; area, physical page 1, for the ccw at 2377; page 2 the register page, the
 ;; last physical page, 777777, whose last 400 words it is, at virtual 5400.
-	((m-a) dpb m-ones (byte-field 3 26.) a-zero)	;access <27:26>, <28> writes level 2
+;	((m-a) dpb m-ones (byte-field 3 26.) a-zero)	;access <27:26>, <28> writes level 2
 ;	((vma-write-map) add m-a a-3)			;quux: virtual page 0, physical 3
 	;; 1024-word pages (contract g2, option (w)): the buffer is physical
 	;; 6000, 256-word page 14 (m-a's low bits are zero)
 ;	((vma-write-map) dpb m-ones (byte-field 2 2) a-a)	;virtual page 0, physical 14
-	((vma-write-map) dpb m-ones (byte-field 2 0) a-a)	;virtual page 0, physical page 3
+;	((vma-write-map) dpb m-ones (byte-field 2 0) a-a)	;virtual page 0, physical page 3
 
 ;	((M-B) DPB M-ONES (BYTE-FIELD 11 0) A-A)
-	((m-b) dpb m-ones (byte-field 1 7) a-zero)	;quux: 200, block-disk's first word
+;	((m-b) dpb m-ones (byte-field 1 7) a-zero)	;quux: 200, block-disk's first word
 ;	((MD) A-400)
 ;; quux revision 13:
-	((md) a-2000)					;virtual page 1
+;	((md) a-2000)					;virtual page 1
 ;	((VMA-WRITE-MAP) DPB M-ONES (BYTE-FIELD 4 12) A-B)	;M-A + 36777
 ;	(no-op)						;quux: page 1 is not mapped
 	;; page 1 is not mapped; this word, a no-op before, makes 6400, the first
 	;; word past the buffer (1024-word pages, contract g2, option (w))
 ;	((a-6400) dpb m-ones (byte-field 1 8) a-6000)
 ;; quux revision 13: a-10000 is made with the constants
-	((vma-write-map) dpb m-ones (byte-field 1 0) a-a)	;virtual page 1, physical page 1
+;	((vma-write-map) dpb m-ones (byte-field 1 0) a-a)	;virtual page 1, physical page 1
 ;	((A-DISK-REGS) DPB M-ONES (BYTE-FIELD 7 2) A-ZERO)	;Virt Addr 774
 ;	((a-disk-regs) dpb m-ones (byte-field 1 9.) a-b)	;quux: virt addr 1200
 ;; quux revision 13:
-	((a-disk-regs) add m-b a-5400)			;virt addr 5600
+;	((a-disk-regs) add m-b a-5400)			;virt addr 5600
 
 ;	((MD) ADD MD A-400)
 ;	((M-B) DPB M-ONES (BYTE-FIELD 10 1) A-A)		;776
@@ -571,8 +612,15 @@ SET-UP-FOUR-PAGES
 ;	((vma-write-map) dpb m-ones (byte-field 1 2) a-a)	;m-a + 4
 ;	(NO-OP)
 ;; quux revision 13:
-	((md) add md a-2000)				;virtual page 2
-	((vma-write-map) dpb m-ones (byte-field 18. 0) a-a)	;physical page 777777
+;	((md) add md a-2000)				;virtual page 2
+;	((vma-write-map) dpb m-ones (byte-field 18. 0) a-a)	;physical page 777777
+
+;; quux revision 14 (contract g3 revision 14, 9.5): no map to set up (above):
+;; the buffer, the system communication area's ccw word and the register page
+;; are reached through the windows.  block-disk is the register page's words
+;; 200-203.
+	((m-b) dpb m-ones (byte-field 1 7) a-zero)	;200, block-disk's first word
+	((a-disk-regs) add m-b a-register-page)		;35777777600
 
 ;;; quux: page-0-parity-fix, which read and rewrote every word of page 0
 ;;; so that saving it to the disk found good parity, is gone with the save
@@ -590,7 +638,7 @@ SET-UP-FOUR-PAGES
 	((M-TEMP-1) DPB M-ONES (BYTE-FIELD 1 6) A-2)		;102
 ;	((VMA-START-WRITE) DPB M-ONES (BYTE-FIELD 1 9) A-TEMP-1)	;1102
 ;; quux revision 13: the register page is virtual 5400
-	((vma-start-write) add m-temp-1 a-5400)		;5502
+	((vma-start-write) add m-temp-1 a-register-page)	;quux revision 14: 35777777502
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
 ;;; quux (contract q11, revision 10): reset the devices, then give timer 0
@@ -610,7 +658,7 @@ SET-UP-FOUR-PAGES
 	((m-temp-1) dpb m-ones (byte-field 1 6) a-4)		;104
 ;	((vma-start-write) dpb m-ones (byte-field 1 9) a-temp-1)	;1104
 ;; quux revision 13:
-	((vma-start-write) add m-temp-1 a-5400)		;5504
+	((vma-start-write) add m-temp-1 a-register-page)	;quux revision 14: 35777777504
 	(jump-if-page-fault error-page-fault)
 	((m-temp-2) dpb m-ones (byte-field 2 0) a-zero)		;3
 	((m-temp-2) dpb m-ones (byte-field 2 3) a-temp-2)	;33
@@ -620,7 +668,7 @@ SET-UP-FOUR-PAGES
 	((m-temp-1) dpb m-ones (byte-field 1 0) a-temp-1)	;111, timer 0's period
 ;	((vma-start-write) dpb m-ones (byte-field 1 9) a-temp-1)	;1111
 ;; quux revision 13:
-	((vma-start-write) add m-temp-1 a-5400)		;5511
+	((vma-start-write) add m-temp-1 a-register-page)	;quux revision 14: 35777777511
 	(jump-if-page-fault error-page-fault)
 
 ;;; Initialize the disk.
@@ -668,7 +716,7 @@ READ-LABEL
 	((m-b) dpb m-ones (byte-field 1 19.) a-b)
 	((m-b) dpb m-ones (byte-field 1 22.) a-b)
 	((m-b) dpb m-ones (byte-field 1 29.) a-b)
-	((vma-start-read) dpb m-ones (byte-field 1 7) a-zero)	;200
+	((vma-start-read) dpb m-ones (byte-field 1 7) a-buffer-window)	;200 (quux revision 14: of the buffer)
 	(jump-if-page-fault error-page-fault)
 	(jump-not-equal read-memory-data a-b error-no-gpt)
 	;; m-b/ "PART" = 12424440520
@@ -688,7 +736,7 @@ READ-LABEL
 	((vma-start-read) add vma a-1)			;201
 	(jump-if-page-fault error-page-fault)
 	(jump-not-equal read-memory-data a-b error-no-gpt)
-	((m-c) dpb m-ones (byte-field 1 1) a-zero)
+	((m-c) dpb m-ones (byte-field 1 1) a-buffer-window)	;quux revision 14: of the buffer
 	((m-c) dpb m-ones (byte-field 1 4) a-c)
 	((vma-start-read) dpb m-ones (byte-field 1 7) a-c)	;222, the entry array's first sector
 	(jump-if-page-fault error-page-fault)
@@ -745,7 +793,8 @@ search-gpt
 	((m-d) a-gpt-block)
 	((a-gpt-block) add m-d a-4)
 	((m-d) a-40)
-	((m-c) setz)
+;	((m-c) setz)
+	((m-c) a-buffer-window)		;quux revision 14: the buffer's first entry, by the window
 search-gpt-entry
 	((vma-start-read) m-c)			;word 0, the type's first word
 	(jump-if-page-fault error-page-fault)
@@ -777,6 +826,18 @@ FOUND-PARTITION
 ;	((M-MICR-OFFSET) A-400)	;So will read in a new page first off
 ;; quux revision 13: a page, four blocks, 2000 words a read
 	((m-micr-offset) a-2000)	;so will read in a new page first off
+;; quux revision 14 (appendix a14.13): the partition's first section must be
+;; section 6, start 0, one word, the hardware revision 14; a microcode without
+;; it (revision 13's) or for another revision halts at
+;; error-microcode-not-revision-14.  a section 6 anywhere else is a bad section.
+	(call get-next-word)
+	(jump-not-equal m-a a-6 error-microcode-not-revision-14)
+	(call get-next-word)
+	(jump-not-equal m-a a-fixnum-zero error-microcode-not-revision-14)
+	(call get-next-word)
+	(jump-not-equal m-a a-1 error-microcode-not-revision-14)
+	(call get-next-word)
+	(jump-not-equal m-a a-14 error-microcode-not-revision-14)
 
 ;;; Process one section.  Each section starts with three words:
 ;;; The section type, the initial address, and the number of locations.
@@ -961,7 +1022,8 @@ GET-NEXT-WORD
 ;	(JUMP-GREATER-OR-EQUAL M-MICR-OFFSET A-400 GET-NEXT-PAGE)
 ;; quux revision 13: a read moves a page, 2000 words
 	(jump-greater-or-equal m-micr-offset a-2000 get-next-page)
-	((VMA-START-READ) M-MICR-OFFSET)
+;	((VMA-START-READ) M-MICR-OFFSET)
+	((vma-start-read) add m-micr-offset a-buffer-window)	;quux revision 14: the buffer's word
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 	(POPJ-AFTER-NEXT (M-A) READ-MEMORY-DATA)
        ((M-MICR-OFFSET) ADD M-MICR-OFFSET A-1)
@@ -1033,7 +1095,8 @@ DISK-OP-LOW
 ;; quux revision 13: a ccw is one page, its address in <27:10>, more in <0>;
 ;; virtual page 1 is physical page 1, so the ccw's 2377 is virtual 2377
 	((md) selective-deposit m-a (byte-field 18. 10.) a-zero)	;a page's address
-	((vma-start-write) dpb m-ones (byte-field 8 0) a-2000)	;virt addr 2377
+;	((vma-start-write) dpb m-ones (byte-field 8 0) a-2000)	;virt addr 2377
+	((vma-start-write) dpb m-ones (byte-field 8 0) a-sys-com-window)	;quux revision 14: 36000002377
 	(JUMP-IF-PAGE-FAULT ERROR-PAGE-FAULT)
 
 	;; Write the COMMAND register from M-TEMP-2.
@@ -1095,5 +1158,19 @@ error-odd-micr-start
 error-a-mem-section-32-bits
 	(jump halt-cons error-a-mem-section-32-bits)
     (error-table error-a-mem-section-32-bits)
+
+;; quux revision 14 (appendix a14.13): go's first act halts here below
+;; revision 14.
+	(no-op)
+error-not-revision-14
+	(jump halt-cons error-not-revision-14)
+    (error-table error-not-revision-14)
+
+;; quux revision 14 (appendix a14.13): the microcode partition's first section
+;; is not section 6 holding 14.
+	(no-op)
+error-microcode-not-revision-14
+	(jump halt-cons error-microcode-not-revision-14)
+    (error-table error-microcode-not-revision-14)
 
 )))

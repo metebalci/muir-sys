@@ -242,6 +242,64 @@
 (defvar *word-width* 32.
   "The machine word the assembly is for: 32. (the cadr, and quux to microcode 2000) or 40. (contract g2).")
 
+;; quux revision 14 (contract g3's revision 14, appendix a14): the hardware
+;; revision a 40-bit assembly is for, 13. (microcode 2001) or 14.  at 13. every
+;; output is what it was, byte for byte, and revision 14's names (condition 12
+;; and the write-map operation word, cadsym) are refused, since revision 13
+;; decodes them otherwise.  at 14. the .mcr starts with section 6, the hardware
+;; revision (a14.13; qwmcr), and an assembly of the microcode (assemble-system)
+;; is refused unless it keeps what revision 14's hardware rests on:
+;;  - a-pdl-buffer-virtual-address at a 430 and a-pdl-buffer-head at a 431,
+;;    whose writes the pdl buffer redirect snoops (a14.7);
+;;  - every data type that a map-bit dispatch table tells apart by its map bit
+;;    in *pointer-types*, the pointer-type register's set: a dispatch on any
+;;    other type reads map bits 1 and 1 with no lookup (a14.5, contract 5.3);
+;;  - no write of the location counter through the right shift, nor by an
+;;    arithmetic function other than add, sub, m+1 and m-1, which lc's adder
+;;    serves (a14.11, contract 10.4).
+;; set it before assembling, (setq ua:*hardware-revision* 14.).
+(defvar *hardware-revision* 13.
+  "The hardware revision a 40-bit assembly is for: 13. (microcode 2001) or 14. (contract g3).")
+
+;; quux revision 14: the pointer-type register's set (appendix a14.5, a14.9),
+;; the data types whose map bits a dispatch looks up.  it must hold every type
+;; some map-bit dispatch table tells apart by its map bit (in microcode 2001
+;; these 19); it may hold more.  the revision-14 check compares it with the
+;; tables (check-map-bit-tables).
+(defvar *pointer-types*
+	'(dtp-null dtp-symbol dtp-symbol-header dtp-extended-number
+	  dtp-external-value-cell-pointer dtp-one-q-forward dtp-header-forward
+	  dtp-locative dtp-list dtp-fef-pointer dtp-array-pointer dtp-stack-group
+	  dtp-closure dtp-select-method dtp-instance dtp-instance-header dtp-entity
+	  dtp-stack-closure dtp-self-ref-pointer)
+  "The data types in revision 14's pointer-type register (appendix a14.5): a list of DTP- names.")
+
+;; quux revision 14: the names only a revision-14 assembly may use (cadsym),
+;; marked so that cons-lap-symeval refuses them in any other.
+(dolist (s '(jump-less-or-equal-unsigned-condition jump-greater-than-unsigned-condition
+	     jump-less-or-equal-unsigned jump-less-or-equal-unsigned-xct-next
+	     call-less-or-equal-unsigned call-less-or-equal-unsigned-xct-next
+	     popj-less-or-equal-unsigned popj-less-or-equal-unsigned-xct-next
+	     jump-greater-than-unsigned jump-greater-than-unsigned-xct-next
+	     call-greater-than-unsigned call-greater-than-unsigned-xct-next
+	     popj-greater-than-unsigned popj-greater-than-unsigned-xct-next
+	     write-map-operation write-map-entry write-map-none write-map-direct-write
+	     write-map-invalidate write-map-empty
+	     pointer-type-register-0-31 pointer-type-register-32-63))
+  (putprop s t 'cons-lap-revision-14))
+
+;; quux revision 14: a word of the pointer-type register (appendix a14.9),
+;; register-page word 222 for first 0 and 223 for first 32.: bit k is type
+;; first + k, set when that type is in *pointer-types*.  cadsym's
+;; pointer-type-register-0-31 and pointer-type-register-32-63 are these.
+(defun pointer-type-register-word (first)
+  (let ((word 0))
+    (dolist (s *pointer-types*)
+      (let ((type (symeval s)))
+	(when (and (>= type first) (< type (+ first 32.)))
+	  (setq word (logior word (expt 2 (- type first)))))))
+    word))
+
 (defun d-mem-size ()
   "The dispatch memory's number of entries for *word-width*: 4000 at 32. bits, 10000 at 40."
   (if (= *word-width* 40.) 10000 4000))
@@ -285,6 +343,13 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	;; fit no machine.
 	(unless (memq *word-width* '(32. 40.))
 	  (ferror nil "~D is not a word width the micro-assembler knows: 32. or 40." *word-width*))
+	;; quux: revision 14 is a 40-bit machine's; any other revision would
+	;; assemble words no machine decodes as written.
+	(unless (memq *hardware-revision* '(13. 14.))
+	  (ferror nil "~D is not a hardware revision the micro-assembler knows: 13. or 14."
+		  *hardware-revision*))
+	(when (and (= *hardware-revision* 14.) (not (= *word-width* 40.)))
+	  (ferror nil "Revision 14 is assembled at 40 bits, not ~D." *word-width*))
 	(SETQ A-MEM-CREVICE-LIST NIL)
 ;	(SETQ D-MEM-FREE-BLOCKS
 ;	      (COPYTREE (GETF INIT-STATE 'D-MEM-FREE-BLOCKS
@@ -642,7 +707,201 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 		      (CDR INITIAL-D-MEM-FREE-BLOCKS)
 		      (CDR D-MEM-FREE-BLOCKS))))
 	  (COND (TEM (SETQ D-MEMORY-RANGE-LIST (APPEND TEM D-MEMORY-RANGE-LIST)))))
+	;; quux revision 14: the microcode is refused, before anything is
+	;; written, unless it keeps what the hardware rests on (*hardware-revision*).
+	(when (and (eql *hardware-revision* 14.) (null cons-lap-init-state))
+	  (check-pinned-a-locations)
+	  (check-map-bit-tables)
+	  (check-lc-writes)
+	  (check-fiddle-windows))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
+
+;; quux revision 14 (appendix a14.7): the pdl buffer redirect takes its base
+;; and head by snooping a memory's write pulse at two fixed locations, so a
+;; microcode that moves either variable is refused.
+(defconst *pinned-a-locations*
+	  '((a-pdl-buffer-virtual-address 430) (a-pdl-buffer-head 431))
+  "A memory variables revision 14's hardware snoops, and the locations it snoops.")
+
+(defun check-pinned-a-locations ()
+  (dolist (p *pinned-a-locations*)
+    (let ((v (get (car p) 'cons-lap-user-symbol)))
+      (unless (and (eq (car v) 'a-mem) (eql (caddr (cadr v)) (cadr p)))
+	(ferror nil "~A is ~A, not at A ~O, where revision 14's PDL buffer redirect snoops it (appendix a14.7)."
+		(car p)
+		(if v (format nil "at ~A ~O" (car v) (caddr (cadr v))) "not defined")
+		(cadr p))))))
+
+;; quux revision 14 (appendix a14.5, contract 5.3): a dispatch on map bits
+;; looks the page up only for a data type whose bit is set in the
+;; pointer-type register, and reads map bits 1 and 1 for any other.  that is
+;; safe when every table such a dispatch reads has equal entries for map bit 0
+;; and 1 for each type not in the register.  each table is indexed by the data
+;; type above the map bit, entry 2t for map bit 0 and 2t+1 for map bit 1.
+(defconst *map-bit-dispatch-tables*
+	  '(d-transport d-transport-no-evcp d-pb-trans d-gc-write-test)
+  "The dispatch tables revision 14's map-bit dispatches read (appendix a14.5).")
+
+(defun check-map-bit-tables ()
+  (let ((bases (mapcar #'(lambda (s)
+			   (let ((v (get s 'cons-lap-user-symbol)))
+			     (unless (eq (car v) 'd-mem)
+			       (ferror nil "~A, a map-bit dispatch table, is not in D-MEM." s))
+			     (caddr (cadr v))))
+		       *map-bit-dispatch-tables*))
+	(apart nil) (missing nil)
+	(declared (mapcar #'symeval *pointer-types*)))
+    ;; every dispatch on map bits (ir<9:8>) reads one of the tables, by the
+    ;; data type and one bit (ir<7:5>, 7 bits), so that the tables are all.
+    (dotimes (pc (array-length i-mem))
+      (let ((w (aref i-mem pc)))
+	(when (and w (= (ldb 5302 w) 2) (not (zerop (ldb 1002 w))))
+	  (unless (and (memq (ldb 1414 w) bases) (= (ldb 0503 w) 7))
+	    (ferror nil "The dispatch at I-MEM ~O reads D-MEM ~O on map bits, not one of ~S by a data type and a bit: the map-bit check (appendix a14.5) does not read it."
+		    pc (ldb 1414 w) *map-bit-dispatch-tables*)))))
+    (dolist (base bases)
+      (dotimes (type 100)
+	(unless (eql (aref d-mem (+ base (* 2 type))) (aref d-mem (+ base (* 2 type) 1)))
+	  (or (memq type apart) (push type apart)))))
+    (dolist (type apart)
+      (unless (memq type declared) (push type missing)))
+    ;; the register's words as the microcode names them (cadsym) must be the
+    ;; set checked here: a value given them some other way would let the
+    ;; register leave out a type the tables tell apart.
+    (dolist (w '((pointer-type-register-0-31 0) (pointer-type-register-32-63 32.)))
+      (let ((value (cons-lap-arg-eval (car w)))
+	    (want 0))
+	(dolist (type declared)
+	  (when (and (>= type (cadr w)) (< type (+ (cadr w) 32.)))
+	    (setq want (logior want (expt 2 (- type (cadr w)))))))
+	(unless (eql value want)
+	  (ferror nil "~A is ~O, not ~O, the bits of ua:*pointer-types* for its 32 types: the pointer-type register would not hold the set the map-bit check holds the tables to (appendix a14.9)."
+		  (car w) value want))))
+    (when missing
+      (setq missing (sort missing #'<))
+      (ferror nil "~{~A~^, ~}: a map-bit dispatch table tells ~:[it~;them~] apart by the map bit, but ua:*pointer-types*, the pointer-type register's set, leaves ~:[it~;them~] out (appendix a14.5)."
+	      (mapcar #'(lambda (type) (or (nth type q-data-types) type)) missing)
+	      (cdr missing) (cdr missing)))))
+
+;; quux revision 14 (appendix a14.11, contract 10.4): lc<33:32> are written by
+;; lc's adder for an arithmetic alu word through the alu or the left shift,
+;; which is m<33:32> plus a's sign and the carry, right for add, sub, m+1 and
+;; m-1 (the array's functions 9, 6, 0 and 15, m being p).  a write of lc
+;; through the right shift, or by another arithmetic function (a multiply or
+;; divide step, quux's multiply and divide among them), is refused.
+(defun check-lc-writes ()
+  (dotimes (pc (array-length i-mem))
+    (let ((w (aref i-mem pc)))
+      ;; an alu word (ir<44:43> 0) with a functional destination (ir<25> 0) of
+      ;; 1, the location counter (ir<23:19>)
+      (when (and w (zerop (ldb 5302 w)) (zerop (ldb 3101 w)) (= (ldb 2305 w) 1))
+	(let ((function (+ (* 10 (ldb 0301 w)) (* 4 (ldb 0401 w))
+			   (* 2 (- 1 (ldb 0601 w))) (- 1 (ldb 0501 w)))))
+	  (cond ((= (ldb 1402 w) 2)
+		 (ferror nil "The word at I-MEM ~O writes the location counter through the right shift (output selector 2), which revision 14's LC adder does not serve (appendix a14.11)."
+			 pc))
+		((not (zerop (ldb 1001 w)))
+		 (ferror nil "The word at I-MEM ~O writes the location counter by the arithmetic function ~O (a multiply or divide), not ADD, SUB, M+1 or M-1 (appendix a14.11)."
+			 pc (ldb 0306 w)))
+		((and (= (ldb 0701 w) 1) (not (memq function '(11 6 0 17))))
+		 (ferror nil "The word at I-MEM ~O writes the location counter by the arithmetic function ~O, not ADD, SUB, M+1 or M-1 (appendix a14.11)."
+			 pc (ldb 0306 w)))))))))
+
+;; quux revision 14 (contract g3 revision 14, 6.2, 9.1; the review of the
+;; fiddles against tlb eviction): a fiddle is a tlb direct write (a store to
+;; write-map, destination 23 or 33, whose a operand is a constant with the
+;; operation 1 in <33:32>), which gives a page access 11 so that a reference
+;; neither faults nor goes through the pdl buffer redirect.  it lasts only
+;; until the next fill, invalidation or empty at its index, and any memory
+;; start, map(md) read or map-bit dispatch can fill it.  so from a fiddle to
+;; the invalidation or empty that ends it (a write-map whose constant's
+;; operation is 2 or 3), the microcode may make one memory start, the
+;; reference the fiddle is for, and no other start, no map(md) read
+;; (functional source 11), no dispatch, no other write-map, and no call but a
+;; conditional one to illop or trap; every path must reach the end, not a
+;; return.  the pdl buffer's dump and refill loops break the rule on purpose,
+;; and are listed with their reasons; every other fiddle is held to it, and an
+;; assembly that breaks it is refused.
+(defconst *fiddle-allowed-ranges*
+	  '((p-b-mr0 p-b-mr3
+	     "the dump: its words lie below the redirect's copies of the base (p-b-mr3), so after an eviction a write at status 5 goes to memory; at status 6 p-b-fiddle-again fiddles again")
+	    (p-r-0 p-r-2
+	     "the refill: its words lie below the base, so after an eviction a read at status 5 goes to memory; at status 6 p-r-fiddle-again fiddles again")
+	    (p-b-fiddle-again p-r-fiddle-again-end
+	     "the loops' recovery from an evicted fiddle at status 6: the loop's own invalidation ends it"))
+  "The fiddles the window check allows, by the labels around them, with the reasons.")
+
+(defun i-mem-symbol-location (sym)
+  "SYM's I-MEM location, or nil if this microcode does not define it."
+  (let ((v (get sym 'cons-lap-user-symbol)))
+    (and (eq (car v) 'i-mem) (caddr (cadr v)))))
+
+(defun a-operand-value (w)
+  "The value of the a memory location an alu or byte word reads, from the constants or a memory."
+  (let ((loc (ldb 4012 w)))
+    (or (dolist (e a-constant-list) (when (eql (cadr e) loc) (return (car e))))
+	(aref a-mem loc))))
+
+(defun write-map-operation-of (w)
+  "For a word that stores to write-map, the operation its a operand's constant names (0-3), or :unknown; nil for any other word."
+  (when (and (memq (ldb 5302 w) '(0 3)) (zerop (ldb 3101 w)) (memq (ldb 2305 w) '(23 33)))
+    (let ((v (a-operand-value w)))
+      (if (numberp v) (ldb 4002 v) :unknown))))
+
+(defun check-fiddle-windows ()
+  ;; a range whose labels this microcode lacks (one with no fiddles, such as
+  ;; microcode 2001, whose map writes are revision 13's) allows nothing
+  (let ((allowed (mapcan #'(lambda (r)
+			     (let ((from (i-mem-symbol-location (car r)))
+				   (to (i-mem-symbol-location (cadr r))))
+			       (and from to (list (list from to)))))
+			 *fiddle-allowed-ranges*))
+	(halts (list (i-mem-symbol-location 'illop) (i-mem-symbol-location 'trap))))
+    (dotimes (pc (array-length i-mem))
+      (let ((w (aref i-mem pc)))
+	(when (and w (eql (write-map-operation-of w) 1)
+		   (not (dolist (r allowed) (when (and (>= pc (car r)) (< pc (cadr r))) (return t)))))
+	  (check-fiddle-window pc halts))))))
+
+(defun fiddle-window-bad (fiddle why pc)
+  (ferror nil "The fiddle (a TLB direct write) at I-MEM ~O is ~A at I-MEM ~O before its invalidation: a lookup there can evict it (revision 14's fiddle rule, contract 9.1)."
+	  fiddle why pc))
+
+(defun check-fiddle-window (fiddle halts)
+  ;; each state is (pc starts . pending): pending the pcs an xct-next jump
+  ;; goes to after the word at pc
+  (let ((work (list (list (1+ fiddle) 0))) (seen nil))
+    (do () ((null work))
+      (let* ((state (pop work)) (pc (car state)) (starts (cadr state)) (pending (cddr state))
+	     (w (and (< pc (array-length i-mem)) (aref i-mem pc))))
+	(unless (member state seen)
+	  (push state seen)
+	  (cond ((null w) (fiddle-window-bad fiddle "run off the code" pc))
+		((= (ldb 3206 w) 51) (fiddle-window-bad fiddle "read by MAP(MD)" pc))
+		((= (ldb 5302 w) 2) (fiddle-window-bad fiddle "followed by a dispatch" pc))
+		((memq (ldb 5302 w) '(0 3))
+		 (let ((op (write-map-operation-of w)) (n starts))
+		   (when (and (zerop (ldb 3101 w)) (memq (ldb 2305 w) '(21 22 32)))
+		     (setq n (1+ starts))
+		     (when (> n 1) (fiddle-window-bad fiddle "followed by a second memory start" pc)))
+		   (cond ((memq op '(2 3)))	;ended: this path is fine
+			 (op (fiddle-window-bad fiddle "followed by another write-map" pc))
+			 ((not (zerop (ldb 5201 w))) (fiddle-window-bad fiddle "followed by a return" pc))
+			 (t (dolist (p (or pending (list (1+ pc)))) (push (list p n) work))))))
+		(t			;a jump
+		 (let* ((target (ldb 1416 w)) (condition (ldb 0006 w)) (invert (ldb 0601 w))
+			(always (and (= condition 47) (zerop invert)))
+			(never (and (= condition 47) (= invert 1)))
+			(xct-next (zerop (ldb 0701 w))) (call (= 1 (ldb 1001 w))) (ret (= 1 (ldb 1101 w)))
+			(taken (cond (never nil)
+				     (call (if (memq target halts) nil
+					     (fiddle-window-bad fiddle "followed by a call" pc)))
+				     (ret (fiddle-window-bad fiddle "followed by a return" pc))
+				     (t (list target))))
+			(fall (if always nil (list (if xct-next (+ pc 2) (1+ pc))))))
+		   (if xct-next
+		       (push (list* (1+ pc) starts (append taken fall)) work)
+		     (dolist (p (append taken fall)) (push (list p starts) work)))))))))))
 
 (DEFUN FILE-TEST-ALWAYS (F1 F2) F1 F2 T)
 
@@ -1042,8 +1301,18 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 (DEFUN CONS-LAP-SET (SYM VAL)
   (PUTPROP SYM VAL 'CONS-LAP-USER-SYMBOL))
 
-(DEFUN CONS-LAP-SYMEVAL (SYM)
-  (OR (GET SYM 'CONS-LAP-SYM) (GET SYM 'CONS-LAP-USER-SYMBOL)))
+;(DEFUN CONS-LAP-SYMEVAL (SYM)
+;  (OR (GET SYM 'CONS-LAP-SYM) (GET SYM 'CONS-LAP-USER-SYMBOL)))
+;; quux: a name only revision 14 decodes as meant (cadsym: condition 12, the
+;; write-map operation word) is refused in another revision's assembly, where
+;; it would assemble without a word into bits that mean something else.
+(defun cons-lap-symeval (sym)
+  (let ((v (get sym 'cons-lap-sym)))
+    (cond ((null v) (get sym 'cons-lap-user-symbol))
+	  ((and (not (eql *hardware-revision* 14.)) (get sym 'cons-lap-revision-14))
+	   (ferror nil "~S is revision 14's: this assembly is for revision ~D (ua:*hardware-revision*)."
+		   sym *hardware-revision*))
+	  (t v))))
 
 (DEFUN CONS-LAP-LISP-SYMEVAL (SYM)
   (OR (BOUNDP SYM) (FERROR NIL "Unbound Lisp Variable ~s" SYM))
@@ -1454,6 +1723,12 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
        (GO M-ROTATE-BUGGER)
     JUMP 
        (SETQ INST 200000000000000)
+       ;; quux: condition 12, ir<5:0> 52 (condition mode, m <= a unsigned), is
+       ;; revision 14's; revision 13 decodes it as its ir<2:0>, condition 2.
+       (when (and (= (logand combined-value 77) 52)
+		  (not (eql *hardware-revision* 14.)))
+	 (ferror nil "Condition 12 (m <= a, unsigned) is revision 14's: this assembly is for revision ~D."
+		 *hardware-revision*))
        (SETQ T1 (LOGAND 6077 COMBINED-VALUE))
        (COND ((> (LOGAND T1 77) 37) (GO X1)))	;TEST-CONDITION, DONT HACK
        (GO M-ROTATE-BUGGER-1)		;RANDOMLY SAVE A BIGNUM OP

@@ -220,8 +220,10 @@ XTVCH1	(CHECK-PAGE-READ)
 	((M-S) M-R)					;THIS MANY ROWS IN THIS WORD
 	((M-1) READ-MEMORY-DATA)			;M-1 GETS WORD FROM FONT ARRAY
 ;HERE FOR EACH ROW OF RASTER, IN THE CASE WHERE IT CROSSES A WORD BOUNDARY
-XTVCH2  (JUMP-LESS-THAN M-C A-TV-SCREEN-BUFFER-ADDRESS XTVCHO1)  ;COMMENT ABOUT RANGE CHECKING 
-	(JUMP-GREATER-OR-EQUAL M-C A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO1)  ;ABOVE
+;XTVCH2  (JUMP-LESS-THAN M-C A-TV-SCREEN-BUFFER-ADDRESS XTVCHO1)  ;COMMENT ABOUT RANGE CHECKING 
+xtvch2  (jump-less-than-unsigned m-c a-tv-screen-buffer-address xtvcho1)  ;COMMENT ABOUT RANGE CHECKING	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-GREATER-OR-EQUAL M-C A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO1)  ;ABOVE
+	(jump-greater-or-equal-unsigned m-c a-tv-screen-buffer-end-address xtvcho1)  ;ABOVE	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA-START-READ) M-C)				;GET FIRST TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-T (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
@@ -230,8 +232,10 @@ XTVCH2  (JUMP-LESS-THAN M-C A-TV-SCREEN-BUFFER-ADDRESS XTVCHO1)  ;COMMENT ABOUT 
        ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2)
 	(CHECK-PAGE-WRITE)
 XTVCHO1	((VMA) ADD M-C (A-CONSTANT 1))
-	(JUMP-LESS-THAN VMA A-TV-SCREEN-BUFFER-ADDRESS XTVCHO2)
-	(JUMP-GREATER-OR-EQUAL VMA A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO2)
+;	(JUMP-LESS-THAN VMA A-TV-SCREEN-BUFFER-ADDRESS XTVCHO2)
+	(jump-less-than-unsigned vma a-tv-screen-buffer-address xtvcho2)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-GREATER-OR-EQUAL VMA A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO2)
+	(jump-greater-or-equal-unsigned vma a-tv-screen-buffer-end-address xtvcho2)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA-START-READ) ADD M-C (A-CONSTANT 1))	;GET SECOND TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-I (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
@@ -271,8 +275,10 @@ XTVCH5	(CHECK-PAGE-READ)
 	((M-S) M-R)					;THIS MANY ROWS IN THIS WORD
 	((M-1) READ-MEMORY-DATA)			;M-1 GETS WORD FROM FONT ARRAY
 ;HERE FOR EACH ROW OF RASTER
-XTVCH6	(JUMP-LESS-THAN M-C A-TV-SCREEN-BUFFER-ADDRESS XTVCHO3)  ;COMMENT ABOUT RANGE CHECKING 
-	(JUMP-GREATER-OR-EQUAL M-C A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO3)  ;ABOVE
+;XTVCH6	(JUMP-LESS-THAN M-C A-TV-SCREEN-BUFFER-ADDRESS XTVCHO3)  ;COMMENT ABOUT RANGE CHECKING 
+xtvch6	(jump-less-than-unsigned m-c a-tv-screen-buffer-address xtvcho3)  ;COMMENT ABOUT RANGE CHECKING	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-GREATER-OR-EQUAL M-C A-TV-SCREEN-BUFFER-END-ADDRESS XTVCHO3)  ;ABOVE
+	(jump-greater-or-equal-unsigned m-c a-tv-screen-buffer-end-address xtvcho3)  ;ABOVE	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA-START-READ) M-C)				;GET TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-T (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
@@ -344,9 +350,11 @@ XTVERS5	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
 	((M-K) DPB (M-CONSTANT -1) (BYTE-FIELD 0 0) A-ZERO)
 	(JUMP-EQUAL-XCT-NEXT M-C A-ZERO XTVERS3)	;JUMP IF NARROW (LESS THAN 1 WORD)
 XTVERS0((M-B) M-D)					;COPY OF HEIGHT
-	(CALL-LESS-THAN M-E A-TV-SCREEN-BUFFER-ADDRESS TRAP)
+;	(CALL-LESS-THAN M-E A-TV-SCREEN-BUFFER-ADDRESS TRAP)
+	(call-less-than-unsigned m-e a-tv-screen-buffer-address trap)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)
-	(CALL-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TRAP)
+;	(CALL-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TRAP)
+	(call-greater-or-equal-unsigned m-e a-tv-screen-buffer-end-address trap)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)			;This is special.
 	((VMA-START-READ) M-E)				;FETCH TOP LEFT-HAND WORD
 XTVERS1	(CHECK-PAGE-READ-NO-INTERRUPT)			;DO FIRST COLUMN
@@ -357,7 +365,8 @@ XTVERS1	(CHECK-PAGE-READ-NO-INTERRUPT)			;DO FIRST COLUMN
 	;; buffer, an xbus nxm (muir traced them at row 1024 of a 1280x1024
 	;; screen); the cadr's tv memory ran on past its last line.  m-b is the
 	;; height, never 0 here (xtvers5 returns for 0).
-	(CALL-GREATER-OR-EQUAL VMA A-TV-SCREEN-BUFFER-END-ADDRESS TRAP)
+;	(CALL-GREATER-OR-EQUAL VMA A-TV-SCREEN-BUFFER-END-ADDRESS TRAP)
+	(call-greater-or-equal-unsigned vma a-tv-screen-buffer-end-address trap)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)			;This is special.
 	((OA-REG-LOW) M-J)
 	((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-K)
@@ -436,8 +445,10 @@ TVDRL3	((M-A) (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 1) 1) M-R)	;M-A <length of
 	((M-1) SUB M-2 (A-CONSTANT 1))
 	((M-1) DPB M-1 OAL-BYTL-1 A-ZERO)		;Position for hardware byte size
 	(JUMP-EQUAL M-ZERO A-DRAW-LINE-DRAW-FIRST-POINT TVDRL7)	;Skip first point?
-TVDRL4	(JUMP-LESS-THAN M-E A-TV-SCREEN-BUFFER-ADDRESS TVDRL7) ;Clip
-	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TVDRL7) ;Clip
+;TVDRL4	(JUMP-LESS-THAN M-E A-TV-SCREEN-BUFFER-ADDRESS TVDRL7) ;Clip
+tvdrl4	(jump-less-than-unsigned m-e a-tv-screen-buffer-address tvdrl7) ;Clip	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
+;	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TVDRL7) ;Clip
+	(jump-greater-or-equal-unsigned m-e a-tv-screen-buffer-end-address tvdrl7) ;Clip	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA-START-READ) M-E)				;get data
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) DPB M-T OAL-MROT A-1)		;bit offset

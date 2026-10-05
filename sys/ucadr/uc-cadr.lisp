@@ -15,9 +15,20 @@
 ;; just below it, 1757776000-1757777777, in the order the page fault handler
 ;; tests them.  there is no unibus: its window is put past the frame buffer in
 ;; the i/o region, where nothing answers.
-(assign lowest-a-mem-virtual-address 1757776000)	;must be 0 modulo size of a-mem
-(assign lowest-io-space-virtual-address 1760000000)	;the i/o virtual region
-(assign lowest-unibus-virtual-address 1770000000)	;no unibus on quux
+;(assign lowest-a-mem-virtual-address 1757776000)	;must be 0 modulo size of a-mem
+;(assign lowest-io-space-virtual-address 1760000000)	;the i/o virtual region
+;(assign lowest-unibus-virtual-address 1770000000)	;no unibus on quux
+;; quux revision 14 (contract g3 revision 14, 2, 10.8; appendix a14.1): 32-bit
+;; virtual addresses and two untranslated windows above 2^31.  a memory's
+;; window is 35700000000-35700001777 in the device window, every reference to
+;; it faulting with status 7; %xbus-read's and %xbus-write's base is
+;; 35760000000, so that lisp's offset 17777400 + w is register-page word w at
+;; 35777777400 + w.  there is no unibus: its base is the first slice of the
+;; device window reserved for devices, where nothing answers, and %unibus-read
+;; and %unibus-write signal an error before they reach it.
+(assign lowest-a-mem-virtual-address 35700000000)	;must be 0 modulo size of a-mem
+(assign lowest-io-space-virtual-address 35760000000)	;%xbus-read's base
+(assign lowest-unibus-virtual-address 34400000000)	;no unibus on quux
 
 ;Compare with these after clearing the sign bit of the address
 ;(which is done since that bit is meaningless in the map on a CADR).
@@ -26,9 +37,13 @@
 ;(ASSIGN INTERNAL-LOWEST-UNIBUS-VIRTUAL-ADDRESS 77400000)   ;END OF X-BUS, BEGINNING OF UNIBUS
 ;; quux revision 13: no sign bit is cleared from a 28-bit address, so the
 ;; internal addresses are the addresses themselves.
-(assign internal-lowest-a-mem-virtual-address 1757776000)
-(assign internal-lowest-io-space-virtual-address 1760000000)
-(assign internal-lowest-unibus-virtual-address 1770000000)
+;(assign internal-lowest-a-mem-virtual-address 1757776000)
+;(assign internal-lowest-io-space-virtual-address 1760000000)
+;(assign internal-lowest-unibus-virtual-address 1770000000)
+;; quux revision 14: the same as the addresses above
+(assign internal-lowest-a-mem-virtual-address 35700000000)
+(assign internal-lowest-io-space-virtual-address 35760000000)
+(assign internal-lowest-unibus-virtual-address 34400000000)
 
 ;; quux (contract q13, revision 11): the register page is the last page of
 ;; the physical space, 17777400-17777777, fixed, where it was 17377000-
@@ -41,8 +56,14 @@
 ;; quux revision 13 (contract g2 4.1): the register page is the last page of
 ;; the 28-bit physical space, 1777777400, and virtual equal to physical in the
 ;; i/o virtual region.
-(assign quux-register-page-virtual-address 1777777400)
-(assign quux-register-page-physical-address 1777777400)
+;(assign quux-register-page-virtual-address 1777777400)
+;(assign quux-register-page-physical-address 1777777400)
+;; quux revision 14 (appendix a14.1): the register page is 35777777400 in the
+;; device window, untranslated.  it has no physical address in main memory's
+;; space any more: phys-mem-read and phys-mem-write take a window address as
+;; it is (uc-cold-disk), so the "physical" names below are the same address.
+(assign quux-register-page-virtual-address 35777777400)
+(assign quux-register-page-physical-address 35777777400)
 
 ;; quux (contract q4): the chaosnet interface is the register page's words
 ;; 140-147, word 140+k for unibus 764140+2k, the same registers in the same
@@ -70,7 +91,10 @@
 ;; ran was an xbus nxm (muir traced them at 17176423 on a 1280x1024 screen).
 ;(assign disk-run-light-virtual-address 77000036)	;XBUS ADDRESS
 ;; quux revision 13: the frame buffer window is at 1760000000 (g1 3.2).
-(assign disk-run-light-virtual-address 1760000036)
+;(assign disk-run-light-virtual-address 1760000036)
+;; quux revision 14 (appendix a14.1): frame buffer 0 is at 34000000000, the
+;; device window's slice 0.
+(assign disk-run-light-virtual-address 34000000036)
 
 ;; quux: the microsecond clock is the processor's source 15 (revision 5), not
 ;; the i/o board's at unibus 764120.
@@ -137,6 +161,14 @@
 (assign quux-timer-2-control-virtual-address (plus quux-register-page-virtual-address 114))
 (assign quux-timer-2-period-physical-address (plus quux-register-page-physical-address 115))
 (assign quux-file-device-status-physical-address (plus quux-register-page-physical-address 161))
+;; quux revision 14 (appendix a14.9): the memory system's words, 220-224: the
+;; directory base, the ephemeral-reference enable, the pointer-type register's
+;; two words, and the count of write-backs the guard refused.
+(assign quux-directory-base-physical-address (plus quux-register-page-physical-address 220))
+(assign quux-ephemeral-enable-physical-address (plus quux-register-page-physical-address 221))
+(assign quux-pointer-types-0-31-physical-address (plus quux-register-page-physical-address 222))
+(assign quux-pointer-types-32-63-physical-address (plus quux-register-page-physical-address 223))
+(assign quux-refused-write-backs-physical-address (plus quux-register-page-physical-address 224))
 ;; quux revision 12 (contract h8a): the feature page's word 17 is the number of
 ;; the macro dispatch memory's entries, 1,024, and reads 0 below revision 12;
 ;; reset-machine fills the memory only when it is there.
@@ -244,6 +276,14 @@ XXBR (MISC-INST-ENTRY %XBUS-READ)
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
     (ERROR-TABLE ARGTYP FIXNUM PP 0)
     (ERROR-TABLE ARG-POPPED 0 PP)
+	;; quux revision 14 (contract g3 revision 14, 10.8): the offset must be
+	;; within 0-17777777, the 16 m words from the base to the register page's
+	;; end.  from 20000000 on, base plus offset is the physical memory window,
+	;; and would read main memory silently; on revision 13 it faulted past the
+	;; 28-bit space.  an argument error (the type xbus-offset) instead.
+	((m-tem) q-pointer c-pdl-buffer-pointer)
+	(call-greater-than-unsigned m-tem (a-constant 17777777) trap)
+    (error-table argtyp xbus-offset pp 0)
 	((VMA-START-READ) ADD C-PDL-BUFFER-POINTER-POP	;XBUS word addr
 		(A-CONSTANT LOWEST-IO-SPACE-VIRTUAL-ADDRESS))
 XUBR0	(CHECK-PAGE-READ)		;Mustn't check for sequence breaks since
@@ -254,6 +294,13 @@ XUBR (MISC-INST-ENTRY %UNIBUS-READ)
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
     (ERROR-TABLE ARGTYP FIXNUM PP 0)
     (ERROR-TABLE ARG-POPPED 0 PP)
+	;; quux revision 14 (contract g3 revision 14, 10.9, rule a6): quux has no
+	;; unibus.  its old window, 1770000000, is paged space on revision 14,
+	;; where a region can lie, so a read there would read lisp's memory: an
+	;; argument error for every address (the type unibus-address, which no
+	;; address is), before the read below, which is no longer reached.
+	(call trap)
+    (error-table argtyp unibus-address pp 0)
 	((VMA-START-READ) (BYTE-FIELD 17. 1) C-PDL-BUFFER-POINTER-POP	;UBUS word addr
 		(A-CONSTANT LOWEST-UNIBUS-VIRTUAL-ADDRESS))
 	(JUMP XUBR0)
@@ -268,6 +315,11 @@ XXBW (MISC-INST-ENTRY %XBUS-WRITE)
 	(CALL GET-32-BITS)		;M-1 gets value to write
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
 		(ERROR-TABLE ARGTYP FIXNUM PP 0)
+	;; quux revision 14 (contract g3 revision 14, 10.8): the offset's bound,
+	;; as %xbus-read's: past 17777777 it would write main memory silently.
+	((m-tem) q-pointer c-pdl-buffer-pointer)
+	(call-greater-than-unsigned m-tem (a-constant 17777777) trap)
+    (error-table argtyp xbus-offset pp 0)
 	((WRITE-MEMORY-DATA) M-1)
 	((VMA-START-WRITE M-T) ADD C-PDL-BUFFER-POINTER-POP	;Return random fixnum in M-T
 		(A-CONSTANT LOWEST-IO-SPACE-VIRTUAL-ADDRESS))
@@ -277,6 +329,12 @@ XXBW (MISC-INST-ENTRY %XBUS-WRITE)
 XUBW (MISC-INST-ENTRY %UNIBUS-WRITE)
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
 		(ERROR-TABLE ARGTYP FIXNUM PP 1)
+	;; quux revision 14 (contract g3 revision 14, 10.9, rule a6): no unibus,
+	;; as %unibus-read: an argument error on the address, the second argument,
+	;; before anything is written.
+	((m-tem) c-pdl-buffer-pointer-pop)		;the word, to reach the address
+	(call trap)
+    (error-table argtyp unibus-address pp 0)
 	((M-T WRITE-MEMORY-DATA) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP) ;WORD TO WRITE
 ;;; IF THIS IS MADE CONTINUABLE, THIS WILL HAVE TO BE FIXED
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
