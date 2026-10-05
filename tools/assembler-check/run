@@ -1,0 +1,444 @@
+#!/usr/bin/env python3
+"""tools/assembler-check/run: the micro-assembler's checks for revision 14
+(tools/assembler-check/README.md).
+
+Usage:
+  tools/assembler-check/run --ref UBIN [--out DIR] [--ports N] [CHECK...]
+                            [-- LISPM-CHECK-ARGS...]
+
+CHECK is one of the names in CHECKS below; none means all of them.  The checks
+given run at once, each in its own lispm-check run with its own 16 ports from
+N on (default 47300), on a copy of this tree's sys/ and site/, planted as the
+check says.  Each assembles UCADR (or the bits fixture) on the band with
+ua:*word-width* 40. and the check's ua:*hardware-revision*, and the runner
+then reads what the assembler wrote.  UBIN holds the release's ucadr.mcr,
+.sym, .tbl and .locs, the outputs microcode 2001 must assemble to.  Output in
+DIR/CHECK/ (DIR is the tree's run/assembler-check/ unless --out):
+lispm-check.out, cases.cases, the outputs, result.txt.  Exit status 0 when
+every check given passes.
+
+lispm-check's band, ubin/, quux and ozd are this tree's defaults
+(run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
+copies are not where those defaults are found; LISPM_CHECK_BAND and the
+others, or arguments after --, choose others.
+"""
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import threading
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+TOOL = os.path.join(TREE, 'tools', 'lispm-check')
+OUTPUTS = ('ucadr.mcr', 'ucadr.sym', 'ucadr.tbl', 'ucadr.locs')
+
+# The checks: the revision assembled, the plant, what the assembly must do
+# (None: succeed; a string: be refused with a message containing it), and the
+# analysis of what it wrote.
+CHECKS = {
+    'rev13': dict(rev=13, plant=None, refused=None),
+    'rev14': dict(rev=14, plant=None, refused=None),
+    'bits': dict(rev=14, plant=None, refused=None),
+    'pinned': dict(rev=14, plant='pinned', refused='A-PDL-BUFFER-VIRTUAL-ADDRESS'),
+    'map-table': dict(rev=14, plant='map-table', refused='FIX'),
+    'map-set': dict(rev=14, plant='map-set', refused='NULL'),
+    'lc-shift': dict(rev=14, plant='lc-shift', refused='right shift'),
+    'lc-mm': dict(rev=14, plant='lc-mm', refused='arithmetic function'),
+    'map-constant': dict(rev=14, plant='map-constant', refused='POINTER-TYPE-REGISTER-0-31'),
+}
+
+# Appendix A14.5's 19 types, the pointer-type register's set in microcode 2001
+# (contract G3 revision 14, 5.3): the bits words 222 and 223 must hold.
+POINTER_TYPES = ['DTP-NULL', 'DTP-SYMBOL', 'DTP-SYMBOL-HEADER', 'DTP-EXTENDED-NUMBER',
+                 'DTP-EXTERNAL-VALUE-CELL-POINTER', 'DTP-ONE-Q-FORWARD', 'DTP-HEADER-FORWARD',
+                 'DTP-LOCATIVE', 'DTP-LIST', 'DTP-FEF-POINTER', 'DTP-ARRAY-POINTER',
+                 'DTP-STACK-GROUP', 'DTP-CLOSURE', 'DTP-SELECT-METHOD', 'DTP-INSTANCE',
+                 'DTP-INSTANCE-HEADER', 'DTP-ENTITY', 'DTP-STACK-CLOSURE', 'DTP-SELF-REF-POINTER']
+
+
+def pointer_type_words():
+    """Words 222 and 223 for POINTER_TYPES, numbered by the tree's
+    Q-DATA-TYPES (sys/cold/qcom.lisp)."""
+    text = open(os.path.join(TREE, 'sys', 'cold', 'qcom.lisp'), 'rb').read().decode('latin-1')
+    names = re.search(r'\(DEFCONST Q-DATA-TYPES \'\((.*?)\)\)', text, re.S).group(1).split()
+    bits = sum(1 << names.index(t) for t in POINTER_TYPES)
+    return bits & 0xffffffff, bits >> 32
+
+UC_FILES = ['UC-PARAMETERS', 'UC-CADR', 'UC-MACROCODE', 'UC-CALL-RETURN',
+            'UC-STORAGE-ALLOCATION', 'UC-FCTNS', 'UC-ARRAY', 'UC-LOGICAL', 'UC-ARITH',
+            'UC-STRING', 'UC-TRANSPORTER', 'UC-STACK-CLOSURE', 'UC-METER', 'UC-HACKS',
+            'UC-TV', 'UC-TRACK-MOUSE', 'UC-PAGE-FAULT', 'UC-DISK', 'UC-INTERRUPT',
+            'UC-CHAOS', 'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+
+
+def uc_files():
+    """The files of sys/ucadr/ucode.lisp's :MICRO-ASSEMBLE, in order; checked
+    against UC_FILES, the list the assembly case names."""
+    text = open(os.path.join(TREE, 'sys', 'ucadr', 'ucode.lisp'), 'rb').read().decode('latin-1')
+    m = re.search(r':MICRO-ASSEMBLE \((.*?)\)\)', text, re.S)
+    names = re.findall(r'"([^"]+)"', re.sub(r';[^\r\n]*', '', m.group(1)))
+    if names != UC_FILES:
+        sys.exit('assembler-check: ucode.lisp lists %s, not UC_FILES' % names)
+    return names
+
+
+# ---------------------------------------------------------------- the plants
+# Read and write bytes, as the tree's files may hold bare CRs.
+
+def replace_once(path, old, new, after=None):
+    data = open(path, 'rb').read()
+    start = data.index(after) if after else 0
+    at = data.index(old, start)
+    open(path, 'wb').write(data[:at] + new + data[at + len(old):])
+
+
+def plant(kind, copy):
+    uc = os.path.join(copy, 'sys', 'ucadr')
+    if kind == 'pinned':
+        # a variable inserted before A 430, which moves A-PDL-BUFFER-VIRTUAL-ADDRESS
+        # to 431 and A-PDL-BUFFER-HEAD to 432
+        replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'A-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)',
+                     b'a-planted-y1\t(0)\nA-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)')
+    elif kind == 'map-table':
+        # D-TRANSPORT's entry for FIX (type 5, not a pointer type) with map bit 1
+        # made unlike its entry with map bit 0
+        replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'(R-BIT)\t\t\t\t\t;1 FIX',
+                     b'(INHIBIT-XCT-NEXT-BIT TRANS-OLD)\t;1 FIX', after=b'\nD-TRANSPORT\n')
+    elif kind in ('lc-shift', 'lc-mm'):
+        word = {'lc-shift': b'((location-counter) output-selector-rightshift-1 add m-a a-b)',
+                'lc-mm': b'((location-counter) m+m m-a)'}[kind]
+        path = os.path.join(uc, 'uc-mc.lisp')
+        data = open(path, 'rb').read()
+        at = data.rindex(b'))')
+        open(path, 'wb').write(data[:at] + b'planted-y1\t' + word + b'\n' + data[at:])
+    elif kind in ('map-set', 'map-constant'):
+        pass                                # planted in the cases, not in the tree
+
+
+def copy_tree(dest):
+    shutil.rmtree(dest, ignore_errors=True)
+    for top in ('sys', 'site'):
+        shutil.copytree(os.path.join(TREE, top), os.path.join(dest, top),
+                        ignore=shutil.ignore_patterns('ubin'))
+    # the assembler writes UCADR's outputs into SYS: UBIN;, which the tree
+    # does not carry
+    os.makedirs(os.path.join(dest, 'sys', 'ubin'))
+    os.makedirs(os.path.join(dest, 'sys', 'assembler-check'))
+    shutil.copy2(os.path.join(HERE, 'lisp', 'y1bits.lisp'),
+                 os.path.join(dest, 'sys', 'assembler-check', 'y1bits.lisp'))
+
+
+# ---------------------------------------------------------------- the cases
+
+def assemble_form(version):
+    files = ' '.join('"SYS: UCADR; %s LISP"' % f for f in uc_files())
+    return ('(let* ((files (mapcar #\'(lambda (name) (send (fs:parse-pathname name) :truename)) '
+            "'(%s))) (ua:file-truenames-listified (mapcar #'ua:listify-pathname files)) "
+            "(old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p "
+            "#'(lambda (&rest ignore) t)) (ua:assemble-system (send (fs:parse-pathname "
+            '"SYS: UBIN; UCADR") :new-version %d.) files nil nil t) t) (fset \'y-or-n-p old)))'
+            % (files, version))
+
+
+def bits_form():
+    return ('(let ((*standard-input* (make-string-input-stream "1.")) (old (symbol-function '
+            "'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p #'(lambda (&rest ignore) t)) "
+            '(ua:assemble "SYS: ASSEMBLER-CHECK; Y1BITS LISP") t) (fset \'y-or-n-p old)))')
+
+
+def cases(check):
+    c = CHECKS[check]
+    lines = ['; tools/assembler-check: %s' % check,
+             "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+             '(setq ua:*word-width* 40.) => 40']
+    if check == 'bits':
+        # revision 13 refuses the names and condition 12; revision 14 assembles them
+        lines += ['(setq ua:*hardware-revision* 13.) => 13',
+                  bits_form() + ' =>! revision 14',
+                  '(setq ua:*hardware-revision* 14.) => 14',
+                  bits_form() + ' => T']
+        return '\n'.join(lines) + '\n'
+    lines.append('(setq ua:*hardware-revision* %d.) => %d' % (c['rev'], c['rev']))
+    if check == 'map-constant':
+        # word 222's constant made unlike the set, as a stale or hand-written one would be
+        lines.append("(progn (putprop 'ua:pointer-type-register-0-31 1 'ua:cons-lap-sym) t) => T")
+    if check == 'map-set':
+        lines.append("(length (setq ua:*pointer-types* (remove 'dtp-null ua:*pointer-types*))) => 18")
+    lines.append('(setq ua:version-number 2001.) => 2001')
+    lines.append(assemble_form(2001) + (' => T' if c['refused'] is None
+                                        else ' =>! %s' % c['refused']))
+    return '\n'.join(lines) + '\n'
+
+
+# ---------------------------------------------------------------- the .mcr
+
+def mcr_sections(path):
+    """The sections of a .mcr in partition order: a list of (code, start,
+    count, data), data the section's words (I-MEM: 48-bit words; A memory at
+    40 bits: 40-bit words; a main-memory section: its three header words
+    after the code, as start, count and data); and the byte offset where the
+    sections end, the A memory section being the last."""
+    b = open(path, 'rb').read()
+    w = struct.unpack('<%dI' % (len(b) // 4), b[:len(b) // 4 * 4])
+    i, out = 0, []
+    while i < len(w):
+        code, start, count = w[i:i + 3]
+        if code == 1:
+            out.append((1, start, count, [w[i + 3 + 2 * k] << 32 | w[i + 4 + 2 * k]
+                                          for k in range(count)]))
+            i += 3 + 2 * count
+        elif code == 2:
+            out.append((2, start, count, list(w[i + 3:i + 3 + count])))
+            i += 3 + count
+        elif code == 3:
+            out.append((3, start, count, [w[i + 3]]))
+            i += 4
+        elif code == 5:
+            d = w[i + 3:i + 3 + 2 * count]
+            out.append((5, start, count, [d[2 * k] | (d[2 * k + 1] & 0o377) << 32
+                                          for k in range(count)]))
+            return out, 4 * (i + 3 + 2 * count)
+        elif code == 6:
+            out.append((6, start, count, list(w[i + 3:i + 3 + count])))
+            i += 3 + count
+        else:
+            raise ValueError('section code %o at word %d' % (code, i))
+    raise ValueError('no A memory section')
+
+
+def mcr_symbol_area(path):
+    """The main-memory section's words as the file holds them: from its
+    relative disk block (1024 bytes a block) to the end of the file."""
+    secs, _ = mcr_sections(path)
+    block = [s for s in secs if s[0] == 3][0][2]
+    return open(path, 'rb').read()[1024 * block:]
+
+
+def sym_table(path):
+    """NAME -> (memory, location) from a .sym file's symbols."""
+    syms = {}
+    t = open(path, 'rb').read().decode('latin-1').split()
+    for k in range(len(t) - 2):
+        if t[k + 1] in ('I-MEM', 'A-MEM', 'M-MEM', 'D-MEM') and re.match(r'[0-7]+$', t[k + 2]):
+            syms[t[k]] = (t[k + 1], int(t[k + 2], 8))
+    return syms
+
+
+def ir(word, lo, n):
+    return word >> lo & ((1 << n) - 1)
+
+
+def same_sym(a, b):
+    """Whether two .sym files hold the same assembler state and the same
+    symbols.  The symbols are dumped in the order of the package's hash table
+    (docs/building.md, "Assembling the microcode"), which any symbol interned
+    in UA moves, so they are compared as a set."""
+    def parts(path):
+        text = open(path, 'rb').read().decode('latin-1')
+        head, _, body = text.partition('\n-2 ')
+        return head, sorted(re.findall(r'(\S+) ([IAMD]-MEM) ([0-7]+)', body))
+    return parts(a) == parts(b)
+
+
+def compare_outputs(out, ref, files):
+    lines, ok = [], True
+    for f in files:
+        same = open(os.path.join(out, f), 'rb').read() == open(os.path.join(ref, f), 'rb').read()
+        if same:
+            lines.append('%s equals the release byte for byte' % f)
+        elif f.endswith('.sym') and same_sym(os.path.join(out, f), os.path.join(ref, f)):
+            lines.append('%s holds the release\'s state and symbols, in another order' % f)
+        else:
+            lines.append('%s DIFFERS FROM the release' % f)
+            ok = False
+    return ok, lines
+
+
+def check_rev13(out, ref):
+    return compare_outputs(out, ref, OUTPUTS)
+
+
+def check_rev14(out, ref):
+    lines, ok = [], True
+    secs, end = mcr_sections(os.path.join(out, 'ucadr.mcr'))
+    first = secs[0]
+    s6 = first[0] == 6 and first[1] == 0 and first[2] == 1 and first[3] == [14]
+    lines.append('first section %s: code %o start %o count %o %s' % (
+        'is section 6 = 14' if s6 else 'is NOT section 6 = 14', first[0], first[1], first[2],
+        ['%o' % x for x in first[3][:4]]))
+    ok &= s6
+    sixes = [s for s in secs if s[0] == 6]
+    if len(sixes) != 1:
+        lines.append('%d sections 6' % len(sixes))
+        ok = False
+    mine = [s for s in secs if s[0] != 6]
+    theirs, _ = mcr_sections(os.path.join(ref, 'ucadr.mcr'))
+    for a, b in zip(mine, theirs):
+        if a[0] == 3:
+            # the main-memory section's relative disk block may move with the
+            # four words section 6 adds; its block count and address may not
+            same = a[1] == b[1] and a[3] == b[3]
+        else:
+            same = a == b
+        lines.append('section %o %s the release\'s' % (a[0], 'equals' if same else 'DIFFERS FROM'))
+        ok &= same
+    if [s[0] for s in mine] != [s[0] for s in theirs]:
+        lines.append('sections %s, the release %s' % ([s[0] for s in mine], [s[0] for s in theirs]))
+        ok = False
+    mcr = open(os.path.join(out, 'ucadr.mcr'), 'rb').read()
+    tail = mcr_symbol_area(os.path.join(out, 'ucadr.mcr'))
+    pad = mcr[end:len(mcr) - len(tail)]
+    same = tail == mcr_symbol_area(os.path.join(ref, 'ucadr.mcr')) and not pad.strip(b'\0')
+    lines.append('the symbol area %s the release\'s, the padding before it %d zero bytes' % (
+        'equals' if same else 'DIFFERS FROM', len(pad)))
+    ok &= same
+    good, more = compare_outputs(out, ref, OUTPUTS[1:])
+    return ok and good, lines + more
+
+
+def check_bits(out):
+    """Each word against appendix A14 as muir-sim's revision 14 decodes it:
+    a jump's IR<44:43> 1, IR<5> condition mode, IR<4:0> the condition, IR<6>
+    inverted, IR<7> N (no xct-next), IR<8> P (call), IR<9> R (popj); the
+    write-map operation VMA<33:32> 0 none, 1 direct write, 2 invalidate, 3
+    empty, a direct write's entry VMA<29:0>."""
+    lines, ok = [], True
+    secs = {s[0]: s for s in mcr_sections(os.path.join(out, 'y1bits.mcr'))[0]}
+    imem, amem = secs[1][3], secs[5][3]
+    syms = sym_table(os.path.join(out, 'y1bits.sym'))
+    s6 = 6 in secs and secs[6][3] == [14]
+    lines.append('section 6 = 14 %s' % ('present' if s6 else 'MISSING'))
+    ok &= s6
+    ma, ab = syms['M-A'][1], syms['A-B'][1]
+    le = syms['Y1-LE'][1]
+    want = {  # name: (inverted, n, p, r)
+        'Y1-LE': (0, 1, 0, 0), 'Y1-LE-X': (0, 0, 0, 0), 'Y1-LE-CALL': (0, 1, 1, 0),
+        'Y1-LE-POPJ': (0, 1, 0, 1), 'Y1-GT': (1, 1, 0, 0), 'Y1-GT-X': (1, 0, 0, 0),
+        'Y1-GT-CALL': (1, 1, 1, 0), 'Y1-GT-POPJ': (1, 1, 0, 1)}
+    for name, (inv, n, p, r) in want.items():
+        w = imem[syms[name][1]]
+        got = (ir(w, 43, 2), ir(w, 5, 1), ir(w, 0, 5), ir(w, 6, 1), ir(w, 7, 1), ir(w, 8, 1),
+               ir(w, 9, 1), ir(w, 26, 6), ir(w, 32, 10))
+        exp = (1, 1, 0o12, inv, n, p, r, ma, ab)
+        good = got == exp and (r or ir(w, 12, 14) == le)
+        lines.append('%-11s %016o %s' % (name, w, 'ok' if good else 'WRONG: %s, want %s' % (got, exp)))
+        ok &= good
+    for name, op in (('Y1-NONE', 0), ('Y1-WRITE', 1), ('Y1-INVAL', 2), ('Y1-EMPTY', 3), ('Y1-BV', 2)):
+        w = imem[syms[name][1]]
+        v = amem[ir(w, 32, 10)]
+        good = v == op << 32
+        lines.append('%-11s A %o = %o: operation %d %s' % (name, ir(w, 32, 10), v, v >> 32 & 3,
+                                                           'ok' if good else 'WRONG, want %d' % op))
+        ok &= good
+    for name, want in zip(('Y1-PTR-LO', 'Y1-PTR-HI'), pointer_type_words()):
+        w = imem[syms[name][1]]
+        v = amem[ir(w, 32, 10)]
+        good = v == want
+        lines.append('%-11s A %o = %o: %s' % (name, ir(w, 32, 10), v,
+                                              'ok' if good else 'WRONG, want %o' % want))
+        ok &= good
+    for name, length, pos, dest in (('Y1-OP-DPB', 2, 32, 0o23), ('Y1-ENT-DPB', 30, 0, 0o20)):
+        w = imem[syms[name][1]]
+        got = (ir(w, 43, 2), ir(w, 12, 2), ir(w, 6, 6) + 1, ir(w, 0, 6), ir(w, 19, 5))
+        exp = (3, 3, length, pos, dest)
+        good = got == exp
+        lines.append('%-11s %016o %s' % (name, w, 'ok' if good else 'WRONG: %s, want %s' % (got, exp)))
+        ok &= good
+    return ok, lines
+
+
+# ---------------------------------------------------------------- running
+
+def environment():
+    env = dict(os.environ)
+    if 'LISPM_CHECK_BAND' not in env:
+        env['LISPM_CHECK_BAND'] = os.path.join(TREE, 'run', 'check', 'band.img')
+        env.setdefault('LISPM_CHECK_UBIN', os.path.join(TREE, 'run', 'check', 'ubin'))
+    env.setdefault('LISPM_CHECK_QUUX', os.path.join(TREE, '..', 'muir-sim', 'target', 'release', 'quux'))
+    env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
+    return env
+
+
+def run_check(check, outdir, ref, port, extra, results):
+    out = os.path.join(outdir, check)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    copy = os.path.join(out, 'tree')
+    copy_tree(copy)
+    plant(CHECKS[check]['plant'], copy)
+    cf = os.path.join(out, 'cases.cases')
+    open(cf, 'w').write(cases(check))
+    env = environment()
+    env['LISPM_CHECK_PORTS'] = '%d-%d' % (port, port + 15)
+    env['XDG_CACHE_HOME'] = os.path.join(out, 'xdg')
+    cmd = [sys.executable, TOOL, '--tree', copy, '--timeout', '3000', '--keep'] + extra + [cf]
+    with open(os.path.join(out, 'lispm-check.out'), 'w') as f:
+        rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    text = open(os.path.join(out, 'lispm-check.out')).read()
+    lines = ['lispm-check exit %d' % rc]
+    lines += [l for l in text.splitlines() if l.startswith(('PASS', 'FAIL', 'ERROR'))]
+    ok = rc == 0
+    m = re.search(r'run files kept in (\S+)', text)
+    served = os.path.join(m.group(1), 'served', 'sys') if m else None
+    try:
+        if ok and check in ('rev13', 'rev14'):
+            for f in OUTPUTS:
+                shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
+            good, more = (check_rev13 if check == 'rev13' else check_rev14)(out, ref)
+            ok &= good
+            lines += more
+        elif ok and check == 'bits':
+            for f in ('y1bits.mcr', 'y1bits.sym'):
+                shutil.copy2(os.path.join(served, 'assembler-check', f), os.path.join(out, f))
+            good, more = check_bits(out)
+            ok &= good
+            lines += more
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        lines.append('analysis failed: %r' % (e,))
+        ok = False
+    lines.append('%s %s' % (check.upper(), 'PASS' if ok else 'FAIL'))
+    open(os.path.join(out, 'result.txt'), 'w').write('\n'.join(lines) + '\n')
+    results[check] = ok
+
+
+def main(argv):
+    extra = []
+    if '--' in argv:
+        extra = argv[argv.index('--') + 1:]
+        argv = argv[:argv.index('--')]
+    outdir, ref, port, checks = os.path.join(TREE, 'run', 'assembler-check'), None, 47300, []
+    while argv:
+        a = argv.pop(0)
+        if a == '--out':
+            outdir = os.path.abspath(argv.pop(0))
+        elif a == '--ref':
+            ref = os.path.abspath(argv.pop(0))
+        elif a == '--ports':
+            port = int(argv.pop(0))
+        elif a in CHECKS:
+            checks.append(a)
+        else:
+            sys.exit(__doc__)
+    if ref is None:
+        sys.exit('assembler-check: --ref UBIN, the release\'s ucadr outputs, is needed\n' + __doc__)
+    uc_files()
+    checks = checks or list(CHECKS)
+    results, threads = {}, []
+    for k, check in enumerate(checks):
+        t = threading.Thread(target=run_check,
+                             args=(check, outdir, ref, port + 16 * k, extra, results))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    for check in checks:
+        print('%-10s %s' % (check, 'PASS' if results.get(check) else 'FAIL'))
+        sys.stdout.write(open(os.path.join(outdir, check, 'result.txt')).read())
+    return 0 if all(results.get(c) for c in checks) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

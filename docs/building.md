@@ -980,6 +980,27 @@ and `.locs`: `mcr`, `tbl` and `locs` are byte for byte System 100's. `sym`
 holds the same symbols in the order of a hash table, and names its source host
 OZ, not MIT-OZ.
 
+**Revision 14.** `(setq ua:*hardware-revision* 14.)` before assembling
+(the default is 13) assembles for QUUX's revision 14 (contract G3's revision
+14, appendix A14): it allows condition 12, M <= A unsigned
+(`jump-less-or-equal-unsigned`, `jump-greater-than-unsigned` and their
+call, return and `-xct-next` forms), and the write-map operation word's names
+(`write-map-operation`, `VMA<33:32>`, with `write-map-none`,
+`write-map-direct-write`, `write-map-invalidate` and `write-map-empty`, and
+`write-map-entry`, `VMA<29:0>`), and the pointer-type register's words 222
+and 223, `pointer-type-register-0-31` and `pointer-type-register-32-63`, the
+bits of `ua:*pointer-types*`, all of which a revision-13 assembly refuses; it
+writes the `.mcr` with section 6 first (code 6, start 0, one word, the
+hardware revision, 14); and `ua:assemble-system` refuses the microcode, before
+writing anything, when `A-PDL-BUFFER-VIRTUAL-ADDRESS` is not at A 430 or
+`A-PDL-BUFFER-HEAD` not at A 431, when a map-bit dispatch table tells apart by
+its map bit a data type that `ua:*pointer-types*` (the pointer-type register's
+set, A14.5's 19 types) leaves out, when the register's two words are not
+that set's bits, or when a word writes the location counter
+through the right shift or by an arithmetic function other than ADD, SUB, M+1
+and M-1 (`sys/sys/cadrlp.lisp`). At 13 every output is what it was.
+`tools/assembler-check` checks all of it (its README).
+
 **Reboot before assembling again.** A second `ua:assemble-system` in the
 same band reuses the source it read the first time, even when the files have
 changed: on 2026-09-23 a second assembly after a source edit came out byte for

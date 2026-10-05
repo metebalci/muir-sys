@@ -78,6 +78,15 @@
 (defprop jump-greater-or-equal-unsigned-condition
 	 (plus invert-jump-sense jump-less-than-unsigned-condition) cons-lap-sym)
 
+;; quux revision 14 (contract g3's revision 14, appendix a14.10): condition 12,
+;; ir<4:0> 12 octal in condition mode, is m <= a on the fields, unsigned, so
+;; that an a-only operand such as a-pgf-b can be compared on either side
+;; without a move; revision 13 decodes 12 as its ir<2:0>, so only a revision-14
+;; assembly may use it (cadrlp refuses it otherwise, *hardware-revision*).
+(defprop jump-less-or-equal-unsigned-condition 52 cons-lap-sym)
+(defprop jump-greater-than-unsigned-condition
+	 (plus invert-jump-sense jump-less-or-equal-unsigned-condition) cons-lap-sym)
+
 ;MISC FUNCTION CODES
 
 ;(DEFPROP INSTRUCTION-STREAM 3_10. CONS-LAP-SYM)
@@ -275,6 +284,21 @@
 (defprop popj-greater-or-equal-unsigned (plus jump-greater-or-equal-unsigned r-bit) cons-lap-sym)
 (defprop popj-greater-or-equal-unsigned-xct-next (plus jump-greater-or-equal-unsigned-xct-next r-bit) cons-lap-sym)
 
+;; quux revision 14's condition 12 (appendix a14.10), m <= a on the fields,
+;; unsigned, and its inverse, named as revision 13's two are.
+(defprop jump-less-or-equal-unsigned (plus jump-op jump-less-or-equal-unsigned-condition) cons-lap-sym)
+(defprop jump-less-or-equal-unsigned-xct-next (plus jump-op-xct-next jump-less-or-equal-unsigned-condition) cons-lap-sym)
+(defprop call-less-or-equal-unsigned (plus jump-less-or-equal-unsigned p-bit) cons-lap-sym)
+(defprop call-less-or-equal-unsigned-xct-next (plus jump-less-or-equal-unsigned-xct-next p-bit) cons-lap-sym)
+(defprop popj-less-or-equal-unsigned (plus jump-less-or-equal-unsigned r-bit) cons-lap-sym)
+(defprop popj-less-or-equal-unsigned-xct-next (plus jump-less-or-equal-unsigned-xct-next r-bit) cons-lap-sym)
+(defprop jump-greater-than-unsigned (plus jump-op jump-greater-than-unsigned-condition) cons-lap-sym)
+(defprop jump-greater-than-unsigned-xct-next (plus jump-op-xct-next jump-greater-than-unsigned-condition) cons-lap-sym)
+(defprop call-greater-than-unsigned (plus jump-greater-than-unsigned p-bit) cons-lap-sym)
+(defprop call-greater-than-unsigned-xct-next (plus jump-greater-than-unsigned-xct-next p-bit) cons-lap-sym)
+(defprop popj-greater-than-unsigned (plus jump-greater-than-unsigned r-bit) cons-lap-sym)
+(defprop popj-greater-than-unsigned-xct-next (plus jump-greater-than-unsigned-xct-next r-bit) cons-lap-sym)
+
 (DEFPROP WRITE-I-MEM (PLUS JUMP-OP P-BIT R-BIT JUMP-ALWAYS) CONS-LAP-SYM)
 
 (DEFPROP JUMP-CONDITIONAL JUMP-OP CONS-LAP-SYM)	;DEFINED FOR CONVENIENCE
@@ -466,6 +490,28 @@
 
 (DEFPROP VMA-WRITE-MAP  (OR (SOURCE-P (ERROR))
 			    (FIELD FUNCTION-DESTINATION 23)) CONS-LAP-SYM)
+
+;; quux revision 14 (appendix a14.4): a store to write-map (destinations 23
+;; and 33) is an operation on the tlb's entry for md's address, named by
+;; vma<33:32>: 0 none, 1 direct write (the entry <- valid, md's tag and
+;; vma<29:0>, a page entry's <29:0>), 2 invalidate, 3 empty (the sweep).
+;; revision 13's map-write word has the level-1 entry in <38:32>, so only a
+;; revision-14 assembly may use these names (cadrlp refuses them otherwise).
+(defprop write-map-operation (m-mem (byte-field 2 32.)) cons-lap-sym)
+(defprop write-map-entry (m-mem (byte-field 30. 0)) cons-lap-sym)
+(defprop write-map-none 0 cons-lap-sym)
+(defprop write-map-direct-write 1_32. cons-lap-sym)
+(defprop write-map-invalidate 2_32. cons-lap-sym)
+(defprop write-map-empty 3_32. cons-lap-sym)
+
+;; quux revision 14 (appendix a14.9): the pointer-type register's words, 222
+;; (types 0-31, <k> type k) and 223 (types 32-63, <k> type 32 + k), as the
+;; microcode writes them at boot.  each is computed from ua:*pointer-types*,
+;; the set the map-bit check holds the dispatch tables to (cadrlp), so that the
+;; register and the checked set cannot drift apart; cadrlp also refuses an
+;; assembly in which either value is not that set's.
+(defprop pointer-type-register-0-31 (eval (pointer-type-register-word 0)) cons-lap-sym)
+(defprop pointer-type-register-32-63 (eval (pointer-type-register-word 32.)) cons-lap-sym)
 
 ;10 C-PDL-BUFFER-POINTER
 
