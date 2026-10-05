@@ -215,10 +215,15 @@ because regions are allocated bigger than their data.")
 ;;; slots plus the pageable frames), not by the free quanta below it: those
 ;;; counted the address space below the partition's size, and eden's quanta,
 ;;; from 32000000000, lie far above it.  free space is the commit limit less
-;;; the words of every region that is not a fixed area's, eden's included.
+;;; the words of every region that is not free, the fixed areas' and eden's
+;;; included, every region number from 0 to size-of-area-arrays: the
+;;; microcode's commit check at make-region counts them all, since a fixed
+;;; area's pages own paging slots too.  counting only the unfixed areas'
+;;; regions overstated free space by the fixed areas' size.
 (defun get-free-space-size-1 ()
   (- virtual-memory-size
-     (loop for region from (1+ init-list-area) below size-of-area-arrays
+;     (loop for region from (1+ init-list-area) below size-of-area-arrays
+     (loop for region from 0 to size-of-area-arrays
 	   unless (= (ldb %%region-space-type (region-bits region)) %region-space-free)
 	     sum (region-length region))))
 
