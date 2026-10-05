@@ -1,4 +1,4 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:T; Patch-File:T -*-
-;;; System 2001, in progress on main since System 2000 was released.
+;;; System 2002, in progress on main since System 2001 was released.
 
-("System" 2001)
+("System" 2002)

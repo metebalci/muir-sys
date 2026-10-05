@@ -42,10 +42,10 @@ What the system on `main` uses so far:
 
 QUUX's microcode is MIT's 323 changed, released first as **microcode 2000**
 with **boot PROM 2000** and System 2000: QUUX's numbers are the 2000s, the
-CADR's the 1000s. `main` is now **System 2001**, on **microcode 2001** and
-**boot PROM 2001**. Both are for QUUX alone and stop on anything else, as a
+CADR's the 1000s. `main` is now **System 2002**, on **microcode 2002** and
+**boot PROM 2002**. Both are for QUUX alone and stop on anything else, as a
 band from `main` does.
-[`docs/release-2001.md`](docs/release-2001.md) records each
+[`docs/release-2002.md`](docs/release-2002.md) records each
 change as it is made; [`docs/booting.md`](docs/booting.md) follows a machine
 from power-on to Lisp.
 
@@ -119,8 +119,10 @@ This is the system. Three projects provide the machine:
 - [`docs/building.md`](docs/building.md) --- building the system from source:
   compiling, the cold load, `QLD`, saving a band, assembling the microcode, and
   writing a release pack.
-- [`docs/release-2001.md`](docs/release-2001.md) --- every change System 2001,
-  in progress on `main`, makes to System 2000.
+- [`docs/release-2002.md`](docs/release-2002.md) --- every change System 2002,
+  in progress on `main`, makes to System 2001.
+- [`docs/release-2001.md`](docs/release-2001.md) --- every change System 2001
+  makes to System 2000.
 - [`docs/release-2000.md`](docs/release-2000.md) --- every change System 2000
   makes to System 1001.
 - [`docs/booting.md`](docs/booting.md) --- how a machine boots, from power-on

@@ -74,7 +74,7 @@ machine only reads its GPT.
    carries the TELNET listener here too, though it serves no file
    (`docs/lispm-check.md`, "The file server").
 6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
-   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2001 ..."`), and LOD2, LOD3
+   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2002 ..."`), and LOD2, LOD3
    and PAGE zeroed before the disk is handed over.
 
 **Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
