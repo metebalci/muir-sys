@@ -33,8 +33,13 @@ TRANS-OLD
 	;; such a pointer drops through, as a pointer to a memory or i/o does once
 	;; get-map-bits has marked its map neither oldspace nor extra pdl.  only
 	;; using it as an address signals the error.
-	((m-tem) (byte-field 4 28.) md)
-	(jump-not-equal m-tem a-zero trans-drop-through)
+; 	((m-tem) (byte-field 4 28.) md)
+;	(jump-not-equal m-tem a-zero trans-drop-through)
+	;; quux revision 14 (contract g3 revision 14, 10.1): the drop-through
+	;; goes.  every address has an entry or a fixed one, and no entry and the
+	;; windows read "not oldspace, not extra pdl" (appendix a14.5), so only a
+	;; real oldspace pointer comes here, and an address past 2^31 is ephemeral
+	;; space, which can be oldspace.
 TRANS-OLD0	;Enter here if forwarding-pointer, mustn't ever drop-through
 	((A-TRANS-VMA) VMA)			;Save where MD came from
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;Ensure validity of meta bits
@@ -469,9 +474,11 @@ EXTRA-PDL-TRAP-1
 	;; alarm, without asking the map, whose bits for it stay 0.  storing or
 	;; saving such a pointer (sglv dumping the pdl buffer at every process
 	;; switch) halted the machine.
-	((m-tem) (byte-field 4 28.) md)
-	(jump-not-equal-xct-next m-tem a-zero trans-drop-through)
-       ((vma) a-trans-vma)			;restore vma, as the false alarm below
+;	((m-tem) (byte-field 4 28.) md)
+;	(jump-not-equal-xct-next m-tem a-zero trans-drop-through)
+;       ((vma) a-trans-vma)			;restore vma, as the false alarm below
+	;; quux revision 14 (contract g3 revision 14, 10.1): the drop-through
+	;; goes, as at trans-old: the map bits answer for every address.
 ;Only if MD points at the extra pdl area do we need to copy it.
 	(DISPATCH L2-MAP-STATUS-CODE D-GET-MAP-BITS) ;ENSURE VALIDITY OF META BITS
 	(POPJ-IF-BIT-SET-XCT-NEXT		;RETURN IF FALSE ALARM
@@ -487,13 +494,18 @@ EXTRA-PDL-TRAP-1
 
 ;Don't copy if storing into virtual address which will map to PDL buffer.
 	((m-tem) dpb m-zero q-all-but-pointer a-trans-vma)
-	(jump-less-than m-tem a-pdl-buffer-virtual-address extra-pdl-trap-2)
+;	(jump-less-than m-tem a-pdl-buffer-virtual-address extra-pdl-trap-2)
+	;; quux revision 14 (contract g3 revision 14, 10.1): addresses, compared
+	;; unsigned here and below: any object's address against the pdl buffer's,
+	;; which an ephemeral one past 2^31 sorted below.
+	(jump-less-than-unsigned m-tem a-pdl-buffer-virtual-address extra-pdl-trap-2)
 	((m-tem) sub m-tem a-pdl-buffer-active-qs)
 	((pdl-buffer-index) sub pdl-buffer-pointer a-ap)
 	((m-3) pdl-buffer-index)	;do modulo arithmetic
 	((m-tem) sub m-tem a-3)		;account for Qs in current frame 
 					;(in case clobbering REST arg).
-	(jump-less-than m-tem a-pdl-buffer-virtual-address trans-drop-through)
+;	(jump-less-than m-tem a-pdl-buffer-virtual-address trans-drop-through)
+	(jump-less-than-unsigned m-tem a-pdl-buffer-virtual-address trans-drop-through)
 
 EXTRA-PDL-TRAP-2
 ;Real extra-pdl trap, copy object out into working storage
@@ -540,15 +552,22 @@ EXTRA-PDL-TRAP-3	;New copy is now in MD, with suitable tag
 ;M-1 has the original map word contents.
 ;Cleanup is different in that VMA and PI haven't been advanced yet.
 EXTRA-PDL-TRAP-0
-	((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Number of locations dumped -1
+;	((M-TEM) SUB VMA A-PDL-BUFFER-VIRTUAL-ADDRESS)	;Number of locations dumped -1
+	;; quux revision 14: the dump keeps its base in a-pdl-dump-base, having
+	;; set the redirect's copies to where the dump will leave them (p-b-mr3,
+	;; uc-page-fault); here they are set to where it stopped.
+	((m-tem) sub vma a-pdl-dump-base)	;number of locations dumped -1
 	((M-PDL-BUFFER-ACTIVE-QS) M-A-1 M-PDL-BUFFER-ACTIVE-QS A-TEM)
 	((A-PDL-BUFFER-VIRTUAL-ADDRESS) ADD VMA (A-CONSTANT 1))
 	((PDL-BUFFER-INDEX) ADD PDL-BUFFER-INDEX (A-CONSTANT 1))
 	((A-PDL-BUFFER-HEAD) PDL-BUFFER-INDEX)
 	((MD) Q-R)				;Address the map
-	((VMA-WRITE-MAP) DPB M-1		;Restore the map for this page
-		MAP-WRITE-SECOND-LEVEL-MAP
-		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+;	((VMA-WRITE-MAP) DPB M-1		;Restore the map for this page
+;		MAP-WRITE-SECOND-LEVEL-MAP
+;		(A-CONSTANT (BYTE-MASK MAP-WRITE-ENABLE-SECOND-LEVEL-WRITE)))
+	;; quux revision 14 (contract g3 revision 14, 6.2): the dump's fiddle, a
+	;; tlb direct write, is forgotten by an invalidation
+	((vma-write-map) (a-constant write-map-invalidate))
 	;; EXTRA-PDL-TRAP-1 will clean up garbage in VMA.
 	((MD) SETA A-TRANS-MD			;Restore dubious MD
 		MICRO-STACK-PNTR-AND-DATA-POP)	;and flush useless return address

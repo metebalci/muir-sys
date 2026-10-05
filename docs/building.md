@@ -998,8 +998,14 @@ its map bit a data type that `ua:*pointer-types*` (the pointer-type register's
 set, A14.5's 19 types) leaves out, when the register's two words are not
 that set's bits, or when a word writes the location counter
 through the right shift or by an arithmetic function other than ADD, SUB, M+1
-and M-1 (`sys/sys/cadrlp.lisp`). At 13 every output is what it was.
-`tools/assembler-check` checks all of it (its README).
+and M-1, or when a TLB direct write outside the PDL buffer's dump and refill
+is followed, before its invalidation, by a second memory start, a MAP(MD)
+read, a dispatch, a call other than to a halt, a return or another write-map
+(`check-fiddle-windows`, revision 14's fiddle rule) (`sys/sys/cadrlp.lisp`).
+At 13 every output is what it was. `tools/assembler-check` checks all of it
+(its README). The sources' microcode assembles only at 14: its paging is
+revision 14's two-level page table, and the boot PROM's `promh.text`, also
+assembled at 14, refuses a machine and a microcode of another revision.
 
 **Reboot before assembling again.** A second `ua:assemble-system` in the
 same band reuses the source it read the first time, even when the files have

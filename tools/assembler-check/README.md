@@ -13,9 +13,13 @@ tools/assembler-check/run --ref UBIN rev13 pinned       # some of them
 tools/assembler-check/run --ref UBIN rev14 -- --engine rtl
 ```
 
-`UBIN` holds the outputs the tree's microcode must assemble to at revision
-13, `ucadr.mcr`, `.sym`, `.tbl` and `.locs`: for this tree, the release's
-`sys/ubin/`. Arguments after `--` go to every lispm-check run. Each check takes
+`UBIN` holds the outputs microcode 2001 assembles to at revision 13,
+`ucadr.mcr`, `.sym`, `.tbl` and `.locs`: the release's `sys/ubin/`. The
+checks `rev13` and `rev14` assemble that microcode, whose sources
+`--ucadr-ref SRC` names (a directory with `sys/ucadr/`'s `uc-*.lisp` and
+`ucode.lisp` of release-2001); without it they assemble the tree's own, which
+held microcode 2001 until revision 14's microcode replaced it. The check
+`tree` assembles the tree's own microcode, whatever `--ucadr-ref` says. Arguments after `--` go to every lispm-check run. Each check takes
 16 ports from `--ports N` on (47300 by default) and writes
 `run/assembler-check/CHECK/` (git-ignored; `--out DIR` for another place):
 `cases.cases`, `lispm-check.out`, the outputs it read, and `result.txt`,
@@ -32,6 +36,7 @@ the micro-assembler from the copy with `make-system`.
 | Check | Assembles | Passes when |
 |---|---|---|
 | `rev13` | the microcode at revision 13 | the four outputs equal `UBIN`'s byte for byte: nothing changes for a revision-13 build |
+| `tree` | the tree's own microcode at revision 14 | it assembles (the planted checks' controls for revision 14's microcode); the `.mcr`'s first section is section 6, start 0, one word, 14, and there is no other |
 | `rev14` | the microcode at revision 14 | it assembles (the three checks below pass on it); the `.mcr`'s first section is section 6, start 0, one word, 14, and there is no other; every other section, and the symbol area, equals `UBIN`'s, the main-memory section's relative disk block aside; the `.sym`, `.tbl` and `.locs` equal `UBIN`'s |
 | `bits` | `lisp/y1bits.lisp`, a few words in revision 14's names, with `ua:assemble` | at revision 13 the assembly is refused ("revision 14"); at revision 14 each word has appendix A14's bits as muir-sim's revision 14 decodes them: condition 12's jumps, calls and returns (`IR<5>` 1, `IR<4:0>` 12, `IR<6>` the inverse), the write-map operations' constants in `VMA<33:32>` (0 none, 1 direct write, 2 invalidate, 3 empty), the operation and entry fields, `pointer-type-register-0-31` and `-32-63` (register-page words 222 and 223) as the bits of A14.5's 19 types numbered by the tree's `Q-DATA-TYPES`, and section 6 |
 | `pinned` | the microcode at revision 14 with a variable inserted before `A-PDL-BUFFER-VIRTUAL-ADDRESS` | the assembly is refused, naming `A-PDL-BUFFER-VIRTUAL-ADDRESS` (appendix A14.7) |
@@ -39,7 +44,8 @@ the micro-assembler from the copy with `make-system`.
 | `map-set` | the microcode at revision 14 with `ua:*pointer-types*` missing `DTP-NULL` | the assembly is refused, naming `NULL`, which `D-TRANSPORT` tells apart (A14.5) |
 | `map-constant` | the microcode at revision 14 with `pointer-type-register-0-31` given another value than `ua:*pointer-types*`'s bits | the assembly is refused, naming `POINTER-TYPE-REGISTER-0-31` (A14.9) |
 | `lc-shift` | the microcode at revision 14 with a word writing the location counter through the right shift | the assembly is refused (A14.11) |
+| `fiddle` | the tree's microcode with a map-bit dispatch planted between `FORCE-WR-RDONLY`'s TLB direct write and its store | the assembly is refused, naming the fiddle (the fiddle rule: no lookup between a direct write and the reference it is for, the PDL buffer loops allowed by name; contract G3 revision 14, 9.1, and the review of the fiddles against TLB eviction) |
 | `lc-mm` | the microcode at revision 14 with a word writing the location counter by `M+M` | the assembly is refused (A14.11) |
 
-`rev13` and `rev14` are the controls for the five planted checks: the same
+`tree` is the control for `fiddle`; `rev13` and `rev14` are the controls for the five planted checks: the same
 assembly, unplanted, is not refused.

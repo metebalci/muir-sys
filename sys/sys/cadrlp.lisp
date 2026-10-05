@@ -712,7 +712,8 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	(when (and (eql *hardware-revision* 14.) (null cons-lap-init-state))
 	  (check-pinned-a-locations)
 	  (check-map-bit-tables)
-	  (check-lc-writes))
+	  (check-lc-writes)
+	  (check-fiddle-windows))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
 
 ;; quux revision 14 (appendix a14.7): the pdl buffer redirect takes its base
@@ -805,6 +806,102 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 		((and (= (ldb 0701 w) 1) (not (memq function '(11 6 0 17))))
 		 (ferror nil "The word at I-MEM ~O writes the location counter by the arithmetic function ~O, not ADD, SUB, M+1 or M-1 (appendix a14.11)."
 			 pc (ldb 0306 w)))))))))
+
+;; quux revision 14 (contract g3 revision 14, 6.2, 9.1; the review of the
+;; fiddles against tlb eviction): a fiddle is a tlb direct write (a store to
+;; write-map, destination 23 or 33, whose a operand is a constant with the
+;; operation 1 in <33:32>), which gives a page access 11 so that a reference
+;; neither faults nor goes through the pdl buffer redirect.  it lasts only
+;; until the next fill, invalidation or empty at its index, and any memory
+;; start, map(md) read or map-bit dispatch can fill it.  so from a fiddle to
+;; the invalidation or empty that ends it (a write-map whose constant's
+;; operation is 2 or 3), the microcode may make one memory start, the
+;; reference the fiddle is for, and no other start, no map(md) read
+;; (functional source 11), no dispatch, no other write-map, and no call but a
+;; conditional one to illop or trap; every path must reach the end, not a
+;; return.  the pdl buffer's dump and refill loops break the rule on purpose,
+;; and are listed with their reasons; every other fiddle is held to it, and an
+;; assembly that breaks it is refused.
+(defconst *fiddle-allowed-ranges*
+	  '((p-b-mr0 p-b-mr3
+	     "the dump: its words lie below the redirect's copies of the base (p-b-mr3), so after an eviction a write at status 5 goes to memory; at status 6 p-b-fiddle-again fiddles again")
+	    (p-r-0 p-r-2
+	     "the refill: its words lie below the base, so after an eviction a read at status 5 goes to memory; at status 6 p-r-fiddle-again fiddles again")
+	    (p-b-fiddle-again p-r-fiddle-again-end
+	     "the loops' recovery from an evicted fiddle at status 6: the loop's own invalidation ends it"))
+  "The fiddles the window check allows, by the labels around them, with the reasons.")
+
+(defun i-mem-symbol-location (sym)
+  "SYM's I-MEM location, or nil if this microcode does not define it."
+  (let ((v (get sym 'cons-lap-user-symbol)))
+    (and (eq (car v) 'i-mem) (caddr (cadr v)))))
+
+(defun a-operand-value (w)
+  "The value of the a memory location an alu or byte word reads, from the constants or a memory."
+  (let ((loc (ldb 4012 w)))
+    (or (dolist (e a-constant-list) (when (eql (cadr e) loc) (return (car e))))
+	(aref a-mem loc))))
+
+(defun write-map-operation-of (w)
+  "For a word that stores to write-map, the operation its a operand's constant names (0-3), or :unknown; nil for any other word."
+  (when (and (memq (ldb 5302 w) '(0 3)) (zerop (ldb 3101 w)) (memq (ldb 2305 w) '(23 33)))
+    (let ((v (a-operand-value w)))
+      (if (numberp v) (ldb 4002 v) :unknown))))
+
+(defun check-fiddle-windows ()
+  ;; a range whose labels this microcode lacks (one with no fiddles, such as
+  ;; microcode 2001, whose map writes are revision 13's) allows nothing
+  (let ((allowed (mapcan #'(lambda (r)
+			     (let ((from (i-mem-symbol-location (car r)))
+				   (to (i-mem-symbol-location (cadr r))))
+			       (and from to (list (list from to)))))
+			 *fiddle-allowed-ranges*))
+	(halts (list (i-mem-symbol-location 'illop) (i-mem-symbol-location 'trap))))
+    (dotimes (pc (array-length i-mem))
+      (let ((w (aref i-mem pc)))
+	(when (and w (eql (write-map-operation-of w) 1)
+		   (not (dolist (r allowed) (when (and (>= pc (car r)) (< pc (cadr r))) (return t)))))
+	  (check-fiddle-window pc halts))))))
+
+(defun fiddle-window-bad (fiddle why pc)
+  (ferror nil "The fiddle (a TLB direct write) at I-MEM ~O is ~A at I-MEM ~O before its invalidation: a lookup there can evict it (revision 14's fiddle rule, contract 9.1)."
+	  fiddle why pc))
+
+(defun check-fiddle-window (fiddle halts)
+  ;; each state is (pc starts . pending): pending the pcs an xct-next jump
+  ;; goes to after the word at pc
+  (let ((work (list (list (1+ fiddle) 0))) (seen nil))
+    (do () ((null work))
+      (let* ((state (pop work)) (pc (car state)) (starts (cadr state)) (pending (cddr state))
+	     (w (and (< pc (array-length i-mem)) (aref i-mem pc))))
+	(unless (member state seen)
+	  (push state seen)
+	  (cond ((null w) (fiddle-window-bad fiddle "run off the code" pc))
+		((= (ldb 3206 w) 51) (fiddle-window-bad fiddle "read by MAP(MD)" pc))
+		((= (ldb 5302 w) 2) (fiddle-window-bad fiddle "followed by a dispatch" pc))
+		((memq (ldb 5302 w) '(0 3))
+		 (let ((op (write-map-operation-of w)) (n starts))
+		   (when (and (zerop (ldb 3101 w)) (memq (ldb 2305 w) '(21 22 32)))
+		     (setq n (1+ starts))
+		     (when (> n 1) (fiddle-window-bad fiddle "followed by a second memory start" pc)))
+		   (cond ((memq op '(2 3)))	;ended: this path is fine
+			 (op (fiddle-window-bad fiddle "followed by another write-map" pc))
+			 ((not (zerop (ldb 5201 w))) (fiddle-window-bad fiddle "followed by a return" pc))
+			 (t (dolist (p (or pending (list (1+ pc)))) (push (list p n) work))))))
+		(t			;a jump
+		 (let* ((target (ldb 1416 w)) (condition (ldb 0006 w)) (invert (ldb 0601 w))
+			(always (and (= condition 47) (zerop invert)))
+			(never (and (= condition 47) (= invert 1)))
+			(xct-next (zerop (ldb 0701 w))) (call (= 1 (ldb 1001 w))) (ret (= 1 (ldb 1101 w)))
+			(taken (cond (never nil)
+				     (call (if (memq target halts) nil
+					     (fiddle-window-bad fiddle "followed by a call" pc)))
+				     (ret (fiddle-window-bad fiddle "followed by a return" pc))
+				     (t (list target))))
+			(fall (if always nil (list (if xct-next (+ pc 2) (1+ pc))))))
+		   (if xct-next
+		       (push (list* (1+ pc) starts (append taken fall)) work)
+		     (dolist (p (append taken fall)) (push (list p starts) work)))))))))))
 
 (DEFUN FILE-TEST-ALWAYS (F1 F2) F1 F2 T)
 

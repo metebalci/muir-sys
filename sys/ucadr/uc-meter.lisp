@@ -189,7 +189,11 @@ METER-WRITE-HEADER
 METER-PAGE-OUT
 	((A-METER-EVENT) (A-CONSTANT (EVAL %METER-PAGE-OUT-EVENT)))
 	(JUMP-XCT-NEXT METER-PAGE)
-       ((M-TEM) SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-ZERO)
+;       ((M-TEM) SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-ZERO)
+	;; quux revision 14 (contract g3 revision 14, 10.7 item 6): the hash
+	;; table's 18-bit page is gone; evict-page (uc-page-fault) gives the
+	;; evicted page's 32-bit address in m-a.
+       ((m-tem) selective-deposit m-a all-but-vma-low-bits a-zero)
 
 METER-PAGE-IN
 	((A-METER-EVENT) (A-CONSTANT (EVAL %METER-PAGE-IN-EVENT)))
@@ -255,7 +259,11 @@ X-PAGE-TRACE (MISC-INST-ENTRY %PAGE-TRACE)
 PAGE-TRACE-OUT	;Here when swapping page out
 	((A-PAGE-TRACE-UPC) (A-CONSTANT (BYTE-MASK SIGN-BIT)))
 	(JUMP-XCT-NEXT PAGE-TRACE-0)
-       ((A-PAGE-TRACE-VMA) SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-ZERO)
+;       ((A-PAGE-TRACE-VMA) SELECTIVE-DEPOSIT M-A PHT1-VIRTUAL-PAGE-NUMBER A-ZERO)
+	;; quux revision 14 (contract g3 revision 14, 10.7 item 6): the evicted
+	;; page's 32-bit address, m-a from evict-page (uc-page-fault), not the
+	;; hash table's 18-bit page.
+       ((a-page-trace-vma) selective-deposit m-a all-but-vma-low-bits a-zero)
 
 PAGE-TRACE-IN	;Here when swapping page in
 	((A-PAGE-TRACE-VMA) A-DISK-SWAPIN-VIRTUAL-ADDRESS)
@@ -289,7 +297,8 @@ PAGE-TRACE-0					;clobbers M-1, M-2.
 	((VMA-START-WRITE) ADD VMA (A-CONSTANT 1))	
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 	((VMA) ADD VMA (A-CONSTANT 1))		;Next trace entry address
-	(JUMP-LESS-THAN VMA A-PAGE-TRACE-END PAGE-TRACE-1)
+;	(JUMP-LESS-THAN VMA A-PAGE-TRACE-END PAGE-TRACE-1)
+	(jump-less-than-unsigned vma a-page-trace-end page-trace-1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((VMA) A-PAGE-TRACE-START)		;Wrap around
 PAGE-TRACE-1
 	(CALL-XCT-NEXT DISK-PGF-RESTORE)	;Restore and return

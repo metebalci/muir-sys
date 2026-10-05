@@ -1099,7 +1099,8 @@ FIND-MVR-FRAME-3
 
 ;MD gets contents of untyped virtual address in M-K, when likely to be in pdl buffer
 ;and known not to be off the top end of the pdl buffer.
-MKCONT	(JUMP-LESS-THAN M-K A-PDL-BUFFER-VIRTUAL-ADDRESS MKCONT1)
+;MKCONT	(JUMP-LESS-THAN M-K A-PDL-BUFFER-VIRTUAL-ADDRESS MKCONT1)
+mkcont	(jump-less-than-unsigned m-k a-pdl-buffer-virtual-address mkcont1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-TEM) SUB M-K A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	(POPJ-AFTER-NEXT (PDL-INDEX) ADD M-TEM A-PDL-BUFFER-HEAD)
        ((MD) PDL-INDEX-INDIRECT)
@@ -1111,7 +1112,8 @@ MKCONT1	(POPJ-AFTER-NEXT (VMA-START-READ) M-K)
 ;and known not to be off the top end of the pdl buffer.
 MKWRIT	((M-TEM) Q-DATA-TYPE MD)
 	(JUMP-EQUAL M-TEM (A-CONSTANT (EVAL DTP-STACK-CLOSURE)) MKWRIT2)
-	(JUMP-LESS-THAN M-K A-PDL-BUFFER-VIRTUAL-ADDRESS MKWRIT1)
+;	(JUMP-LESS-THAN M-K A-PDL-BUFFER-VIRTUAL-ADDRESS MKWRIT1)
+	(jump-less-than-unsigned m-k a-pdl-buffer-virtual-address mkwrit1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-TEM) SUB M-K A-PDL-BUFFER-VIRTUAL-ADDRESS)
 	;; quux (contract h8a, see qstloc in uc-macrocode): the store at
 	;; pdl-index before the popj, a no-op after it.
@@ -1516,7 +1518,8 @@ FIND-CATCH-TRAP-LATER
 ;GET A WORD WHOSE UNTYPED VIRTUAL ADDRESS IS IN M-1.  FOR SPEED, ATTEMPTS
 ;TO FIGURE OUT IF IT IS IN THE PDL BUFFER AND IF SO GET IT DIRECTLY
 ;WITHOUT BOTHERING WITH PAGE TRAPS.  BASHES M-1 TO Q-TYPED-POINTER OF THE FETCHED DATA.
-XTHCG	(JUMP-LESS-THAN M-1 A-PDL-BUFFER-VIRTUAL-ADDRESS XTHCG1)
+;XTHCG	(JUMP-LESS-THAN M-1 A-PDL-BUFFER-VIRTUAL-ADDRESS XTHCG1)
+xthcg	(jump-less-than-unsigned m-1 a-pdl-buffer-virtual-address xthcg1)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	((M-1) SUB M-1 A-A)
 	(POPJ-AFTER-NEXT (PDL-INDEX) ADD M-1 A-C)
        ((M-1) Q-TYPED-POINTER PDL-INDEX-INDIRECT)
@@ -1596,7 +1599,8 @@ XTHRW6	(JUMP-LESS-THAN M-D A-ZERO XTHRW6B)	;IF ENCOUNTERED *CATCH W/O ADI-RESTAR
 	((M-J) SELECTIVE-DEPOSIT M-J Q-POINTER (A-CONSTANT -1)) ;IS LEVEL OF -1
 XTHRW6C	((M-J) ADD M-J A-QLBNDO)
 	(JUMP-EQUAL M-J A-QLBNDP XTHRW6A)
-	(CALL-GREATER-THAN M-J A-QLBNDP ILLOP)	;ALREADY OVERPOPPED?
+;	(CALL-GREATER-THAN M-J A-QLBNDP ILLOP)	;ALREADY OVERPOPPED?
+	(call-greater-than-unsigned m-j a-qlbndp illop)	;ALREADY OVERPOPPED?	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 XTHRW6F	(CALL-IF-BIT-CLEAR M-QBBFL ILLOP)
 	(CALL QUNBND)
 	(JUMP-NOT-EQUAL M-J A-QLBNDP XTHRW6F)
@@ -2856,7 +2860,13 @@ SB-REINSTATE		;SB deferred.  Take it now?
        ((M-DEFERRED-SEQUENCE-BREAK-FLAG) DPB M-ZERO A-FLAGS)
 
 BBLKP-PG-FAULT
-	(JUMP-LESS-THAN VMA (A-CONSTANT LOWEST-A-MEM-VIRTUAL-ADDRESS) PGF-R)
+;	(JUMP-LESS-THAN VMA (A-CONSTANT LOWEST-A-MEM-VIRTUAL-ADDRESS) PGF-R)
+	;; quux revision 14 (contract g3 revision 14, 7, 9.1): a memory's window,
+	;; 35700000000-35700001777, lies above 2^31, so a signed compare put every
+	;; address below it, ephemeral space among them, after it: the window is
+	;; tested by its bits, vma<31:10>, and anything else is an ordinary fault.
+	((m-tem) (byte-field 22. 10.) vma)
+	(jump-not-equal m-tem (a-constant 16740000) pgf-r)	;35700000000, its page
 ;; Page fault due to unbinding an A-memory variable.
 ;; Handle the unbinding with special code to make this much faster.
 ;; No need to worry about preserving cdr code of an a-mem loc; just zero it.
@@ -2941,7 +2951,8 @@ XUNBIND-TO-INDEX (MISC-INST-ENTRY UNBIND-TO-INDEX)
 	((M-D) Q-POINTER PDL-POP)
 	((M-J) A-QLBNDP)   ;Remember starting value for debugging.
 XUNBIND-TO-INDEX-0
-	(POPJ-GREATER-OR-EQUAL M-D A-QLBNDP)
+;	(POPJ-GREATER-OR-EQUAL M-D A-QLBNDP)
+	(popj-greater-or-equal-unsigned m-d a-qlbndp)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(CALL-IF-BIT-CLEAR M-QBBFL ILLOP)
 	(JUMP-XCT-NEXT XUNBIND-TO-INDEX-0)
        (CALL QUNBND)
@@ -3027,7 +3038,12 @@ XPOP-OPEN-CALL (MISC-INST-ENTRY POP-OPEN-CALL)
 	((M-K) DPB PDL-INDEX-INDIRECT (BYTE-FIELD Q-POINTER-WIDTH 2) A-ZERO)
 	((M-TEM) SUB LOCATION-COUNTER A-K)
 	((M-T) ADD M-T A-T)
-	((LOCATION-COUNTER) ADD M-T A-K)
+;	((LOCATION-COUNTER) ADD M-T A-K)
+	;; quux revision 14 (contract g3 revision 14, 10.4; appendix a14.11): lc's
+	;; adder carries an arithmetic write into lc<33:32> from m's <33:32>, so the
+	;; 34-bit address must be on m: the fef's address shifted, m-k, plus the
+	;; relative bytes, a-t (m-t as the line above left it); the same sum.
+	((location-counter) add m-k a-t)
 	((PDL-PUSH) DPB M-TEM Q-POINTER
 	 (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	((PDL-PUSH) (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX) 1)))

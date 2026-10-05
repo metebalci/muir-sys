@@ -126,7 +126,8 @@ TV-DRAW-TRI-SORT-3
 TV-DRAW-TRI-LOOP
 	(JUMP-GREATER-OR-EQUAL M-A A-TRI-Y-LIM TV-DRAW-TRI-LOOP-1)
 TV-DRAW-TRI-HALF-DONE
-	(JUMP-LESS-THAN-XCT-NEXT M-A A-TRI-Y3-ADDR XFALSE)	;Done with second half
+;	(JUMP-LESS-THAN-XCT-NEXT M-A A-TRI-Y3-ADDR XFALSE)	;Done with second half
+	(jump-less-than-unsigned-xct-next m-a a-tri-y3-addr xfalse)	;Done with second half	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
        ((A-TRI-Y-LIM) A-TRI-Y3-ADDR)
 	((M-1) A-TRI-X2)
 	((M-B) A-TRI-Y2)
@@ -145,7 +146,8 @@ TV-DRAW-TRI-X0-OK
 	((C-PDL-BUFFER-POINTER-PUSH) M-C)	;Setup x co-ordinate
 	(CALL-XCT-NEXT TVXYAD0)
        ((M-2) M-A)			;Setup Y co-ordinate
-	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TV-DRAW-TRI-SKIP-LINE)
+;	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TV-DRAW-TRI-SKIP-LINE)
+	(jump-greater-or-equal-unsigned m-e a-tv-screen-buffer-end-address tv-draw-tri-skip-line)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(JUMP-LESS-OR-EQUAL M-D A-TV-SCREEN-WIDTH TV-DRAW-TRI-X1-OK)
 	((M-D) A-TV-SCREEN-WIDTH)	;M-D clipped right end
 	(JUMP-GREATER-OR-EQUAL M-D A-C TV-DRAW-TRI-X1-OK)
@@ -317,7 +319,8 @@ TV-AOS-TRI-SORT-3
 TV-AOS-TRI-LOOP
 	(JUMP-GREATER-OR-EQUAL M-A A-TRI-Y-LIM TV-AOS-TRI-LOOP-1)
 TV-AOS-TRI-HALF-DONE
-	(JUMP-LESS-THAN-XCT-NEXT M-A A-TRI-Y3-ADDR XFALSE)	;Done with second half
+;	(JUMP-LESS-THAN-XCT-NEXT M-A A-TRI-Y3-ADDR XFALSE)	;Done with second half
+	(jump-less-than-unsigned-xct-next m-a a-tri-y3-addr xfalse)	;Done with second half	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
        ((A-TRI-Y-LIM) A-TRI-Y3-ADDR)
 	((M-1) A-TRI-X2)
 	((M-B) A-TRI-Y2)
@@ -336,7 +339,8 @@ TV-AOS-TRI-X0-OK
 	((C-PDL-BUFFER-POINTER-PUSH) M-C)	;Setup x co-ordinate
 	(CALL-XCT-NEXT TVXYAD0)
        ((M-2) M-A)			;Setup Y co-ordinate
-	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TV-AOS-TRI-SKIP-LINE)
+;	(JUMP-GREATER-OR-EQUAL M-E A-TV-SCREEN-BUFFER-END-ADDRESS TV-AOS-TRI-SKIP-LINE)
+	(jump-greater-or-equal-unsigned m-e a-tv-screen-buffer-end-address tv-aos-tri-skip-line)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(JUMP-LESS-OR-EQUAL M-D A-TV-SCREEN-WIDTH TV-AOS-TRI-X1-OK)
 	((M-D) A-TV-SCREEN-WIDTH)	;M-D clipped right end
 	(JUMP-GREATER-OR-EQUAL M-D A-C TV-AOS-TRI-X1-OK)

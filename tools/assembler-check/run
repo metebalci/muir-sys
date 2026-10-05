@@ -3,8 +3,8 @@
 (tools/assembler-check/README.md).
 
 Usage:
-  tools/assembler-check/run --ref UBIN [--out DIR] [--ports N] [CHECK...]
-                            [-- LISPM-CHECK-ARGS...]
+  tools/assembler-check/run --ref UBIN [--ucadr-ref SRC] [--out DIR] [--ports N]
+                            [CHECK...] [-- LISPM-CHECK-ARGS...]
 
 CHECK is one of the names in CHECKS below; none means all of them.  The checks
 given run at once, each in its own lispm-check run with its own 16 ports from
@@ -16,6 +16,12 @@ then reads what the assembler wrote.  UBIN holds the release's ucadr.mcr,
 DIR/CHECK/ (DIR is the tree's run/assembler-check/ unless --out):
 lispm-check.out, cases.cases, the outputs, result.txt.  Exit status 0 when
 every check given passes.
+
+The microcode UBIN holds is the one rev13 and rev14 assemble: with --ucadr-ref
+SRC, a directory holding its sources (sys/ucadr/'s uc-*.lisp and ucode.lisp,
+microcode 2001's for the release's UBIN), which replace the tree's in those
+two checks' copies; without it, the tree's own.  The check tree assembles the
+tree's own microcode at revision 14, whatever --ucadr-ref says.
 
 lispm-check's band, ubin/, quux and ozd are this tree's defaults
 (run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
@@ -41,6 +47,7 @@ OUTPUTS = ('ucadr.mcr', 'ucadr.sym', 'ucadr.tbl', 'ucadr.locs')
 CHECKS = {
     'rev13': dict(rev=13, plant=None, refused=None),
     'rev14': dict(rev=14, plant=None, refused=None),
+    'tree': dict(rev=14, plant=None, refused=None),
     'bits': dict(rev=14, plant=None, refused=None),
     'pinned': dict(rev=14, plant='pinned', refused='A-PDL-BUFFER-VIRTUAL-ADDRESS'),
     'map-table': dict(rev=14, plant='map-table', refused='FIX'),
@@ -48,6 +55,7 @@ CHECKS = {
     'lc-shift': dict(rev=14, plant='lc-shift', refused='right shift'),
     'lc-mm': dict(rev=14, plant='lc-mm', refused='arithmetic function'),
     'map-constant': dict(rev=14, plant='map-constant', refused='POINTER-TYPE-REGISTER-0-31'),
+    'fiddle': dict(rev=14, plant='fiddle', refused='fiddle'),
 }
 
 # Appendix A14.5's 19 types, the pointer-type register's set in microcode 2001
@@ -114,6 +122,13 @@ def plant(kind, copy):
         data = open(path, 'rb').read()
         at = data.rindex(b'))')
         open(path, 'wb').write(data[:at] + b'planted-y1\t' + word + b'\n' + data[at:])
+    elif kind == 'fiddle':
+        # a map-bit dispatch inside force-wr-rdonly's fiddle, between its direct
+        # write and its store, where a port-b fill could evict it
+        replace_once(os.path.join(uc, 'uc-page-fault.lisp'),
+                     b'\t((VMA) A-PGF-VMA)\t\t;Restore original VMA\n\t((MD-START-WRITE) A-PGF-WMD)',
+                     b'\t(dispatch transport md)\t;planted-y2\n\t((VMA) A-PGF-VMA)\t\t;Restore original VMA\n\t((MD-START-WRITE) A-PGF-WMD)',
+                     after=b'\nFORCE-WR-RDONLY\n\t(CALL PGF-SAVE)\n\t((m-tem) map-entry')
     elif kind in ('map-set', 'map-constant'):
         pass                                # planted in the cases, not in the tree
 
@@ -362,12 +377,32 @@ def environment():
     return env
 
 
-def run_check(check, outdir, ref, port, extra, results):
+def check_tree(out, ref):
+    """The tree's own microcode at revision 14: it assembled, and its .mcr's
+    first section is section 6 = 14, the only one."""
+    lines, ok = [], True
+    secs, end = mcr_sections(os.path.join(out, 'ucadr.mcr'))
+    first = secs[0]
+    s6 = first[0] == 6 and first[1] == 0 and first[2] == 1 and first[3] == [14]
+    lines.append('first section %s' % ('is section 6 = 14' if s6 else 'is NOT section 6 = 14'))
+    sixes = [s for s in secs if s[0] == 6]
+    if len(sixes) != 1:
+        lines.append('%d sections 6' % len(sixes))
+        s6 = False
+    return s6, lines
+
+
+def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
     out = os.path.join(outdir, check)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     copy = os.path.join(out, 'tree')
     copy_tree(copy)
+    if ucadr_ref and check in ('rev13', 'rev14'):
+        # the microcode UBIN was assembled from, in place of the tree's
+        for f in os.listdir(ucadr_ref):
+            if f.endswith('.lisp'):
+                shutil.copy2(os.path.join(ucadr_ref, f), os.path.join(copy, 'sys', 'ucadr', f))
     plant(CHECKS[check]['plant'], copy)
     cf = os.path.join(out, 'cases.cases')
     open(cf, 'w').write(cases(check))
@@ -384,10 +419,11 @@ def run_check(check, outdir, ref, port, extra, results):
     m = re.search(r'run files kept in (\S+)', text)
     served = os.path.join(m.group(1), 'served', 'sys') if m else None
     try:
-        if ok and check in ('rev13', 'rev14'):
+        if ok and check in ('rev13', 'rev14', 'tree'):
             for f in OUTPUTS:
                 shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
-            good, more = (check_rev13 if check == 'rev13' else check_rev14)(out, ref)
+            good, more = {'rev13': check_rev13, 'rev14': check_rev14,
+                          'tree': check_tree}[check](out, ref)
             ok &= good
             lines += more
         elif ok and check == 'bits':
@@ -410,12 +446,15 @@ def main(argv):
         extra = argv[argv.index('--') + 1:]
         argv = argv[:argv.index('--')]
     outdir, ref, port, checks = os.path.join(TREE, 'run', 'assembler-check'), None, 47300, []
+    ucadr_ref = None
     while argv:
         a = argv.pop(0)
         if a == '--out':
             outdir = os.path.abspath(argv.pop(0))
         elif a == '--ref':
             ref = os.path.abspath(argv.pop(0))
+        elif a == '--ucadr-ref':
+            ucadr_ref = os.path.abspath(argv.pop(0))
         elif a == '--ports':
             port = int(argv.pop(0))
         elif a in CHECKS:
@@ -429,7 +468,7 @@ def main(argv):
     results, threads = {}, []
     for k, check in enumerate(checks):
         t = threading.Thread(target=run_check,
-                             args=(check, outdir, ref, port + 16 * k, extra, results))
+                             args=(check, outdir, ref, port + 16 * k, extra, results, ucadr_ref))
         t.start()
         threads.append(t)
     for t in threads:
