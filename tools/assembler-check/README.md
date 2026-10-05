@@ -16,9 +16,15 @@ tools/assembler-check/run --ref UBIN rev14 -- --engine rtl
 `UBIN` holds the outputs microcode 2001 assembles to at revision 13,
 `ucadr.mcr`, `.sym`, `.tbl` and `.locs`: the release's `sys/ubin/`. The
 checks `rev13` and `rev14` assemble that microcode, whose sources
-`--ucadr-ref SRC` names (a directory with `sys/ucadr/`'s `uc-*.lisp` and
-`ucode.lisp` of release-2001); without it they assemble the tree's own, which
-held microcode 2001 until revision 14's microcode replaced it. The check
+`--ucadr-ref SRC` names: a directory laid out as the tree, with release-2001's
+`sys/ucadr/` and the two files the micro-assembler reads for the microcode's
+constants, `sys/cold/qcom.lisp` and `sys/cold/defmic.lisp`
+(`git archive release-2001 sys/ucadr sys/cold | tar -x -C SRC`), so that the
+release's microcode is assembled with the release's constants. Revision 14's
+`qcom.lisp` no longer defines the page hash table's names, and its area
+numbers are two lower from `ADDRESS-SPACE-MAP` on. Without `--ucadr-ref` they
+assemble the tree's own microcode, which held microcode 2001 until revision
+14's microcode replaced it. The check
 `tree` assembles the tree's own microcode, whatever `--ucadr-ref` says. Arguments after `--` go to every lispm-check run. Each check takes
 16 ports from `--ports N` on (47300 by default) and writes
 `run/assembler-check/CHECK/` (git-ignored; `--out DIR` for another place):

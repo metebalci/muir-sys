@@ -55,7 +55,13 @@ microcode only for the faults the walk leaves.
   README): `rev13`, `rev14`, `tree`, `bits`, `pinned`, `map-table`,
   `map-set`, `map-constant`, `lc-shift`, `lc-mm` and `fiddle`. Its `rev13`
   and `rev14` checks assemble as version 2001, since they compare the
-  outputs with release 2001's `sys/ubin/`.
+  outputs with release 2001's `sys/ubin/`. Their `--ucadr-ref` names a
+  directory laid out as the tree, and the release's `sys/cold/qcom.lisp`
+  and `sys/cold/defmic.lisp` replace the tree's with its `sys/ucadr/`
+  (`REF_FILES`, `tools/assembler-check/run`): the micro-assembler reads them
+  for the microcode's constants, and release 2001's microcode read with
+  revision 14's `qcom.lisp` stopped at an unbound
+  `%PHT-MAP-STATUS-META-BITS-ONLY`.
 
 ### The microcode and the boot PROM
 

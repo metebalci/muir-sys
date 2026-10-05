@@ -18,10 +18,14 @@ lispm-check.out, cases.cases, the outputs, result.txt.  Exit status 0 when
 every check given passes.
 
 The microcode UBIN holds is the one rev13 and rev14 assemble: with --ucadr-ref
-SRC, a directory holding its sources (sys/ucadr/'s uc-*.lisp and ucode.lisp,
-microcode 2001's for the release's UBIN), which replace the tree's in those
-two checks' copies; without it, the tree's own.  The check tree assembles the
-tree's own microcode at revision 14, whatever --ucadr-ref says.
+SRC, a directory laid out as the tree, holding that microcode's sources,
+sys/ucadr/'s uc-*.lisp and ucode.lisp, and the files the micro-assembler reads
+for the microcode's constants, sys/cold/qcom.lisp and sys/cold/defmic.lisp
+(REF_FILES), all of them release-2001's for the release's UBIN, which replace
+the tree's in those two checks' copies; without it, the tree's own.  Make it
+with `git archive release-2001 sys/ucadr sys/cold | tar -x -C SRC`.  The check
+tree assembles the tree's own microcode at revision 14, whatever --ucadr-ref
+says.
 
 lispm-check's band, ubin/, quux and ozd are this tree's defaults
 (run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
@@ -40,6 +44,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.dirname(os.path.dirname(HERE))
 TOOL = os.path.join(TREE, 'tools', 'lispm-check')
 OUTPUTS = ('ucadr.mcr', 'ucadr.sym', 'ucadr.tbl', 'ucadr.locs')
+# besides sys/ucadr/, the files of --ucadr-ref's tree that the reference
+# assembly takes: the micro-assembler reads QCOM and DEFMIC for the
+# microcode's constants (sys/sys/sysdcl.lisp, CADR-MICRO-ASSEMBLER), so the
+# release's microcode is assembled with the release's, like with like
+REF_FILES = (os.path.join('sys', 'cold', 'qcom.lisp'), os.path.join('sys', 'cold', 'defmic.lisp'))
 
 # The checks: the revision assembled, the plant, what the assembly must do
 # (None: succeed; a string: be refused with a message containing it), and the
@@ -400,9 +409,18 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
     copy_tree(copy)
     if ucadr_ref and check in ('rev13', 'rev14'):
         # the microcode UBIN was assembled from, in place of the tree's
-        for f in os.listdir(ucadr_ref):
+        ucadr = os.path.join(ucadr_ref, 'sys', 'ucadr')
+        for f in os.listdir(ucadr):
             if f.endswith('.lisp'):
-                shutil.copy2(os.path.join(ucadr_ref, f), os.path.join(copy, 'sys', 'ucadr', f))
+                shutil.copy2(os.path.join(ucadr, f), os.path.join(copy, 'sys', 'ucadr', f))
+        # and the files the micro-assembler reads for its constants (the
+        # CADR-MICRO-ASSEMBLER system, sys/sys/sysdcl.lisp), the release's
+        # too: revision 14's qcom.lisp no longer defines the page hash
+        # table's names, so release-2001's microcode read with the tree's
+        # stopped at an unbound %PHT-MAP-STATUS-META-BITS-ONLY, and a qcom
+        # whose area numbers differ changes an A-memory constant
+        for f in REF_FILES:
+            shutil.copy2(os.path.join(ucadr_ref, f), os.path.join(copy, f))
     plant(CHECKS[check]['plant'], copy)
     cf = os.path.join(out, 'cases.cases')
     open(cf, 'w').write(cases(check))
@@ -455,6 +473,14 @@ def main(argv):
             ref = os.path.abspath(argv.pop(0))
         elif a == '--ucadr-ref':
             ucadr_ref = os.path.abspath(argv.pop(0))
+            # a tree's layout, sys/ucadr/ and REF_FILES; a bare directory of
+            # uc-*.lisp files, the earlier form, is refused rather than taken
+            # with the tree's constants
+            missing = [f for f in [os.path.join('sys', 'ucadr', 'ucode.lisp')] + list(REF_FILES)
+                       if not os.path.isfile(os.path.join(ucadr_ref, f))]
+            if missing:
+                sys.exit('assembler-check: --ucadr-ref %s lacks %s\n' % (ucadr_ref, ', '.join(missing))
+                         + __doc__)
         elif a == '--ports':
             port = int(argv.pop(0))
         elif a in CHECKS:
