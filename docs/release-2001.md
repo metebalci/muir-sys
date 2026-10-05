@@ -1534,6 +1534,26 @@ the faults known at the release are listed at the end.
   TELNET refused for 180 s each time; Yes typed at the console brought
   TELNET back in 6 of 6, and a variable set before the boot kept its value;
   3 of 3 warm boots without forcing asked nothing and answered TELNET.
+- **Writing a file into a `HOST:` directory that does not exist offers to
+  create the directory, and that option then fails.** Opening
+  `HOST: /newdir/x.text` for output stops with "Directory not found for
+  HOST: /newdir/x.text", and the debugger offers s-A (Resume), "Creates the
+  directory and tries again", and s-B, "Proceeds, reading a new filename and
+  using that instead". s-A creates the directory, then stops with "Invalid
+  proceed-type :RETRY-FILE-OPERATION returned by handler for
+  #<FS::DIRECTORY-NOT-FOUND-ERROR ...>" (`sys/eh/ehf.lisp:861`). The file
+  device signals its errors with no proceed type (`FILE-DEVICE-ERROR`,
+  `sys/io/file/hostfs.lisp:87-96`, `:734`), but the condition offers the
+  create option whatever the signal accepts, and the option proceeds with
+  `:RETRY-FILE-OPERATION` (`sys/io/file/open.lisp:190-201`). Workaround:
+  since s-A has made the directory, abort and evaluate the form again; or
+  make the directory first, on the host side or with `FS:CREATE-DIRECTORY`;
+  or take s-B and give a pathname in a directory that exists. A directory
+  that exists, such as the home, `HOST: /home/lispm/`, is not affected.
+  `OZ:`, whose files go through QFILE, is not affected: QFILE's errors
+  accept `:RETRY-FILE-OPERATION`, and the same
+  option creates the directory and writes the file. Measured on the
+  release's disk (micro, 32 M words), at the console and over TELNET.
 - **A date printed MM/DD parses as DD/MM outside the United States**, as
   in System 2000: at the site's zone, `*TIMEZONE*` -1,
   `TIME:PARSE-UNIVERSAL-TIME` takes "3/4/2026 12:00" as 3 April, not 4 March
