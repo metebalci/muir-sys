@@ -1832,7 +1832,10 @@ The microcode sets it at boot from MACHINE-ID."
 ;;; (feature-page-xbus-address, defined in sys; ltop, which reads the
 ;;; display's geometry from it in the cold load).
 (defconst feature-page-words
-	  '("Machine ID" "Level-1 entry bits" "Level-2 map entries" "PDL buffer words"
+;	  '("Machine ID" "Level-1 entry bits" "Level-2 map entries" "PDL buffer words"
+	  ;; quux revision 14 (appendix a14.9): no maps; word 1 reads 0, and word
+	  ;; 2 is the tlb's entries, for information
+	  '("Machine ID" "Level-1 entry bits" "TLB entries" "PDL buffer words"
 	    "Control store words" "A memory words" "Dispatch memory words"
 	    ;; word 7, from revision 3: bit 0 multiply, bit 1 divide, one
 	    ;; instruction each.
@@ -1881,7 +1884,12 @@ The microcode sets it at boot from MACHINE-ID."
 ;    (format stream "~&Feature page, Xbus ~O:" (+ #o17000000 feature-page-xbus-address))
 ;    (format stream "~&Feature page, at ~O:" (+ #o17000000 feature-page-xbus-address))
     ;; quux revision 13: the i/o region's physical base is 1760000000
-    (format stream "~&Feature page, at ~O:" (+ #o1760000000 feature-page-xbus-address))
+;    (format stream "~&Feature page, at ~O:" (+ #o1760000000 feature-page-xbus-address))
+    ;; quux revision 14 (contract g3 revision 14, 10.8): the register page is
+    ;; at 35777777400, %xbus-read's base plus the page's offset, printed
+    ;; unsigned
+    (format stream "~&Feature page, at ~O:"
+	    (%pointer-unsigned (%pointer-plus io-space-virtual-address feature-page-xbus-address)))
     (loop for name in feature-page-words
 	  for i from 0
 	  as word = (%xbus-read (+ feature-page-xbus-address i))

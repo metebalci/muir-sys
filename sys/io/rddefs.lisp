@@ -258,7 +258,10 @@ This macro generates a form which:
 	      `((SEND ,STREAM ':TYO (PTTBL-SPACE *READTABLE*))
 		(LET ((*PRINT-BASE* 8.)
 		      (*PRINT-RADIX* NIL))
-		  (PRINT-FIXNUM (%POINTER ,OBJECT) ,STREAM))))
+;		  (PRINT-FIXNUM (%POINTER ,OBJECT) ,STREAM))))
+		  ;; quux revision 14 (contract g3 revision 14, 10.1, class
+		  ;; p): the address unsigned, as print-pointer-field prints it
+		  (print-pointer-field ,object ,stream))))
        (PRINT-RAW-STRING (CDR (PTTBL-RANDOM *READTABLE*)) ,STREAM ,FASTP)
        ,OBJECT)))
 
@@ -277,10 +280,13 @@ This macro generates a form which:
   (:PRINT-SELF (RDTBL STREAM IGNORE &OPTIONAL IGNORE)
     (IF *PRINT-ESCAPE*
 	(SYS:PRINTING-RANDOM-OBJECT (RDTBL STREAM :TYPE :NO-POINTER)
-	  (FORMAT STREAM "~@[~A ~]~O" (RDTBL-NAME RDTBL) (%POINTER RDTBL)))
+;	  (FORMAT STREAM "~@[~A ~]~O" (RDTBL-NAME RDTBL) (%POINTER RDTBL)))
+	  ;; quux revision 14: the address unsigned (class p)
+	  (format stream "~@[~A ~]~O" (rdtbl-name rdtbl) (%pointer-unsigned (%pointer rdtbl))))
       (IF (RDTBL-NAME RDTBL)
 	  (FORMAT STREAM "~A readtable" (RDTBL-NAME RDTBL))
-	(FORMAT STREAM "#<Readtable ~O>" (%POINTER RDTBL)))))
+;	(FORMAT STREAM "#<Readtable ~O>" (%POINTER RDTBL)))))
+	(format stream "#<Readtable ~O>" (%pointer-unsigned (%pointer rdtbl))))))
   ((:GET :GET-LOCATION-OR-NIL :GET-LOCATION :GETL :PUTPROP :REMPROP :PUSH-PROPERTY :PLIST
     :PLIST-LOCATION :PROPERTY-LIST-LOCATION :SETPLIST :SET)
    . READTABLE-PROPERTY-LIST-HANDLER)

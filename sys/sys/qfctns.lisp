@@ -2938,15 +2938,28 @@ SYS:%%REGION-SCAVENGE-ENABLE - default 1, 0 disables scavenger."
 		    (%LOGDPB 1 %%REGION-EXTRA-PDL-META-BIT
 		      (%LOGDPB REPRESENTATION %%REGION-REPRESENTATION-TYPE
 		  ;;Map status code
-			(%LOGDPB (COND (PDL %PHT-MAP-STATUS-PDL-BUFFER)
-				       (READ-ONLY %PHT-MAP-STATUS-READ-ONLY)
-				       (T %PHT-MAP-STATUS-READ-WRITE-FIRST))
-			     %%PHT2-MAP-STATUS-CODE
+;			(%LOGDPB (COND (PDL %PHT-MAP-STATUS-PDL-BUFFER)
+;				       (READ-ONLY %PHT-MAP-STATUS-READ-ONLY)
+;				       (T %PHT-MAP-STATUS-READ-WRITE-FIRST))
+;			     %%PHT2-MAP-STATUS-CODE
+;		  ;;Hardware access code
+;			  (%LOGDPB (COND (PDL 0)
+;					 (READ-ONLY 2)
+;					 (T 3))
+;				   %%PHT2-MAP-ACCESS-CODE 0))))))))
+		  ;; quux revision 14 (contract g3 revision 14, 9.1; appendix
+		  ;; a14.2): status 3, read/write-first, is retired, since the
+		  ;; hardware sets modified: a writable area's pages are status 4,
+		  ;; read/write, access 11.  the fields are the page entry's.
+			(%logdpb (cond (pdl %page-entry-status-pdl-buffer)
+				       (read-only %page-entry-status-read-only)
+				       (t %page-entry-status-read-write))
+			     %%page-entry-status
 		  ;;Hardware access code
-			  (%LOGDPB (COND (PDL 0)
-					 (READ-ONLY 2)
-					 (T 3))
-				   %%PHT2-MAP-ACCESS-CODE 0))))))))
+			  (%logdpb (cond (pdl 0)
+					 (read-only 2)
+					 (t 3))
+				   %%page-entry-access-code 0))))))))
   (SETQ THE-REGION-BITS
 	(%LOGDPB MAP-BITS %%REGION-MAP-BITS
 		 (%LOGDPB SPACE-TYPE %%REGION-SPACE-TYPE
@@ -2983,3 +2996,43 @@ SYS:%%REGION-SCAVENGE-ENABLE - default 1, 0 disables scavenger."
 
 
 
+
+;;; quux revision 14 (contract g3 revision 14, 10.11): the region floor.
+;;; make-region places a region of an area that is not ephemeral in the
+;;; lowest free quanta at or above the floor, below ephemeral space
+;;; (32000000000); an ephemeral area's regions lie in ephemeral space.  by
+;;; default the floor is the first unfixed area's address, which is today's
+;;; placement.  the tests raise it to place regions at, above and across 2^31
+;;; words, which normal use places none at below ephemeral space.  the floor
+;;; is the a-memory variable %region-floor (qcom), and the system
+;;; communication area's %sys-com-region-floor keeps it in a saved band, from
+;;; which the boot sets it again.  addresses are compared unsigned
+;;; (%pointer-lessp).
+
+(defun region-floor-default ()
+  "The region floor's default: the first unfixed area's address, the first quantum above
+the fixed areas, where make-region starts by default."
+  (logand (%pointer-plus (region-origin init-list-area)
+			 (+ (region-length init-list-area) (1- %address-space-quantum-size)))
+	  (- %address-space-quantum-size)))
+
+(defun region-floor-p (address)
+  "T if ADDRESS can be the region floor: a fixnum whose field is a multiple of the quantum,
+not below the default, and below ephemeral space."
+  (and (fixnump address)
+       (zerop (logand address (1- %address-space-quantum-size)))
+       (not (%pointer-lessp address (region-floor-default)))
+       (%pointer-lessp address ephemeral-space-virtual-address)))
+
+(defun set-region-floor (&optional address)
+  "Make make-region place the regions of every area that is not ephemeral at or above ADDRESS,
+in the lowest free quanta there, below ephemeral space.  ADDRESS is a fixnum whose field is
+the address (si:%make-pointer-unsigned builds one above 2^31), a multiple of the address
+space quantum, not below the default and below ephemeral space.  With no ADDRESS, or NIL,
+the floor is the default, the first unfixed area's address.  Returns the floor."
+  (if (null address)
+      (setq address (region-floor-default))
+    (check-arg address region-floor-p
+	       "a region floor: a fixnum address, a multiple of the quantum, from the first unfixed area's address to below ephemeral space"))
+  (setf (system-communication-area %sys-com-region-floor) address)
+  (setq %region-floor address))

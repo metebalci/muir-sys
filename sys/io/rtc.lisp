@@ -781,7 +781,9 @@
     (OR DEBUG-FLAG (PRINT-FSM **))))
 
 (DEFUN PRINT-FSM (FSM)
-  (FORMAT T "~&#<FSM ~O>" (%POINTER FSM))
+;  (FORMAT T "~&#<FSM ~O>" (%POINTER FSM))
+  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+  (format t "~&#<FSM ~O>" (%pointer-unsigned (%pointer fsm)))
   (FORMAT T "~&Character translation:")
   (DOLIST (L (FSM-BUCKETS))
     (FORMAT T "~D = {" (LENGTH L))

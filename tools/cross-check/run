@@ -3,13 +3,13 @@
 builder band (tools/cross-check/README.md).
 
 Usage:
-  tools/cross-check/run [--out DIR] [--tree-2000 TARBALL] [--system NAME]
+  tools/cross-check/run [--out DIR] [--base-tree TARBALL] [--system NAME]
                         [--fresh] [--skip-definitions-check] CHECK...
                         [-- LISPM-CHECK-ARGS...]
 CHECK is check1, check3, native or check2; all is check1, check3 and native.
 The checks given run at once, each in its own lispm-check run with its own
-ports.  Each gets a copy of this tree's sys/ and site/ (native: System 2000's
-tree, from TARBALL) with the files of lisp/ served as SYS: CROSS-CHECK;, runs
+ports.  Each gets a copy of this tree's sys/ and site/ (native: the builder's
+own tree, from TARBALL) with the files of lisp/ served as SYS: CROSS-CHECK;, runs
 cases/prime.cases and its own case file on the builder, and then its analysis
 on what the run left in HOST's home.  Output in DIR/CHECK/ (DIR is the tree's
 run/cross-check/ unless --out): lispm-check.out, the machine's logs, home/,
@@ -21,9 +21,15 @@ run after one that stopped goes on where it stopped (--fresh starts again).
 
 Before a check that cross-builds, crossdefs.py checks that sys/cold/crossdefs.lisp
 is the list of the tree's compile-time definitions the sources give, against
-System 2000's tree (TARBALL), and that no #, sits in a macro's or defsubst's
-body; either failing fails the check before the machine runs.
+the builder's own tree (TARBALL), and that no #, sits in a macro's or
+defsubst's body; either failing fails the check before the machine runs.
 --skip-definitions-check leaves that out, for a planted tree.
+
+The builder is System 2001's band, and TARBALL by default its tree with its
+QFASLs, muir-sim's ref/band-2001-81b3973/handover-2001-81b3973-sys.tar.gz
+(CROSS_CHECK_BASE_TREE, or --base-tree): the cross build of revision 14's
+system (contract G3 revision 14, 10.6).  G2's cross build had System 2000's;
+--tree-2000 and CROSS_CHECK_TREE_2000 are older names of the same.
 
 lispm-check's band, ubin/, quux and ozd are this tree's defaults
 (run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
@@ -54,7 +60,7 @@ FIXTURES = {
                'shortfloat.lisp'],
     'check3': [],
     'check2': ['planted.lisp', 'uncovered-sharp.lisp'],
-    'native': ['copy-partition.lisp', 'pages32.lisp'],
+    'native': ['copy-partition.lisp'],
 }
 TIMEOUT = {'check1': 1800, 'check3': 7200, 'native': 3600, 'check2': 40000}
 # the files of the cross build whose digests each run records
@@ -91,7 +97,9 @@ def copy_tree(src, dest, all_qfasls):
 
 
 def tree_2000(out, tarball):
-    """System 2000's tree, sources and QFASLs, extracted once under OUT."""
+    """The builder's own tree, sources and QFASLs, extracted once under OUT
+    (System 2001's for revision 14's cross build; the name is G2's, whose
+    builder was System 2000)."""
     dest = os.path.join(out, 'tree-2000')
     stamp = os.path.join(dest, 'SHA256')
     digest = sha256(tarball)
@@ -243,16 +251,16 @@ def run_check(check, out, args, extra):
         lines.append('sha256 %s  cold40.img' % sha256(img))
     elif check == 'native' and ok:
         nt = nil_and_t(text, 'cold:xc-make-cold')
-        old, new, pages = (os.path.join(home, f) for f in ('cold-old.img', 'cold-new.img',
-                                                           'cold-pages.img'))
+        old, new = (os.path.join(home, f) for f in ('cold-old.img', 'cold-new.img'))
         same = open(old, 'rb').read() == open(new, 'rb').read()
-        lines.append('%s: the 32-bit cold load by this tree\'s generator %s the one System 2000\'s makes'
+        lines.append('%s: the cold load by this tree\'s generator %s the one the builder\'s makes'
                      % ('ok' if same else 'FAIL', 'is byte for byte' if same else 'differs from'))
-        ok &= same and len(nt) == 3
-        if len(nt) == 3:
-            ok &= analyse([py('check3.py'), new, '32', '256'] + list(nt[1]), lines)
-            ok &= analyse([py('check3.py'), pages, '32', '1024'] + list(nt[2]), lines)
-        for f in (old, new, pages):
+        # the builder's own parameters, revision 13's: its tree's QCOM
+        qcom = os.path.join(source, 'sys', 'cold', 'qcom.lisp')
+        ok &= same and len(nt) == 2
+        if len(nt) == 2:
+            ok &= analyse([py('check3.py'), '--qcom', qcom, new, '40', '1024'] + list(nt[1]), lines)
+        for f in (old, new):
             lines.append('sha256 %s  %s' % (sha256(f), os.path.basename(f)))
     elif check == 'check2':
         # a later part resumes from the QFASLs this one made
@@ -276,15 +284,19 @@ def main():
         extra = argv[argv.index('--') + 1:]
         argv = argv[:argv.index('--')]
     args = {'out': os.path.join(TREE, 'run', 'cross-check'),
-            'tree_2000': os.environ.get('CROSS_CHECK_TREE_2000',
-                                        os.path.join(TREE, '..', 'muir-sim', 'ref', 'band-2000',
-                                                     'tree-2000.tar.gz')),
+            'tree_2000': os.environ.get('CROSS_CHECK_BASE_TREE',
+                                        os.environ.get('CROSS_CHECK_TREE_2000',
+                                                       os.path.join(TREE, '..', 'muir-sim', 'ref',
+                                                                    'band-2001-81b3973',
+                                                                    'handover-2001-81b3973-sys.tar.gz'))),
             'system': 'system', 'fresh': False, 'skip_definitions_check': False}
     checks = []
     while argv:
         a = argv.pop(0)
         if a in ('--out', '--tree-2000', '--system'):
             args[a[2:].replace('-', '_')] = argv.pop(0)
+        elif a == '--base-tree':
+            args['tree_2000'] = argv.pop(0)
         elif a == '--fresh':
             args['fresh'] = True
         elif a == '--skip-definitions-check':

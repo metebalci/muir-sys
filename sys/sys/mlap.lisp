@@ -483,11 +483,18 @@
        (AS-1 NUMBER-MICRO-ENTRIES
 	     (FUNCTION SYS:SCRATCH-PAD-INIT-AREA)
 	     31)
-       (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
-					1
-					(%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
-						       *MC-EXIT-VECTOR-ARRAY*
-						       0)))
+;       (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
+;					1
+;					(%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
+;						       *MC-EXIT-VECTOR-ARRAY*
+;						       0)))
+       ;; quux revision 14 (contract g3 revision 14, 10.10): the array's first
+       ;; data word by %pointer-plus, so that it is the fixnum of an address
+       ;; at or above 2^31, not a bignum
+       (setq si:%mc-code-exit-vector (%pointer-plus *mc-exit-vector-array*
+						    (1+ (%p-ldb-offset %%array-long-length-flag
+								       *mc-exit-vector-array*
+								       0))))
        N)
 
 (DEFUN MA-REBOOT NIL	;should not be neccessary now that SCRATCH-PAD-INIT-AREA hacked
@@ -495,11 +502,16 @@
   (IF (NUMBERP NUMBER-MICRO-ENTRIES)
       (SETQ SYSTEM:%NUMBER-OF-MICRO-ENTRIES NUMBER-MICRO-ENTRIES))
   (IF *MC-EXIT-VECTOR-ARRAY*
-      (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
-				       1
-				       (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
-						      *MC-EXIT-VECTOR-ARRAY*
-						      0)))))
+;      (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
+;				       1
+;				       (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
+;						      *MC-EXIT-VECTOR-ARRAY*
+;						      0)))))
+      ;; quux revision 14 (contract g3 revision 14, 10.10): by %pointer-plus
+      (setq si:%mc-code-exit-vector (%pointer-plus *mc-exit-vector-array*
+						   (1+ (%p-ldb-offset %%array-long-length-flag
+								      *mc-exit-vector-array*
+								      0))))))
 
 (DEFUN MA-LOAD-C-MEM (ADR I)
   (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 1 ADR
@@ -519,11 +531,16 @@
 			   ':AREA SYSTEM:PERMANENT-STORAGE-AREA
 			   ':LEADER-LIST '(0))))
 	(T (STORE-ARRAY-LEADER 0 *MC-EXIT-VECTOR-ARRAY* 0)))
-  (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
-				   1
-				   (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
-						  *MC-EXIT-VECTOR-ARRAY*
-						  0))))
+;  (SETQ SI:%MC-CODE-EXIT-VECTOR (+ (%POINTER *MC-EXIT-VECTOR-ARRAY*)
+;				   1
+;				   (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG
+;						  *MC-EXIT-VECTOR-ARRAY*
+;						  0))))
+  ;; quux revision 14 (contract g3 revision 14, 10.10): by %pointer-plus
+  (setq si:%mc-code-exit-vector (%pointer-plus *mc-exit-vector-array*
+					       (1+ (%p-ldb-offset %%array-long-length-flag
+								  *mc-exit-vector-array*
+								  0)))))
 
 (DEFUN MA-LOAD-EXIT-VECTOR-Q (EV &AUX DTP PTR) 
   (COND ((EQ (CAR EV) 'QUOTE)
@@ -531,10 +548,15 @@
 	       PTR (%POINTER (CADR EV))))
 	((EQ (CAR EV) 'SPECIAL)
 	 (SETQ DTP DTP-EXTERNAL-VALUE-CELL-POINTER
-	       PTR (1+ (%POINTER (CADR EV)))))
+;	       PTR (1+ (%POINTER (CADR EV)))))
+	       ;; quux revision 14 (contract g3 revision 14, 10.10): the
+	       ;; symbol's value cell by %pointer-plus
+	       ptr (%pointer-plus (cadr ev) 1)))
 	((EQ (CAR EV) 'FUNCTION)
 	 (SETQ DTP DTP-EXTERNAL-VALUE-CELL-POINTER
-	       PTR (+ 2 (%POINTER (CADR EV))))))
+;	       PTR (+ 2 (%POINTER (CADR EV))))))
+	       ;; quux revision 14: the function cell by %pointer-plus
+	       ptr (%pointer-plus (cadr ev) 2))))
   (ARRAY-PUSH *MC-EXIT-VECTOR-ARRAY* (%MAKE-POINTER DTP PTR)))
 
 

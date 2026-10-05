@@ -270,8 +270,18 @@ accumulators from the error."
     ;; which signals address-past-28-bits again, here in the error handler, so
     ;; the condition's handler never ran.  such a word is saved as its field,
     ;; as a non-pointer is; sg-restore-state puts the field and the tag back.
+;    (setf (aref rp pp)
+;	  (if (and (%p-pointerp p) (not (ldb-test #o3404 (%p-pointer p))))
+;	      (%p-contents-as-locative p)
+;	    (%p-pointer p)))
+    ;; quux revision 14 (contract g3 revision 14, 2, 10.1): addresses with
+    ;; <31:28> set are no longer past the space: ephemeral space, every young
+    ;; object, lies there, and its pointers must be saved as locatives, so
+    ;; that they are transported.  a pointer into no region (the windows, an
+    ;; unallocated page) is saved as its field, as the 28-bit test saved one
+    ;; past the space.
     (setf (aref rp pp)
-	  (if (and (%p-pointerp p) (not (ldb-test #o3404 (%p-pointer p))))
+	  (if (and (%p-pointerp p) (%region-number (%p-pointer p)))
 	      (%p-contents-as-locative p)
 	    (%p-pointer p)))
     (SETF (AREF RP (1+ PP))
@@ -1164,15 +1174,28 @@ UNINTERESTING-FUNCTIONS is a list of functions that are uninteresting."
     (when ( frame index)
       (return frame))))
 
+;(defun virtual-address-to-pdl-index (sg vadr)
+;  (let* ((rp (sg-regular-pdl sg))
+;	 (offset (si::array-data-offset rp)))
+;    (if (or (< (%pointer vadr)
+;	       (%pointer-plus rp offset))
+;	    ( (%pointer vadr)
+;	       (%pointer-plus rp (+ (sg-regular-pdl-pointer sg) offset))))
+;	nil
+;      (%pointer-difference vadr (%pointer-plus rp offset)))))
+;;; quux revision 14 (contract g3 revision 14, 10.1, class b; 10.10): an
+;;; address within an object by its offset, (%pointer-difference x base),
+;;; compared with 0 and the size: two signed compares of raw addresses put an
+;;; address past 2^31 below a stack under it (an ephemeral address read as in
+;;; no stack only by luck), and are wrong for a stack across 2^31.
 (defun virtual-address-to-pdl-index (sg vadr)
   (let* ((rp (sg-regular-pdl sg))
-	 (offset (si::array-data-offset rp)))
-    (if (or (< (%pointer vadr)
-	       (%pointer-plus rp offset))
-	    ( (%pointer vadr)
-	       (%pointer-plus rp (+ (sg-regular-pdl-pointer sg) offset))))
+	 (offset (si::array-data-offset rp))
+	 (index (%pointer-difference vadr (%pointer-plus rp offset))))
+    (if (or (minusp index)
+	    ( index (sg-regular-pdl-pointer sg)))
 	nil
-      (%pointer-difference vadr (%pointer-plus rp offset)))))
+      index)))
 
 (DEFUN SG-ERRING-FUNCTION (SG &OPTIONAL (FRAME (SG-AP SG)))
   "Return a /"function name/" that represents the macro instruction that erred, in SG."
@@ -2094,8 +2117,14 @@ without hairy precautions; see source for SYS:DELETE-BINDING-FROM-CLOSURE."
 
 (DEFUN SYMBOL-FROM-VALUE-CELL-LOCATION (LOC &AUX SYM)
   "Given LOC which is VALUE-CELL-LOCATION of some symbol, return that symbol."
-  (COND ((AND ( (%POINTER LOC) A-MEMORY-VIRTUAL-ADDRESS)	;Microcode location
-	      (< (%POINTER LOC) IO-SPACE-VIRTUAL-ADDRESS))	; forwarded from value cell
+;  (COND ((AND ( (%POINTER LOC) A-MEMORY-VIRTUAL-ADDRESS)	;Microcode location
+;	      (< (%POINTER LOC) IO-SPACE-VIRTUAL-ADDRESS))	; forwarded from value cell
+  ;; quux revision 14 (contract g3 revision 14, 10.1, class w; appendix
+  ;; a14.1): a memory's window, 35700000000-35700001777, lies above 2^31 and
+  ;; no longer just below the i/o region: a location in it is one whose
+  ;; offset from the window's base is 0 to 1777
+  (COND ((< -1 (%pointer-difference loc a-memory-virtual-address) #o2000)	;microcode location
+						; forwarded from value cell
 	 (OR (DOLIST (SYM A-MEMORY-LOCATION-NAMES)
 	       (AND (= (%POINTER LOC) (%P-LDB-OFFSET %%Q-POINTER SYM 1)) (RETURN SYM)))
 	     (DOLIST (SYM M-MEMORY-LOCATION-NAMES)

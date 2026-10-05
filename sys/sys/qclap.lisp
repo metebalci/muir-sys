@@ -382,6 +382,10 @@ and then stored into the debugging info :INTERNAL-FEF-OFFSETS item.")
 	 (WHEN ( LAP-STORE-POINTER LAP-OUTPUT-BLOCK-LENGTH)
 	   (BARF WD "Doesn't fit in allocated block" 'BARF))
 	 (LET ((%INHIBIT-READ-ONLY T))
+	   ;; quux revision 14 (contract g1 2.6; contract g3 revision 14, 8.3,
+	   ;; 10.6): an instruction word is a fixnum, tag 005 (cdr-normal,
+	   ;; dtp-fix), not the tag of the word the fef was filled with
+	   (%p-dpb-offset dtp-fix %%q-all-but-pointer lap-output-block lap-store-pointer)
 	   (%P-DPB-OFFSET WD %%Q-HIGH-HALF LAP-OUTPUT-BLOCK LAP-STORE-POINTER)
 	   (%P-DPB-OFFSET LOW-HALF-Q %%Q-LOW-HALF LAP-OUTPUT-BLOCK LAP-STORE-POINTER))
 	 (SETQ LOW-HALF-Q NIL)

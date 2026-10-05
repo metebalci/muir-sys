@@ -511,12 +511,22 @@ been answered.  After a reset nothing more is written to it."
 	:response-producer (file-device-register %file-device-response-producer-register)
 	:response-consumer (file-device-register %file-device-response-consumer-register)
 	:ring-address file-device-ring-address
+;	:ring-address-now (and file-device-ring-rqb
+;			       (%physical-address
+;				 (+ (%pointer file-device-ring-rqb) 1
+;				    (%p-ldb %%array-long-length-flag file-device-ring-rqb)
+;				    (floor (- (array-length file-device-ring-rqb)
+;					      (* page-size 2)) 2))))
+	;; quux revision 14 (contract g3 revision 14, 10.10): the ring's address
+	;; by %pointer-plus of the rqb and the offset, so that an rqb at or
+	;; across 2^31 names its own word, not a bignum's
 	:ring-address-now (and file-device-ring-rqb
 			       (%physical-address
-				 (+ (%pointer file-device-ring-rqb) 1
-				    (%p-ldb %%array-long-length-flag file-device-ring-rqb)
-				    (floor (- (array-length file-device-ring-rqb)
-					      (* page-size 2)) 2))))
+				 (%pointer-plus file-device-ring-rqb
+						(+ 1
+						   (%p-ldb %%array-long-length-flag file-device-ring-rqb)
+						   (floor (- (array-length file-device-ring-rqb)
+							     (* page-size 2)) 2)))))
 	:enabled file-device-enabled
 	:generation file-device-generation
 	:commands file-device-command-count

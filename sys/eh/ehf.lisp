@@ -1593,6 +1593,15 @@ control will be returned from the micro-routine that got the error."
 
 (deftype fixnum-greater-than-1 () '(and fixnum (integer 2)))
 
+;; quux revision 14 (contract g3 revision 14, 10.8, 10.9): %xbus-read's and
+;; %xbus-write's offset, bounded, since from 20000000 on it would reach the
+;; physical memory window; and %unibus-read's and %unibus-write's address,
+;; which nothing satisfies, quux having no unibus (rule a6).
+(deftype xbus-offset () '(and fixnum (integer 0 #o17777777)))
+(defprop xbus-offset "an Xbus offset, a fixnum from 0 to 17777777 (octal)" si:type-name)
+(deftype unibus-address () 'nil)
+(defprop unibus-address "a Unibus address, which QUUX has none of: it has no Unibus" si:type-name)
+
 (deftype positive-number () '(and number (satisfies plusp)))
 
 (deftype art-q-list-array () '(and array (satisfies art-q-list-array-p)))
@@ -2346,6 +2355,16 @@ The width, times the number of bits per pixel, must be a multiple of 32.")
   :format-string "There was a reference to ~S, which is past the 28-bit address space."
   :format-args (list (%make-pointer dtp-locative (sg-contents sg (second ete)))))
 
+;; quux revision 14 (contract g3 revision 14, 9.2): a reference to a page with
+;; no entry, an address in no region.  the microcode (address-in-no-region,
+;; uc-page-fault) passes the address's field in m-t, a fixnum, and vma nil, as
+;; address-past-28-bits did; the error holds it as a locative, in its :address
+;; property and in its message, which prints it unsigned.  not continuable.
+(def-ucode-error address-in-no-region error
+  :property-list `(:address ,(%make-pointer dtp-locative (sg-contents sg (second ete))))
+  :format-string "There was a reference to ~S, which is in no region."
+  :format-args (list (%make-pointer dtp-locative (sg-contents sg (second ete)))))
+
 (def-ucode-error turd-alert (turd-alert-error draw-on-unprepared-sheet)
   :sheet (sg-contents sg (second ete))
   :format-string "There was an attempt to draw on the sheet ~S without preparing it first.~%"
@@ -2599,7 +2618,10 @@ cannot be RPLACD'ed.  The list is ~S."
      (format stream "The word #<~S ~S> was read from location ~O ~@[(in ~A)~]."
 	     (q-data-types data-type)
 	     pointer
-	     (%pointer address)
+;	     (%pointer address)
+	     ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the
+	     ;; address unsigned
+	     (si:%pointer-unsigned (%pointer address))
 	     (let ((area (%area-number address)))
 	       (and area (area-name area)))))))
 

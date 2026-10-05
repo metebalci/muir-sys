@@ -32,16 +32,26 @@
   (IF (NULL DISK-PARTITION-START)
       (FERROR NIL "No partition named METR to use for metering"))
   (STOP-GC-PROCESS)
-  (SETQ BUFFER-ADDRESS (1+ (LOGIOR (%POINTER BUFFER-ARRAY)	;This is in Q's here
-				   (1- PAGE-SIZE))))
+;  (SETQ BUFFER-ADDRESS (1+ (LOGIOR (%POINTER BUFFER-ARRAY)	;This is in Q's here
+;				   (1- PAGE-SIZE))))
+  ;; quux revision 14 (contract g3 revision 14, 10.10): the next page
+  ;; boundary by %pointer-plus: 1+ of an address just below 2^31 made the
+  ;; bignum 2^31, which %meter-buffer-pointer then held
+  (setq buffer-address (%pointer-plus (logior (%pointer buffer-array)	;this is in q's here
+					      (1- page-size))
+				      1))
   (SI:WIRE-PAGE BUFFER-ADDRESS)
   ;***bug displaced-index-offset can be negative, bombing if array exactly on page boundary.
 ;  (SETQ BUFFER (MAKE-ARRAY (* PAGE-SIZE 2)
   (setq buffer (make-array (* (si:disk-block-words) 2)	;one block, the microcode's
 			   ':TYPE 'ART-16B
 			   ':DISPLACED-TO BUFFER-ARRAY
-			   ':DISPLACED-INDEX-OFFSET (* 2 (- BUFFER-ADDRESS
-							    (%POINTER BUFFER-ARRAY) 2))))
+;			   ':DISPLACED-INDEX-OFFSET (* 2 (- BUFFER-ADDRESS
+;							    (%POINTER BUFFER-ARRAY) 2))))
+			   ;; quux revision 14: the offset by %pointer-difference
+			   ':displaced-index-offset (* 2 (- (%pointer-difference buffer-address
+										  buffer-array)
+							    2))))
   (RESET))
 
 (DEFUN RESET ()

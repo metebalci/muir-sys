@@ -1801,8 +1801,12 @@ Each element is an argument list to which MAKE-PACKAGE is applied.")
 		 (princ " Multiple symbols with same pname and package.")
 		 (terpri)
 		 (princ sym)
-		 (princ ", interned at ") (prin1 (%pointer sym1))
-		 (princ ", wanted at ") (prin1 (%pointer sym))
+;		 (princ ", interned at ") (prin1 (%pointer sym1))
+;		 (princ ", wanted at ") (prin1 (%pointer sym))
+		 ;; quux revision 14 (contract g3 revision 14, 10.1, class p):
+		 ;; the addresses unsigned
+		 (princ ", interned at ") (prin1 (%pointer-unsigned (%pointer sym1)))
+		 (princ ", wanted at ") (prin1 (%pointer-unsigned (%pointer sym)))
 		 (%halt))))))
   ;; Give normal new-symbol-intern function now that bootstrap cruft has been done.
   (setf (pkg-new-symbol-function pkg-global-package) #'pkg-auto-export-store)

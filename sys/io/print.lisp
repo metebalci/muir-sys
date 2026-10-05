@@ -336,7 +336,9 @@ Pathnames, editor buffers, host objects, and many other hairy things
 			       FASTP)
 	     (SEND STREAM :TYO (PTTBL-SPACE *READTABLE*))
 	     (LET ((*PRINT-BASE* 8) (*PRINT-RADIX* NIL))
-	       (PRINT-FIXNUM (%POINTER EXP) STREAM))
+;	       (PRINT-FIXNUM (%POINTER EXP) STREAM))
+	       ;; quux revision 14: the address unsigned (print-pointer-field)
+	       (print-pointer-field exp stream))
 	     (PRINT-RAW-STRING (CDR (PTTBL-RANDOM *READTABLE*)) STREAM FASTP))
 	    (CLOSURE (PRINT-CLOSURE EXP STREAM FASTP))
 	    (T
@@ -564,6 +566,17 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	     (EQ *PRINT-BASE* 10.))
     (SEND STREAM :TYO (PTTBL-DECIMAL-POINT *READTABLE*)))
   X)
+
+;;; quux revision 14 (contract g3 revision 14, 10.1, class P): an address is
+;;; unsigned, and its fixnum is negative from 2^31 up, as every address in
+;;; ephemeral space and the windows is; printed as a fixnum it had a minus
+;;; sign.  only such an address makes a bignum here.
+(defun print-pointer-field (object stream)
+  "Print OBJECT's pointer field, an address, on STREAM as an unsigned number in *PRINT-BASE*."
+  (let ((field (%pointer object)))
+    (if (minusp field)
+	(print-bignum (%pointer-unsigned field) stream nil)
+      (print-fixnum field stream))))
 
 (DEFCONST PRINT-FIXNUM-DIGITS "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   "Characters used as digits when printing fixnums (if *PRINT-BASE* is big enough).")

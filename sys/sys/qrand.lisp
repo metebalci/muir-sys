@@ -11,6 +11,30 @@
 (defconst most-positive-fixnum (%logdpb 0 %%q-boxed-sign-bit -1)
   "Any integer larger than this must be a bignum.")
 
+;;; quux revision 14 (contract g3 revision 14, 10.1): addresses are unsigned.
+;;; an address is the fixnum whose 32-bit field is the address, negative from
+;;; 2^31 up; these two convert between it and the unsigned number.  they were
+;;; in sys: sys; qmisc, and are here so that the printer, in the cold load,
+;;; can print an address unsigned (print-pointer-field), and so that the
+;;; addresses of the windows, above 2^31, are built as fixnums by one named
+;;; function (%make-pointer-unsigned) wherever they are written.
+(defun %pointer-unsigned (n)
+  "Convert the fixnum N, regarded as unsigned number, into number (maybe big) with same value.
+If the argument is negative (if regarded as signed), it is expanded into a bignum."
+  ;; the sign bit's value is -2^31, so the shifted term is -2^32; qmisc's
+  ;; version added it, making a negative field more negative (-1 gave
+  ;; -4294967297, a field of 0xD0000000 -5100273664), where N + 2^32 is wanted.
+  (if (minusp n) (- n (ash (%logdpb 1 %%q-boxed-sign-bit 0) 1)) n))
+
+(defun %make-pointer-unsigned (n)
+  "Convert N to a fixnum which, regarded as unsigned, has same value as N.
+Thus, a number just too big to be a signed fixnum
+becomes a fixnum which, if regarded as signed, would be negative."
+  (if (fixnump n)
+      n
+    (logior (ldb (1- %%q-pointer) n)
+	    (rot (ldb (byte 1 (1- %%q-pointer)) n) -1))))
+
 ;;; SPECIAL, UNSPECIAL, PUTPROP, and REMPROP are here because
 ;;; various qfasl files in the cold load will cause these to
 ;;; be called at initial startup.
@@ -872,8 +896,14 @@ If END is NIL or not specified, the active length of ARRAY is used."
 	    ;; If the array is displaced to a random location, use that location
 	    ;; as the data start.  Arrays displaced to other arrays
 	    ;; were handled above.
-	    (IF (ARRAY-DISPLACED-P ARRAY)
-		(SETQ ARRAY (- (%POINTER (ARRAY-INDIRECT-TO ARRAY)) DATA-OFFSET)))
+;	    (IF (ARRAY-DISPLACED-P ARRAY)
+;		(SETQ ARRAY (- (%POINTER (ARRAY-INDIRECT-TO ARRAY)) DATA-OFFSET)))
+	    ;; quux revision 14 (contract g3 revision 14, 10.10): the location
+	    ;; less the offset by %pointer-plus: by - a location within
+	    ;; data-offset above 2^31 gave a bignum, from whose own address
+	    ;; %blt then copied
+	    (if (array-displaced-p array)
+		(setq array (%pointer-plus (%pointer (array-indirect-to array)) (- data-offset))))
 	    (IF BITS-PER-ELEMENT
 		;; Numeric array.
 		(%BLT (%MAKE-POINTER-OFFSET DTP-FIX ARRAY
@@ -1176,7 +1206,10 @@ in some sense, LOCATION represents."
 						     (FOLLOW-STRUCTURE-FORWARDING LOCATION)
 						   LOCATION)
 						 1)))
-	(#.CDR-ERROR (FERROR NIL "Invalid CDR code in list at #o~O." (%POINTER LOCATION)))
+;	(#.CDR-ERROR (FERROR NIL "Invalid CDR code in list at #o~O." (%POINTER LOCATION)))
+	;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+	(#.cdr-error (ferror nil "Invalid CDR code in list at #o~O."
+			     (%pointer-unsigned (%pointer location))))
 	(T T)))
     (T
       ;; Cell could be forwarded somewhere, e.g. into microcode memory
@@ -1194,7 +1227,10 @@ This causes the list to be forwarded if it did not have an explicit cdr pointer.
 			       (FOLLOW-STRUCTURE-FORWARDING LIST)
 			     LIST)
 			   1))
-    (#.CDR-ERROR (FERROR NIL "Invalid CDR code in list at #o~O." (%POINTER LIST)))
+;    (#.CDR-ERROR (FERROR NIL "Invalid CDR code in list at #o~O." (%POINTER LIST)))
+    ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the address unsigned
+    (#.cdr-error (ferror nil "Invalid CDR code in list at #o~O."
+			 (%pointer-unsigned (%pointer list))))
     (T (WITHOUT-INTERRUPTS			;cdr-nil, cdr-next
 	 (RPLACD LIST (CDR LIST)))
        (%MAKE-POINTER-OFFSET DTP-LOCATIVE (FOLLOW-STRUCTURE-FORWARDING LIST) 1))))
@@ -1426,9 +1462,15 @@ not the old, forwarded one."
     ;; By this point, ARRAY cannot be in oldspace
     (SETQ NDIMS (%P-LDB %%ARRAY-NUMBER-DIMENSIONS ARRAY)
 	  LONG-ARRAY-BIT (%P-LDB %%ARRAY-LONG-LENGTH-FLAG ARRAY)
-	  ARRAY-DATA-BASE (+ (%MAKE-POINTER DTP-FIX ARRAY)	;Safe since can't move now
-			     LONG-ARRAY-BIT	;Careful, this can be a negative number!
-			     NDIMS)
+;	  ARRAY-DATA-BASE (+ (%MAKE-POINTER DTP-FIX ARRAY)	;Safe since can't move now
+;			     LONG-ARRAY-BIT	;Careful, this can be a negative number!
+;			     NDIMS)
+	  ;; quux revision 14 (contract g3 revision 14, 10.10): the data's
+	  ;; address by %make-pointer-offset, modulo 2^32: by + an array whose
+	  ;; header lay just below 2^31 gave a bignum, into which its users
+	  ;; then wrote
+	  array-data-base (%make-pointer-offset dtp-fix array	;safe since can't move now
+						(+ long-array-bit ndims))
 	  CURRENT-INDEX-LENGTH (IF (ZEROP LONG-ARRAY-BIT)
 				   (%P-LDB %%ARRAY-INDEX-LENGTH-IF-SHORT ARRAY)
 				 (%P-CONTENTS-OFFSET ARRAY 1))

@@ -40,8 +40,15 @@
 
 (DEFVAR PAGE-OFFSET :UNBOUND
   "Disk address of start of PAGE partition")
-(DEFVAR VIRTUAL-MEMORY-SIZE :UNBOUND
-  "Size of paging partition in words")
+;; quux revision 14 (contract g3 revision 14, 9.3, 10.6): a band is restored
+;; into the paging partition's slots, so DISK-SAVE checks that it fits
+(defvar page-partition-size :unbound
+  "Size of the PAGE partition in disk blocks")
+;(DEFVAR VIRTUAL-MEMORY-SIZE :UNBOUND
+;  "Size of paging partition in words")
+;; quux revision 14 (contract g3 revision 14, 9.3, 10.5): the commit limit
+(defvar virtual-memory-size :unbound
+  "The words the regions may hold: the paging partition's slots plus the pageable frames.")
 
 (DEFVAR CURRENT-LOADED-BAND :UNBOUND
   "Remembers %LOADED-BAND through warm-booting")
@@ -338,12 +345,26 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 		      		    (WIRE-P T)
 				    SET-MODIFIED
 			  &AUX (LONG-ARRAY-FLAG (%P-LDB %%ARRAY-LONG-LENGTH-FLAG RQB))
-			       (LOW (- (%POINTER RQB) (ARRAY-LEADER-LENGTH RQB) 2))
-			       (HIGH (+ (%POINTER RQB) 1 LONG-ARRAY-FLAG
-					(FLOOR (ARRAY-LENGTH RQB) 2))))
-  (DO ((LOC (LOGAND LOW (- PAGE-SIZE)) (+ LOC PAGE-SIZE)))
-      (( LOC HIGH))
-    (WIRE-PAGE LOC WIRE-P SET-MODIFIED))
+;			       (LOW (- (%POINTER RQB) (ARRAY-LEADER-LENGTH RQB) 2))
+;			       (HIGH (+ (%POINTER RQB) 1 LONG-ARRAY-FLAG
+;					(FLOOR (ARRAY-LENGTH RQB) 2))))
+;  (DO ((LOC (LOGAND LOW (- PAGE-SIZE)) (+ LOC PAGE-SIZE)))
+;      (( LOC HIGH))
+;    (WIRE-PAGE LOC WIRE-P SET-MODIFIED))
+			       ;; quux revision 14 (contract g3 revision 14, 10.10):
+			       ;; the rqb's first and one-past-last words by
+			       ;; %pointer-plus, modulo 2^32: by - and + an rqb at or
+			       ;; across 2^31 gave bignums, and wire-page wired the
+			       ;; bignums' pages, not the rqb's.
+			       (low (%pointer-plus rqb (- (+ (array-leader-length rqb) 2))))
+			       (high (%pointer-plus rqb (+ 1 long-array-flag
+							   (floor (array-length rqb) 2)))))
+  ;; each page from LOW's up to HIGH, counted, the address stepped by
+  ;; %pointer-plus (the loop ended by a signed compare, at once past 2^31)
+  (do ((loc (logand low (- page-size)) (%pointer-plus loc page-size))
+       (n (ceiling (%pointer-difference high (logand low (- page-size))) page-size) (1- n)))
+      (( n 0))
+    (wire-page loc wire-p set-modified))
   ;; Having wired the rqb, if really wiring set up CCW-list N-PAGES long
   ;; and CLP to it, but if really unwiring make CLP point to NXM as err check
   (IF (NOT WIRE-P)
@@ -365,16 +386,28 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 ;	((>= ccwx n-blocks)	;done, set end in last ccw
     ;; quux revision 13 (appendix a1.11): a ccw names a page: its physical
     ;; address, <27:10>, and <0> the chain bit, a page's frame being whole.
+;    (do* ((n-blocks n-pages)			;the ccws
+;	  (block-words page-size)		;a ccw's words
+;	  (ccwx 0 (1+ ccwx))
+;	  (vadr (+ low page-size) (+ vadr block-words))	;start with 2nd page of rqb array
+;	  (padr))
+;	((>= ccwx n-blocks)	;done, set end in last ccw
+;	 (SETQ PADR (%PHYSICAL-ADDRESS (+ (%POINTER RQB)
+;					  1
+;					  LONG-ARRAY-FLAG
+;					  (FLOOR %DISK-RQ-CCW-LIST 2))))
+    ;; quux revision 14 (contract g3 revision 14, 10.10): each data page's
+    ;; address, and the ccw list's, by %pointer-plus, so that an rqb at or
+    ;; across 2^31 names its own pages' frames, not a bignum's
     (do* ((n-blocks n-pages)			;the ccws
 	  (block-words page-size)		;a ccw's words
 	  (ccwx 0 (1+ ccwx))
-	  (vadr (+ low page-size) (+ vadr block-words))	;start with 2nd page of rqb array
+	  (vadr (%pointer-plus low page-size) (%pointer-plus vadr block-words))	;start with 2nd page of rqb array
 	  (padr))
 	((>= ccwx n-blocks)	;done, set end in last ccw
-	 (SETQ PADR (%PHYSICAL-ADDRESS (+ (%POINTER RQB)
-					  1
-					  LONG-ARRAY-FLAG
-					  (FLOOR %DISK-RQ-CCW-LIST 2))))
+	 (setq padr (%physical-address (%pointer-plus rqb (+ 1
+							     long-array-flag
+							     (floor %disk-rq-ccw-list 2)))))
 	 (SETF (aref RQB %DISK-RQ-CCW-LIST-POINTER-LOW) PADR)
 	 (SETF (aref RQB %DISK-RQ-CCW-LIST-POINTER-HIGH) (LSH PADR -16.)))
       (SETQ PADR (%PHYSICAL-ADDRESS VADR))
@@ -1219,8 +1252,14 @@ WHICH defaults to /"LOD/"."
   (let ((*disk-transfer-packed* t))
     (disk-read rqb unit (band-sys-com-block part-base))))
 
-(defconst band-format-compressed #o2000)
-(defconst band-format-incremental #o2001)
+;(defconst band-format-compressed #o2000)
+;(defconst band-format-incremental #o2001)
+;; quux revision 14 (contract g3 revision 14, 10.6; appendix a14.13): the
+;; fixed areas move (no page table or physical-page-data area), so the band's
+;; layout keeps its form and its numbers move: 2010 saved, 2011 incremental,
+;; and the cold load 2012 (sys: cold; coldut).  microcode 2002 refuses 2000-2002.
+(defconst band-format-compressed #o2010)
+(defconst band-format-incremental #o2011)
 
 ;;; the words are counted in blocks, not through sys-com-page-number: an
 ;;; incremental band's valid size, which the microcode writes as its blocks
@@ -1239,14 +1278,24 @@ WHICH defaults to /"LOD/"."
 	      page-size)
      disk-blocks-per-packed-page))
 
-(DEFUN SYS-COM-PAGE-NUMBER (16B-BUFFER INDEX)
-  (LSH
-    (LOGAND
-;      (1- 1_24.)				;the CADR's mask; the Lambda's is gone.
-      (1- 1_32.)				;quux revision 13: the field is 32 bits
-      (LOGIOR (LSH (AREF 16B-BUFFER (1+ (* 2 INDEX))) #o20)
-	      (AREF 16B-BUFFER (* 2 INDEX))))
-    (- %%Q-POINTER-WITHIN-PAGE)))
+;(DEFUN SYS-COM-PAGE-NUMBER (16B-BUFFER INDEX)
+;  (LSH
+;    (LOGAND
+;;      (1- 1_24.)				;the CADR's mask; the Lambda's is gone.
+;      (1- 1_32.)				;quux revision 13: the field is 32 bits
+;      (LOGIOR (LSH (AREF 16B-BUFFER (1+ (* 2 INDEX))) #o20)
+;	      (AREF 16B-BUFFER (* 2 INDEX))))
+;    (- %%Q-POINTER-WITHIN-PAGE)))
+;; quux revision 14 (contract g3 revision 14, 10.1): the word is an unsigned
+;; address of 32 bits, such as the highest virtual address of a band with
+;; regions in ephemeral space, above 2^31: its page number is its bits 10-31,
+;; taken by ldb from the fixnum the halves make.  the mask with 2^32 - 1 made
+;; a bignum of an address from 2^31 up, which lsh does not take.
+(defun sys-com-page-number (16b-buffer index)
+  (ldb (byte (- (byte-size %%q-pointer) (byte-size %%q-pointer-within-page))
+	     (byte-size %%q-pointer-within-page))
+       (logior (lsh (aref 16b-buffer (1+ (* 2 index))) #o20)
+	       (aref 16b-buffer (* 2 index)))))
 
 (DEFUN DESCRIBE-PARTITION (PART &OPTIONAL (UNIT 0)
 			   &AUX PART-BASE PART-SIZE RQB
@@ -1421,7 +1470,13 @@ or /"CC/" which refers to the machine being debugged by this one."
 		    (FINAL-SIZE (IF (AND (> SIZE #o10) ( SIZE PART-SIZE)) SIZE PART-SIZE))
 		    (MEMORY-SIZE
 ;		      (SYS-COM-PAGE-NUMBER BUF %SYS-COM-HIGHEST-VIRTUAL-ADDRESS)))
-		      (sys-com-block-count buf %sys-com-highest-virtual-address)))
+;		      (sys-com-block-count buf %sys-com-highest-virtual-address)))
+		      ;; quux revision 14 (contract g3 revision 14, 9.3, 10.6):
+		      ;; the restore copies the band's pages into a run of slots
+		      ;; of the paging partition, so it needs as many blocks as
+		      ;; the band holds, not as many as its highest address's page
+		      ;; (which, from 2^31 up, was negative here)
+		      final-size))
 	       (VALUES FINAL-SIZE
 ;		       (IF (= (AREF BUF (* 2 %SYS-COM-BAND-FORMAT)) #o1000)
 		       (if (= (aref buf (* 2 %sys-com-band-format)) band-format-compressed)
@@ -1458,8 +1513,16 @@ or /"CC/" which refers to the machine being debugged by this one."
 	     ;; quux revision 13 (appendix a1.7, a1.11): the a-memory address is
 	     ;; a positive 28-bit fixnum, its page its bits 10-27; the paging
 	     ;; partition's pages are packed, disk-blocks-per-packed-page blocks each
-	     (setq virtual-memory-size (* (min (ldb #o1222 a-memory-virtual-address)
-					       (floor size disk-blocks-per-packed-page))
+;	     (setq virtual-memory-size (* (min (ldb #o1222 a-memory-virtual-address)
+;					       (floor size disk-blocks-per-packed-page))
+;					  page-size)))
+	     ;; quux revision 14 (contract g3 revision 14, 9.3, 10.5): a page is
+	     ;; no longer at its virtual page's place in the paging partition but
+	     ;; in a slot of it, and the regions may hold the commit limit, the
+	     ;; partition's slots plus the pageable frames, which the cold boot
+	     ;; works out and make-region holds them to
+	     (setq page-partition-size size)
+	     (setq virtual-memory-size (* (system-communication-area %sys-com-commit-limit)
 					  page-size)))
     (RETURN-DISK-RQB RQB)))
 
@@ -1523,11 +1586,52 @@ This is obsolete -- You probably want PRINT-HERALD"
 	    LOCAL-PRETTY-HOST-NAME
 	    (SEND ASSOCIATED-MACHINE :NAME-AS-FILE-COMPUTER))))
 
+;;; quux revision 14 (contract g3 revision 14, 3, 10.5; appendix a14.2, a14.3,
+;;; a14.12): the page table and physical-page-data are frames taken at boot,
+;;; read through the physical memory window.  these read them for the
+;;; functions below; the microcode alone writes them.
+
+(defun physical-memory-word (physical-address)
+  "The 32-bit field of the word at PHYSICAL-ADDRESS of main memory, as a fixnum."
+  (%p-ldb %%q-pointer (%pointer-plus physical-memory-virtual-address physical-address)))
+
+(defun page-entry (address)
+  "The page table's entry for the page holding ADDRESS, a fixnum (appendix a14.2),
+or NIL if no page-table page covers it (an address in no region)."
+  (let ((directory (feature-page-field #o220 %%directory-entry-frame))	;its first frame
+	(address (%pointer address))
+	(directory-entry))
+    (and (not (zerop directory))		;0, no directory yet
+	 ;; the directory's entry vma<31:20>; the page-table page's, vma<19:10>
+	 (setq directory-entry
+	       (physical-memory-word (+ (* directory page-size) (ldb (byte 12. 20.) address))))
+	 (= (ldb %%directory-entry-status directory-entry) %directory-entry-status-present)
+	 (physical-memory-word (+ (* (ldb %%directory-entry-frame directory-entry) page-size)
+				  (ldb (byte 10. 10.) address))))))
+
+(defun page-entry-slot (entry)
+  "The slot of the paging partition that the page of ENTRY, not in core, is in,
+or NIL if it has none (a fresh page)."
+  (let ((slot (dpb (ldb %%page-entry-slot-high entry) (byte 4 18.)
+		   (ldb %%page-entry-slot-low entry))))
+    (if (= slot %page-entry-no-slot) nil slot)))
+
+(defun frame-wired-p (frame)
+  "T if FRAME, a frame in service, is wired (physical-page-data, appendix a14.12)."
+  (let ((word (physical-memory-word (+ (system-communication-area %sys-com-physical-page-data)
+				       (* %ppd-words-per-frame frame)))))
+    (and (not (= word -1))			;out of service
+	 (ldb-test %%ppd0-wired word))))
+
 ;;; Must be defined before initialization below
 (DEFUN WIRE-PAGE (ADDRESS &OPTIONAL (WIRE-P T) SET-MODIFIED DONT-BOTHER-PAGING-IN)
+  ;; quux revision 14 (contract g3 revision 14, 9.1): %change-page-status
+  ;; takes the swap status with revision 13's values, by their new names
+  ;; (qcom): wired sets the frame's wired bit in physical-page-data
   (IF WIRE-P
       (DO ()
-	  ((%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-WIRED NIL)
+;	  ((%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-WIRED NIL)
+	  ((%change-page-status address %page-swap-status-wired nil)
 	   (IF SET-MODIFIED			;Set modified bit without changing anything
 	       (IF DONT-BOTHER-PAGING-IN	;and without touching uninitialized memory
 		   (%P-STORE-TAG-AND-POINTER ADDRESS DTP-TRAP ADDRESS)
@@ -1542,19 +1646,43 @@ This is obsolete -- You probably want PRINT-HERALD"
 ;		       (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))))))
 		   ;; 1024-word pages (contract g2, option (w)): the virtual page
 		   ;; number and the frame's physical address by page-size, not 256
-		   (or (%page-in pfn (floor (%pointer address) page-size))
+;		   (or (%page-in pfn (floor (%pointer address) page-size))
+		   ;; quux revision 14 (contract g3 revision 14, 10.7 item 3): the
+		   ;; virtual page number is vma<31:10>, 22 bits; a floor of the
+		   ;; address made it negative from 2^31 up
+		   (or (%page-in pfn (ldb (byte 22. 10.) (%pointer address)))
 		       ;; page already got in somehow, free up the pfn
 		       (%create-physical-page (* pfn page-size))))))))
       (UNWIRE-PAGE ADDRESS)))
 
 (DEFUN UNWIRE-PAGE (ADDRESS)
-  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-NORMAL NIL))
+;  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-NORMAL NIL))
+  ;; quux revision 14: the swap status by its new name (qcom); normal clears
+  ;; the frame's wired bit
+  (%change-page-status address %page-swap-status-normal nil))
 
-(DEFUN WIRE-WORDS (FROM SIZE &OPTIONAL (WIRE-P T) SET-MODIFIED DONT-BOTHER-PAGING-IN)
-  (DO ((ADR (- FROM (LOGAND FROM (1- PAGE-SIZE))) (+ ADR PAGE-SIZE))
-       (N   (- PAGE-SIZE (LOGAND FROM (1- PAGE-SIZE))) (+ N PAGE-SIZE)))
-      (( N SIZE))
-    (WIRE-PAGE ADR WIRE-P SET-MODIFIED DONT-BOTHER-PAGING-IN)))
+;(DEFUN WIRE-WORDS (FROM SIZE &OPTIONAL (WIRE-P T) SET-MODIFIED DONT-BOTHER-PAGING-IN)
+;  (DO ((ADR (- FROM (LOGAND FROM (1- PAGE-SIZE))) (+ ADR PAGE-SIZE))
+;       (N   (- PAGE-SIZE (LOGAND FROM (1- PAGE-SIZE))) (+ N PAGE-SIZE)))
+;      (( N SIZE))
+;    (WIRE-PAGE ADR WIRE-P SET-MODIFIED DONT-BOTHER-PAGING-IN)))
+;;; quux revision 14 (contract g3 revision 14, 10.10): the page loop, the
+;;; pages counted, the address stepped by %pointer-plus from FROM's page,
+;;; taken from FROM's pointer field.  by - and + an address at or across 2^31
+;;; became a bignum, whose own page wire-page then wired; FROM, a locative
+;;; from wire-structure, was taken by neither logand nor -, so wire-structure
+;;; stopped with an argument error; and the old loop's end test, run before
+;;; each page, left the range's last page unwired, and every page of a range
+;;; within one page (all three measured on system 2001).
+(defun wire-words (from size &optional (wire-p t) set-modified dont-bother-paging-in)
+  (do ((adr (logand (%pointer from) (- page-size)) (%pointer-plus adr page-size))
+       ;; the pages from FROM's to the last word's
+       (n (if (plusp size)
+	      (ceiling (+ (logand (%pointer from) (1- page-size)) size) page-size)
+	    0)
+	  (1- n)))
+      (( n 0))
+    (wire-page adr wire-p set-modified dont-bother-paging-in)))
 
 (DEFUN UNWIRE-WORDS (FROM SIZE)
   (WIRE-WORDS FROM SIZE NIL))
@@ -2045,12 +2173,21 @@ First value is NIL if displaced to an absolute address (probably TV buffer)."
 	(UNLESS (ARRAYP ARRAY)
 	  (RETURN-FROM DONE NIL)))
       (SETQ ELTS-PER-Q (CDR (ASSOC TYPE ARRAY-ELEMENTS-PER-Q)))
-      (SETQ START (+ (IF (PLUSP ELTS-PER-Q)
-			 (FLOOR START ELTS-PER-Q)
-		         (* START (MINUS ELTS-PER-Q)))
-		     (%POINTER-PLUS ARRAY
-				    (+ NDIMS
-				       (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG ARRAY 0))))
+;      (SETQ START (+ (IF (PLUSP ELTS-PER-Q)
+;			 (FLOOR START ELTS-PER-Q)
+;		         (* START (MINUS ELTS-PER-Q)))
+;		     (%POINTER-PLUS ARRAY
+;				    (+ NDIMS
+;				       (%P-LDB-OFFSET %%ARRAY-LONG-LENGTH-FLAG ARRAY 0))))
+      ;; quux revision 14 (contract g3 revision 14, 10.10): the data's start
+      ;; address by one %pointer-plus of the array and the sum of the offsets;
+      ;; + of the word index and an address made a bignum at or across 2^31
+      (setq start (%pointer-plus array
+				 (+ (if (plusp elts-per-q)
+					(floor start elts-per-q)
+				      (* start (minus elts-per-q)))
+				    ndims
+				    (%p-ldb-offset %%array-long-length-flag array 0)))
 	    SIZE (IF (PLUSP ELTS-PER-Q)
 		     (CEILING SIZE ELTS-PER-Q)
 		     (* SIZE (MINUS ELTS-PER-Q))))
@@ -2085,116 +2222,194 @@ FROM and TO are lists of subscripts, or NIL."
     (DO ((ADDR (LOGAND (- PAGE-SIZE) ADDRESS) (%MAKE-POINTER-OFFSET DTP-FIX ADDR PAGE-SIZE))
 	 (N (+ NWDS (LOGAND (1- PAGE-SIZE) ADDRESS)) (- N PAGE-SIZE)))
 	((NOT (PLUSP N)))
-      (OR (NULL (SETQ STS (%PAGE-STATUS ADDR)))	;Swapped out
-	  ( (LDB %%PHT1-SWAP-STATUS-CODE STS)
-	     %PHT-SWAP-STATUS-WIRED)	;Wired
-	  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-FLUSHABLE
-			       (LDB %%REGION-MAP-BITS
-				    (REGION-BITS (%REGION-NUMBER ADDRESS))))))))
+;      (OR (NULL (SETQ STS (%PAGE-STATUS ADDR)))	;Swapped out
+;	  ( (LDB %%PHT1-SWAP-STATUS-CODE STS)
+;	     %PHT-SWAP-STATUS-WIRED)	;Wired
+;	  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-FLUSHABLE
+;			       (LDB %%REGION-MAP-BITS
+;				    (REGION-BITS (%REGION-NUMBER ADDRESS))))))))
+      ;; quux revision 14 (contract g3 revision 14, 9.1, 10.5): %page-status
+      ;; gives the page's entry when it is in core, and a frame's wired bit is
+      ;; in physical-page-data (frame-wired-p), with no pht swap status.  each
+      ;; page of the range is offered, ADDR: the old call named ADDRESS, the
+      ;; first page, every time.
+      (or (null (setq sts (%page-status addr)))	;swapped out
+	  (frame-wired-p (ldb %%page-entry-frame sts))	;wired
+	  (%change-page-status addr %page-swap-status-flushable
+			       (ldb %%region-map-bits
+				    (region-bits (%region-number addr))))))))
 
-(DEFUN PAGE-IN-WORDS (ADDRESS NWDS &AUX (CCWX 0) CCWP BASE-ADDR)
-  (WITHOUT-INTERRUPTS
-    (SETQ ADDRESS (%POINTER ADDRESS))
-    (UNWIND-PROTECT
-      (PROGN (WIRE-PAGE-RQB)
-	     ;; This DO is over the whole frob
-	     (DO ((ADDR (LOGAND (- PAGE-SIZE) ADDRESS)
-			(%MAKE-POINTER-OFFSET DTP-FIX ADDR PAGE-SIZE))
-		  (N (+ NWDS (LOGAND (1- PAGE-SIZE) ADDRESS)) (- N PAGE-SIZE)))
-		 ((NOT (PLUSP N)))
-	       (SETQ CCWX 0
-		     CCWP %DISK-RQ-CCW-LIST
-		     BASE-ADDR ADDR)
-	       ;; This DO is over pages to go in a single I/O operation.
-	       ;; We collect some page frames to put them in, remembering the
-	       ;; PFNs as CCWs.
-	       (DO-FOREVER
-		 (OR (EQ (%PAGE-STATUS ADDR) NIL) (RETURN NIL))
-;		 (LET ((PFN (%FINDCORE)))
-;		   (SETF (AREF PAGE-RQB CCWP) (1+ (LSH PFN 8)))
-;		   (SETF (AREF PAGE-RQB (1+ CCWP)) (LSH PFN -8)))
-;		 (INCF CCWX 1)
-;		 (INCF CCWP 2)
-;		 (UNLESS (< CCWX PAGE-RQB-SIZE)
-		 ;; 1024-word pages (contract g2, option (w)): a ccw for each of
-		 ;; the frame's blocks, each with its chain bit, the frame's
-		 ;; physical address page-size words a frame
+;(DEFUN PAGE-IN-WORDS (ADDRESS NWDS &AUX (CCWX 0) CCWP BASE-ADDR)
+;  (WITHOUT-INTERRUPTS
+;    (SETQ ADDRESS (%POINTER ADDRESS))
+;    (UNWIND-PROTECT
+;      (PROGN (WIRE-PAGE-RQB)
+;	     ;; This DO is over the whole frob
+;	     (DO ((ADDR (LOGAND (- PAGE-SIZE) ADDRESS)
+;			(%MAKE-POINTER-OFFSET DTP-FIX ADDR PAGE-SIZE))
+;		  (N (+ NWDS (LOGAND (1- PAGE-SIZE) ADDRESS)) (- N PAGE-SIZE)))
+;		 ((NOT (PLUSP N)))
+;	       (SETQ CCWX 0
+;		     CCWP %DISK-RQ-CCW-LIST
+;		     BASE-ADDR ADDR)
+;	       ;; This DO is over pages to go in a single I/O operation.
+;	       ;; We collect some page frames to put them in, remembering the
+;	       ;; PFNs as CCWs.
+;	       (DO-FOREVER
+;		 (OR (EQ (%PAGE-STATUS ADDR) NIL) (RETURN NIL))
+;;		 (LET ((PFN (%FINDCORE)))
+;;		   (SETF (AREF PAGE-RQB CCWP) (1+ (LSH PFN 8)))
+;;		   (SETF (AREF PAGE-RQB (1+ CCWP)) (LSH PFN -8)))
+;;		 (INCF CCWX 1)
+;;		 (INCF CCWP 2)
+;;		 (UNLESS (< CCWX PAGE-RQB-SIZE)
+;		 ;; 1024-word pages (contract g2, option (w)): a ccw for each of
+;		 ;; the frame's blocks, each with its chain bit, the frame's
+;		 ;; physical address page-size words a frame
+;;		 (let ((padr (* (%findcore) page-size)))
+;;		   (dotimes (k disk-blocks-per-page)
+;;		     (setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
+;;		     (setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
+;;		     (incf ccwp 2)
+;;		     (incf padr (disk-block-words))))
+;;		 (incf ccwx disk-blocks-per-page)
+;;		 (unless (<= (+ ccwx disk-blocks-per-page) page-rqb-size)
+;;		   (RETURN NIL))
+;		 ;; quux revision 13 (appendix a1.11): a ccw a page, the frame's address
+;		 ;; with the chain bit
 ;		 (let ((padr (* (%findcore) page-size)))
-;		   (dotimes (k disk-blocks-per-page)
-;		     (setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
-;		     (setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
-;		     (incf ccwp 2)
-;		     (incf padr (disk-block-words))))
-;		 (incf ccwx disk-blocks-per-page)
-;		 (unless (<= (+ ccwx disk-blocks-per-page) page-rqb-size)
-;		   (RETURN NIL))
-		 ;; quux revision 13 (appendix a1.11): a ccw a page, the frame's address
-		 ;; with the chain bit
-		 (let ((padr (* (%findcore) page-size)))
-		   (setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
-		   (setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
-		   (incf ccwp 2))
-		 (incf ccwx)
-		 (unless (< ccwx page-rqb-size)
-		   (return nil))
-		 (SETQ ADDR (%POINTER-PLUS ADDR PAGE-SIZE))
-		 (DECF N PAGE-SIZE)
-		 (UNLESS (PLUSP N)
-		   (RETURN NIL)))
-	       (WHEN (PLUSP CCWX)	;We have something to do, run the I/O op
-		 ;; Turn off chain bit
-		 (SETF (AREF PAGE-RQB (- CCWP 2)) (LOGAND (AREF PAGE-RQB (- CCWP 2)) -2))
-;		 (DISK-READ-WIRED PAGE-RQB 0 (+ (LSH BASE-ADDR -8) PAGE-OFFSET))
-		 ;; 1024-word pages (contract g2, option (w)): the page's blocks,
-		 ;; disk-blocks-per-page a page
-;		 (disk-read-wired page-rqb 0 (+ (* (floor base-addr page-size) disk-blocks-per-page)
-;						page-offset))
-		 ;; quux revision 13 (appendix a1.11): a paging partition's pages are
-		 ;; packed, disk-blocks-per-packed-page blocks each, as the
-		 ;; microcode's paging writes them
-		 (let ((*disk-transfer-packed* t))
-		   (disk-read-wired page-rqb 0 (+ (* (floor base-addr page-size)
-						     disk-blocks-per-packed-page)
-						  page-offset)))
-		 ;; Make these pages in
-;		 (DO ((I 0 (1+ I))
-;		      (CCWP %DISK-RQ-CCW-LIST (+ 2 CCWP))
-;		      (VPN (LSH BASE-ADDR -8) (1+ VPN))
-;		      (PFN))
-;		     ((= I CCWX))
-;		   (SETQ PFN (DPB (AREF PAGE-RQB (1+ CCWP))
-;				  #o1010
-;				  (LDB #o1010 (AREF PAGE-RQB CCWP))))
-;		   (UNLESS (%PAGE-IN PFN VPN)
-;		     ;; Page already got in somehow, free up the PFN
-;		     (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))
-		 ;; a page's first ccw names its frame
-;		 (do ((i 0 (+ i disk-blocks-per-page))
-;		      (ccwp %disk-rq-ccw-list (+ ccwp (* 2 disk-blocks-per-page)))
-		 ;; quux revision 13 (appendix a1.11): a ccw a page
-		 (do ((i 0 (1+ i))
-		      (ccwp %disk-rq-ccw-list (+ ccwp 2))
-		      (vpn (floor base-addr page-size) (1+ vpn))
-		      (pfn))
-		     ((>= i ccwx))
-		   (setq pfn (floor (dpb (aref page-rqb (1+ ccwp)) #o2020
-					 (logand (aref page-rqb ccwp) -2))
-				    page-size))
-		   (unless (%page-in pfn vpn)
-		     ;; page already got in somehow, free up the pfn
-		     (%create-physical-page (* pfn page-size))))
-		 (SETQ CCWX 0))))
-      ;; UNWIND-PROTECT forms
-      (UNWIRE-PAGE-RQB)
-;I guess it's better to lose some physical memory than to get two pages
-;swapped into the same address, in the event that we bomb out.
-;     (DO ((CCWP %DISK-RQ-CCW-LIST (+ CCWP 2))
-;	   (N CCWX (1- N)))
-;	  ((ZEROP N))
-;	(%CREATE-PHYSICAL-PAGE (DPB (AREF PAGE-RQB (1+ CCWP))
-;				    #o2006
-;				    (AREF PAGE-RQB CCWP))))
-      )))
+;		   (setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
+;		   (setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
+;		   (incf ccwp 2))
+;		 (incf ccwx)
+;		 (unless (< ccwx page-rqb-size)
+;		   (return nil))
+;		 (SETQ ADDR (%POINTER-PLUS ADDR PAGE-SIZE))
+;		 (DECF N PAGE-SIZE)
+;		 (UNLESS (PLUSP N)
+;		   (RETURN NIL)))
+;	       (WHEN (PLUSP CCWX)	;We have something to do, run the I/O op
+;		 ;; Turn off chain bit
+;		 (SETF (AREF PAGE-RQB (- CCWP 2)) (LOGAND (AREF PAGE-RQB (- CCWP 2)) -2))
+;;		 (DISK-READ-WIRED PAGE-RQB 0 (+ (LSH BASE-ADDR -8) PAGE-OFFSET))
+;		 ;; 1024-word pages (contract g2, option (w)): the page's blocks,
+;		 ;; disk-blocks-per-page a page
+;;		 (disk-read-wired page-rqb 0 (+ (* (floor base-addr page-size) disk-blocks-per-page)
+;;						page-offset))
+;		 ;; quux revision 13 (appendix a1.11): a paging partition's pages are
+;		 ;; packed, disk-blocks-per-packed-page blocks each, as the
+;		 ;; microcode's paging writes them
+;		 (let ((*disk-transfer-packed* t))
+;		   (disk-read-wired page-rqb 0 (+ (* (floor base-addr page-size)
+;						     disk-blocks-per-packed-page)
+;						  page-offset)))
+;		 ;; Make these pages in
+;;		 (DO ((I 0 (1+ I))
+;;		      (CCWP %DISK-RQ-CCW-LIST (+ 2 CCWP))
+;;		      (VPN (LSH BASE-ADDR -8) (1+ VPN))
+;;		      (PFN))
+;;		     ((= I CCWX))
+;;		   (SETQ PFN (DPB (AREF PAGE-RQB (1+ CCWP))
+;;				  #o1010
+;;				  (LDB #o1010 (AREF PAGE-RQB CCWP))))
+;;		   (UNLESS (%PAGE-IN PFN VPN)
+;;		     ;; Page already got in somehow, free up the PFN
+;;		     (%CREATE-PHYSICAL-PAGE (LSH PFN 8))))
+;		 ;; a page's first ccw names its frame
+;;		 (do ((i 0 (+ i disk-blocks-per-page))
+;;		      (ccwp %disk-rq-ccw-list (+ ccwp (* 2 disk-blocks-per-page)))
+;		 ;; quux revision 13 (appendix a1.11): a ccw a page
+;		 (do ((i 0 (1+ i))
+;		      (ccwp %disk-rq-ccw-list (+ ccwp 2))
+;		      (vpn (floor base-addr page-size) (1+ vpn))
+;		      (pfn))
+;		     ((>= i ccwx))
+;		   (setq pfn (floor (dpb (aref page-rqb (1+ ccwp)) #o2020
+;					 (logand (aref page-rqb ccwp) -2))
+;				    page-size))
+;		   (unless (%page-in pfn vpn)
+;		     ;; page already got in somehow, free up the pfn
+;		     (%create-physical-page (* pfn page-size))))
+;		 (SETQ CCWX 0))))
+;      ;; UNWIND-PROTECT forms
+;      (UNWIRE-PAGE-RQB)
+;;I guess it's better to lose some physical memory than to get two pages
+;;swapped into the same address, in the event that we bomb out.
+;;     (DO ((CCWP %DISK-RQ-CCW-LIST (+ CCWP 2))
+;;	   (N CCWX (1- N)))
+;;	  ((ZEROP N))
+;;	(%CREATE-PHYSICAL-PAGE (DPB (AREF PAGE-RQB (1+ CCWP))
+;;				    #o2006
+;;				    (AREF PAGE-RQB CCWP))))
+;      )))
+
+;;; quux revision 14 (contract g3 revision 14, 9.3, 10.7 item 3; appendix
+;;; a14.12): a page not in core is in a slot of the paging partition, at the
+;;; partition's base plus disk-blocks-per-packed-page blocks a slot, not at
+;;; its virtual page's place: an address from 2^31 up had a negative page
+;;; there, and %page-in kept 18 bits of it, page 0.  the pages that go in one
+;;; disk operation are those whose slots follow one another, as the slot
+;;; allocator gives a region written out in order; a fresh page, with no
+;;; slot, needs no read and is left for its first touch to zero-fill.
+;;; %page-in takes the page's frame with the page's contents read into it and
+;;; its virtual page number, vma<31:10>, and keeps the entry's slot.
+(defun page-in-words (address nwds &aux (ccwx 0) (ccwp %disk-rq-ccw-list) base-addr base-slot)
+  (without-interrupts
+    (setq address (%pointer address))
+    (unwind-protect
+	(progn
+	  (wire-page-rqb)
+	  ;; this do is over the whole frob, a page at a time
+	  (do ((addr (logand (- page-size) address) (%pointer-plus addr page-size))
+	       (n (+ nwds (logand (1- page-size) address)) (- n page-size))
+	       (entry)
+	       (slot))
+	      ((not (plusp n))
+	       (page-in-words-run base-addr base-slot ccwx ccwp))	;the last run
+	    ;; a page not in core with a slot is read; in core, fresh, or in no
+	    ;; region (no page-table page), it is not
+	    (setq entry (page-entry addr)
+		  slot (and entry
+			    (= (ldb %%page-entry-status entry) %page-entry-status-not-in-core)
+			    (page-entry-slot entry)))
+	    ;; the run so far ends unless this page's slot is its next, and the
+	    ;; rqb has room for another ccw
+	    (unless (and slot (plusp ccwx) (= slot (+ base-slot ccwx)) (< ccwx page-rqb-size))
+	      (page-in-words-run base-addr base-slot ccwx ccwp)
+	      (setq ccwx 0 ccwp %disk-rq-ccw-list))
+	    (when slot
+	      (when (zerop ccwx)
+		(setq base-addr addr base-slot slot))
+	      ;; a ccw a page, the frame's address with the chain bit
+	      (let ((padr (* (%findcore) page-size)))
+		(setf (aref page-rqb ccwp) (1+ (ldb #o0020 padr)))
+		(setf (aref page-rqb (1+ ccwp)) (ldb #o2020 padr))
+		(incf ccwp 2))
+	      (incf ccwx))))
+      ;; unwind-protect forms
+      (unwire-page-rqb))))
+
+(defun page-in-words-run (base-addr base-slot ccwx ccwp)
+  "Read the CCWX pages from BASE-ADDR on, in the slots from BASE-SLOT on, into the
+frames PAGE-RQB's ccws name, and make them the pages' frames."
+  (when (plusp ccwx)
+    ;; turn off the last ccw's chain bit
+    (setf (aref page-rqb (- ccwp 2)) (logand (aref page-rqb (- ccwp 2)) -2))
+    (let ((*disk-transfer-packed* t))
+      (disk-read-wired page-rqb 0 (+ (* base-slot disk-blocks-per-packed-page) page-offset)))
+    ;; make these pages in
+    (do ((i 0 (1+ i))
+	 (ccwp %disk-rq-ccw-list (+ ccwp 2))
+	 (vpn (ldb (byte 22. 10.) base-addr) (1+ vpn))
+	 (pfn))
+	((>= i ccwx))
+      (setq pfn (floor (dpb (aref page-rqb (1+ ccwp)) #o2020
+			    (logand (aref page-rqb ccwp) -2))
+		       page-size))
+      (unless (%page-in pfn vpn)
+	;; page already got in somehow, free up the pfn
+	(%create-physical-page (* pfn page-size))))))
+
 
 ;;;used by the lambda to find the machine name (since there is nothing like the
 ;;; chaos address set on the IO board)  Must be in this file since is needed when

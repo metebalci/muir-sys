@@ -784,7 +784,9 @@ LOCK-VALUE defaults to the current process."
 	  (SETQ CURRENT-PROCESS NIL)
 	(SETF (PROCESS-WAIT-WHOSTATE NEXT-PROCESS) NIL)
 	(SET-PROCESS-WAIT NEXT-PROCESS #'TRUE NIL)
-	(SETF (RUN-LIGHT-FOR-CADR) T)
+;	(SETF (RUN-LIGHT-FOR-CADR) T)
+	;; quux revision 14: the run light by its setter (sys2; prodef)
+	(set-run-light-for-cadr t)
 	(LET ((SG (PROCESS-STACK-GROUP (SETQ CURRENT-PROCESS NEXT-PROCESS)))
 	      (START-TIME (FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-CADR))
 	      (START-DISK-TIME (FIXNUM-READ-METER-FOR-SCHEDULER %DISK-WAIT-TIME))
@@ -793,7 +795,9 @@ LOCK-VALUE defaults to the current process."
 	  (IF (TYPEP SG 'STACK-GROUP)
 	      (STACK-GROUP-RESUME SG NIL)
 	    (APPLY SG (CDR (PROCESS-INITIAL-FORM CURRENT-PROCESS))))
-	  (SETF (RUN-LIGHT-FOR-CADR) NIL)
+;	  (SETF (RUN-LIGHT-FOR-CADR) NIL)
+	  ;; quux revision 14: the run light by its setter (sys2; prodef)
+	  (set-run-light-for-cadr nil)
 	  (LET ((P CURRENT-PROCESS)
 		(END-TIME (FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-CADR))
 		(END-DISK-TIME (FIXNUM-READ-METER-FOR-SCHEDULER %DISK-WAIT-TIME))
@@ -826,7 +830,9 @@ LOCK-VALUE defaults to the current process."
 		      %CURRENT-STACK-GROUP-PREVIOUS-STACK-GROUP)))))
       ;; In case we took a page fault, the microcode will turn the run light on.
       ;; So turn it back off...this is a kind of kludge, but...
-      (SETF (RUN-LIGHT-FOR-CADR) NIL))))
+;      (SETF (RUN-LIGHT-FOR-CADR) NIL))))
+      ;; quux revision 14: the run light by its setter (sys2; prodef)
+      (set-run-light-for-cadr nil))))
 
 ;;;; PROCESS-RUN-FUNCTION and associated hair
 

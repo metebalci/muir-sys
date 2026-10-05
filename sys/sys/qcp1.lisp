@@ -984,15 +984,22 @@ We create this:
       (setf (car l) (car form)
 	    (cadr l) (cdr form))
       (%p-dpb cdr-normal %%q-cdr-code (%pointer l))
-      (%p-dpb cdr-normal %%q-cdr-code (1+ (%pointer l)))
+;      (%p-dpb cdr-normal %%q-cdr-code (1+ (%pointer l)))
+      ;; quux revision 14 (contract g3 revision 14, 10.10): the list's second
+      ;; word by %pointer-plus; 1+ of an address at 2^31 - 1 made a bignum
+      (%p-dpb cdr-normal %%q-cdr-code (%pointer-plus l 1))
       l)))
 
 (defun already-optimized-p (form)
   (without-interrupts
     (or (atom form)
 	(and (eq (%p-ldb %%q-cdr-code (%pointer form)) cdr-normal)
-	     (eq (%p-ldb %%q-cdr-code (1+ (%pointer form))) cdr-normal)
-	     (eq (%p-ldb %%q-pointer (+ (%pointer form) 2)) (%pointer 'already-optimized))))))
+;	     (eq (%p-ldb %%q-cdr-code (1+ (%pointer form))) cdr-normal)
+;	     (eq (%p-ldb %%q-pointer (+ (%pointer form) 2)) (%pointer 'already-optimized))))))
+	     ;; quux revision 14 (contract g3 revision 14, 10.10): the form's
+	     ;; next words by %pointer-plus
+	     (eq (%p-ldb %%q-cdr-code (%pointer-plus form 1)) cdr-normal)
+	     (eq (%p-ldb %%q-pointer (%pointer-plus form 2)) (%pointer 'already-optimized))))))
 
 ;;; Given a form, apply optimizations and expand macros until no more is possible
 ;;; (at the top level).  Also apply style-checkers to the supplied input

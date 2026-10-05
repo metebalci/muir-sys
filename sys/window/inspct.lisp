@@ -625,7 +625,10 @@ LINE is a list of elements telling us what to print:
 (defun print-pointer (locative stream)
   (format stream "#<~S ~O>"
 	  (or (q-data-types (%p-data-type locative)) (%p-data-type locative))
-	  (%pointer locative)))
+;	  (%pointer locative)))
+	  ;; quux revision 14 (contract g3 revision 14, 10.1, class p): the
+	  ;; address unsigned
+	  (si:%pointer-unsigned (%pointer locative))))
 
 (defmethod (basic-inspect :object-locative) (obj)
   `(((:item1 locative-cell "Contents : " princ)
@@ -658,7 +661,12 @@ LINE is a list of elements telling us what to print:
 				      (format nil "#<~S ~O>"
 					      (or (q-data-types (send cond :data-type))
 						  (send cond :data-type))
-					      (%pointer (send cond :address)))))))
+;					      (%pointer (send cond :address)))))))
+					      ;; quux revision 14 (contract g3
+					      ;; revision 14, 10.1, class p): the
+					      ;; address unsigned
+					      (si:%pointer-unsigned
+						(%pointer (send cond :address))))))))
 	  (GRIND-INTO-LIST LIST (TRUNCATE (SHEET-INSIDE-WIDTH) CHAR-WIDTH) T)))
     ;; Turn STRING-LIST into a list of elements, one for each line, of the form
     ;; (NIL contents-string atom-item-list line-contains-lozenged-characters-p).

@@ -182,14 +182,30 @@ It runs in the scheduler stack group and keeps no stack state between runs."))
      ;; put in the value %%q-pointer had where this macro was loaded, which in
      ;; a cross build is the builder's (#o0030 on system 2000) and not the
      ;; target's (#o0037 on quux revision 13)
+;     `(%p-ldb (1- %%q-pointer)
+;	      (+ %counter-block-a-mem-address a-memory-virtual-address ,a-off))))
+     ;; quux revision 14 (contract g3 revision 14, 10.10): a memory's window
+     ;; lies above 2^31, so the meter's address is made by %pointer-plus of
+     ;; the window's base and the offset
      `(%p-ldb (1- %%q-pointer)
-	      (+ %counter-block-a-mem-address a-memory-virtual-address ,a-off))))
+	      (%pointer-plus a-memory-virtual-address (+ %counter-block-a-mem-address ,a-off)))))
 
-(DEFSUBST RUN-LIGHT-FOR-CADR ()
-  (NOT (ZEROP (%XBUS-READ TV:WHO-LINE-RUN-LIGHT-LOC))))
+;(DEFSUBST RUN-LIGHT-FOR-CADR ()
+;  (NOT (ZEROP (%XBUS-READ TV:WHO-LINE-RUN-LIGHT-LOC))))
 
-(DEFSETF RUN-LIGHT-FOR-CADR () (VALUE)
-  `(%XBUS-WRITE TV:WHO-LINE-RUN-LIGHT-LOC (IF ,VALUE -1 0)))
+;(DEFSETF RUN-LIGHT-FOR-CADR () (VALUE)
+;  `(%XBUS-WRITE TV:WHO-LINE-RUN-LIGHT-LOC (IF ,VALUE -1 0)))
+;; quux revision 14 (contract g3 revision 14, 10.8): the run light is an
+;; address in the frame buffer (sys: sys; ltop), which %xbus-read and
+;; %xbus-write no longer reach; its 32-bit field is read and written whole.
+;; it is set by set-run-light-for-cadr, not by setf: the cross build cannot
+;; give the target a changed setf method, so the defsetf goes (sys2; proces
+;; calls the setter).
+(defsubst run-light-for-cadr ()
+  (not (zerop (%p-ldb %%q-pointer tv:who-line-run-light-loc))))
+
+(defsubst set-run-light-for-cadr (value)
+  (%p-dpb (if value -1 0) %%q-pointer tv:who-line-run-light-loc))
 
 (DEFSTRUCT (PROCESS-QUEUE :NAMED-ARRAY-LEADER (:CONSTRUCTOR MAKE-PROCESS-QUEUE-INTERNAL)
 			  		      (:ALTERANT NIL))

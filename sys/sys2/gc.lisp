@@ -203,13 +203,24 @@ because regions are allocated bigger than their data.")
 	 (INCF STATIC-SIZE SZ))))))
 
 ;;; Returns the number of words of free space
-(DEFUN GET-FREE-SPACE-SIZE-1 ()
-  (* (LOOP FOR I FROM (TRUNCATE (+ (REGION-ORIGIN INIT-LIST-AREA)
-				   (REGION-LENGTH INIT-LIST-AREA))
-				%ADDRESS-SPACE-QUANTUM-SIZE)
-	   	 BELOW (TRUNCATE VIRTUAL-MEMORY-SIZE %ADDRESS-SPACE-QUANTUM-SIZE)
-	   COUNT (ZEROP (AREF #'ADDRESS-SPACE-MAP I)))
-     %ADDRESS-SPACE-QUANTUM-SIZE))
+;(DEFUN GET-FREE-SPACE-SIZE-1 ()
+;  (* (LOOP FOR I FROM (TRUNCATE (+ (REGION-ORIGIN INIT-LIST-AREA)
+;				   (REGION-LENGTH INIT-LIST-AREA))
+;				%ADDRESS-SPACE-QUANTUM-SIZE)
+;	   	 BELOW (TRUNCATE VIRTUAL-MEMORY-SIZE %ADDRESS-SPACE-QUANTUM-SIZE)
+;	   COUNT (ZEROP (AREF #'ADDRESS-SPACE-MAP I)))
+;     %ADDRESS-SPACE-QUANTUM-SIZE))
+;;; quux revision 14 (contract g3 revision 14, 9.3, 10.7 item 1): storage is
+;;; bounded by the commit limit, virtual-memory-size (the paging partition's
+;;; slots plus the pageable frames), not by the free quanta below it: those
+;;; counted the address space below the partition's size, and eden's quanta,
+;;; from 32000000000, lie far above it.  free space is the commit limit less
+;;; the words of every region that is not a fixed area's, eden's included.
+(defun get-free-space-size-1 ()
+  (- virtual-memory-size
+     (loop for region from (1+ init-list-area) below size-of-area-arrays
+	   unless (= (ldb %%region-space-type (region-bits region)) %region-space-free)
+	     sum (region-length region))))
 
 (DEFUN GET-DIRECT-GC-WORK-REMAINING ()
   "Return the number of words now waiting to be scavenged.
@@ -894,45 +905,57 @@ It can then be allocated into other regions."
     (INVALIDATE-REGION-MAPPING REGION)))
 
 ;;; For N-PAGES pages starting at BASE-ADDR, mark them properly not in core.
-(DEFUN DEALLOCATE-PAGES (BASE-ADDR N-PAGES)
-  (PAGE-IN-STRUCTURE #'DEALLOCATE-PAGES)	;Make sure entire fef is in core.
-  (DO ((I 0 (1+ I))
-       (ADDRESS BASE-ADDR (%POINTER-PLUS ADDRESS PAGE-SIZE)))
-      ((= I N-PAGES))
-    ;; Search for this page in the page hash table.
-    (DO ((PHTX (%COMPUTE-PAGE-HASH ADDRESS) (+ PHTX 2))
-	 (PHT-LIMIT (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE))
-	 (PHT1))
-	(())
-      (AND ( PHTX PHT-LIMIT) (SETQ PHTX (- PHTX PHT-LIMIT)))
-      (LET ((%%VALID-BIT %%PHT1-VALID-BIT)
-	    (%DUMMY-VIRTUAL-ADDRESS %PHT-DUMMY-VIRTUAL-ADDRESS)
-	    (%%VIRTUAL-PAGE-NUMBER %%PHT1-VIRTUAL-PAGE-NUMBER)
-	    (%SWAP-STATUS-FLUSHABLE %PHT-SWAP-STATUS-FLUSHABLE)
-	    (%%SWAP-STATUS-CODE %%PHT1-SWAP-STATUS-CODE)
-	    (%%MODIFIED-BIT %%PHT1-MODIFIED-BIT)
-	    (%MAP-STATUS-READ-ONLY %PHT-MAP-STATUS-READ-ONLY)
-	    (%%MAP-STATUS-CODE %%PHT2-MAP-STATUS-CODE)
-	    (%%ACCESS-STATUS-AND-META-BITS %%PHT2-ACCESS-STATUS-AND-META-BITS))
-	;; Above locals used to avoid references to specials in the following.
-	;; Thus there is no chance of a page fault here.
-	(SETQ PHT1 (PAGE-TABLE-AREA PHTX))
-	(COND ((NOT (LDB-TEST %%VALID-BIT PHT1)) (RETURN NIL))	;Not found
-	      ((= (LDB %%VIRTUAL-PAGE-NUMBER PHT1)
-;		  (LSH ADDRESS -10))		;Address match
-		  ;; 1024-word pages (contract g2, option (w)): the page number
-		  ;; is the address over 1024, not 256
-		  (lsh address -12))		;address match
-	       (SETF (PAGE-TABLE-AREA PHTX)
-		     (%LOGDPB %DUMMY-VIRTUAL-ADDRESS %%VIRTUAL-PAGE-NUMBER
-			      (%LOGDPB %SWAP-STATUS-FLUSHABLE
-				       %%SWAP-STATUS-CODE
-				       (%LOGDPB 0 %%MODIFIED-BIT PHT1))))
-	       (SETF (PAGE-TABLE-AREA (1+ PHTX))
-		     (%LOGDPB %MAP-STATUS-READ-ONLY %%MAP-STATUS-CODE
-			      (%LOGDPB 0 %%ACCESS-STATUS-AND-META-BITS
-				       (PAGE-TABLE-AREA (1+ PHTX)))))
-	       (RETURN NIL)))))))
+;;; quux revision 14 (contract g3 revision 14, 9.3, 10.5): no page hash table.
+;;; the pages leave their region, so each is freed as free-region frees a
+;;; region's pages: its frame and its slot are freed and its entry becomes
+;;; status 0, no entry.  %change-page-status does it when its swap status is
+;;; negative, as the microcode's free-region path calls it.
+(defun deallocate-pages (base-addr n-pages)
+  (page-in-structure #'deallocate-pages)	;make sure entire fef is in core.
+  (do ((i 0 (1+ i))
+       (address base-addr (%pointer-plus address page-size)))
+      ((= i n-pages))
+    (%change-page-status address -1 nil)))
+
+;(DEFUN DEALLOCATE-PAGES (BASE-ADDR N-PAGES)
+;  (PAGE-IN-STRUCTURE #'DEALLOCATE-PAGES)	;Make sure entire fef is in core.
+;  (DO ((I 0 (1+ I))
+;       (ADDRESS BASE-ADDR (%POINTER-PLUS ADDRESS PAGE-SIZE)))
+;      ((= I N-PAGES))
+;    ;; Search for this page in the page hash table.
+;    (DO ((PHTX (%COMPUTE-PAGE-HASH ADDRESS) (+ PHTX 2))
+;	 (PHT-LIMIT (SYSTEM-COMMUNICATION-AREA %SYS-COM-PAGE-TABLE-SIZE))
+;	 (PHT1))
+;	(())
+;      (AND ( PHTX PHT-LIMIT) (SETQ PHTX (- PHTX PHT-LIMIT)))
+;      (LET ((%%VALID-BIT %%PHT1-VALID-BIT)
+;	    (%DUMMY-VIRTUAL-ADDRESS %PHT-DUMMY-VIRTUAL-ADDRESS)
+;	    (%%VIRTUAL-PAGE-NUMBER %%PHT1-VIRTUAL-PAGE-NUMBER)
+;	    (%SWAP-STATUS-FLUSHABLE %PHT-SWAP-STATUS-FLUSHABLE)
+;	    (%%SWAP-STATUS-CODE %%PHT1-SWAP-STATUS-CODE)
+;	    (%%MODIFIED-BIT %%PHT1-MODIFIED-BIT)
+;	    (%MAP-STATUS-READ-ONLY %PHT-MAP-STATUS-READ-ONLY)
+;	    (%%MAP-STATUS-CODE %%PHT2-MAP-STATUS-CODE)
+;	    (%%ACCESS-STATUS-AND-META-BITS %%PHT2-ACCESS-STATUS-AND-META-BITS))
+;	;; Above locals used to avoid references to specials in the following.
+;	;; Thus there is no chance of a page fault here.
+;	(SETQ PHT1 (PAGE-TABLE-AREA PHTX))
+;	(COND ((NOT (LDB-TEST %%VALID-BIT PHT1)) (RETURN NIL))	;Not found
+;	      ((= (LDB %%VIRTUAL-PAGE-NUMBER PHT1)
+;;		  (LSH ADDRESS -10))		;Address match
+;		  ;; 1024-word pages (contract g2, option (w)): the page number
+;		  ;; is the address over 1024, not 256
+;		  (lsh address -12))		;address match
+;	       (SETF (PAGE-TABLE-AREA PHTX)
+;		     (%LOGDPB %DUMMY-VIRTUAL-ADDRESS %%VIRTUAL-PAGE-NUMBER
+;			      (%LOGDPB %SWAP-STATUS-FLUSHABLE
+;				       %%SWAP-STATUS-CODE
+;				       (%LOGDPB 0 %%MODIFIED-BIT PHT1))))
+;	       (SETF (PAGE-TABLE-AREA (1+ PHTX))
+;		     (%LOGDPB %MAP-STATUS-READ-ONLY %%MAP-STATUS-CODE
+;			      (%LOGDPB 0 %%ACCESS-STATUS-AND-META-BITS
+;				       (PAGE-TABLE-AREA (1+ PHTX)))))
+;	       (RETURN NIL)))))))
 
 
 (DEFUN AREA-NUMBER-STATIC-P (AREA-NUMBER)
@@ -967,20 +990,28 @@ AREA-STATIC-P will continue to call this area a static area."
       ((OR (ZEROP PHYS-ADR) ( PAGES-FOUND WS-SIZE))
        (SETQ GC-SCAVENGER-WS-SIZE WS-SIZE
 	     %SCAVENGER-WS-ENABLE PHYS-ADR))
-    (LET ((PPD-ADR (+ (REGION-ORIGIN PHYSICAL-PAGE-DATA)
-		      (TRUNCATE PHYS-ADR PAGE-SIZE))))
-;      (IF (NOT (AND (= (%P-LDB #o0020 PPD-ADR) #o177777)	;flush if fixed wired
-;		    ( (%P-LDB #o2020 PPD-ADR) #o177777)))
-;	  (LET ((PHT-ADR (+ (%P-LDB #o0020 PPD-ADR) (REGION-ORIGIN PAGE-TABLE-AREA))))
-      ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, for a
-      ;; table of 32 m words' pages, and the gc data <31:20>
-      (if (not (and (= (%p-ldb #o0024 ppd-adr) #o3777777)	;flush if fixed wired
-		    ( (%p-ldb #o2414 ppd-adr) #o7777)))
-	  (let ((pht-adr (+ (%p-ldb #o0024 ppd-adr) (region-origin page-table-area))))
-	    (IF (NOT
-		  (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT PHT-ADR)))
-		       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE PHT-ADR) %PHT-SWAP-STATUS-WIRED)))
-		(INCF PAGES-FOUND)))))))
+;    (LET ((PPD-ADR (+ (REGION-ORIGIN PHYSICAL-PAGE-DATA)
+;		      (TRUNCATE PHYS-ADR PAGE-SIZE))))
+;;      (IF (NOT (AND (= (%P-LDB #o0020 PPD-ADR) #o177777)	;flush if fixed wired
+;;		    ( (%P-LDB #o2020 PPD-ADR) #o177777)))
+;;	  (LET ((PHT-ADR (+ (%P-LDB #o0020 PPD-ADR) (REGION-ORIGIN PAGE-TABLE-AREA))))
+;      ;; quux revision 13 (appendix a1.9): the pht index is <19:0>, for a
+;      ;; table of 32 m words' pages, and the gc data <31:20>
+;      (if (not (and (= (%p-ldb #o0024 ppd-adr) #o3777777)	;flush if fixed wired
+;		    ( (%p-ldb #o2414 ppd-adr) #o7777)))
+;	  (let ((pht-adr (+ (%p-ldb #o0024 ppd-adr) (region-origin page-table-area))))
+;	    (IF (NOT
+;		  (AND (NOT (ZEROP (%P-LDB %%PHT1-VALID-BIT PHT-ADR)))
+;		       (= (%P-LDB %%PHT1-SWAP-STATUS-CODE PHT-ADR) %PHT-SWAP-STATUS-WIRED)))
+;		(INCF PAGES-FOUND)))))))
+    ;; quux revision 14 (contract g3 revision 14, 10.5; appendix a14.12): a
+    ;; frame's wired bit is physical-page-data's word 0, read through the
+    ;; physical memory window; a frame in service and not wired is counted
+    (let ((word (physical-memory-word (+ (system-communication-area %sys-com-physical-page-data)
+					 (* %ppd-words-per-frame (floor phys-adr page-size))))))
+      (unless (or (= word -1)			;out of service
+		  (ldb-test %%ppd0-wired word))	;wired
+	(incf pages-found)))))
 
 (DEFUN SET-SWAP-RECOMMENDATIONS-OF-AREA (AREA SWAP-RECOMMENDATIONS)
   "Set the number of pages to be swapped in at once in AREA."

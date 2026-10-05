@@ -3,18 +3,18 @@
 sources (tools/cross-check/README.md, "The tree's definitions").
 
 A file compiled for the target by the cross build expands a macro or open-codes
-a defsubst with the definition the builder has, which is System 2000's unless
-the tree's has been given to the compile.  This lists, mechanically, every
-compile-time definition of the tree whose text is not System 2000's: new,
-changed, or gone (System 2000 has it and the tree does not).  Text is compared
-as tokens, comments dropped, case folded outside strings.
+a defsubst with the definition the builder has, which is the builder's own
+system's (BASE) unless the tree's has been given to the compile.  This lists,
+mechanically, every compile-time definition of the tree whose text is not
+BASE's: new, changed, or gone (BASE has it and the tree does not).  Text is
+compared as tokens, comments dropped, case folded outside strings.
 
 Usage:
   crossdefs.py TREE BASE [--lisp OUT]   list; --lisp writes the list as Lisp
                                         (cold:*cross-definitions*)
   crossdefs.py TREE BASE --check FILE   exit 1 unless FILE is what --lisp writes
   crossdefs.py TREE BASE --all ...      every compile-time definition, those
-                                        System 2000 has as they are too
+                                        BASE has as they are too
                                         (status :same), for a probe of
                                         declaring them all
   crossdefs.py TREE BASE --census [--table CROSS-TABLE]
@@ -23,8 +23,10 @@ Usage:
                                         and the new or changed DEFCONSTANTs whose
                                         form reads a constant the cross table
                                         (cold:cross-write-table) changes
-TREE and BASE are trees with sys/ (BASE: System 2000's, e.g. muir-sim's
-ref/band-2000/tree-2000.tar.gz unpacked, or `git archive release-2000`).
+TREE and BASE are trees with sys/ (BASE: the builder's system's: System 2001's
+for revision 14's cross build, e.g. muir-sim's
+ref/band-2001-81b3973/handover-2001-81b3973-sys.tar.gz unpacked, or `git archive
+release-2001`; System 2000's for G2's).
 """
 import os
 import re
@@ -214,7 +216,7 @@ FUNCTION_KINDS = {'DEFMACRO', 'DEFSUBST', 'MACRO', 'DEFF-MACRO', 'DEFLAMBDA-MACR
 
 def has_float(form):
     """True if FORM holds a float literal, which the builder read with its own
-    floats (System 2000's short float holds 17 bits of significand)."""
+    floats (System 2000's short float held 17 bits of significand)."""
     if isinstance(form, list):
         return any(has_float(x) for x in form)
     return isinstance(form, Tok) and bool(FLOAT.match(str(form)))
@@ -317,8 +319,8 @@ def lisp_text(rows):
            '',
            ';;; The tree\'s compile-time definitions that the cross build gives every',
            ';;; compile for the target (cold:cross-begin, sys/cold/cross.lisp): each',
-           ';;; (file kind name status), status :new, :changed, :gone (System 2000',
-           ';;; has it and the tree does not), or :floats (a macro or defsubst of the',
+           ';;; (file kind name status), status :new, :changed, :gone (the builder\'s',
+           ';;; system has it and the tree does not), or :floats (a macro or defsubst of the',
            ';;; same text that holds a float literal, which the builder read with its',
            ';;; own floats).  Written by tools/cross-check/crossdefs.py',
            ';;; from the sources; run it again after a change, since the cross build',

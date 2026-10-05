@@ -112,7 +112,11 @@
       (WITHOUT-INTERRUPTS
 	;; the run light is read and restored on the Xbus only; the Lambda's
 	;; I/O space branches are gone.
-	(SETQ RL (%XBUS-READ WHO-LINE-RUN-LIGHT-LOC))	;Don't clobber run light
+;	(SETQ RL (%XBUS-READ WHO-LINE-RUN-LIGHT-LOC))	;Don't clobber run light
+	;; quux revision 14 (contract g3 revision 14, 10.8): the run light is
+	;; an address in the frame buffer, which %xbus-read does not reach; its
+	;; 32-bit field is read and written whole
+	(setq rl (%p-ldb %%q-pointer who-line-run-light-loc))	;don't clobber run light
 	(IF RUN-STATE-ONLY-P
 	    ;; The reason this is here is that this function conspires to do some
 	    ;; minor nice things for you.  This note is here to remind HIC not to
@@ -122,7 +126,8 @@
 	    (DOLIST (I (SHEET-EXPOSED-INFERIORS WHO-LINE-SCREEN))
 	      (WHEN (TYPEP I 'WHO-LINE-MIXIN)
 		(SEND I :UPDATE))))
-	(%XBUS-WRITE WHO-LINE-RUN-LIGHT-LOC RL)))
+;	(%XBUS-WRITE WHO-LINE-RUN-LIGHT-LOC RL)))
+	(%p-dpb rl %%q-pointer who-line-run-light-loc)))
   T)
 
 (DEFUN WHO-LINE-CLOBBERED ()

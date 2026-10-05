@@ -50,7 +50,10 @@
   SG-STATE-FIELDS
   SG-INST-DISPATCHES
   SYSTEM-COMMUNICATION-AREA-QS
-  PAGE-HASH-TABLE-FIELDS 
+;  PAGE-HASH-TABLE-FIELDS
+  ;; quux revision 14 (contract g3 revision 14, 9.1): the page hash table's
+  ;; fields go with it; the page entry's and physical-page-data's (qcom)
+  page-entry-fields
   Q-FIELDS MICRO-STACK-FIELDS
   M-FLAGS-FIELDS
   M-ERROR-SUBSTATUS-FIELDS 
@@ -125,7 +128,10 @@
   SG-STATE-FIELDS
   SG-INST-DISPATCHES
   SYSTEM-COMMUNICATION-AREA-QS
-  PAGE-HASH-TABLE-FIELDS
+;  PAGE-HASH-TABLE-FIELDS
+  ;; quux revision 14 (contract g3 revision 14, 9.1): the page hash table's
+  ;; fields go with it; the page entry's and physical-page-data's (qcom)
+  page-entry-fields
   Q-FIELDS MICRO-STACK-FIELDS
   M-FLAGS-FIELDS
   M-ERROR-SUBSTATUS-FIELDS 
@@ -169,6 +175,11 @@
   A-MEMORY-VIRTUAL-ADDRESS
   IO-SPACE-VIRTUAL-ADDRESS
   UNIBUS-VIRTUAL-ADDRESS
+  ;; quux revision 14 (contract g3 revision 14, 2): the physical memory
+  ;; window's base, through which lisp reads the tables, and ephemeral
+  ;; space's (qcom)
+  physical-memory-virtual-address
+  ephemeral-space-virtual-address
   ARRAY-ELEMENTS-PER-Q
   ARRAY-BITS-PER-ELEMENT
   %FEF-HEADER-LENGTH
@@ -216,8 +227,10 @@
   REGION-BITS					;Used by page fault handler
   REGION-FREE-POINTER				;Used by DISK-SAVE, etc.
 						; Not likely to be swapped out!
-  PAGE-TABLE-AREA				;Used by page fault handler
-  PHYSICAL-PAGE-DATA				;Used by page fault handler
+;  PAGE-TABLE-AREA				;Used by page fault handler
+;  PHYSICAL-PAGE-DATA				;Used by page fault handler
+  ;; quux revision 14 (contract g3 revision 14, 3.2): no longer areas; the
+  ;; tables are frames the cold boot takes and wires
   ADDRESS-SPACE-MAP				;Used by page fault handler
   ))
 
@@ -252,8 +265,9 @@
   SYSTEM-COMMUNICATION-AREA
   SCRATCH-PAD-INIT-AREA
   MICRO-CODE-SYMBOL-AREA
-  PAGE-TABLE-AREA
-  PHYSICAL-PAGE-DATA
+;  PAGE-TABLE-AREA
+;  PHYSICAL-PAGE-DATA
+  ;; quux revision 14 (contract g3 revision 14, 3.2): no longer areas
   REGION-ORIGIN
   REGION-LENGTH
   REGION-BITS

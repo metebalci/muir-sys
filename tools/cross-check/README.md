@@ -1,10 +1,24 @@
 # The cross build's checks
 
 The cross build (`sys/cold/cross.lisp`; `docs/building.md`, "Cross-building
-for the 40-bit QUUX") compiles SYSTEM on System 2000's band for the 40-bit
-machine and writes that machine's cold load. These are its checks, and the
-controls that show each check can fail. They run on a builder band through
-`tools/lispm-check`, and read what the builder wrote on the host.
+for the 40-bit QUUX") compiles SYSTEM on a builder band for the target
+machine and writes that machine's cold load. G2's builder was System 2000's
+band, for the 40-bit machine; revision 14's (contract G3 revision 14, 10.6) is
+System 2001's, for revision 14's layout: no page hash table area, the area
+numbers two lower, the page entry's fields, band format 2012. These are its
+checks, and the controls that show each check can fail. They run on a builder
+band through `tools/lispm-check`, and read what the builder wrote on the host.
+
+**Revision 14.** Check 3 and the native control run on System 2001's band,
+with its own tree as the base (below); `sys/cold/crossdefs.lisp` lists the
+tree's definitions against System 2001's. Check 1 and check 2, with
+`compare.py`'s explanations, are G2's: their families and controls test what
+changed between System 2000 and the 40-bit word, which on a System 2001
+builder no longer differs; they are not yet retargeted to revision 14's
+changes. On a 40-bit builder, whose own compiles carry the word-width mark as
+the target's do, a marked file is foreign only when the target's word is not
+the builder's (`cold:cross-foreign-file-p`): the builder loads the
+revision-14 QFASLs it compiles as they are.
 
 ```
 tools/cross-check/run all                 # checks 1 and 3 and the native control, at once
@@ -29,15 +43,19 @@ every check given passes. Each check writes `run/cross-check/CHECK/` (git-ignore
 
 ## What it needs
 
-- The builder band: lispm-check's default, `run/check/band.img` (System
-  2000's, `docs/lispm-check.md`, Defaults), with its `ubin/`, quux and ozd.
+- The builder band: lispm-check's default, `run/check/band.img`, with its
+  `ubin/`, quux and ozd: System 2001's for revision 14 (muir-sim's
+  `ref/band-2001-81b3973`), System 2000's for G2.
   Since each check serves a copy of the tree, the driver passes these defaults
   of this tree to lispm-check (`LISPM_CHECK_BAND` and the others, set unless
   already set); `LISPM_CHECK_PORTS` gives the port range.
-- For check 3, the native control and check 2: System 2000's tree with its
-  QFASLs, muir-sim's `ref/band-2000/tree-2000.tar.gz` beside this tree
-  (`--tree-2000` or `CROSS_CHECK_TREE_2000` for another). It is unpacked once
-  into `run/cross-check/tree-2000/`.
+- For check 3, the native control and check 2: the builder's own tree with
+  its QFASLs, by default System 2001's, muir-sim's
+  `ref/band-2001-81b3973/handover-2001-81b3973-sys.tar.gz` beside this tree
+  (`--base-tree` or `CROSS_CHECK_BASE_TREE` for another; `--tree-2000` and
+  `CROSS_CHECK_TREE_2000`, G2's names, still work; G2's was muir-sim's
+  `ref/band-2000/tree-2000.tar.gz`). It is unpacked once into
+  `run/cross-check/tree-2000/`.
 - The builder is primed as `docs/building.md` says: `cases/prime.cases`
   compiles and loads the compiler files the cross build changes, `SYSDCL`, the
   cold-load generator and `SYS: COLD; CROSS`, with their QFASLs in HOST's
@@ -117,14 +135,16 @@ And the controls and encodings:
 ## The tree's definitions
 
 A file compiled for the target expands a macro, or open-codes a defsubst, with
-the definition in force where it is compiled, which in the builder is System
-2000's unless the compile is given the tree's. `crossdefs.py TREE BASE --lisp
-sys/cold/crossdefs.lisp` lists every compile-time definition of the tree
-(`DEFMACRO`, `DEFSUBST`, `DEFSETF`, `DEFINE-SETF-METHOD`, `DEFSTRUCT`,
-`DEFF-MACRO` and the like, at top level or inside `EVAL-WHEN` and `PROGN`) whose
-text is not System 2000's (BASE: muir-sim's `ref/band-2000/tree-2000.tar.gz`
-unpacked): new, changed, or gone; and every macro or defsubst of System 2000's
-text that holds a float literal (`:floats`), which the builder read with its
+the definition in force where it is compiled, which in the builder is the
+builder's own system's unless the compile is given the tree's.
+`crossdefs.py TREE BASE --lisp sys/cold/crossdefs.lisp` lists every
+compile-time definition of the tree (`DEFMACRO`, `DEFSUBST`, `DEFSETF`,
+`DEFINE-SETF-METHOD`, `DEFSTRUCT`, `DEFF-MACRO` and the like, at top level or
+inside `EVAL-WHEN` and `PROGN`) whose text is not the base's (BASE: the
+builder's tree, System 2001's for revision 14, muir-sim's
+`ref/band-2001-81b3973/handover-2001-81b3973-sys.tar.gz` unpacked; G2's was
+System 2000's): new, changed, or gone; and every macro or defsubst of the
+base's text that holds a float literal (`:floats`), which the builder read with its
 own floats. The text is compared as tokens, comments
 dropped, case folded outside strings, and a file that does not parse into whole
 forms stops the script. `cold:cross-begin` reads each listed definition from
@@ -158,22 +178,29 @@ in the run. The partition's pages are then copied to `home/cold40.img`.
 - NIL and T sit where `RESIDENT-SYMBOL-AREA`'s origin says, with their
   headers, print names, value, function, property and package cells, and at
   the words `MAKE-COLD` reported;
-- the band format is 2002, and the pointer width 32.
+- the band format is 2012 for revision 14's parameters, with no page hash
+  table area (2002 for revision 13's), and the pointer width 32. `check3.py
+  --qcom QCOM` reads another tree's parameters, as the native control does.
 
 Also run on this check:
 
 - `plant3.py`: two planted faults, each of which `check3.py` must fail on;
 - `check2.py`: the fold log of this compile;
-- `compare.py`: these QFASLs against System 2000's.
+- `compare.py`: these QFASLs against the base tree's (files whose source
+  differs are listed apart).
 
 ## The native control
 
-`cases/native.cases`. On System 2000's own tree and QFASLs, the cold load made
-by this tree's cold-load generator must be byte for byte the one System 2000's
-generator makes. This tree's generator is served as `SYS: CROSS-CHECK;
-COLDUT-NEW` and `COLDLD-NEW`. `check3.py` must pass on that image (256-word
-pages), and on the generator's cold load at 1024-word pages of 32-bit words,
-4 blocks a page (`lisp/pages32.lisp`), whose band format is 1102.
+`cases/native.cases`. On the builder's own tree and QFASLs, System 2001's,
+the cold load made by this tree's cold-load generator must be byte for byte
+the one the builder's generator makes. This tree's generator is served as
+`SYS: CROSS-CHECK; COLDUT-NEW` and `COLDLD-NEW`. It writes revision 14's
+layout only for parameters without the page hash table area
+(`COLD:TARGET-HAS-PAGE-HASH-TABLE-P`), so revision 13's must give their cold
+load unchanged. `check3.py --qcom`, with the builder's tree's parameters, must
+pass on that image (40-bit words, 1024-word pages, format 2002). G2's control,
+on System 2000's 32-bit tree, also made the cold load at 1024-word pages of
+32-bit words (`lisp/pages32.lisp`), which a 40-bit builder has already.
 
 ## Check 2: SYSTEM compiled for the target
 
