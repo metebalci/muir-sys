@@ -1,0 +1,12 @@
+; lisp: rev14-straddle.lisp
+; Straddle run 4 of 4 (contract G3 revision 14, 10.11; 10.4, code anywhere):
+; MACRO-COMPILED-PROGRAM's next region lies across 2^31, filled to 200 words
+; below it, and the workloads are compiled into it, their FEFs across 2^31
+; and above it, so that they run with LC<31> and LC<33> set; then they run.
+(rev14s-word #o224) => 0
+(third (setq *r* (rev14s-straddle macro-compiled-program :structure))) => T
+(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) macro-compiled-program :structure 200.)) *rev14s-two31*) => T
+(rev14s-compile-workloads) => T
+(list (= (%region-number #'rev14s-workloads) (first *r*)) (si:%pointer-lessp (%pointer #'rev14s-workloads) *rev14s-two31*)) => (T NIL)
+(rev14s-workloads) => NIL
+(rev14s-word #o224) => 0

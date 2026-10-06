@@ -1,0 +1,14 @@
+; lisp: rev14-straddle.lisp
+; Straddle run 1 of 4 (contract G3 revision 14, 10.11): WORKING-STORAGE-AREA's
+; next list region lies across 2^31, filled to 256 words below it, and the
+; workloads' lists are consed through 2^31.  It needs revision 14 and a band
+; of System 2002 whose floor is the default.
+(rev14s-word #o224) => 0
+(= si:%region-floor (si:region-floor-default)) => T
+(third (setq *r* (rev14s-straddle working-storage-area :list))) => T
+(= si:%region-floor (si:region-floor-default)) => T
+(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) working-storage-area :list 256.)) *rev14s-two31*) => T
+(let ((l (make-list 1000))) (list (= (%region-number l) (first *r*)) (si:%pointer-lessp (%pointer (nthcdr 999 l)) *rev14s-two31*))) => (T NIL)
+(rev14s-compile-workloads) => T
+(rev14s-workloads) => NIL
+(rev14s-word #o224) => 0

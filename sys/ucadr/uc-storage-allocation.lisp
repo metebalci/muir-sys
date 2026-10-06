@@ -1911,6 +1911,15 @@ UN-CONS-0
 	(JUMP-NOT-EQUAL M-TEM A-E UN-CONS-FILL)	;Something else got allocated, don't mess
 	((MD-START-WRITE) SUB MD A-2)		;Decrement free pointer.
 	(CHECK-PAGE-WRITE)
+	;; quux revision 14 (contract g3 revision 14, 10.1): the
+	;; scavenger's pointer, read below, is relative to the region's origin, as
+	;; the free pointer is, but m-e is the object's end as an address.  the
+	;; signed compare of the two never backed the pointer up below 2^31 (an
+	;; address is larger than any offset), and from 2^31 up (an ephemeral
+	;; region) it always did, writing the address into region-gc-pointer.
+	;; m-e is now the free pointer just written, relative, which the pointer
+	;; is backed up to when it lies above it.
+	((m-e) q-pointer md)
 	(JUMP-NOT-EQUAL M-T A-SCONS-CACHE-REGION UN-CONS-1)	;Fix free ptr in cache, too
 	((A-SCONS-CACHE-FREE-POINTER) ADD MD A-SCONS-CACHE-REGION-ORIGIN)
 UN-CONS-1

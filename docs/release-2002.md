@@ -136,6 +136,34 @@ Labels are cited rather than lines, since these files are still changing.
   it, and `fiddle` plants a dispatch in FORCE-WR-RDONLY's window, which is
   refused.
 
+- **Microcode 2002 halts at MACHINE-NOT-QUUX-14 below revision 14 when it is
+  loaded another way** (appendix A14.13): the PROM entry's first read, the
+  keyboard's status through the device window, which revision 13 does not
+  have, faulted and halted at PHYS-MEM-READ-2's ILLOP before RESET-DEVICES'
+  check could name the halt. It now calls PROM-ENTRY-READ
+  (`sys/ucadr/uc-cadr.lisp`, `sys/ucadr/uc-cold-disk.lisp`), which checks
+  MACHINE-ID first, as RESET-DEVICES does; one word as before, so nothing
+  after it in the entry moves. `tools/cross-build`'s guards show the halt,
+  and the old one with the microcode before the change.
+- **An incremental band restores** (`sys/ucadr/uc-cold-disk.lisp:992`):
+  DSR-MASK-BIT took the bit's place in its mask word from A-WALK-INDEX,
+  which is the page's index in the band while DISK-SAVE-REGIONWISE-SUBR
+  saves but its region's first page's while BUILD-REGION-ENTRIES restores,
+  so every page but a region's first took another page's bit and the
+  restored world read pages from the wrong slots; every incremental band
+  halted in its boot. It now takes it from A-MASK-K, as it takes the word.
+  Found by the first incremental save and restore on revision 14
+  (`tools/cross-build`'s `incremental` step); the save is unchanged.
+- **UN-CONS backs up the scavenger's pointer as an offset**
+  (`sys/ucadr/uc-storage-allocation.lisp:1922`): it compared the region's
+  REGION-GC-POINTER, relative to the origin, with the freed block's end as
+  an address, signed, so below 2^31 it never backed the pointer up, and from
+  2^31 up, an ephemeral region, it always did, writing an address into
+  REGION-GC-POINTER. It now compares with the free pointer it has just
+  written. Found by the ephemeral run's check that every region's free and
+  scavenger pointers are offsets within it (`tools/system-check`,
+  `rev14-ephemeral`). The CADR's line has the same compare.
+
 ### The Lisp side
 
 Citations are of the files as this step left them.
@@ -249,6 +277,27 @@ Citations are of the files as this step left them.
 - **The incremental band's mask** has a bit a page of the band, in the band's
   own order, region by region (`BAND-PAGE-INDEX`, `sys/io1/inc.lisp:57`),
   not a bit a virtual page (contract 10.7 item 2).
+- **An incremental save's mask and the pages it saves come from one state
+  of the regions.** The mask was computed early in DISK-SAVE, with every
+  process still running, and the regions' pages were saved later, so a
+  process consing between the two shifted the mask's indexes; on revision
+  14 it wrote no band at all, with or without another process consing.
+  DISK-SAVE-INCREMENTAL (`sys/io1/inc.lisp:106`) now runs inside
+  DISK-SAVE's last WITHOUT-INTERRUPTS, where no other process runs, with
+  every array, disk buffer and the base partition's address made before it
+  takes a snapshot of each region's free pointer (`REGION-PAGES-SNAPSHOT`,
+  `:85`), from which both the mask and the region table's marks are made.
+  Just before `%DISK-SAVE`, DISK-SAVE-INCREMENTAL-VERIFY (`:96`) checks the
+  regions against the snapshot; if one changed, no band is written and the
+  save stops with an error naming the region, after which the machine wants
+  a warm boot, as after CHECK-PARTITION-SIZE's late error
+  (`sys/sys/qmisc.lisp:1926`). FIND-MAX-ADDR now runs before the snapshot
+  (`:1886`): with a region at or above 2^31 it makes bignums on the extra
+  PDL, which the check took for a changed region. The first check of the
+  partition's size, before the partition's comment is changed, now comes
+  before the compare, so it asks room for a whole band; the check after the
+  compare asks only for the incremental band's. `tools/cross-build`'s
+  `incremental` step saves while another process conses.
 - **Errors for revision 14's microcode**: `ADDRESS-IN-NO-REGION`, a reference
   to a page with no entry (`sys/eh/ehf.lisp:2363`); the argument types
   `XBUS-OFFSET`, a fixnum from 0 to 17777777, and `UNIBUS-ADDRESS`, which
@@ -292,6 +341,34 @@ Citations are of the files as this step left them.
   (`CROSS-FOREIGN-FILE-P`, `sys/cold/cross.lisp:634`) (`tools/cross-check/run`,
   `crossdefs.py`, `check3.py`, `cases/native.cases`; `sys/cold/crossdefs.lisp`
   against System 2001's tree).
+- **A flip no longer walks each old region's pages to remap them**
+  (contract G3 revision 14, 9.4): DEALLOCATE-END-OF-REGION
+  (`sys/sys2/gc.lisp:888`) called INVALIDATE-REGION-MAPPING, a
+  `%CHANGE-PAGE-STATUS` of every page of the region, which rewrote each entry
+  unchanged on revision 14, where the flip's UPDATE-REGION-PHT writes the
+  entries; measured on micro at 32 M words, its share of a flip's pause went
+  from 157-217 ms to 74-85 ms (`:910`).
+- **The microcode metering ranges name microcode 2002's labels**
+  (`sys/sys2/usymld.lisp:1081`, `:1093`, `:1121`): the map reload's ranges
+  are empty, there being none, and the hash table's search is the page
+  table's, FIND-PAGE-ENTRY to TAKE-TABLE-FRAME; seven of their labels were
+  gone.
 - **Checks**: `tools/system-check` gains `unsigned-addresses`, `fef-tags`,
   `mar-range` and `rev14-addresses` (its README); `rev14-addresses` needs
-  revision 14.
+  revision 14. `herald-machine-type`'s Microcode line is checked against the
+  running microcode's number, not "Microcode 2001". `tools/microcode-check`'s
+  `address-past-28-bits`, which expected revision 13's fault for an address
+  past 28 bits, is replaced by `address-in-no-region`: on revision 14 such
+  an address is in the space, and a reference to a page of no region is the
+  error ADDRESS-IN-NO-REGION.
+- **The first band's route and its checks**: `tools/cross-build/run`
+  assembles the microcode and PROM twice, cross-builds on System 2001's band
+  (`tools/cross-check`'s checks 3 and 2, the site, WORMCH), boots the cold
+  load on revision 14 through QLD and DISK-SAVE, rebuilds natively twice, and
+  runs G2 section 7's checks (a)-(d), appendix A14.13's guards and the high
+  band (its README). `tools/microcode-check` gains `rev14-fiddles`,
+  `rev14-paging` (`cases-2mw/`, at 2 M words) and `rev14-mutants`, and
+  `tools/system-check` gains `rev14-ephemeral`, the four
+  `rev14-straddle-*` runs and `rev14-code-anywhere` (their READMEs).
+  `tools/cold-compare` reads revision 14's cold load, whose AREA-NAME is area
+  11, not 13.

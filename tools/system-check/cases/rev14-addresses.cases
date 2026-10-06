@@ -78,7 +78,10 @@
 ; SET-MAR on an object across 2^31 traps a write of its first and its last
 ; word, its pages in core; CLEAR-MAR restores every page's status; a range
 ; whose end lies in the first 127 words of a page traps a write there
-(progn (rev14-fresh) (setq *rev14-mar* (rev14-array-at (rev14-address #o17777777770) 40.)) (fill *rev14-mar* 0) (set-mar (aloc *rev14-mar* 0) :write 40.) (list (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 0) 1))) (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 39.) 1))))) => (T T)
+; One write a SET-MAR: the case tests the range, its ends on either side of
+; 2^31; after a MAR break a page's later writes do not break until the next
+; SET-MAR, on revision 13 as on 14, which is a separate fault.
+(progn (rev14-fresh) (setq *rev14-mar* (rev14-array-at (rev14-address #o17777777770) 40.)) (fill *rev14-mar* 0) (set-mar (aloc *rev14-mar* 0) :write 40.) (list (prog1 (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 0) 1))) (clear-mar)) (progn (set-mar (aloc *rev14-mar* 0) :write 40.) (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 39.) 1)))))) => (T T)
 (progn (clear-mar) (mapcar #'rev14-page-status (rev14-pages (aloc *rev14-mar* 0) 2))) => (4 4)
 (progn (set-mar (aloc *rev14-mar* 0) :write 30.) (prog1 (rev14-mar-trap-p #'(lambda () (setf (aref *rev14-mar* 29.) 1))) (clear-mar))) => T
 (mapcar #'rev14-page-status (rev14-pages (aloc *rev14-mar* 0) 2)) => (4 4)

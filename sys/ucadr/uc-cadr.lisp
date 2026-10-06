@@ -212,7 +212,14 @@ PROM	(JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO PROM)    ;These 2 instructions duplicat
 ;;; Decide whether to restore virtual memory from saved band on disk, i.e.
 ;;; whether this is a cold boot or a warm boot.  If the keyboard has input
 ;;; available, and the character was RETURN (rather than RUBOUT), it's a warm boot.
-	(CALL-XCT-NEXT PHYS-MEM-READ)
+	;; quux revision 14 (appendix a14.13): this first read goes through the
+	;; device window, which revision 13 does not have, so the revision is
+	;; checked first, in prom-entry-read: below revision 14 the read faulted
+	;; and the machine halted at phys-mem-read-2's illop, not at the named
+	;; machine-not-quux-14 that reset-devices gives.  one word as before, so
+	;; nothing below it moves.
+;	(CALL-XCT-NEXT PHYS-MEM-READ)
+	(call-xct-next prom-entry-read)
        ((VMA) (A-CONSTANT QUUX-KBD-STATUS-PHYSICAL-ADDRESS)) ;quux: word 120, not 764112
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD	;If keyboard is not ready,
 		COLD-BOOT)			; assume we are supposed to cold-boot

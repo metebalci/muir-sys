@@ -907,7 +907,14 @@ It can then be allocated into other regions."
 	(DEALLOCATE-PAGES (%POINTER-PLUS ORIGIN (REGION-LENGTH REGION))
 			  (TRUNCATE (%POINTER-DIFFERENCE SIZE (REGION-LENGTH REGION))
 				    PAGE-SIZE))))
-    (INVALIDATE-REGION-MAPPING REGION)))
+    ;; quux revision 14 (contract g3 revision 14, 9.4): no remapping here.
+    ;; the flip's update-region-pht already wrote each entry of the region
+    ;; from its bits, this function leaves the bits as they are, and the pages
+    ;; it frees get status 0 from deallocate-pages; so %change-page-status
+    ;; over every page of the region rewrote each entry unchanged, a page
+    ;; table search per page that made up most of a flip's pause.
+;    (INVALIDATE-REGION-MAPPING REGION)
+    ))
 
 ;;; For N-PAGES pages starting at BASE-ADDR, mark them properly not in core.
 ;;; quux revision 14 (contract g3 revision 14, 9.3, 10.5): no page hash table.

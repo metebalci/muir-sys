@@ -4,7 +4,9 @@
 # through tools/lispm-check, with lisp/CHECK.lisp loaded first when there is
 # one; with no CHECK, every case file runs.  Arguments after -- go to every
 # lispm-check run (--band, --ubin, --engine and so on).  Exit status 0 when
-# every check passes, else the first failing run's status.
+# every check passes, else the first failing run's status.  The checks of
+# cases-2mw/ want a machine of 2 M words of main memory and run only when
+# named (README.md).
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
 checks=() args=()
@@ -18,7 +20,8 @@ fi
 status=0
 for c in "${checks[@]}"; do
     cases=$here/cases/$c.cases
-    [ -f "$cases" ] || { echo "microcode-check: no $cases" >&2; exit 2; }
+    [ -f "$cases" ] || cases=$here/cases-2mw/$c.cases
+    [ -f "$cases" ] || { echo "microcode-check: no $here/cases/$c.cases" >&2; exit 2; }
     files=()
     [ -f "$here/lisp/$c.lisp" ] && files=(--files "$here/lisp/$c.lisp")
     echo "##### $c"

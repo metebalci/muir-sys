@@ -1,0 +1,14 @@
+; lisp: rev14-straddle.lisp
+; Straddle run 2 of 4 (contract G3 revision 14, 10.11): PDL-AREA's next region
+; lies across 2^31, filled to 4000 words below it, and a stack group's regular
+; PDL of 40000 words is made there, across 2^31; the workloads run in that
+; stack group, w-ack's recursion through 2^31.
+(rev14s-word #o224) => 0
+(third (setq *r* (rev14s-straddle si:pdl-area :structure))) => T
+(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) si:pdl-area :structure 4000.)) *rev14s-two31*) => T
+(third (setq *s* (rev14s-stack-group 40000.))) => T
+(rev14s-array-across-p (si:sg-regular-pdl (first *s*))) => T
+(rev14s-compile-workloads) => T
+(rev14s-in-stack-group (first *s*) '(rev14s-workloads)) => NIL
+(rev14s-in-stack-group (first *s*) '(w-ack 2 1000)) => 2003
+(rev14s-word #o224) => 0

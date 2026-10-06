@@ -1,0 +1,9 @@
+; The site's files compiled for the target in the cross build (docs/building.md,
+; "Loading the 40-bit cold load": the QFASLs QLD needs beside check 2's and
+; check 3's), on the builder band after tools/cross-check/cases/prime.cases.
+(cold:cross-begin :log-directory "HOST: //home//lispm//s-")
+(cold:cross-write-table)
+(qc-file "SYS: SYS; SYSDCL LISP")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (make-system 'site :compile :noload :noconfirm :nowarn) t) => T
+(cold:cross-end)
+(list (not (null (probe-file "SYS: SITE; SITE QFASL"))) (not (null (probe-file "SYS: SITE; LMLOCS QFASL"))) (not (null (probe-file "SYS: SITE; HSTTBL QFASL")))) => (T T T)

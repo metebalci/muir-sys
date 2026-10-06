@@ -1,0 +1,20 @@
+; The native rebuild's compile (contract G2 section 7, steps 5 and 6;
+; docs/building.md, "The native rebuild on revision 13", and on revision 14 the
+; same): the band compiles its own system from the served tree, whose QFASLs it
+; writes.  SYSDCL, the ALLDEFS files, the site, the readtables, WORMCH from its
+; AST, then SYSTEM with :RECOMPILE.  The site must be :MIT and SYS: on HOST.
+(list :build-site si:site-name (send (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) :name) (eq (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) fs:*file-device-host*)) => (:BUILD-SITE :MIT "HOST" T)
+(let ((si:inhibit-fdefine-warnings :just-warn)) (qc-file "SYS: SYS; SYSDCL LISP") (load "SYS: SYS; SYSDCL QFASL") t) => T
+(qc-file "SYS: SYS2; DEFMAC LISP")
+(qc-file "SYS: SYS2; LMMAC LISP")
+(qc-file "SYS: EH; ERRMAC LISP")
+(qc-file "SYS: SYS2; STRUCT LISP")
+(qc-file "SYS: SYS2; SETF LISP")
+(qc-file "SYS: SYS; TYPES LISP")
+(progn (make-system 'site :recompile :noload :noconfirm :nowarn) t) => T
+(progn (qc-file-load "SYS: IO; RTC LISP") t) => T
+(si:rtc-file "SYS: IO; RDTBL LISP")
+(si:rtc-file "SYS: IO; CRDTBL LISP")
+(let ((name (fed:read-ast-into-font "SYS: DEMO; WORMCH AST" 'fonts:worm))) (compiler:dump-forms-to-file "SYS: DEMO; WORMCH QFASL" (list (list 'proclaim (list 'quote (list 'special name))) (list 'setq name (list 'quote (symbol-value name)))) '(:package :user)) name) => FONTS:WORM
+(progn (make-system 'system :recompile :noload :noconfirm :nowarn :no-increment-patch) t) => T
+(list :compiled (si:get-patch-system-major-version "System") (si:get-system-version))

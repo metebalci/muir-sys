@@ -1,0 +1,7 @@
+; SYS: DEMO; WORMCH QFASL written for the target from its AST in the cross build
+; (docs/building.md, "Loading the 40-bit cold load"), on the builder band after
+; tools/cross-check/cases/prime.cases.
+(cold:cross-begin :log-directory "HOST: //home//lispm//w-")
+(let ((name (fed:read-ast-into-font "SYS: DEMO; WORMCH AST" 'fonts:worm))) (compiler:dump-forms-to-file "SYS: DEMO; WORMCH QFASL" (list (list 'proclaim (list 'quote (list 'special name))) (list 'setq name (list 'quote (symbol-value name)))) '(:package :user)) name) => FONTS:WORM
+(cold:cross-end)
+(not (null (probe-file "SYS: DEMO; WORMCH QFASL"))) => T

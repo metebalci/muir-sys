@@ -1,0 +1,1003 @@
+#!/usr/bin/env python3
+"""tools/cross-build/run: the first band of a system whose layout changed, cross
+built on the previous system's band and then rebuilt natively (contract G2
+section 7; contract G3 revision 14, 10.6), and the route's checks.
+
+Usage:
+  tools/cross-build/run --out DIR --builder DISK --builder-ubin DIR
+      --base-tree TARBALL --quux PATH --ozd PATH --ports LO-HI
+      [--commit SHA] [--work DIR] [--ubin-ref DIR] [--from STEP] [--to STEP]
+  tools/cross-build/run --list
+
+Every option can also come from the environment as CROSS_BUILD_ and the
+option's name (CROSS_BUILD_BUILDER).  README.md beside this file says what each
+step does and what it needs.  The steps, in order:
+
+  export    the sources: git archive of --commit, or this tree's tracked and
+            untracked files as they are (git status recorded)
+  assemble  UCADR twice and PROMH on the builder, compared byte for byte
+  cross     the cross build on the builder: check 3 (the cold-load files and
+            MAKE-COLD), check 2 (SYSTEM), the site and WORMCH
+  target    the target's tree: check 2's, with check 3's, the site's and WORMCH's
+  band4     step 4: the cold load booted on the new revision, QLD, DISK-SAVE
+  native5   step 5: band4 compiles the system, MAKE-COLD, QLD, DISK-SAVE
+  native6   step 6: the same from native5's band
+  checks    G2 section 7's checks (a)-(d), (b) as amended
+  guards    A14.13's guards, each with a control that does not fire
+  high      the high band (contract G3 revision 14, 10.11): native6's band with
+            the region floor one quantum below 2^31, a full collection, a
+            region across 2^31, saved
+  incremental  an incremental save of native6's band and of the high band, each
+            with a young array in an ephemeral region, restored and compared
+
+--from STEP continues a run whose record shows the earlier steps passed;
+--to STEP stops after STEP.  Output in --out: record.txt (a line a step and
+check), STEP/ (logs and results), bands/ (the bands' disks, raw, sparse, each
+with its band current in LOD1 and its microcode in MCR1).  Large scratch in
+--work (default $XDG_CACHE_HOME/cross-build/<out's name>).
+"""
+import argparse
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+sys.dont_write_bytecode = True
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+STEPS = ['export', 'assemble', 'cross', 'target', 'band4', 'native5', 'native6', 'checks',
+         'guards', 'high', 'incremental']
+# the system's number, its microcode's and the hardware revision the band is for
+SYSTEM, MICROCODE, REVISION = 2002, 2002, 14
+BAND_GUID = uuid.UUID('a3b30470-c5d4-41c1-87a8-d26590424cb8').bytes_le
+# the band formats the microcode writes: saved, incremental, cold load (A14.13)
+FORMAT_SAVED = 0o2010
+UC_FILES = ['UC-PARAMETERS', 'UC-CADR', 'UC-MACROCODE', 'UC-CALL-RETURN',
+            'UC-STORAGE-ALLOCATION', 'UC-FCTNS', 'UC-ARRAY', 'UC-LOGICAL', 'UC-ARITH',
+            'UC-STRING', 'UC-TRANSPORTER', 'UC-STACK-CLOSURE', 'UC-METER', 'UC-HACKS',
+            'UC-TV', 'UC-TRACK-MOUSE', 'UC-PAGE-FAULT', 'UC-DISK', 'UC-INTERRUPT',
+            'UC-CHAOS', 'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+UC_OUT = ('ucadr.mcr', 'ucadr.tbl', 'ucadr.locs', 'ucadr.sym')
+PROM_OUT = ('promh.mcr', 'promh.tbl', 'promh.locs', 'promh.sym')
+# QLD with a QUUX disk at 32 MW on micro took 15 minutes (revision 14); the
+# compile of SYSTEM 1 h 40 min; check 2 2 h 20 min
+QLD_TIMEOUT, COMPILE_TIMEOUT = 4 * 3600, 40000
+
+
+class Failed(Exception):
+    pass
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def result_of(text, script):
+    """The RESULT of the analysis whose command line names SCRIPT, in a
+    cross-check result.txt: each analysis is a '$ ' line and its output."""
+    for section in re.split(r'\n(?=\$ )', text):
+        if section.startswith('$ ') and script in section.split('\n')[0]:
+            m = re.search(r'^RESULT (\w+)', section, re.M)
+            return m.group(1) if m else None
+    return None
+
+
+def stamp():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+class Run:
+    def __init__(self, a):
+        self.a = a
+        self.out, self.work = a.out, a.work
+        self.lock = threading.Lock()
+        lo, hi = a.ports
+        # lispm-check takes four ports a run from its range under its own
+        # lock; the QLD runs take theirs from the top 16 of the range
+        self.lc_ports = '%d-%d' % (lo, hi - 16)
+        self.qld_ports = list(range(hi - 15, hi + 1))
+        self.src = os.path.join(self.work, 'src')
+        self.ubin = os.path.join(self.work, 'ubin')
+        self.bands = os.path.join(self.out, 'bands')
+
+    # ------------------------------------------------------------ the record
+
+    def record(self, text):
+        with self.lock:
+            with open(os.path.join(self.out, 'record.txt'), 'a') as f:
+                f.write('%s %s\n' % (stamp(), text))
+            print('%s %s' % (stamp(), text), flush=True)
+
+    def passed_steps(self):
+        p = os.path.join(self.out, 'record.txt')
+        done = set()
+        if os.path.exists(p):
+            for line in open(p):
+                m = re.match(r'\S+ step (\S+) (passed|started|FAILED)', line)
+                if m and m.group(2) == 'passed':
+                    done.add(m.group(1))
+                elif m:
+                    done.discard(m.group(1))
+        return done
+
+    # ---------------------------------------------------- simulators, wrapped
+
+    def wrapper(self, rev, prom, quux=None, rw=False):
+        """An executable that runs quux at REV with PROM (none: its own),
+        for lispm-check's --quux: lispm-check names no revision and no PROM.
+        The quux and PROM digests are in its text, so that lispm-check, which
+        keys its checkpoints by the executable's digest, makes new ones when
+        either changes.  No --prom on a resume: the checkpoint carries it."""
+        d = os.path.join(self.work, 'bin')
+        os.makedirs(d, exist_ok=True)
+        q = os.path.abspath(quux or self.a.quux)
+        text = ['#!/bin/sh', '# quux %s' % sha256(q)]
+        if prom:
+            text.append('# prom %s' % sha256(prom))
+        # revision 0: the executable's own default (an older quux, as for
+        # System 2000's band, which assembles)
+        text += ['export MUIR_QUUX_REVISION=%d' % rev if rev else 'unset MUIR_QUUX_REVISION']
+        if rw:
+            # the disk opened read-write: lispm-check passes it read-only
+            text += ['for a in "$@"; do shift; set -- "$@" "${a%,ro}"; done']
+        text += ['for a in "$@"; do [ "$a" = --resume ] && exec %s "$@"; done' % q,
+                 'exec %s "$@"%s' % (q, ' --prom %s' % prom if prom else '')]
+        path = os.path.join(d, 'quux%d-%s' % (rev, hashlib.sha256('\n'.join(text).encode())
+                                               .hexdigest()[:12]))
+        if not os.path.exists(path):
+            with open(path + '.tmp', 'w') as f:
+                f.write('\n'.join(text) + '\n')
+            os.chmod(path + '.tmp', 0o755)
+            os.replace(path + '.tmp', path)
+        return path
+
+    def lispm_check(self, where, cases, band, ubin, quux, tree, timeout, keep=('home',),
+                    extra=()):
+        """lispm-check of CASES (text) on BAND with TREE served; the run's
+        logs, and of what it left the parts in KEEP (home: HOST's home;
+        sys, site: the served copy), go to WHERE.  Returns (exit, output)."""
+        os.makedirs(where, exist_ok=True)
+        cf = os.path.join(where, 'cases.cases')
+        open(cf, 'w').write(cases)
+        env = dict(os.environ, LISPM_CHECK_PORTS=self.lc_ports,
+                   XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
+        cmd = [sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--band', band,
+               '--ubin', ubin, '--quux', quux, '--ozd', self.a.ozd, '--tree', tree,
+               '--timeout', str(timeout), '--keep'] + list(extra) + [cf]
+        log = os.path.join(where, 'lispm-check.out')
+        with open(log, 'w') as f:
+            f.write('$ %s\n' % ' '.join(cmd))
+            f.flush()
+            rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+        text = open(log, encoding='latin-1').read()
+        m = re.search(r'run files kept in (\S+)', text)
+        if m and os.path.isdir(m.group(1)):
+            run = m.group(1)
+            served = os.path.join(run, 'served')
+            for k in keep:
+                src = os.path.join(served, 'home', 'lispm') if k == 'home' else os.path.join(served, k)
+                if os.path.isdir(src):
+                    dest = os.path.join(where, k)
+                    shutil.rmtree(dest, ignore_errors=True)
+                    shutil.copytree(src, dest, symlinks=True)
+            for f in glob.glob(os.path.join(run, '*.log')):
+                shutil.copy2(f, where)
+            shutil.rmtree(run, ignore_errors=True)
+        return rc, text
+
+    def session(self, where, disk, tree, forms, save_part=None, files=(), incremental=False):
+        """Boot DISK's band cold, read-write, on quux at the target's revision
+        with TREE on the file device, log in, and run FORMS, each (form,
+        timeout), in one TELNET session, through lispm-check's own classes;
+        FILES are served in HOST's home.  With SAVE_PART, (si:disk-save
+        SAVE_PART t) is typed last, the session's connection closing as the
+        save begins, and the save is waited for until SAVE_PART holds a band
+        that stays the same for 60 s, before the machine is stopped.  Returns
+        [(form, kind, text)]."""
+        from importlib.machinery import SourceFileLoader
+        lc = SourceFileLoader('lispm_check', os.path.join(TREE, 'tools', 'lispm-check')).load_module()
+        os.environ['LISPM_CHECK_PORTS'] = self.lc_ports
+        os.environ['XDG_CACHE_HOME'] = os.path.join(self.work, 'xdg')
+        run_dir = os.path.join(where, 'session')
+        shutil.rmtree(run_dir, ignore_errors=True)
+        os.makedirs(run_dir)
+        log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+        ports_lock, ports = lc.take_ports()
+        server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log)
+        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'), rw=True)
+        machine = lc.Machine(quux, disk, run_dir, ports[3], server, self.a.engine)
+        results = []
+        try:
+            server.lay_out(tree, self.ubin)
+            for f in files:
+                shutil.copy2(f, os.path.join(server.root, 'home', 'lispm', os.path.basename(f)))
+            server.start()
+            machine.start()
+            sock, _ = server.connect_listener(machine.alive, lc.now() + 600)
+            sock.settimeout(0.2)
+            sess = lc.Session(sock, log, helper=False)
+            for form, timeout in [(server.login(), 120)] + list(forms):
+                r = sess.run(form, timeout)
+                results.append((form, r[0], r[1]))
+                self.record('  session %s: %s -> %s %s' % (os.path.basename(where), form[:100], r[0],
+                                                           r[1].strip()[:300]))
+                if r[0] != 'value':
+                    raise Failed('%s: %s' % (form[:80], r[1][:200]))
+            if save_part:
+                form = '(si:disk-save "%s" t%s)' % (save_part, ' t' if incremental else '')
+                try:
+                    r = sess.run(form, 600)
+                    why = '%s %s' % (r[0], r[1].strip()[:200])
+                except lc.RunFailed as e:     # the save closes the connection
+                    why = str(e)
+                self.record('  session %s: %s -> %s' % (os.path.basename(where), form, why))
+            sock.close()
+            if save_part:
+                p = self.part(disk, save_part)
+                last, t0 = None, time.time()
+                while time.time() - t0 < 1800:
+                    time.sleep(30)
+                    fmt, valid = self.band_header(disk, p[2])
+                    h = hashlib.sha256()
+                    with open(disk, 'rb') as f:
+                        f.seek(p[2] * 1024)
+                        h.update(f.read(p[3] * 1024))
+                    if fmt == FORMAT_SAVED + bool(incremental) and valid > 0 and h.digest() == last:
+                        break
+                    last = h.digest()
+                    time.sleep(30)
+                else:
+                    raise Failed('no band saved in %s in 30 minutes' % save_part)
+                self.record('  session %s: %s holds format %d, valid %d words' % (
+                    os.path.basename(where), save_part, fmt, valid))
+        finally:
+            machine.stop(wait=30)
+            server.stop()
+            ports_lock.release()
+        return results
+
+    def builder_check(self, where, cases, tree, timeout, keep=('home',), prime=True):
+        """lispm-check on the builder band at its revision, primed for the
+        cross build first (tools/cross-check/cases/prime.cases)."""
+        body = (open(os.path.join(TREE, 'tools', 'cross-check', 'cases', 'prime.cases')).read()
+                if prime else '') + cases
+        return self.lispm_check(where, body, self.a.builder, self.a.builder_ubin,
+                                self.wrapper(self.a.builder_revision, self.a.builder_prom),
+                                tree, timeout, keep)
+
+    # ----------------------------------------------------------- disks
+
+    @staticmethod
+    def gpt(img):
+        """The GPT's entries: [(number, name, first block, blocks, attributes)],
+        blocks of 1024 bytes."""
+        with open(img, 'rb') as f:
+            f.seek(512)
+            h = f.read(92)
+            if h[:8] != b'EFI PART':
+                raise Failed('%s: no GPT' % img)
+            lba, n, esz = struct.unpack_from('<QII', h, 72)
+            f.seek(lba * 512)
+            ents = f.read(n * esz)
+        parts = []
+        for i in range(n):
+            e = ents[i * esz:(i + 1) * esz]
+            if e[:16] == b'\0' * 16:
+                continue
+            first, last, attrs = struct.unpack_from('<QQQ', e, 32)
+            name = e[56:128].decode('utf-16-le').rstrip('\0')
+            parts.append((i + 1, name, first // 2, (last + 1) // 2 - first // 2, attrs,
+                          e[:16] == BAND_GUID))
+        return parts
+
+    def part(self, img, name):
+        for p in self.gpt(img):
+            if p[1].split()[0] == name:
+                return p
+        raise Failed('%s: no partition %s' % (img, name))
+
+    @staticmethod
+    def band_header(img, first):
+        """The band's format and valid size, words 8 and 1 of its page 1
+        (blocks 5-9, 5 bytes a word, the field <31:0>)."""
+        with open(img, 'rb') as f:
+            f.seek((first + 5) * 1024)
+            b = f.read(5 * 16)
+        w = [int.from_bytes(b[5 * k:5 * k + 4], 'little') for k in range(16)]
+        return w[8], w[1]
+
+    def raw_copy(self, src, dest):
+        """A raw, sparse copy of a disk: a VHD (fixed or dynamic) converted."""
+        with open(src, 'rb') as f:
+            head = f.read(8)
+            f.seek(-512, 2)
+            tail = f.read(8)
+        if head == b'conectix' or tail == b'conectix':
+            subprocess.run(['qemu-img', 'convert', '-f', 'vpc', '-O', 'raw', src, dest], check=True)
+        else:
+            subprocess.run(['cp', '--sparse=always', src, dest], check=True)
+
+    @staticmethod
+    def zero(img, p):
+        """Partition P's blocks zero, as holes."""
+        subprocess.run(['fallocate', '--punch-hole', '--offset', str(p[2] * 1024), '--length',
+                        str(p[3] * 1024), img], check=True)
+
+    def write_part(self, img, name, data_file):
+        p = self.part(img, name)
+        size = os.path.getsize(data_file)
+        if size > p[3] * 1024:
+            raise Failed('%s: %d bytes do not fit %s' % (data_file, size, name))
+        self.zero(img, p)
+        subprocess.run(['dd', 'if=' + data_file, 'of=' + img, 'bs=1024', 'seek=%d' % p[2],
+                        'conv=notrunc,sparse', 'status=none'], check=True)
+
+    def read_part(self, img, name, dest, blocks=None):
+        p = self.part(img, name)
+        subprocess.run(['dd', 'if=' + img, 'of=' + dest, 'bs=1024', 'skip=%d' % p[2],
+                        'count=%d' % (blocks or p[3]), 'status=none'], check=True)
+
+    def set_current(self, img, names, comments=None):
+        """Bit 48 on the partitions NAMES and off on every other; comments
+        (number: name) set the names."""
+        args = []
+        for p in self.gpt(img):
+            args += ['-A', '%d:%s:48' % (p[0], 'set' if p[1].split()[0] in names else 'clear')]
+        for n, c in (comments or {}).items():
+            args += ['-c', '%d:%s' % (n, c)]
+        subprocess.run(['sgdisk'] + args + [img], check=True, stdout=subprocess.DEVNULL)
+
+    def make_disk(self, dest, mcr, lods):
+        """A disk from the builder's (its layout), MCR1 holding MCR, each
+        partition of LODS ({name: file}) holding its file and every other
+        band partition and PAGE zero, bit 48 on MCR1 and the first of LODS."""
+        self.raw_copy(self.a.builder, dest)
+        for p in self.gpt(dest):
+            if p[1].split()[0] == 'PAGE' or (p[5] and p[1].split()[0] not in lods):
+                self.zero(dest, p)
+        self.write_part(dest, 'MCR1', mcr)
+        for name, f in lods.items():
+            self.write_part(dest, name, f)
+        self.set_current(dest, ['MCR1', list(lods)[0]])
+
+    def band_disk(self, src_img, part, dest, label):
+        """The band saved in PART of SRC_IMG on a fresh disk, current in LOD1,
+        with the microcode of SRC_IMG's MCR1."""
+        tmp = dest + '.parts'
+        os.makedirs(tmp, exist_ok=True)
+        fmt, valid = self.band_header(src_img, self.part(src_img, part)[2])
+        blocks = -(-valid // 1024) * 5
+        self.read_part(src_img, part, os.path.join(tmp, 'band'), blocks)
+        self.read_part(src_img, 'MCR1', os.path.join(tmp, 'mcr'))
+        self.make_disk(dest, os.path.join(tmp, 'mcr'), {'LOD1': os.path.join(tmp, 'band')})
+        n = self.part(dest, 'LOD1')[0]
+        self.set_current(dest, ['MCR1', 'LOD1'],
+                         {n: 'LOD1 System %d %s' % (SYSTEM, label),
+                          self.part(dest, 'MCR1')[0]: 'MCR1 UCADR %d' % MICROCODE})
+        shutil.rmtree(tmp)
+        return fmt, valid
+
+    # ----------------------------------------------------------- QLD
+
+    def qld(self, where, disk, tree, timeout=QLD_TIMEOUT):
+        """Boot DISK's current band, a cold load, on quux at the target's
+        revision with TREE served as HOST's / on the file device and COLDRUN
+        running QLD and DISK-SAVE into LOD4; wait for the save to settle;
+        stop the machine.  Returns the band's format and valid size."""
+        os.makedirs(where, exist_ok=True)
+        root = os.path.join(self.work, 'qld-' + os.path.basename(where))
+        shutil.rmtree(root, ignore_errors=True)
+        os.makedirs(os.path.join(root, 'home', 'lispm'))
+        for d in ('sys', 'site'):
+            shutil.copytree(os.path.join(tree, d), os.path.join(root, d), symlinks=True)
+        shutil.rmtree(os.path.join(root, 'sys', 'ubin'), ignore_errors=True)
+        shutil.copytree(self.ubin, os.path.join(root, 'sys', 'ubin'))
+        coldrun = open(os.path.join(HERE, 'lisp', 'coldrun.lisp')).read().replace('@SAVE@', 'LOD4')
+        open(os.path.join(root, 'site', 'coldrun.lisp'), 'w').write(coldrun)
+        with self.lock:
+            port = self.qld_ports.pop(0)
+        cmd = [self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')), '-c', '/dev/null',
+               '--' + self.a.engine, '--main-memory-size', '32MW', '--disk-pack', disk,
+               '--file-root', root, '--terminal', '127.0.0.1:%d' % port]
+        log = os.path.join(where, 'quux.log')
+        lf = open(log, 'wb')
+        lf.write(('# %s\n' % ' '.join(cmd)).encode())
+        lf.flush()
+        p = subprocess.Popen(cmd, cwd=where, stdin=subprocess.PIPE, stdout=lf, stderr=lf,
+                             start_new_session=True)
+        t0, ok, why = time.time(), False, ''
+        lod4 = self.part(disk, 'LOD4')
+        try:
+            while time.time() - t0 < timeout:
+                time.sleep(20)
+                text = open(log, 'rb').read().decode('latin-1')
+                if 'report: saving' in text:
+                    ok = True
+                    break
+                if p.poll() is not None:
+                    why = 'quux exited (%s) before the save' % p.returncode
+                    break
+            else:
+                why = 'no "report: saving" in %d s' % timeout
+            if ok:
+                # the save writes page 1 (the valid size) and the pages; wait
+                # until LOD4 holds a band and stays the same for 60 s
+                for _ in range(90):
+                    fmt, valid = self.band_header(disk, lod4[2])
+                    if valid > 0 and fmt == FORMAT_SAVED:
+                        break
+                    time.sleep(10)
+                last = None
+                for _ in range(30):
+                    h = hashlib.sha256()
+                    with open(disk, 'rb') as f:
+                        f.seek(lod4[2] * 1024)
+                        h.update(f.read(lod4[3] * 1024))
+                    if h.digest() == last:
+                        break
+                    last = h.digest()
+                    time.sleep(60)
+                fmt, valid = self.band_header(disk, lod4[2])
+                if fmt != FORMAT_SAVED or valid <= 0:
+                    ok, why = False, 'LOD4 holds format %d, valid %d' % (fmt, valid)
+        finally:
+            time.sleep(5)
+            try:
+                p.stdin.write(b'quit\n')
+                p.stdin.flush()
+            except OSError:
+                pass
+            try:
+                p.wait(30)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+            lf.close()
+            with self.lock:
+                self.qld_ports.append(port)
+        text = open(log, 'rb').read().decode('latin-1')
+        reports = re.findall(r'report: ([^\r\n]*)', text)
+        open(os.path.join(where, 'reports.txt'), 'w').write('\n'.join(reports) + '\n')
+        self.record('  qld %s: %s in %d s; reports: %s' % (os.path.basename(where),
+                    'saved' if ok else 'FAILED (%s)' % why, time.time() - t0,
+                    '; '.join(r for r in reports if not r.startswith('loading'))[:400]))
+        if not ok:
+            raise Failed('QLD %s: %s (see %s)' % (where, why, log))
+        shutil.rmtree(root, ignore_errors=True)
+        return self.band_header(disk, lod4[2])
+
+    # ----------------------------------------------------------- steps
+
+    def step_export(self):
+        shutil.rmtree(self.src, ignore_errors=True)
+        os.makedirs(self.src)
+        m = open(os.path.join(self.out, 'export', 'manifest.txt'), 'w')
+        if self.a.commit:
+            sha = subprocess.run(['git', '-C', TREE, 'rev-parse', self.a.commit + '^{commit}'],
+                                 capture_output=True, text=True, check=True).stdout.strip()
+            a = subprocess.Popen(['git', '-C', TREE, 'archive', sha], stdout=subprocess.PIPE)
+            subprocess.run(['tar', '-x', '-C', self.src], stdin=a.stdout, check=True)
+            if a.wait():
+                raise Failed('git archive %s' % sha)
+            m.write('commit %s (git archive)\n' % sha)
+        else:
+            head = subprocess.run(['git', '-C', TREE, 'rev-parse', 'HEAD'], capture_output=True,
+                                  text=True).stdout.strip()
+            files = subprocess.run(['git', '-C', TREE, 'ls-files', '-co', '--exclude-standard', '-z'],
+                                   capture_output=True, check=True).stdout.split(b'\0')
+            files = [f.decode() for f in files if f and os.path.isfile(os.path.join(TREE, f.decode()))]
+            for f in files:
+                os.makedirs(os.path.dirname(os.path.join(self.src, f)) or self.src, exist_ok=True)
+                shutil.copy2(os.path.join(TREE, f), os.path.join(self.src, f))
+            status = subprocess.run(['git', '-C', TREE, 'status', '--porcelain', '-uall'],
+                                    capture_output=True, text=True).stdout
+            m.write('working tree at HEAD %s, %d files; git status --porcelain -uall:\n%s'
+                    % (head, len(files), status))
+        # an exported tree has no sys/ubin/, which the assembler writes into
+        os.makedirs(os.path.join(self.src, 'sys', 'ubin'), exist_ok=True)
+        for d in ('sys', 'site'):
+            for dp, dns, fns in sorted(os.walk(os.path.join(self.src, d))):
+                dns.sort()
+                for f in sorted(fns):
+                    p = os.path.join(dp, f)
+                    m.write('%s  %s\n' % (sha256(p), os.path.relpath(p, self.src)))
+        m.close()
+        self.record('  export: %s' % open(os.path.join(self.out, 'export', 'manifest.txt'))
+                    .readline().strip())
+
+    def step_assemble(self):
+        def form_uc():
+            files = ' '.join('"SYS: UCADR; %s LISP"' % f for f in UC_FILES)
+            return ("(let* ((files (mapcar #'(lambda (name) (send (fs:parse-pathname name) :truename))"
+                    " '(%s))) (ua:file-truenames-listified (mapcar #'ua:listify-pathname files))"
+                    " (old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p"
+                    " #'(lambda (&rest ignore) t)) (ua:assemble-system (send (fs:parse-pathname"
+                    " \"SYS: UBIN; UCADR\") :new-version %d.) files nil nil t) t)"
+                    " (fset 'y-or-n-p old))) => T" % (files, MICROCODE))
+        form_prom = ('(let ((*standard-input* (make-string-input-stream "T %d.")) (old'
+                     " (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p"
+                     " #'(lambda (&rest ignore) t)) (ua:assemble \"SYS: UCADR; PROMH TEXT\") t)"
+                     " (fset 'y-or-n-p old))) => T" % MICROCODE)
+        head = ["(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+                '(setq ua:*word-width* 40.) => 40',
+                '(setq ua:*hardware-revision* %d.) => %d' % (REVISION, REVISION),
+                '(setq ua:version-number %d.) => %d' % (MICROCODE, MICROCODE)]
+        results = {}
+
+        def one(name, last, keep):
+            where = os.path.join(self.out, 'assemble', name)
+            tree = os.path.join(self.work, 'asm-' + name)
+            shutil.rmtree(tree, ignore_errors=True)
+            os.makedirs(tree)
+            for d in ('sys', 'site'):
+                shutil.copytree(os.path.join(self.src, d), os.path.join(tree, d), symlinks=True)
+            rc, text = self.lispm_check(where, '\n'.join(head + [last]) + '\n', self.a.asm_band,
+                                        self.a.asm_ubin, self.wrapper(self.a.asm_revision, None,
+                                                                      self.a.asm_quux),
+                                        tree, 4000, keep=(keep,))
+            results[name] = rc
+            shutil.rmtree(tree, ignore_errors=True)
+        threads = [threading.Thread(target=one, args=a) for a in
+                   (('ucadr-1', form_uc(), 'sys'), ('ucadr-2', form_uc(), 'sys'),
+                    ('promh', form_prom, 'sys'))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        if any(results.values()):
+            raise Failed('an assembly failed: %s' % results)
+        A = os.path.join(self.out, 'assemble')
+        os.makedirs(self.ubin, exist_ok=True)
+        for f in UC_OUT:
+            a, b = (os.path.join(A, n, 'sys', 'ubin', f) for n in ('ucadr-1', 'ucadr-2'))
+            same = open(a, 'rb').read() == open(b, 'rb').read()
+            self.record('  assemble: %s twice %s, sha256 %s' % (f, 'equal' if same else 'DIFFER',
+                                                                   sha256(a)))
+            if not same and f != 'ucadr.sym':
+                raise Failed('the two assemblies of %s differ' % f)
+            shutil.copy2(a, self.ubin)
+        for f in PROM_OUT:
+            p = os.path.join(A, 'promh', 'sys', 'ucadr', f)
+            shutil.copy2(p, self.ubin)
+            self.record('  assemble: %s sha256 %s' % (f, sha256(p)))
+        if self.a.ubin_ref:
+            for f in UC_OUT[:3] + PROM_OUT[:3]:
+                r = os.path.join(self.a.ubin_ref, f)
+                same = os.path.exists(r) and sha256(r) == sha256(os.path.join(self.ubin, f))
+                self.record('  assemble: %s %s --ubin-ref\'s' % (f, 'equals' if same else 'DIFFERS from'))
+                if not same:
+                    raise Failed('%s differs from --ubin-ref\'s' % f)
+        for d in ('ucadr-1', 'ucadr-2', 'promh'):
+            shutil.rmtree(os.path.join(A, d, 'sys'), ignore_errors=True)
+        with open(os.path.join(self.out, 'assemble', 'ubin.sha256'), 'w') as f:
+            for n in sorted(os.listdir(self.ubin)):
+                f.write('%s  %s\n' % (sha256(os.path.join(self.ubin, n)), n))
+
+    def step_cross(self):
+        X = os.path.join(self.out, 'cross')
+        env = dict(os.environ, LISPM_CHECK_BAND=self.a.builder, LISPM_CHECK_UBIN=self.a.builder_ubin,
+                   LISPM_CHECK_QUUX=self.wrapper(self.a.builder_revision, self.a.builder_prom),
+                   LISPM_CHECK_OZD=self.a.ozd, LISPM_CHECK_PORTS=self.lc_ports,
+                   XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
+        results = {}
+
+        def checks():
+            # the export's own cross-check, so that it copies the export's sys/
+            cmd = [sys.executable, os.path.join(self.src, 'tools', 'cross-check', 'run'),
+                   '--out', os.path.join(self.work, 'cross-check'), '--base-tree',
+                   self.a.base_tree, '--fresh', 'check3', 'check2']
+            with open(os.path.join(X, 'cross-check.out'), 'w') as f:
+                f.write('$ %s\n' % ' '.join(cmd))
+                f.flush()
+                results['cross-check'] = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT,
+                                                        env=env).returncode
+
+        def other(name, keep):
+            cases = open(os.path.join(HERE, 'cases', name + '.cases')).read()
+            rc, _ = self.builder_check(os.path.join(X, name), cases, self.src, 7200, keep=keep)
+            results[name] = rc
+        threads = [threading.Thread(target=checks),
+                   threading.Thread(target=other, args=('site', ('home', 'site'))),
+                   threading.Thread(target=other, args=('wormch', ('home', 'sys')))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        C = os.path.join(self.work, 'cross-check')
+        for c in ('check3', 'check2'):
+            r = os.path.join(C, c, 'result.txt') if c == 'check3' else None
+            if c == 'check2':
+                parts = sorted(glob.glob(os.path.join(C, c, 'part*', 'result.txt')))
+                r = parts[-1] if parts else None
+            if r and os.path.exists(r):
+                shutil.copy2(r, os.path.join(X, c + '-result.txt'))
+                lines = open(r).read().split('\n')
+                self.record('  cross: %s: %s' % (c, '; '.join(
+                    l for l in lines if l.startswith(('lispm-check exit', 'RESULT', 'sha256'))
+                    or l.startswith(c))))
+        self.record('  cross: site %s, wormch %s, cross-check exit %s' % (
+            results.get('site'), results.get('wormch'), results.get('cross-check')))
+        # check 3 must pass whole; check 2 must have compiled SYSTEM (its
+        # lispm-check run passed) and its logs show no host value
+        # (check2.py); its comparison with the builder's QFASLs (compare.py)
+        # is recorded, since a changed definition the cross build gives the
+        # compile is not yet one of its explanations (clarification 55)
+        r3 = open(os.path.join(X, 'check3-result.txt')).read()
+        if 'check3 PASS' not in r3:
+            raise Failed('check 3 failed (cross/check3-result.txt)')
+        r2 = open(os.path.join(X, 'check2-result.txt')).read()
+        if not re.search(r'lispm-check exit 0', r2) or result_of(r2, 'check2.py') != 'PASS':
+            raise Failed('check 2 did not compile SYSTEM cleanly (cross/check2-result.txt)')
+        if results.get('site') or results.get('wormch'):
+            raise Failed('the site or WORMCH run failed: %s' % results)
+
+    def step_target(self):
+        """The target's tree (docs/building.md, "Loading the 40-bit cold
+        load"): check 2's tree, SYSTEM compiled for the target; check 3's
+        compiles of the cold load's files and its readtables over it (those
+        inside the image); the site's QFASLs and WORMCH's, made in cross
+        sessions; the microcode in sys/ubin/."""
+        C = os.path.join(self.work, 'cross-check')
+        T = os.path.join(self.work, 'target')
+        shutil.rmtree(T, ignore_errors=True)
+        os.makedirs(T)
+        for d in ('sys', 'site'):
+            shutil.copytree(os.path.join(C, 'check2', 'tree', d), os.path.join(T, d), symlinks=True)
+        served = os.path.join(C, 'check3', 'served')
+        cases = os.path.join(C, 'check3', 'cases.cases')
+        n3 = []
+        for p in glob.glob(os.path.join(served, 'sys', '**', '*.qfasl'), recursive=True):
+            if os.path.getmtime(p) > os.path.getmtime(cases):
+                rel = os.path.relpath(p, served)
+                shutil.copy2(p, os.path.join(T, rel))
+                n3.append(rel)
+        X = os.path.join(self.out, 'cross')
+        for f in ('site.qfasl', 'lmlocs.qfasl', 'hsttbl.qfasl', 'hsttbl.lisp'):
+            shutil.copy2(os.path.join(X, 'site', 'site', f), os.path.join(T, 'site', f))
+        shutil.copy2(os.path.join(X, 'wormch', 'sys', 'demo', 'wormch.qfasl'),
+                     os.path.join(T, 'sys', 'demo', 'wormch.qfasl'))
+        shutil.rmtree(os.path.join(T, 'sys', 'cross-check'), ignore_errors=True)
+        shutil.rmtree(os.path.join(T, 'sys', 'ubin'), ignore_errors=True)
+        shutil.copytree(self.ubin, os.path.join(T, 'sys', 'ubin'))
+        shutil.copy2(os.path.join(C, 'check3', 'home', 'cold40.img'),
+                     os.path.join(self.work, 'cold-3.img'))
+        with open(os.path.join(self.out, 'target', 'qfasl.sha256'), 'w') as f:
+            for p in sorted(glob.glob(os.path.join(T, '**', '*.qfasl'), recursive=True)):
+                f.write('%s  %s\n' % (sha256(p), os.path.relpath(p, T)))
+        open(os.path.join(self.out, 'target', 'check3.list'), 'w').write('\n'.join(sorted(n3)) + '\n')
+        self.record('  target: %d QFASLs, %d of them check 3\'s; cold load sha256 %s' % (
+            sum(1 for _ in open(os.path.join(self.out, 'target', 'qfasl.sha256'))), len(n3),
+            sha256(os.path.join(self.work, 'cold-3.img'))))
+
+    def boot_and_save(self, name, cold, tree):
+        """A disk with the microcode in MCR1 and the cold load COLD in LOD3,
+        current; QLD; the saved band on its own disk in bands/."""
+        disk = os.path.join(self.work, name + '-qld.img')
+        self.make_disk(disk, os.path.join(self.ubin, 'ucadr.mcr'), {'LOD3': cold})
+        self.qld(os.path.join(self.out, name, 'qld'), disk, tree)
+        os.makedirs(self.bands, exist_ok=True)
+        band = os.path.join(self.bands, name + '.img')
+        fmt, valid = self.band_disk(disk, 'LOD4', band, name)
+        os.unlink(disk)
+        self.record('  %s: band format %d, valid %d words; %s sha256 %s' % (
+            name, fmt, valid, os.path.relpath(band, self.out), sha256(band)))
+        return band
+
+    def step_band4(self):
+        self.boot_and_save('band4', os.path.join(self.work, 'cold-3.img'),
+                           os.path.join(self.work, 'target'))
+
+    def native(self, name, builder):
+        """Steps 5 and 6: BUILDER, a band of the target, compiles the system
+        from the sources, makes its cold load in a fresh session, which is
+        booted, QLD run and saved."""
+        N = os.path.join(self.out, name)
+        tree = os.path.join(self.work, name + '-tree')
+        shutil.rmtree(tree, ignore_errors=True)
+        os.makedirs(tree)
+        for d in ('sys', 'site'):
+            shutil.copytree(os.path.join(self.src, d), os.path.join(tree, d), symlinks=True)
+        # UCINIT is compiled from its source; a QFASL in the sources would be
+        # System 100's (the tree tracked one until System 2002)
+        if os.path.exists(os.path.join(tree, 'sys', 'sys', 'ucinit.qfasl')):
+            os.unlink(os.path.join(tree, 'sys', 'sys', 'ucinit.qfasl'))
+        shutil.rmtree(os.path.join(tree, 'sys', 'ubin'), ignore_errors=True)
+        shutil.copytree(self.ubin, os.path.join(tree, 'sys', 'ubin'))
+        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'))
+        before = len(glob.glob(os.path.join(tree, '**', '*.qfasl'), recursive=True))
+        cases = open(os.path.join(HERE, 'cases', 'native-compile.cases')).read()
+        rc, text = self.lispm_check(os.path.join(N, 'compile'), cases, builder, self.ubin, quux,
+                                    tree, COMPILE_TIMEOUT, keep=('sys', 'site'),
+                                    extra=['--file-server', 'device'])
+        last = [l for l in text.split('\n') if l.startswith(('PASS', 'FAIL', 'ERROR'))][-1:]
+        self.record('  %s compile: lispm-check exit %d; %s' % (name, rc, last[0][:200] if last else ''))
+        if rc:
+            raise Failed('%s: the compile failed (%s/compile)' % (name, N))
+        for d in ('sys', 'site'):
+            shutil.rmtree(os.path.join(tree, d))
+            shutil.move(os.path.join(N, 'compile', d), os.path.join(tree, d))
+        after = len(glob.glob(os.path.join(tree, '**', '*.qfasl'), recursive=True))
+        cases = open(os.path.join(HERE, 'cases', 'native-cold.cases')).read()
+        rc, text = self.lispm_check(os.path.join(N, 'cold'), cases, builder, self.ubin, quux,
+                                    tree, 7200, keep=('home',), extra=['--file-server', 'device'])
+        cold = os.path.join(self.work, 'cold-%s.img' % name)
+        if rc or not os.path.exists(os.path.join(N, 'cold', 'home', 'cold.img')):
+            raise Failed('%s: MAKE-COLD failed (%s/cold)' % (name, N))
+        shutil.copy2(os.path.join(N, 'cold', 'home', 'cold.img'), cold)
+        self.record('  %s: %d QFASLs before the compile, %d after; cold load sha256 %s'
+                    % (name, before, after, sha256(cold)))
+        with open(os.path.join(N, 'qfasl.sha256'), 'w') as f:
+            for p in sorted(glob.glob(os.path.join(tree, '**', '*.qfasl'), recursive=True)):
+                f.write('%s  %s\n' % (sha256(p), os.path.relpath(p, tree)))
+        self.boot_and_save(name, cold, tree)
+
+    def step_native5(self):
+        self.native('native5', os.path.join(self.bands, 'band4.img'))
+
+    def step_native6(self):
+        self.native('native6', os.path.join(self.bands, 'native5.img'))
+
+    def step_checks(self):
+        """G2 section 7's checks: (a) the cross QFASLs against step 5's
+        native ones, normalised, each difference explained (a float one unit
+        apart, or a source that differs); (b) the cold-load generator byte
+        for byte both ways, and step 6's cold load against step 5's object by
+        object (as amended 2 Oct 2026); (c) the normaliser's and the cold
+        comparison's planted controls; (d) steps 5 and 6 agree, normalised."""
+        K = os.path.join(self.out, 'checks')
+        XC = os.path.join(TREE, 'tools', 'cross-check')
+        target, n5, n6 = (os.path.join(self.work, n) for n in
+                          ('target', 'native5-tree', 'native6-tree'))
+        verdict = {}
+
+        def tool(name, argv):
+            r = subprocess.run([sys.executable] + argv, capture_output=True, text=True)
+            open(os.path.join(K, name + '.txt'), 'w').write(r.stdout + r.stderr)
+            tail = (r.stdout + r.stderr).strip().split('\n')[-1]
+            verdict[name] = r.returncode == 0
+            self.record('  check %s: %s (%s)' % (name, 'PASS' if r.returncode == 0 else 'FAIL', tail))
+        tool('a', [os.path.join(XC, 'same40.py'), '--floats', '--sources', target, n5])
+        tool('d', [os.path.join(XC, 'same40.py'), n5, n6])
+        tool('c-same40', [os.path.join(XC, 'plant_a.py'), n5])
+        # cold-compare's planted controls, on the pair check (b)'s second
+        # half compares (it takes the pair it plants in)
+        tool('c-cold-compare', [os.path.join(TREE, 'tools', 'cold-compare-test'),
+                                os.path.join(self.work, 'cold-native5.img'),
+                                os.path.join(self.work, 'cold-native6.img')])
+        tool('b2', [os.path.join(TREE, 'tools', 'cold-compare'), '--labels', 'step5,step6',
+                    os.path.join(self.work, 'cold-native5.img'),
+                    os.path.join(self.work, 'cold-native6.img')])
+        results = {}
+
+        def b1_native():
+            # step 5's band, its own generator, on the cross build's QFASLs:
+            # must give the cross build's cold load (step 3's)
+            cases = open(os.path.join(HERE, 'cases', 'native-cold.cases')).read()
+            rc, _ = self.lispm_check(os.path.join(K, 'b1-native'), cases,
+                                     os.path.join(self.bands, 'native5.img'), self.ubin,
+                                     self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')),
+                                     target, 7200, extra=['--file-server', 'device'])
+            results['b1-native'] = (rc, os.path.join(K, 'b1-native', 'home', 'cold.img'),
+                                    os.path.join(self.work, 'cold-3.img'))
+
+        def b1_cross():
+            # the builder's cross build on step 5's QFASLs: must give step
+            # 5's cold load
+            cases = open(os.path.join(HERE, 'cases', 'cross-cold.cases')).read()
+            rc, _ = self.builder_check(os.path.join(K, 'b1-cross'), cases, n5, 7200)
+            results['b1-cross'] = (rc, os.path.join(K, 'b1-cross', 'home', 'cold.img'),
+                                   os.path.join(self.work, 'cold-native5.img'))
+        threads = [threading.Thread(target=b1_native), threading.Thread(target=b1_cross)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for k, (rc, made, want) in sorted(results.items()):
+            same = (rc == 0 and os.path.exists(made)
+                    and open(made, 'rb').read() == open(want, 'rb').read())
+            verdict[k] = same
+            self.record('  check %s: %s (lispm-check exit %d; made %s, wanted %s)' % (
+                k, 'PASS' if same else 'FAIL', rc, sha256(made)[:16] if os.path.exists(made) else '-',
+                sha256(want)[:16]))
+        bad = [k for k, v in verdict.items() if not v]
+        if bad:
+            raise Failed('checks failed: %s' % ', '.join(sorted(bad)))
+
+    def step_high(self):
+        """The high band (contract G3 revision 14, 10.11): native6's band
+        booted, the region floor set one quantum below 2^31, a full
+        collection (FULL-GC), which copies every object of the dynamic areas
+        into regions at or above the floor; one region must lie across 2^31
+        and none of a dynamic area below the floor; saved into LOD2, and the
+        saved band booted again must keep the floor."""
+        H = os.path.join(self.out, 'high')
+        disk = os.path.join(self.work, 'high-session.img')
+        subprocess.run(['cp', '--sparse=always', os.path.join(self.bands, 'native6.img'), disk],
+                       check=True)
+        tree = os.path.join(self.work, 'native6-tree')
+        floor = '(si:%make-pointer-unsigned #o17777740000)'
+        forms = [('(list (= si:%region-floor (si:region-floor-default)) (si:%pointer-unsigned si:%region-floor))', 60),
+                 ('(si:%pointer-unsigned (si:set-region-floor ' + floor + '))', 60),
+                 ('(progn (si:full-gc) t)', 4 * 3600),
+                 ('(progn (load "HOST: //home//lispm//high.lisp") t)', 600),
+                 ('(high-region-report)', 600)]
+        res = self.session(H, disk, tree, forms, save_part='LOD2',
+                           files=[os.path.join(HERE, 'lisp', 'high.lisp')])
+        report = [r for r in res if r[0] == '(high-region-report)'][0][2]
+        open(os.path.join(H, 'regions.txt'), 'w').write(report + '\n')
+        m = re.match(r'\s*\(\((.*?)\)\s+(NIL|\(.*?\))\s+(\d+)\s+(NIL|\(.*\))\)\s*$', report, re.S)
+        across = re.findall(r'\((\d+) (\S+) "(\d+)" (\d+) \d+ \d+\)', report.split(') NIL ')[0]) if m else []
+        if not m or m.group(2) != 'NIL' or len(across) != 1:
+            raise Failed('the high band: not one region across 2^31 with none below the floor (%s)'
+                         % report[:300])
+        self.record('  high: region %s of %s, origin %s, %s words, lies across 2^31; no region of a '
+                    'dynamic area that holds an object below the floor; %s regions; empty ones of '
+                    'dynamic areas below it: %s' % (across[0] + (m.group(3), m.group(4))))
+        band = os.path.join(self.bands, 'high.img')
+        fmt, valid = self.band_disk(disk, 'LOD2', band, 'high')
+        os.unlink(disk)
+        self.record('  high: band format %d, valid %d words; %s sha256 %s'
+                    % (fmt, valid, os.path.relpath(band, self.out), sha256(band)))
+        # the saved band keeps the floor (%sys-com-region-floor) and the region
+        rc, text = self.lispm_check(
+            os.path.join(H, 'boot'),
+            '(si:%%pointer-unsigned si:%%region-floor) => %d\n'
+            '(= (si:system-communication-area si:%%sys-com-region-floor) si:%%region-floor) => T\n'
+            '(let ((o (si:region-origin %s))) (list (si:%%pointer-lessp o (si:%%make-pointer-unsigned #o20000000000)) (si:%%pointer-lessp (si:%%make-pointer-unsigned #o20000000000) (%%pointer-plus o (si:region-length %s))))) => (T T)\n'
+            % (0o17777740000, across[0][0], across[0][0]),
+            band, self.ubin, self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')), tree, 600,
+            extra=['--file-server', 'device'])
+        self.record('  high: the saved band booted keeps the floor and the region: lispm-check exit %d' % rc)
+        if rc:
+            raise Failed('the high band booted does not keep the floor (%s/boot)' % H)
+
+    def step_incremental(self):
+        """An incremental save and restore with an ephemeral region (contract G3
+        revision 14, section 12's Y4 planted tests; 10.7 item 2, the band's
+        mask by its own pages): native6's band and the high band each booted,
+        a young array of 100,000 words made in an ephemeral area and filled,
+        an old symbol set, another process consing in an area of its own all
+        through the save, DISK-SAVE incremental into LOD2 (format 2011); LOD2
+        booted, its base LOD1 beside it, and the array, its place past 2^31
+        and the symbol compared."""
+        ok = True
+        for name in ('native6', 'high'):
+            W = os.path.join(self.out, 'incremental', name)
+            disk = os.path.join(self.work, 'inc-%s.img' % name)
+            subprocess.run(['cp', '--sparse=always', os.path.join(self.bands, name + '.img'), disk],
+                           check=True)
+            # another process grows a region of its own area all through the
+            # save: the incremental save's mask and the pages the microcode
+            # saves must still come from one state (sys/io1/inc.lisp)
+            forms = [('(defvar *inc-area* nil)', 60), ('(defvar *inc-young* nil)', 60),
+                     ('(defvar *inc-mark* nil)', 60), ('(defvar *inc-grown* 0)', 60),
+                     # 64 words every 60th of a second: a few regions' worth over
+                     # the save, not the region tables' worth
+                     ('(progn (process-run-function "inc-grow" (function (lambda (a) (loop'
+                      ' (make-list 64. :area a) (setq *inc-grown* (1+ *inc-grown*))'
+                      ' (process-sleep 1)))) (make-area :name (quote inc-grow)'
+                      ' :region-size #o4000000)) t)', 60),
+                     ('(progn (process-sleep 120.) (plusp *inc-grown*))', 60),
+                     ('(progn (setq *inc-area* (make-area :name (quote inc-young) :gc :dynamic'
+                      ' :region-size #o200000)) (setf (si:area-region-bits *inc-area*) (%logdpb 1'
+                      ' si:%%region-ephemeral (si:area-region-bits *inc-area*))) (si:%use-up-region'
+                      ' (si:area-region-list *inc-area*)) (setq *inc-young* (make-array 100000.'
+                      ' :area *inc-area*)) (dotimes (i 100000.) (aset (- i) *inc-young* i))'
+                      ' (setq *inc-mark* (list 2011. (si:%pointer-unsigned (%pointer *inc-young*))))'
+                      ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15))', 600)]
+            res = self.session(W, disk, os.path.join(self.work, 'native6-tree'), forms,
+                               save_part='LOD2', incremental=True)
+            self.set_current(disk, ['MCR1', 'LOD2'])
+            rc, text = self.lispm_check(
+                os.path.join(W, 'boot'),
+                '(first *inc-mark*) => 2011\n'
+                '(list (length *inc-young*) (loop for i below 100000. count (not (eq (aref *inc-young* i) (- i))))'
+                ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15)'
+                ' (= (si:%pointer-unsigned (%pointer *inc-young*)) (second *inc-mark*))) => (100000 0 T T)\n'
+                '(let ((x (make-array 10 :area *inc-area*))) (= (ldb (byte 4 28) (%pointer x)) #o15)) => T\n',
+                disk, self.ubin, self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')),
+                os.path.join(self.work, 'native6-tree'), 600, extra=['--file-server', 'device'])
+            self.record('  incremental %s: the incremental band booted: lispm-check exit %d' % (name, rc))
+            ok &= rc == 0
+            os.unlink(disk)
+        if not ok:
+            raise Failed('an incremental band did not restore its young array')
+
+    def step_guards(self):
+        from importlib.machinery import SourceFileLoader
+        guards = SourceFileLoader('guards', os.path.join(HERE, 'guards.py')).load_module()
+        ok = guards.run_all(self)
+        if not ok:
+            raise Failed('a guard did not fire, or a control did not run')
+
+
+def main():
+    env = lambda k, d=None: os.environ.get('CROSS_BUILD_' + k.upper().replace('-', '_'), d)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--out', default=env('out'))
+    p.add_argument('--work', default=env('work'))
+    p.add_argument('--commit', default=env('commit'))
+    p.add_argument('--builder', default=env('builder'),
+                   help="the builder's disk, raw or VHD: the previous system's band current")
+    p.add_argument('--builder-ubin', default=env('builder-ubin'),
+                   help="the builder's microcode's sys/ubin/ (its UCADR TBL)")
+    p.add_argument('--builder-prom', default=env('builder-prom'),
+                   help="the builder's PROM (none: quux's own)")
+    p.add_argument('--builder-revision', type=int, default=int(env('builder-revision', '13')))
+    p.add_argument('--base-tree', default=env('base-tree'),
+                   help="the builder's own tree with its QFASLs, a tarball (cross-check's --base-tree)")
+    p.add_argument('--asm-band', default=env('asm-band'), help='the band that assembles (the builder)')
+    p.add_argument('--asm-ubin', default=env('asm-ubin'))
+    p.add_argument('--asm-revision', type=int, default=int(env('asm-revision', '13')),
+                   help="--asm-band's revision; 0, --asm-quux's default")
+    p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
+    p.add_argument('--ubin-ref', default=env('ubin-ref'),
+                   help='a sys/ubin/ the assembly must equal (.mcr, .tbl, .locs)')
+    p.add_argument('--quux', default=env('quux'), help="muir-sim's quux, with revision %d" % REVISION)
+    p.add_argument('--ozd', default=env('ozd'))
+    p.add_argument('--ports', default=env('ports'), help='LO-HI, at least 64 ports')
+    p.add_argument('--engine', default=env('engine', 'micro'))
+    p.add_argument('--from', dest='start', default=env('from'))
+    p.add_argument('--to', default=env('to'))
+    p.add_argument('--list', action='store_true')
+    a = p.parse_args()
+    if a.list:
+        print('\n'.join(STEPS))
+        return 0
+    for k in ('out', 'builder', 'builder_ubin', 'base_tree', 'quux', 'ozd', 'ports'):
+        if not getattr(a, k):
+            p.error('--%s is needed' % k.replace('_', '-'))
+    a.out = os.path.abspath(a.out)
+    a.work = os.path.abspath(a.work or os.path.join(
+        os.environ.get('XDG_CACHE_HOME', os.path.join(os.path.expanduser('~'), '.cache')), 'cross-build',
+        os.path.basename(a.out)))
+    for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'ozd', 'asm_band', 'asm_quux',
+              'asm_ubin', 'ubin_ref'):
+        if getattr(a, k):
+            setattr(a, k, os.path.abspath(getattr(a, k)))
+    a.asm_band = a.asm_band or a.builder
+    a.asm_ubin = a.asm_ubin or a.builder_ubin
+    lo, hi = (int(x) for x in a.ports.split('-'))
+    if hi - lo < 63:
+        p.error('--ports: at least 64 ports')
+    a.ports = (lo, hi)
+    start = STEPS.index(a.start) if a.start else 0
+    end = STEPS.index(a.to) + 1 if a.to else len(STEPS)
+    os.makedirs(a.out, exist_ok=True)
+    os.makedirs(a.work, exist_ok=True)
+    r = Run(a)
+    done = r.passed_steps()
+    missing = [s for s in STEPS[:start] if s not in done]
+    if missing:
+        p.error('--from %s: the record shows these earlier steps not passed: %s'
+                % (a.start, ' '.join(missing)))
+    r.record('run: steps %s; %s' % (' '.join(STEPS[start:end]),
+                                     json.dumps({k: v for k, v in vars(a).items() if k != 'list'})))
+    for s in STEPS[start:end]:
+        os.makedirs(os.path.join(a.out, s), exist_ok=True)
+        r.record('step %s started' % s)
+        t0 = time.time()
+        try:
+            getattr(r, 'step_' + s)()
+        except (Failed, subprocess.CalledProcessError, OSError) as e:
+            r.record('step %s FAILED after %d s: %s' % (s, time.time() - t0, e))
+            return 1
+        r.record('step %s passed in %d s' % (s, time.time() - t0))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

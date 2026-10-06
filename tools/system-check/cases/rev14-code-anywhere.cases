@@ -1,0 +1,28 @@
+; Revision 14's code anywhere: LC's checks L1-L7 at the system level, with
+; planted FEFs (contract G3 revision 14, 10.4; lisp/rev14-code-anywhere.lisp).
+; It needs revision 14 and a band of System 2002 whose floor is the default.
+;
+; L1, L2, L4: a loop whose body, 100 calls and 100 short branches, lies across
+; 2^30 words: its exit branch forward across it, its loop branch back across it
+; (long), calls from above it and the returns.
+(rev14c-place #o7777740000 150.) => 1073741824
+(progn (rev14c-loop-def) t) => T
+(rev14c-across 'rev14c-loop 1073741824.) => (:HEADER-BELOW T :CODE-START-ABOVE NIL :END-ABOVE T)
+(rev14c-loop 1000.) => 4950000
+; L5 (its second part): an FEF whose start PC lies past 3 x 2^30 words, its
+; header and constants below; L6: an unwind-protect continued and one entered
+; by a throw, in an FEF at and above 30000000000 (LC<33:32> = 11).
+(rev14c-place #o27777740000 20.) => 3221225472
+(progn (rev14c-constants-def) t) => T
+(rev14c-across 'rev14c-constants 3221225472.) => (:HEADER-BELOW T :CODE-START-ABOVE T :END-ABOVE T)
+(length (rev14c-constants)) => 120
+(progn (rev14c-unwind-def) t) => T
+(si:%pointer-lessp (%pointer #'rev14c-unwind) (rev14c-address #o30000000000)) => NIL
+(list (rev14c-unwind nil) (rev14c-unwind t) *rev14c-cleanups*) => (:RETURNED :THROWN 2)
+; L5 (its first part) and L7: an FEF above 2^31 words (LC<33:32> = 10) entered,
+; and sequence breaks deferred while interrupts are off and taken after.
+(rev14c-place #o20000000000 5000.) => 2147500032
+(progn (rev14c-deferred-def) t) => T
+(si:%pointer-lessp (%pointer #'rev14c-deferred) (rev14c-address #o20000000000)) => NIL
+(rev14c-deferred 20000.) => 400000
+(= si:%region-floor (si:region-floor-default)) => T
