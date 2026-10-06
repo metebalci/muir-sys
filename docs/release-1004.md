@@ -134,3 +134,24 @@ Every change to a source file carries a comment in that file saying why.
     `tools/system-check`'s `interpreter-closure` and
     `interpreter-closure-scope`, and `mar-range` and `wire-range` with this
     change's Lisp compiled, pass on micro.
+- **FORMAT forgets the clause strings it gives back**
+  (`format-reclaim-clauses`, `sys/io/format.lisp:1276-1292`). The clause
+  buffer, `format-clauses-array`, kept for the next call, still held each
+  `~[`, `~<` or `~:[` clause's string after `return-array` gave its storage
+  back, and the collector scans the buffer whole, past its fill pointer. Once
+  that storage's page was brought back fresh by CONSF (`M-DONT-SWAP-IN`),
+  `%FIND-STRUCTURE-HEADER`'s scan back from the pointer could meet the
+  GC-FORWARD words of an object copied before it, and the machine halted in
+  ILLOP (HALT-CONS, called from `XFSHS1+2`'s dispatch,
+  `sys/ucadr/uc-storage-allocation.lisp:1140-1143`). The string's and the
+  parameters' slots are now cleared as they are given back. Fixed on `main`
+  in the same way, where it was found. `tools/system-check` gains
+  `format-clauses` and `format-clauses-gc` (in the new `cases-2mw/`, for a
+  machine of 2 M words, the CADR's 32 boards; `tools/system-check/run` now
+  looks there for a check named and takes a case file's `; lisp: NAME.lisp`
+  first line, as `main`'s does). On System 1003's band without the change,
+  `format-clauses` fails three of its five cases (the buffer holds three
+  returned strings, `(3 3)` where `(0 0)` is expected) and passes the two
+  controls; `format-clauses-gc` passes its planting cases and halts in the
+  collection case, muir reporting the stop at PC 5317, `XFSHS1+3`, on
+  microcode 1001. With the change both pass, five cases each.

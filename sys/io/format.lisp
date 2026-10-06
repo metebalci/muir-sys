@@ -1279,7 +1279,17 @@ the name of a command, and remaining elements are parameters."
        (return-format-buffer clauses format-clauses-array))
     (return-array (aref clauses (- i 3)))
     (and (aref clauses (1- i))
-	 (deallocate-resource 'format-params (aref clauses (1- i))))))
+	 (deallocate-resource 'format-params (aref clauses (1- i))))
+    ;; the buffer is kept for the next call, and the collector scans it whole,
+    ;; past its fill pointer too: a clause string left in it after
+    ;; return-array is a pointer to storage given back, which the transporter
+    ;; takes for an object.  once that storage's page is created fresh by
+    ;; consf (m-dont-swap-in), %find-structure-header's scan back from the
+    ;; pointer can meet the gc-forward words of an object copied before it,
+    ;; and the machine halts in illop (halt-cons from xfshs1+2).  so the
+    ;; clause's string and parameters are forgotten as they are given back.
+    (setf (aref clauses (- i 3)) nil
+	  (aref clauses (1- i)) nil)))
 
 (DEFPROP /; FORMAT-CTL-DELIMIT-CLAUSE FORMAT-CTL-NO-ARG)
 (DEFUN FORMAT-CTL-DELIMIT-CLAUSE (IGNORE)
