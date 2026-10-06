@@ -92,7 +92,11 @@ SYS_COM = 0o2000
 # load every area is one region, its number the area's).  Checked against the
 # names in AREA-NAME when an image is read.
 AREA_REGION_ORIGIN, AREA_REGION_LENGTH, AREA_REGION_BITS = 4, 5, 6
-AREA_REGION_FREE_POINTER, AREA_AREA_NAME = 7, 13
+AREA_REGION_FREE_POINTER = 7
+# AREA-NAME is area 13 on revision 13 and 11 on revision 14, whose cold load
+# has no page table or physical-page-data area (contract G3 revision 14, 10.6:
+# every later area two lower): the one whose list names itself there is taken.
+AREA_AREA_NAMES = (13, 11)
 # qcom.lisp:112-114: a region's representation type, list or structure.
 REGION_REP_SHIFT, REP_LIST = 20, 0
 
@@ -150,14 +154,17 @@ class Image:
             raise Bad('%s: no locative to REGION-ORIGIN at %o' % (self.path, SYS_COM))
         ro = ptr(ro)
         org = lambda i: ptr(w[ro + i])
-        names, i = [], org(AREA_AREA_NAME)
-        while True:     # AREA-NAME is a cdr-coded list (coldut.lisp, q-storage-finalize)
-            names.append(self.symbol_name(ptr(w[i])) if tag(w[i]) == DTP_SYMBOL else '?')
-            if cdr(w[i]) != CDR_NEXT or len(names) > 0o400:
+        for area_name in AREA_AREA_NAMES:
+            names, i = [], org(area_name)
+            while 0 <= i < len(w):     # AREA-NAME is a cdr-coded list (coldut.lisp, q-storage-finalize)
+                names.append(self.symbol_name(ptr(w[i])) if tag(w[i]) == DTP_SYMBOL else '?')
+                if cdr(w[i]) != CDR_NEXT or len(names) > 0o400:
+                    break
+                i += 1
+            if area_name < len(names) and names[area_name] == 'AREA-NAME':
                 break
-            i += 1
         for n, want in ((AREA_REGION_ORIGIN, 'REGION-ORIGIN'), (AREA_REGION_LENGTH, 'REGION-LENGTH'),
-                        (AREA_REGION_BITS, 'REGION-BITS'), (AREA_AREA_NAME, 'AREA-NAME'),
+                        (AREA_REGION_BITS, 'REGION-BITS'), (area_name, 'AREA-NAME'),
                         (AREA_REGION_FREE_POINTER, 'REGION-FREE-POINTER')):
             if n >= len(names) or names[n] != want:
                 raise Bad('%s: area %d is not %s' % (self.path, n, want))

@@ -1780,7 +1780,11 @@ INCREMENTAL means to write out only those parts of the world which have changed
 	  (PART-NAME (STRING-APPEND (LDB #o0010 (CADR L)) (LDB #o1010 (CADR L))
 				    (LDB #o0010 (CAR L)) (LDB #o1010 (CAR L))))
 	  PART-BASE PART-SIZE SYSTEM-VERSION MAX-ADDR
-	  (INC-PAGES-SAVED 0))
+	  (INC-PAGES-SAVED 0)
+	  (inc-states nil)
+	  (inc-process nil)
+	  (inc-mouse-sheet nil)
+	  (inc-changed nil))
     ;; quux revision 13: microcode 2001 has no incremental save (its
     ;; %disk-save halts at incremental-band-not-supported), so it is refused
     ;; here, with an error, before anything is changed.
@@ -1855,10 +1859,16 @@ will take a few minutes.")
 
     ;; Compare all pages with band we booted from,
     ;; record unchanged pages in a bitmap in the band being saved in.
-    (WHEN INCREMENTAL
-      (SETQ INC-PAGES-SAVED (DISK-SAVE-INCREMENTAL PART-BASE)))
+;    (WHEN INCREMENTAL
+;      (SETQ INC-PAGES-SAVED (DISK-SAVE-INCREMENTAL PART-BASE)))
+    ;; quux revision 14: the compare moved below, inside the last
+    ;; without-interrupts: the mask is indexed by each region's pages, which
+    ;; another process consing here could change before %disk-save (io1; inc).
 
     ;; Check again before updating the partition comment.
+    ;; quux revision 14: for an incremental save inc-pages-saved is still 0
+    ;; here (the compare is below), so this asks room for a whole band; the
+    ;; check after the compare asks for the incremental band's.
     (CHECK-PARTITION-SIZE (+ INC-PAGES-SAVED PART-SIZE))
     (UPDATE-PARTITION-COMMENT PART-NAME SYSTEM-VERSION 0)
 
@@ -1867,6 +1877,7 @@ will take a few minutes.")
     (DOLIST (S TV:ALL-THE-SCREENS) (TV:SHEET-GET-LOCK S))
     (TV:WITH-MOUSE-USURPED
       (WITHOUT-INTERRUPTS
+	(setq inc-mouse-sheet tv:mouse-sheet)	;for the check below
 	(SETQ TV:MOUSE-SHEET NIL)
 	(DOLIST (S TV:ALL-THE-SCREENS)
 	  (SEND S :DEEXPOSE)
@@ -1877,11 +1888,29 @@ will take a few minutes.")
 	;; We'd like to :RESET it, but can't because we are still running in it.
 	;; If the process is the initial process, it will get a new state and get enabled
 	;; during the boot process.
+	;; quux revision 14: the highest address first, before the incremental
+	;; compare's snapshot of the regions: with a region at or above 2^31 (an
+	;; ephemeral one) find-max-addr makes bignums, which take words of the
+	;; extra pdl's region, and the check below took that for a region
+	;; changed since the snapshot.  nothing else runs from here to
+	;; %disk-save, so the address stays the highest.
+	(setq max-addr (find-max-addr))
+	;; quux revision 14: compare all pages with the band we booted from and
+	;; record the unchanged ones in the new band's mask (io1; inc), here,
+	;; where no other process runs (the compare waits for no process), so
+	;; that the mask and the pages %disk-save saves come from one state of
+	;; the regions: disk-save-incremental returns its snapshot of them,
+	;; checked again just before %disk-save.  the mask only names the pages
+	;; to save; %disk-save writes their contents as they are then.
+	(when incremental
+	  (multiple-value-setq (inc-pages-saved inc-states)
+	    (disk-save-incremental part-base)))
+	(setq inc-process current-process)	;for the check below
 	(PROCESS-DISABLE CURRENT-PROCESS)
 	(SET-PROCESS-WAIT CURRENT-PROCESS 'FLUSHED-PROCESS NIL)
 	(SETQ CURRENT-PROCESS NIL)
 	;; Once more with feeling, and bomb out badly if losing.
-	(SETQ MAX-ADDR (FIND-MAX-ADDR))
+;	(SETQ MAX-ADDR (FIND-MAX-ADDR))	;quux revision 14: above
 	(CHECK-PARTITION-SIZE (+ INC-PAGES-SAVED PART-SIZE) T)
 	;; Store the size in words rather than pages.  But don't get a bignum!
 	(SETF (CLI:AREF (FUNCTION SYSTEM-COMMUNICATION-AREA) %SYS-COM-HIGHEST-VIRTUAL-ADDRESS)
@@ -1896,12 +1925,40 @@ will take a few minutes.")
 	    ((= i #o2240))
 	  (%P-DPB 0 %%Q-LOW-HALF I)
 	  (%P-DPB 0 %%Q-HIGH-HALF I))
+	;; quux revision 14: no region changed since the mask's snapshot.  if
+	;; one did, the band is not saved (%disk-save is not called, and the
+	;; partition holds no band): this process is made current and runnable
+	;; again and the mouse given back its sheet here, and the error is
+	;; signalled below, out of the without-interrupts and the usurped mouse
+	;; (an error with no current process stopped the machine in the
+	;; scheduler, and one with no mouse sheet in the mouse process).  as
+	;; after check-partition-size's late error, the machine wants a warm
+	;; boot: measured, the console did not answer again.
+	(setq inc-changed (and incremental (disk-save-incremental-verify inc-states)))
+	(when inc-changed
+	  ;; enabled while there is no current process, as process-initialize
+	  ;; does: with one, process-consider-runnability flushes a process
+	  ;; whose stack group is the running one, this one
+	  (set-process-wait inc-process #'true nil)
+	  (process-enable inc-process)
+	  (setq current-process inc-process)
+	  (setq tv:mouse-sheet inc-mouse-sheet))
+	(unless inc-changed
 	(%DISK-SAVE (IF INCREMENTAL
 			(- (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
 		      (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
-		    (CAR L) (CADR L)))))
+		    (CAR L) (CADR L))))))
+      ;; the generational collector: the save did not happen (an error, an
+      ;; abort, or the incremental save refused below), so the gc process
+      ;; runs again (gc; gc-after-disk-save-abort)
       (when (fboundp 'gc-after-disk-save-abort)
-	(gc-after-disk-save-abort)))))
+	(gc-after-disk-save-abort)))
+    ;; quux revision 14: an incremental save refused above (%disk-save does
+    ;; not return)
+    (when inc-changed
+      (send tv:main-screen :expose)
+      (ferror nil "Region ~O changed during the incremental save (free pointer ~O, then ~O); the band is not saved.  Warm boot please."
+	      inc-changed (aref inc-states (* 2 inc-changed)) (region-free-pointer inc-changed)))))
 
 ;;; 1024-word pages (contract g2, option (w)): PART-SIZE is blocks, as a
 ;;; partition's size is, and a page dumped takes disk-blocks-per-page of them.

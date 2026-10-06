@@ -1,0 +1,34 @@
+; Revision 14's paging over slots at 2 M words (contract G3 revision 14, 9.3
+; and section 12's Y2 checks; lisp/rev14-paging.lisp).  Run it on a machine of
+; 2 M words of main memory (quux --main-memory-size 2MW, through a --quux
+; wrapper); at more nothing is forced out and the first case fails.
+(<= (si:rev14p-memory-words) (* 2 1024 1024)) => T
+(si:rev14p-word #o224) => 0
+; Fresh pages: 400 pages read, never written, each the fresh fill.
+(si:rev14p-fresh-region)
+(si:rev14p-fresh-read 16 416) => 0
+; The round trip: a 2.5 M-word array filled, read back whole, then forced out
+; by 1.5 M-word arrays; the pages that went out have slots, and every element
+; comes back.
+(si:rev14p-fill 2500000)
+(si:rev14p-verify) => 0
+(si:rev14p-push 1500000)
+(si:rev14p-push 1500000)
+(let ((p (si:rev14p-pages si:*rev14p-rt*))) (list (> (first p) 1000) (second p))) => (T 0)
+(si:rev14p-verify) => 0
+; The fresh pages forced out unwritten took no slot, and read again are the
+; fresh fill.
+(let ((o (si:rev14p-fresh-out 16 416))) (list (> (first o) 100) (second o))) => (T 0)
+(si:rev14p-fresh-read 16 216) => 0
+; and pages were written out and read back on the way (A 154 and 155)
+(let ((c (si:rev14p-counters))) (list (> (first c) 1000) (> (second c) 1000))) => (T T)
+(si:rev14p-word #o224) => 0
+; PAGE-IN-WORDS after eviction (the planted test): a young array of 1 M words in
+; ephemeral space, filled, forced out by the arrays above, then paged in whole
+(si:rev14p-young-fill 1000000) => (T 1000000)
+(si:rev14p-push 1500000)
+(si:rev14p-push 1500000)
+(let ((p (si:rev14p-young-in-core))) (> (second p) 100)) => T
+(progn (si:page-in-words (aloc si:*rev14p-young* 0) (array-length si:*rev14p-young*)) (second (si:rev14p-young-in-core))) => 0
+(si:rev14p-young-verify) => 0
+(si:rev14p-word #o224) => 0

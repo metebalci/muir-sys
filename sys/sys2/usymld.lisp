@@ -1078,24 +1078,38 @@ One element of ARRAY goes into each register."
   ; 7.7% (who-uses 'foobarbletch "si")
   ; 2.9% (apropos "foobarbletch" "si")
   ; 36.2 (worst-case-test)
-(DEFCONST FIRST-LEVEL-MAP-RELOAD-RANGES
-	  '((LEVEL-1-MAP-MISS ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER)))
+;; quux revision 14 (contract g3 revision 14, 9.1): the hardware walks the
+;; page table on a tlb miss, so the microcode reloads no map and this range
+;; has nothing to count.  microcode 2002 has neither label.
+;(DEFCONST FIRST-LEVEL-MAP-RELOAD-RANGES
+;	  '((LEVEL-1-MAP-MISS ADVANCE-SECOND-LEVEL-MAP-REUSE-POINTER)))
+(defconst first-level-map-reload-ranges nil)
 
   ; 42% (process-sleep 60.)
   ; 17.2% (who-uses 'foobarbletch "si")
   ; 7.9% (apropos "foobarbletch" "si")
   ; 57.5 (worst-case-test)
   ; 17.2 (compile 'add-assembly)
-(DEFCONST ALL-MAP-FAULT-EXCEPT-DISK-WAIT-RANGES '(
-  ;attempts to measure map reloads for stuff in core
-  (PGF-R-SB SBSER)
-  (PGF-R-I PGF-R-PDL)   		;do not include PDL-BUFFER-FAULTS
-  (PGF-SAVE LEVEL-1-MAP-MISS)
-  (LEVEL-1-MAP-MISS PGF-MAP-MISS)
-  (PGF-MAP-MISS PGF-MAR)		;not MAR, A-MEM faults, MPV, WR-RDONLY, PGF-RWF
-  (PGF-RL SEARCH-PAGE-HASH-TABLE)
-  (SEARCH-PAGE-HASH-TABLE XCPH)		;not %COMPUTE-PAGE-HASH
-  (COMPUTE-PAGE-HASH SWAPIN)))
+;; quux revision 14 (contract g3 revision 14, 9.1): microcode 2002 has no
+;; map reload and no page hash table; a fault is the entry's own, dispatched
+;; from pgf-r and pgf-w to pgf-not-in-core, pgf-a-memory or pgf-no-entry
+;; (pgf-save up to pgf-mar), and the table's search is find-page-entry, up to
+;; take-table-frame.  the old ranges named labels that are gone.
+;(DEFCONST ALL-MAP-FAULT-EXCEPT-DISK-WAIT-RANGES '(
+;  ;attempts to measure map reloads for stuff in core
+;  (PGF-R-SB SBSER)
+;  (PGF-R-I PGF-R-PDL)   		;do not include PDL-BUFFER-FAULTS
+;  (PGF-SAVE LEVEL-1-MAP-MISS)
+;  (LEVEL-1-MAP-MISS PGF-MAP-MISS)
+;  (PGF-MAP-MISS PGF-MAR)		;not MAR, A-MEM faults, MPV, WR-RDONLY, PGF-RWF
+;  (PGF-RL SEARCH-PAGE-HASH-TABLE)
+;  (SEARCH-PAGE-HASH-TABLE XCPH)		;not %COMPUTE-PAGE-HASH
+;  (COMPUTE-PAGE-HASH SWAPIN)))
+(defconst all-map-fault-except-disk-wait-ranges '(
+  (pgf-r-sb sbser)
+  (pgf-r-i pgf-r-pdl)			;not the pdl buffer's faults
+  (pgf-save pgf-mar)			;not mar, a memory's emulation, rdonly
+  (find-page-entry take-table-frame)))	;the page table's search
 
 
 
@@ -1104,8 +1118,10 @@ One element of ARRAY goes into each register."
   ; 1.4% (apropos "foobarbletch" "si")
   ; 7.7% (worst-case-test)
   ; 2.4% (compile 'add-assembly)
-(DEFCONST SEARCH-PAGE-HASH-RANGE '( (SEARCH-PAGE-HASH-TABLE XCPH)
-				   (COMPUTE-PAGE-HASH SWAPIN)))
+;; quux revision 14: the page table's search replaces the hash table's.
+;(DEFCONST SEARCH-PAGE-HASH-RANGE '( (SEARCH-PAGE-HASH-TABLE XCPH)
+;				   (COMPUTE-PAGE-HASH SWAPIN)))
+(defconst search-page-hash-range '((find-page-entry take-table-frame)))
 
 (DEFCONST ALL-MICROCODE-RANGE `( (0 ,SI:SIZE-OF-HARDWARE-CONTROL-MEMORY)))
 

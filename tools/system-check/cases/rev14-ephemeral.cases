@@ -1,0 +1,48 @@
+; Revision 14's ephemeral run (contract G3 revision 14, section 12's Y4
+; checks; lisp/rev14-ephemeral.lisp): the workloads with the default cons area
+; ephemeral and the ephemeral-reference setter's enable on.  It needs revision
+; 14 and a band of System 2002.  Its last case prints the pages whose entry has
+; <19>, for the comparison with a replay of the run's stores (README.md).
+(rev14e-word #o224) => 0
+(rev14e-word #o221) => 0
+(rev14e-bad-regions) => NIL
+; the default cons area and the bignums' (si:number-cons-area) the ephemeral area
+(progn (rev14e-ephemeral-area) (setq *rev14e-nca* si:number-cons-area default-cons-area *rev14e-area* si:number-cons-area *rev14e-area*) (rev14e-enable t)) => 1
+; the control: a new list is young, past 2^31, and an old array is not
+(list (rev14e-young-p (list 1 2)) (rev14e-young-p *rev14e-old*) (minusp (%pointer (list 1)))) => (T NIL T)
+(rev14e-young-p (make-array 10)) => T
+(mapc #'compile '(w-ack w-fib w-cons w-muldiv w-float w-array w-sort w-bignum w-intern))
+(rev14e-young-p #'w-fib) => NIL
+(w-ack 2 100) => 203
+(let ((sg (make-stack-group "ack" ':regular-pdl-size 100000))) (stack-group-preset sg #'w-ack 2 300) (funcall sg)) => 603
+(w-fib 24) => 46368
+(progn (w-cons) t) => T
+(w-muldiv)
+(w-float)
+(progn (w-array) t) => T
+(let ((l (w-sort))) (list (length l) (loop for (a b) on l while b always (<= a b)) (rev14e-young-p l))) => (3000 T T)
+(progn (w-bignum) t) => T
+(rev14e-young-p (expt 3 300)) => T
+(progn (w-intern) t) => T
+(progn (w-print) t) => T
+(progn (mapc #'compile '(w-ack w-fib w-cons w-muldiv)) t) => T
+(progn (w-bitblt) t) => T
+(rev14e-old-to-young 5000) => 2000
+(rev14e-word #o224) => 0
+(rev14e-young-p (make-list 3)) => T
+; SET-MAR on a young object, in ephemeral space: a write of its first and of
+; its last word traps, one beside them does not, and after CLEAR-MAR none does.
+; One write a SET-MAR: after a MAR break a page's later writes do not break
+; until the next SET-MAR, on revision 13 as on 14
+(progn (setq *rev14e-last* (make-array 40.)) (rev14e-young-p *rev14e-last*)) => T
+(progn (set-mar (aloc *rev14e-last* 10.) :write 20.) (prog1 (rev14e-mar-trap-p #'(lambda () (setf (aref *rev14e-last* 10.) 1))) (clear-mar))) => T
+(progn (set-mar (aloc *rev14e-last* 10.) :write 20.) (prog1 (rev14e-mar-trap-p #'(lambda () (setf (aref *rev14e-last* 29.) 1))) (clear-mar))) => T
+(progn (set-mar (aloc *rev14e-last* 10.) :write 20.) (prog1 (rev14e-mar-trap-p #'(lambda () (setf (aref *rev14e-last* 30.) 1))) (clear-mar))) => NIL
+(rev14e-mar-trap-p #'(lambda () (setf (aref *rev14e-last* 10.) 2))) => NIL
+; every region's free pointer and scavenger pointer are offsets within it
+(rev14e-bad-regions) => NIL
+; the pages the setter marked, after the workloads; the enable off
+(rev14e-enable nil) => 0
+(rev14e-word #o224) => 0
+(progn (setq default-cons-area working-storage-area si:number-cons-area *rev14e-nca*) t) => T
+(rev14e-marked-report)

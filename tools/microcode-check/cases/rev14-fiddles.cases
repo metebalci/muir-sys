@@ -1,0 +1,36 @@
+; Revision 14: the PDL buffer's fiddles against TLB eviction (D1, D2, R1,
+; X1), the flip's ephemeral-reference bit and the guard's count (contract G3
+; revision 14, section 12's Y2 checks; lisp/rev14-fiddles.lisp, which says
+; how).  Values are counts of words that came back changed, so 0 passes.
+; Run at 32 M words; on revision 14 and a band of System 2002.
+;
+; Register-page word 224, the guarded write-backs refused, is 0 before.
+(si:rev14-word #o224) => 0
+; The control: no alias, the dump and refill meet no eviction.
+(third (si:rev14-d0 200)) => 0
+; D1: every word of the frame aliases its own stack word's TLB index.  At
+; most 250 args: an interpreted function given 300 or more by APPLY that
+; switches stack groups halts the machine at QMXSG on revision 13 and 14 alike
+; (System 2001 and 2002), which is not this check's; the deep runs below take
+; the frames deeper.
+(third (si:rev14-d1 200)) => 0
+(third (si:rev14-d1 250)) => 0
+; D2 and R1: the same with SET-MAR on a word of the stack page (status 6).
+(third (si:rev14-d1 200 t)) => 0
+(third (si:rev14-d1 250 t)) => 0
+; X1: an extra-PDL bignum above the aliased words, and without the alias.
+(subseq (si:rev14-x1 200) 0 2) => (0 T)
+(subseq (si:rev14-x1 200 nil) 0 2) => (0 T)
+; By depth, compiled frames of eight locals: the control, D1, then D2/R1
+; with SET-MAR over the deep frames; the bignums of every 50th frame were in
+; the extra PDL before the switch and none is after it (X1).
+(first (si:rev14-run 300 nil)) => 0
+(first (si:rev14-run 300)) => 0
+(first (si:rev14-run 200)) => 0
+(first (si:rev14-run 300 t t)) => 0
+(first (si:rev14-run 300 nil t)) => 0
+(let ((r (si:rev14-run 300))) (list (plusp (third r)) (fourth r))) => (T 0)
+(si:rev14-word #o224) => 0
+; The flip keeps <19>: the bit before and after.
+(cddr (si:rev14-flip-test)) => (1 1)
+(si:rev14-word #o224) => 0

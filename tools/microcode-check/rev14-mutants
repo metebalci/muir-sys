@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/rev14-mutants: revision 14's microcode with one fault
+planted, each assembled, so that the checks rev14-fiddles and rev14-paging can be
+shown to fail under it (tools/microcode-check/README.md).
+
+Usage:
+  tools/microcode-check/rev14-mutants --out DIR [--revision R] [--jobs N] [MUTANT...]
+      [-- LISPM-CHECK-ARGS...]
+  tools/microcode-check/rev14-mutants --list
+
+Each MUTANT (all of them when none is named) is a copy of this tree's sys/ and
+site/ with one change to sys/ucadr/, assembled at revision 14 as microcode 2002
+on a band through tools/lispm-check (as tools/assembler-check does; its --band,
+--ubin and --quux after --, or LISPM_CHECK_BAND and the others), N at a time
+(--jobs, 2 by default).
+DIR/MUTANT/ gets ucadr.mcr, .tbl, .locs and .sym, the case file and
+lispm-check's output; DIR/MUTANT/plant.diff the change.  The machine's revision
+for --quux is its own unless --revision gives MUIR_QUUX_REVISION.
+
+  fiddle-copies   the dump's early A 430 and 431 copies removed: the words of
+                  a dump whose fiddle is evicted go into the PDL buffer, not
+                  memory (rev14-fiddles: D1 and X1)
+  dump-recovery   the dump's status-6 recovery (P-B-FIDDLE-AGAIN) made
+                  ILLOP-IF-PAGE-FAULT: under SET-MAR the dump halts (D2)
+  refill-recovery the refill's (P-R-FIDDLE-AGAIN) the same: the refill halts (R1)
+  flip-ephemeral  UPDATE-REGION-PHT clears <19> as it writes an entry in core:
+                  the flip loses the ephemeral-reference bit (the flip case)
+  evict-clean     an eviction takes every page for clean: a modified page is
+                  dropped unwritten (rev14-paging: the round trip)
+  evict-writes    an eviction writes every page: a fresh page takes a slot
+                  (rev14-paging: fresh pages)
+"""
+import difflib
+import os
+import shutil
+import subprocess
+import sys
+import threading
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+AC = SourceFileLoader('assembler_check', os.path.join(TREE, 'tools', 'assembler-check', 'run')).load_module()
+
+# file, the text, its replacement, a text before it that makes it unique
+MUTANTS = {
+    'fiddle-copies': ('uc-page-fault.lisp',
+                      b'\t((a-pdl-buffer-virtual-address) add vma a-tem)\n'
+                      b'\t((m-tem) add m-tem a-pdl-buffer-head)\n'
+                      b'\t((a-pdl-buffer-head) pdl-buffer-address-mask m-tem)\n',
+                      b'\t(no-op)\t;planted: no early copies\n', b'\t((a-pdl-dump-base) vma)\n'),
+    'dump-recovery': ('uc-page-fault.lisp',
+                      b'\t(call-conditional pg-fault p-b-fiddle-again)',
+                      b'\t(illop-if-page-fault)\t;planted', b'\nP-B-MR1'),
+    'refill-recovery': ('uc-page-fault.lisp',
+                        b'\t(call-conditional pg-fault p-r-fiddle-again)',
+                        b'\t(illop-if-page-fault)\t;planted', b'\nP-R-1'),
+    'flip-ephemeral': ('uc-storage-allocation.lisp',
+                       b'\t(jump-xct-next update-region-pht-write)\n'
+                       b'       ((m-a) dpb m-tem map-access-status-and-high-meta a-a)\n',
+                       b'\t((m-a) dpb m-tem map-access-status-and-high-meta a-a)\n'
+                       b'\t(jump-xct-next update-region-pht-write)\n'
+                       b'       ((m-a) dpb m-zero map-ephemeral-reference-bit a-a)\t;planted\n',
+                       b'\nUPDATE-REGION-PHT'),
+    'evict-clean': ('uc-page-fault.lisp',
+                    b'\t(jump-if-bit-clear map-modified-bit md evict-page-clean)',
+                    b'\t(jump evict-page-clean)\t;planted', b'\nEVICT-PAGE'),
+    'evict-writes': ('uc-page-fault.lisp',
+                     b'\t(jump-if-bit-clear map-modified-bit md evict-page-clean)',
+                     b'\t(no-op)\t;planted', b'\nEVICT-PAGE'),
+}
+
+
+def plant(name, copy):
+    f, old, new, after = MUTANTS[name]
+    path = os.path.join(copy, 'sys', 'ucadr', f)
+    data = open(path, 'rb').read()
+    start = data.index(after)
+    at = data.index(old, start)
+    changed = data[:at] + new + data[at + len(old):]
+    open(path, 'wb').write(changed)
+    return ''.join(difflib.unified_diff(data.decode('latin-1').splitlines(True),
+                                        changed.decode('latin-1').splitlines(True),
+                                        'a/sys/ucadr/' + f, 'b/sys/ucadr/' + f))
+
+
+def build(name, out, extra, env, results):
+    d = os.path.join(out, name)
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    copy = os.path.join(d, 'tree')
+    AC.copy_tree(copy)
+    open(os.path.join(d, 'plant.diff'), 'w').write(plant(name, copy))
+    lines = ['; tools/microcode-check/rev14-mutants: %s' % name,
+             "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+             '(setq ua:*word-width* 40.) => 40', '(setq ua:*hardware-revision* 14.) => 14',
+             '(setq ua:version-number 2002.) => 2002', AC.assemble_form(2002) + ' => T']
+    cases = os.path.join(d, 'cases.cases')
+    open(cases, 'w').write('\n'.join(lines) + '\n')
+    log = os.path.join(d, 'lispm-check.out')
+    with open(log, 'w') as f:
+        rc = subprocess.run([sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--tree', copy,
+                             '--timeout', '3000', '--keep'] + extra + [cases],
+                            stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    text = open(log, encoding='latin-1').read()
+    run = [l.split('kept in ')[1].strip() for l in text.split('\n') if 'run files kept in' in l]
+    got = 0
+    if run:
+        for f in AC.OUTPUTS:
+            p = os.path.join(run[0], 'served', 'sys', 'ubin', f)
+            if os.path.exists(p):
+                shutil.copy2(p, d)
+                got += 1
+        shutil.rmtree(run[0], ignore_errors=True)
+    shutil.rmtree(copy, ignore_errors=True)
+    results[name] = rc == 0 and got == len(AC.OUTPUTS)
+
+
+def main():
+    argv = sys.argv[1:]
+    extra = argv[argv.index('--') + 1:] if '--' in argv else []
+    argv = argv[:argv.index('--')] if '--' in argv else argv
+    out, names, env, jobs = None, [], dict(os.environ), 2
+    while argv:
+        a = argv.pop(0)
+        if a == '--out':
+            out = os.path.abspath(argv.pop(0))
+        elif a == '--jobs':
+            jobs = int(argv.pop(0))
+        elif a == '--revision':
+            env['MUIR_QUUX_REVISION'] = argv.pop(0)
+        elif a == '--list':
+            print('\n'.join(MUTANTS))
+            return 0
+        elif a in MUTANTS:
+            names.append(a)
+        else:
+            raise SystemExit(__doc__)
+    if not out:
+        raise SystemExit(__doc__)
+    names = names or list(MUTANTS)
+    results = {}
+    for k in range(0, len(names), jobs):
+        ts = [threading.Thread(target=build, args=(n, out, extra, env, results)) for n in names[k:k + jobs]]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    for n in names:
+        print('%s %s' % (n, 'assembled' if results.get(n) else 'FAILED'))
+    return 0 if all(results.get(n) for n in names) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

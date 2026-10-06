@@ -39,7 +39,8 @@
 # tools/system-check/ (its README), the micro-assembler's checks for
 # revision 14, tools/assembler-check/ (its README), and the comparison of two
 # cold loads, tools/cold-compare with its self-test cold-compare-test
-# (tools/cross-check/README.md).
+# (tools/cross-check/README.md), and the cross build with its native rebuild
+# and their checks, tools/cross-build/ (its README).
 /tools/*
 !/tools/lispm-check
 !/tools/lispm-check-test/
@@ -53,6 +54,7 @@
 !/tools/assembler-check/
 !/tools/cold-compare
 !/tools/cold-compare-test
+!/tools/cross-build/
 /tools/cross-check/__pycache__/
 
 # Working notes for Claude Code, and its agents' worktrees: local, not for the

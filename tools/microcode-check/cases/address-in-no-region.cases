@@ -1,0 +1,26 @@
+; A reference to an address in no region signals ADDRESS-IN-NO-REGION
+; (sys/eh/ehf.lisp), with the address, a locative, and the machine goes on
+; (contract G3 revision 14, 9.2: the page table has no entry for it, and
+; PGF-NO-ENTRY, sys/ucadr/uc-page-fault.lisp, signals the error).  It replaces
+; revision 13's address-past-28-bits: from revision 14 the space is 32 bits,
+; and 2^28 and 2^31 are addresses like any other, here in no region.  Holding,
+; storing or saving such a pointer is harmless: the garbage collector's tests
+; take it as neither oldspace nor extra PDL (TRANS-OLD, EXTRA-PDL-TRAP-1,
+; sys/ucadr/uc-transporter.lisp), so a process switch with it on the stack and
+; a full GC with it in a variable pass.  Each case catches the error by its
+; name; the first is a control, a reference inside a region.  A machine that
+; halts answers none after it.  It needs revision 14.
+(let ((x (list 1 2))) (%p-contents-offset (%make-pointer dtp-locative (%pointer x)) 0)) => 1
+(condition-case (e) (%p-contents-offset (%make-pointer dtp-locative #o-20000000000) 0) (error (list (if (cli:member "ADDRESS-IN-NO-REGION" (mapcar #'string (send e :condition-names)) :test #'string=) :none (send e :condition-names)) (si:%pointer-unsigned (%pointer (cadr (memq ':address (send e :property-list)))))))) => (:NONE 2147483648)
+(condition-case (e) (%p-store-contents (%make-pointer dtp-locative #o2000000000) 5) (error (if (cli:member "ADDRESS-IN-NO-REGION" (mapcar #'string (send e :condition-names)) :test #'string=) :none (send e :condition-names)))) => :NONE
+(condition-case (e) (%p-ldb #o0020 (%make-pointer dtp-locative #o-20000000000)) (error (if (cli:member "ADDRESS-IN-NO-REGION" (mapcar #'string (send e :condition-names)) :test #'string=) :none (send e :condition-names)))) => :NONE
+(condition-case (e) (format nil "~A" (%p-contents-offset (%make-pointer dtp-locative #o-20000000000) 0)) (error (not (null (string-search "which is in no region" (send e :report-string)))))) => T
+; the transporter's map-bits path: such a word read as a locative is taken as
+; no oldspace (its page has no entry, MAP(MD)'s status 0), with no fault
+(let ((a (make-array 2))) (%p-store-tag-and-pointer (%make-pointer-offset dtp-locative a 1) dtp-locative #o-20000000000) (si:%pointer-unsigned (%pointer (%p-contents-as-locative (%make-pointer-offset dtp-locative a 1))))) => 2147483648
+; holding one across a process switch, and storing one and collecting
+(let ((p (%make-pointer dtp-locative #o-20000000000))) (process-sleep 60) (si:%pointer-unsigned (%pointer p))) => 2147483648
+(let ((p (%make-pointer dtp-list #o-20000000000))) (process-sleep 60) (condition-case (e) (car p) (error (if (cli:member "ADDRESS-IN-NO-REGION" (mapcar #'string (send e :condition-names)) :test #'string=) :none (send e :condition-names))))) => :NONE
+(progn (defvar *ainr-p* nil) (setq *ainr-p* (%make-pointer dtp-locative #o-20000000000)) (si:%pointer-unsigned (%pointer *ainr-p*))) => 2147483648
+(progn (si:full-gc) (si:%pointer-unsigned (%pointer *ainr-p*))) => 2147483648
+(+ 1 2) => 3

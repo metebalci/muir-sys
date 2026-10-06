@@ -1,0 +1,19 @@
+; MAKE-COLD in the 40-bit world, on a freshly booted band (in the session of
+; the compile it stopped with the region tables full, docs/building.md): the
+; cold-load generator compiled and loaded here, its QFASLs kept in HOST's home,
+; MAKE-COLD into LOD3 from the served tree's QFASLs (the band is opened
+; read-only, so the writes stay in the run), and the partition's pages copied
+; to HOST's home.  The run's step: native rebuild (cold.img), or check (b)'s
+; generator on the cross build's QFASLs.
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: SYS; SYSDCL QFASL") t) => T
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDPK LISP") t) => T
+(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//n-coldut.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//n-coldut.qfasl") t) => T
+(cold:load-parameters)
+(list cold:word-bits cold:word-bytes cold:blocks-per-page (cold:vmem-native-packed-p)) => (40 5 5 T)
+(qc-file "SYS: COLD; COLDLD LISP" "HOST: //home//lispm//n-coldld.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//n-coldld.qfasl") t) => T
+(qc-file "SYS: COLD; CROSS LISP" "HOST: //home//lispm//n-cross.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//n-cross.qfasl") t) => T
+(cold:cross-make-cold "LOD3")
+(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold.img")

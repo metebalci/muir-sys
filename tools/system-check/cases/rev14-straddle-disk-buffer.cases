@@ -1,0 +1,15 @@
+; lisp: rev14-straddle.lisp
+; Straddle run 3 of 4 (contract G3 revision 14, 10.11): DISK-BUFFER-AREA's next
+; region lies across 2^31, and RQBs are taken there until one's data lie
+; across 2^31; reads of the band into it equal reads into another RQB, and the
+; workloads run.
+(rev14s-word #o224) => 0
+(third (setq *r* (rev14s-straddle si:disk-buffer-area :structure))) => T
+(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) si:disk-buffer-area :structure 3000.)) *rev14s-two31*) => T
+(zerop (remainder (rev14s-align (first *r*) si:disk-buffer-area) si:page-size)) => T
+(not (null (setq *q* (rev14s-rqb-across 2)))) => T
+(rev14s-read-compare *q* 2 200) => 0
+(rev14s-compile-workloads) => T
+(rev14s-workloads) => NIL
+(rev14s-read-compare *q* 2 200) => 0
+(rev14s-word #o224) => 0

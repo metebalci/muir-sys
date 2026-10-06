@@ -11,7 +11,9 @@
 ; give SI:FEATURE-PAGE-FIELD a page whose words 20-24 hold a given name,
 ; packed as the contract packs it, and pass on any machine.
 (si:machine-type) => "QUUX"
-(progn (defun hmt-versions () (with-output-to-string (s) (si:describe-system-versions s))) (defun hmt-line (label v) (let* ((i (string-search label v)) (b (string-reverse-search-char #\return v i))) (substring v (if b (1+ b) 0) (string-search-char #\return v i)))) (defun hmt-column (label v) (let ((line (hmt-line label v))) (string-search-not-char #\space line (+ (string-search label line) (length label))))) (hmt-line "Microcode" (hmt-versions))) => " Microcode 2001"
+; the Microcode line, naming the running microcode's number (it was written
+; as "Microcode 2001", which System 2002 does not print)
+(progn (defun hmt-versions () (with-output-to-string (s) (si:describe-system-versions s))) (defun hmt-line (label v) (let* ((i (string-search label v)) (b (string-reverse-search-char #\return v i))) (substring v (if b (1+ b) 0) (string-search-char #\return v i)))) (defun hmt-column (label v) (let ((line (hmt-line label v))) (string-search-not-char #\space line (+ (string-search label line) (length label))))) (list (string-search "Microcode" (hmt-line "Microcode" (hmt-versions))) (not (null (string-search (format nil "~D" %microcode-version-number) (hmt-line "Microcode" (hmt-versions))))))) => (1 T)
 (si:board-name) => "muir-sim"
 (hmt-line "Machine Type" (hmt-versions)) => " Machine Type QUUX on muir-sim"
 (let ((v (hmt-versions))) (= (hmt-column "Machine Type" v) (hmt-column "Microcode" v))) => T

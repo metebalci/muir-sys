@@ -481,6 +481,19 @@ warm-tables-2
 machine-not-quux-14
 	(call illop)
 
+;; prom-entry-read: the prom's entry (prom, uc-cadr) calls this for its first
+;; read, of the keyboard's status through the device window, with the address
+;; in vma: machine-id is checked first, as reset-devices checks it, and below
+;; revision 14 the machine halts at machine-not-quux-14 (appendix a14.13)
+;; rather than fault on a window the machine does not have.  then the read,
+;; phys-mem-read's.  clobbers m-tem.
+prom-entry-read
+	((m-tem) (byte-field 20 20) machine-id)
+	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-14)
+	((m-tem) (byte-field 14 4) machine-id)
+	(jump-less-than m-tem (a-constant 14.) machine-not-quux-14)
+	(jump phys-mem-read)
+
 ;; band-not-revision-14: disk-restore-1 comes here when the band is revision
 ;; 13's, format 2000, 2001 or 2002 (appendix a14.13): its fixed areas are
 ;; where revision 13's cold load put them, the page table and
@@ -968,7 +981,15 @@ DSR-MASK-BIT
 	((vma) (byte-field 27. 5) m-tem)
 	(call-xct-next phys-mem-read)
        ((vma) add vma (a-constant inc-band-bitmap-buffer-origin))
-	((m-tem) a-walk-index)
+;	((m-tem) a-walk-index)
+	;; the bit's place in its word from a-mask-k, as the word's is.  it was
+	;; taken from a-walk-index, which is the page's index while
+	;; disk-save-regionwise-subr saves, but its region's first page's while
+	;; build-region-entries restores an incremental band (a-mask-k being that
+	;; plus the page's place in its region): every page but a region's
+	;; first got another page's bit, and the restored band took pages from
+	;; the wrong slots.
+	((m-tem) a-mask-k)
 	((m-tem) (byte-field 5 0) m-tem)
 	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem)
        ((m-tem) (byte-field 1 0) md)
