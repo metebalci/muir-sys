@@ -51,6 +51,29 @@ Every change to a source file carries a comment in that file saying why.
   regions stay below `virtual-memory-size`, which is capped at the page of
   `a-memory-virtual-address` (`:1246-1247`), measured 16514048 words, under
   2^24 = 16777216, on System 1003's band.
+- **After `SET-MAR`, every write into the range traps, not only the first**
+  (`restore-mar-mode-from-foothold`, `sys/eh/eh.lisp:300-316`, called by
+  `fh-applier`, `fh-applier-no-restart`, `fh-evaler` and
+  `fh-stream-binding-evaler` when a throw leaves them, `:867`, `:880`,
+  `:910`, `:956`). The error handler signals the MAR's break in the erring
+  stack group through `run-sg`, which turns that stack group's MAR off while
+  the handlers run (`:387`, MIT's line, marked "why??"); only
+  `sg-restore-state`, on the return to the error handler, turned it back on.
+  A break proceeded (the debugger's Resume, a handler returning
+  `:no-action`) kept the MAR on, but one left by a throw (`condition-case`,
+  an abort) left it off for good: the next write into the range did not
+  trap, `mar-mode` said `NIL`, and `%MAR-LOW`, `%MAR-HIGH` and the pages'
+  trap status stayed set. Neither the microcode nor `set-mar` re-arms
+  anything: `PGF-MAR` (`sys/ucadr/uc-page-fault.lisp:456-470`) leaves the
+  page's status as it is and takes the break by the stack group's MAR mode
+  alone. The FH- functions now put back the MAR mode saved in their foothold
+  as they are thrown through. `tools/system-check`'s check `mar-range` has
+  three new cases: System 1003 gives `(T NIL NIL)` for two writes left by
+  throws and `mar-mode`, where `(T T :WRITE)` is expected, and `(T T NIL)`
+  for a proceeded break then two left by throws; the control, two proceeded
+  breaks, passes on both. Its second case, a write outside the range, passed
+  on System 1003 only because the MAR was off by then. `main` has the same
+  code (`run-sg` and the FH- functions in `sys/eh/eh.lisp`).
 - **`%POINTER-UNSIGNED` gives N + 2^25 for a negative N**
   (`sys/sys/qmisc.lisp:6-14`). MIT's added the sign bit shifted left once,
   whose value is negative (-2^25), and so gave N - 2^25: -1 gave -33554433,

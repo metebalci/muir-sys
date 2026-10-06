@@ -296,6 +296,24 @@ before finding the data to be popped."
 				(AREF RP (1+ PP))
 				(AREF RP PP))
       (INCF PP 2))))
+
+;;; Put back the MAR mode that the running stack group had when its state was
+;;; saved in its current foothold (SG-FOOTHOLD-DATA), read from the saved
+;;; M-FLAGS as SG-SAVE-STATE laid them out (the leader's words from the
+;;; FOOTHOLD frame's AP + 1 on, two each).  The FH- functions call it when a
+;;; throw leaves them.  RUN-SG turns the stack group's MAR off while they run,
+;;; and only SG-RESTORE-STATE, on the return to the error handler, turned it
+;;; back on: a handler of the MAR's break that left by a throw (condition-case,
+;;; an abort) left the MAR off, so after SET-MAR only the first write into the
+;;; range trapped, while MAR-MODE said NIL and %MAR-LOW, %MAR-HIGH and the
+;;; pages' trap status stayed set.
+(defun restore-mar-mode-from-foothold ()
+  (let ((ap (sg-foothold-data current-stack-group))
+	(rp (sg-regular-pdl current-stack-group)))
+    (when (and (fixnump ap) (eq (aref rp ap) #'foothold))
+      (setq %mode-flags
+	    (%logdpb (ldb %%m-flags-mar-mode (aref rp (+ ap 1 (* 2 sg-saved-m-flags))))
+		     %%m-flags-mar-mode %mode-flags)))))
 
 ;;;; Low level routines for manipulating the stacks of a stack group.
 
@@ -846,6 +864,7 @@ This is a high-level function, in that SG's state is preserved."
       ;; This is in case the catch catches.
       (STACK-GROUP-RESUME SG 'LOSE))
     ;; This is reached only if we throw through this frame.
+    (restore-mar-mode-from-foothold)		;the mar as it was, after a throw
     (SETF (SG-FOOTHOLD-DATA CURRENT-STACK-GROUP) PREV-FH)
     (AND EH-P (FREE-SECOND-LEVEL-ERROR-HANDLER-SG SG))))
 
@@ -858,6 +877,7 @@ This is a high-level function, in that SG's state is preserved."
   (UNWIND-PROTECT
     (STACK-GROUP-RESUME SG (MULTIPLE-VALUE-LIST (APPLY FN ARGS)))
     ;; This is reached only if we throw through this frame.
+    (restore-mar-mode-from-foothold)		;the mar as it was, after a throw
     (SETF (SG-FOOTHOLD-DATA CURRENT-STACK-GROUP) PREV-FH)
     (AND EH-P (FREE-SECOND-LEVEL-ERROR-HANDLER-SG SG))))
 
@@ -887,6 +907,7 @@ This is a high-level function, in that SG's state is preserved."
 	    (MULTIPLE-VALUE-LIST (EVAL FORM)))))
       ;; This is in case the catch catches.
       (STACK-GROUP-RESUME SG 'LOSE))
+    (restore-mar-mode-from-foothold)		;the mar as it was, after a throw
     (SETF (SG-FOOTHOLD-DATA CURRENT-STACK-GROUP) PREV-FH)
     (AND EH-P (FREE-SECOND-LEVEL-ERROR-HANDLER-SG SG))))
 
@@ -932,6 +953,7 @@ This is a high-level function, in that SG's state is preserved."
 	    (T (STACK-GROUP-RESUME SG 'LOSE))))
     (IF REGPDL-SEGMENT (FREE-SAVED-PDL-SEGMENT REGPDL-SEGMENT))
     (IF SPECPDL-SEGMENT (FREE-SAVED-PDL-SEGMENT SPECPDL-SEGMENT))
+    (restore-mar-mode-from-foothold)		;the mar as it was, after a throw
     (SETF (SG-FOOTHOLD-DATA CURRENT-STACK-GROUP) PREV-FH)
     (AND EH-P (FREE-SECOND-LEVEL-ERROR-HANDLER-SG SG))))
 
