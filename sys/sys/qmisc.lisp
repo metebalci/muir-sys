@@ -805,12 +805,43 @@ The symbol :UNBOUND-FUNCTION is treated specially."
 
 ;;;; MAR-hacking functions
 
-(DEFUN CLEAR-MAR ()
+;;; FUNCTION is called with the address of each page from LOW's to HIGH's,
+;;; once each, the pages counted from the difference of the two pages'
+;;; addresses; with none when HIGH is below LOW, as when the mar is off (LOW
+;;; -1, HIGH -2).  The old loops in CLEAR-MAR and SET-MAR stepped #o200 words
+;;; from LOW and stopped past HIGH, half a page on the CADR: when HIGH lay in
+;;; the first 127 words of its page, the last step could fall in the page
+;;; before, depending on LOW modulo #o200, so HIGH's page was never given the
+;;; mar's status and a write there was not trapped.
+(defun map-mar-pages (function low high)
+  (unless (%pointer-lessp high low)
+    (do ((p (logand low (- page-size)) (%pointer-plus p page-size))
+	 ;; the pages: the difference's page number, of the pointer's width
+	 (n (1+ (ldb (byte (- (byte-size %%q-pointer) (byte-size %%q-pointer-within-page))
+			   (byte-size %%q-pointer-within-page))
+		     (%pointer-difference (logand high (- page-size))
+					  (logand low (- page-size)))))
+	    (1- n)))
+	((zerop n))
+      (funcall function p))))
+
+;(DEFUN CLEAR-MAR ()
+;  "Clear out the mar setting."
+;  (DO ((P %MAR-LOW (+ P #o200)))
+;      ((> P %MAR-HIGH)) ;TROUBLE WITH NEGATIVE NUMBERS HERE!
+;    (%CHANGE-PAGE-STATUS P NIL (LDB %%REGION-MAP-BITS
+;				    (REGION-BITS (%REGION-NUMBER P)))))
+;  (SETQ %MAR-LOW -1
+;	%MAR-HIGH -2
+;	%MODE-FLAGS (%LOGDPB 0 %%M-FLAGS-MAR-MODE %MODE-FLAGS))
+;  NIL)
+(defun clear-mar ()
   "Clear out the mar setting."
-  (DO ((P %MAR-LOW (+ P #o200)))
-      ((> P %MAR-HIGH)) ;TROUBLE WITH NEGATIVE NUMBERS HERE!
-    (%CHANGE-PAGE-STATUS P NIL (LDB %%REGION-MAP-BITS
-				    (REGION-BITS (%REGION-NUMBER P)))))
+  ;; each page of the range once (map-mar-pages), the last one too
+  (map-mar-pages #'(lambda (p)
+		     (%change-page-status p nil (ldb %%region-map-bits
+						     (region-bits (%region-number p)))))
+		 %mar-low %mar-high)
   (SETQ %MAR-LOW -1
 	%MAR-HIGH -2
 	%MODE-FLAGS (%LOGDPB 0 %%M-FLAGS-MAR-MODE %MODE-FLAGS))
@@ -826,12 +857,21 @@ N-WORDS defaults to 1.  CYCLE-TYPE is T, :READ or :WRITE."
 		     (:WRITE 2)
 		     ((T) 3)))
   (CLEAR-MAR)					;Clear old mar
-  (SETQ %MAR-HIGH (+ (1- N-WORDS) (SETQ %MAR-LOW (%POINTER LOCATION))))
+;  (SETQ %MAR-HIGH (+ (1- N-WORDS) (SETQ %MAR-LOW (%POINTER LOCATION))))
+;  ;; If MAR'ed pages are in core, set up their traps
+;  (DO ((P %MAR-LOW (+ P #o200)))
+;      ((> P %MAR-HIGH))
+;    (%CHANGE-PAGE-STATUS P NIL (DPB 6 #o0604 (LDB %%REGION-MAP-BITS  ;CHANGE MAP-STATUS
+;						  (REGION-BITS (%REGION-NUMBER P))))))
+  ;; the last word's address by %pointer-plus, a fixnum also from 2^24 up, and
+  ;; each page of the range once (map-mar-pages): the old loop could miss
+  ;; the page holding the last word
+  (setq %mar-high (%pointer-plus (setq %mar-low (%pointer location)) (1- n-words)))
   ;; If MAR'ed pages are in core, set up their traps
-  (DO ((P %MAR-LOW (+ P #o200)))
-      ((> P %MAR-HIGH))
-    (%CHANGE-PAGE-STATUS P NIL (DPB 6 #o0604 (LDB %%REGION-MAP-BITS  ;CHANGE MAP-STATUS
-						  (REGION-BITS (%REGION-NUMBER P))))))
+  (map-mar-pages #'(lambda (p)
+		     (%change-page-status p nil (dpb 6 #o0604 (ldb %%region-map-bits	;change map-status
+								   (region-bits (%region-number p))))))
+		 %mar-low %mar-high)
   (SETQ %MODE-FLAGS (%LOGDPB CYCLE-TYPE %%M-FLAGS-MAR-MODE %MODE-FLAGS))	;Energize!
   T)
 

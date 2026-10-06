@@ -1,0 +1,18 @@
+; SET-MAR and CLEAR-MAR over a range of words (sys/sys/qmisc.lisp,
+; SI::MAP-MAR-PAGES): each page from the range's first word's to its last
+; word's is visited once.  The old loops stepped #o200 words from the first
+; word and stopped past the last: on the CADR's 256-word pages they missed
+; the page holding the last word when that word lay in the page's first 127
+; words and the step from the first word passed over it, depending on the
+; first word modulo 128.  Here the range runs from 28 words below a page
+; boundary to 50 words past it, so the old loop visited only the first page,
+; and a write of the last word did not trap while its page was in core.
+; Check a source change with
+;   --compile --files sys/sys/qmisc.lisp,tools/system-check/lisp/mar-range.lisp
+; The first two cases and the last are controls: a write of the first word
+; traps, a write outside the range does not, and none once the MAR is
+; cleared.  System 1003 without the change fails the third.
+(progn (mar-set 100. 20.) (mar-trap-p 100.)) => T
+(prog1 (mar-trap-p 130.) (si:clear-mar)) => NIL
+(let ((low (- (mar-index (mar-page-after 100.)) 28.))) (mar-set low 79.) (prog1 (mar-trap-p (+ low 78.)) (si:clear-mar))) => T
+(let ((low (- (mar-index (mar-page-after 100.)) 28.))) (mar-set low 79.) (si:clear-mar) (or (mar-trap-p low) (mar-trap-p (+ low 78.)))) => NIL
