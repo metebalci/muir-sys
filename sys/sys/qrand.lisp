@@ -2429,20 +2429,37 @@ NIL if the user was asked and said no."
   "Call FUNCTION on every symbol in the world, regardless of packages."
   (FUNCALL FUNCTION NIL)			;these two are stored elsewhere
   (FUNCALL FUNCTION T)
+  ;; the generational collector (contract g3 step 2, clarification 12): a
+  ;; region of nr-sym or worthless-symbol-area, static structure areas, begins
+  ;; with its first-object table, so its symbols start at the table's end, not
+  ;; at the region's origin.  walked from the origin, the table's header and
+  ;; entries were taken for symbols, which pkg-initialize, at a cold load's
+  ;; first boot, would intern and store nil into; an empty region gave
+  ;; floor(table/5) false symbols.
   (DO ((REGION (AREA-REGION-LIST NR-SYM) (REGION-LIST-THREAD REGION)))
       ((MINUSP REGION))
-    (DO ((SYM (%MAKE-POINTER DTP-SYMBOL (REGION-ORIGIN REGION))
-	      (%MAKE-POINTER-OFFSET DTP-SYMBOL SYM LENGTH-OF-ATOM-HEAD))
-         (CT (TRUNCATE (REGION-FREE-POINTER REGION) LENGTH-OF-ATOM-HEAD) (1- CT)))
-        ((ZEROP CT))
+;    (DO ((SYM (%MAKE-POINTER DTP-SYMBOL (REGION-ORIGIN REGION))
+;	      (%MAKE-POINTER-OFFSET DTP-SYMBOL SYM LENGTH-OF-ATOM-HEAD))
+;         (CT (TRUNCATE (REGION-FREE-POINTER REGION) LENGTH-OF-ATOM-HEAD) (1- CT)))
+;        ((ZEROP CT))
+    (do* ((start (region-first-object-table-end region))
+	  (sym (%make-pointer-offset dtp-symbol (region-origin region) start)
+	       (%make-pointer-offset dtp-symbol sym length-of-atom-head))
+	  (ct (truncate (- (region-free-pointer region) start) length-of-atom-head) (1- ct)))
+	 ((<= ct 0))
       (FUNCALL FUNCTION SYM)))
   (WHEN (BOUNDP 'WORTHLESS-SYMBOL-AREA)
     (DO ((REGION (AREA-REGION-LIST WORTHLESS-SYMBOL-AREA) (REGION-LIST-THREAD REGION)))
 	((MINUSP REGION))
-      (DO ((SYM (%MAKE-POINTER DTP-SYMBOL (REGION-ORIGIN REGION))
-		(%MAKE-POINTER-OFFSET DTP-SYMBOL SYM LENGTH-OF-ATOM-HEAD))
-	   (CT (TRUNCATE (REGION-FREE-POINTER REGION) LENGTH-OF-ATOM-HEAD) (1- CT)))
-	  ((ZEROP CT))
+;      (DO ((SYM (%MAKE-POINTER DTP-SYMBOL (REGION-ORIGIN REGION))
+;		(%MAKE-POINTER-OFFSET DTP-SYMBOL SYM LENGTH-OF-ATOM-HEAD))
+;	   (CT (TRUNCATE (REGION-FREE-POINTER REGION) LENGTH-OF-ATOM-HEAD) (1- CT)))
+;	  ((ZEROP CT))
+      (do* ((start (region-first-object-table-end region))
+	    (sym (%make-pointer-offset dtp-symbol (region-origin region) start)
+		 (%make-pointer-offset dtp-symbol sym length-of-atom-head))
+	    (ct (truncate (- (region-free-pointer region) start) length-of-atom-head) (1- ct)))
+	   ((<= ct 0))
 	(FUNCALL FUNCTION SYM)))))
 
 (DEFUN FOLLOW-STRUCTURE-FORWARDING (X)

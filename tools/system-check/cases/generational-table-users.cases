@@ -1,0 +1,46 @@
+; The code that found a region's first object at its origin, where the
+; first-object table now is (contract G3 step 2, 6.1; clarifications 11 and
+; 12; the review of the first-object table, section 5, P2-P5;
+; lisp/generational-table-users.lisp).  It needs step 2's microcode, whose
+; MAKE-REGION writes the tables, and step 2's Lisp: on a band built with it
+; (E3's) every case holds; the cold-load regions of a band built before have
+; no tables, so there the cases on NR-SYM's and CHAOS-BUFFER-AREA's own
+; regions do not apply.  Its cases run in USER, so the system's internal names
+; are written SI:.  The planted controls, each given after the check's own
+; file: -plant-disk.lisp fails P2 ("... not on a page boundary"), P2 (b) and
+; P3 (the refusals NIL); -plant-mapatoms.lisp fails P4 (visits that are not
+; symbols); -plant-chaos.lisp fails P5 (the walk signals or visits other
+; words).  Each case uses up regions of a system area: run it on a copy.
+
+; P3 first, before the cases below use up DISK-BUFFER-AREA: PAGE-RQB, made
+; when the band was built, lies on a page boundary
+(gtu-p3-page-rqb) => 0
+; P2, the split retry: (RQB-BUFFER in the RQB's region, a new one, the filled
+; one used up, RQB-BUFFER on a page boundary, the data on one, the table
+; checker's failures in each region)
+(gtu-p2) => (T T T T T NIL NIL)
+; P2 (b): an RQB made off a page boundary is refused by WIRE-DISK-RQB, one of
+; MAKE-DISK-RQB's is wired
+(gtu-p2b) => (T T T)
+; P3: MIT's form for PAGE-RQB in a fresh table region lies off a page
+; boundary by the table's words, and WIRE-PAGE-RQB refuses it; MAKE-PAGE-RQB's
+; array lies on one and is wired
+(gtu-p3) => (T T T 0 T NIL)
+; the offset MIT's form gave (the review predicts 17: a table of a 16-page
+; region), recorded
+*gtu-p3-old-offset*
+; P4, MAPATOMS-NR-SYM: a symbol made in a fresh region of NR-SYM lies at its
+; table's end; then every visit in NR-SYM and in WORTHLESS-SYMBOL-AREA is a
+; symbol, as many as a walk from each region's table end finds, NIL and T
+; elsewhere, the fresh symbol among them
+(gtu-p4-fresh-region) => (T T T)
+(gtu-p4) => (0 0 T T 2 T)
+; P5, PRINT-INT-PKT-STATUS: in a temporary area of 40 buffers made twice, the
+; area reset between, and in CHAOS-BUFFER-AREA as the boot left it: one
+; region, 40 buffers from the table's end, the walk visiting those and no
+; other word, each an ART-16B array, the free pointer inside the region
+(gtu-p5-scratch) => (1 40 T T T)
+(gtu-p5-check chaos:chaos-buffer-area) => (1 40 T T T)
+; CHAOS-BUFFER-AREA's free pointer, its region's length and its table's end
+; (the review's measurement 3), recorded
+(gtu-p5-sizes chaos:chaos-buffer-area)

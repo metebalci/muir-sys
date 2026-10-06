@@ -2199,7 +2199,13 @@ Calling this function with ENABLE-P of T will have the same effect."
     (LET* ((REGION (SYS:AREA-REGION-LIST CHAOS-BUFFER-AREA))
 	   (RO (SYS:REGION-ORIGIN REGION))
 	   (RFP (SYS:REGION-FREE-POINTER REGION)))
-      (DO ((Q-OFFSET 0 (+ Q-OFFSET (+ 3 128. (LENGTH CHAOS-BUFFER-LEADER-QS)))))
+;      (DO ((Q-OFFSET 0 (+ Q-OFFSET (+ 3 128. (LENGTH CHAOS-BUFFER-LEADER-QS)))))
+      ;; the generational collector (contract g3 step 2, clarification 12):
+      ;; the area's region, a temporary structure region, begins with its
+      ;; first-object table, so its buffers start at the table's end; walked
+      ;; from the origin, the first "packet" lay inside the table.
+      (do ((q-offset (si:region-first-object-table-end region)
+		     (+ q-offset (+ 3 128. (length chaos-buffer-leader-qs)))))
 	  ((>= Q-OFFSET RFP))
 	(LET ((PKT (%MAKE-POINTER DTP-ARRAY-POINTER
 				  (+ RO Q-OFFSET (+ 2 (LENGTH CHAOS-BUFFER-LEADER-QS))))))

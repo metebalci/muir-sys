@@ -613,8 +613,31 @@ objects young) changed the save, the band's formats and the boot.
   are paired by region number and place and compared word for word, so the
   save stays right; a tenured flip moves most pages, and the save would gain
   nothing.
+- **What needs a page boundary pads to one** (clarification 11; the review
+  of the first-object table): a region of `DISK-BUFFER-AREA` begins with its
+  first-object table, so a fresh one's free pointer lies past the table, off
+  a page boundary, where MIT's code found its first object. `MAKE-DISK-RQB`
+  (`sys/io/disk.lisp:291`) gives back its three arrays when `RQB-BUFFER` is
+  not on a page boundary, pads the region to one with an `ART-32B` filler
+  (`DISK-BUFFER-REGION-PAD-TO-PAGE`, `:325`) and makes the RQB again: before,
+  every RQB made in a fresh region stopped at "... not on a page boundary",
+  the incremental save's compare and the file device's ring among them.
+  `PAGE-RQB` is made the same way (`MAKE-PAGE-RQB`, `:2152`), where it lay 17
+  words past a boundary, across two pages of which `WIRE-PAGE-RQB` wired the
+  first alone. `WIRE-DISK-RQB` (`:402`) and `WIRE-PAGE-RQB` (`:2165`) refuse
+  an RQB off a page boundary before any transfer. The `UNIBUS-CHANNEL`
+  resource (`sys/io/unibus.lisp:44`) says why QUUX never needs the same.
+- **Walkers from a region's origin start after its table** (clarification
+  12): `MAPATOMS-NR-SYM` (`sys/sys/qrand.lisp:2428`), which a cold load's
+  first boot runs in `PKG-INITIALIZE`, took the table's header and entries
+  of each region of `NR-SYM` and `WORTHLESS-SYMBOL-AREA` for symbols; it and
+  `PRINT-INT-PKT-STATUS` (`sys/network/chaos/chsncp.lisp:2207`) now start
+  at `REGION-FIRST-OBJECT-TABLE-END`.
 - **Checks**: `tools/system-check` gains `generational-collector`, with the
   table checker and the reclaim checker and three files of planted partial
   fixes, and `save/`, the save checks (C14, C25-C29's Lisp parts), each a
   session, a `DISK-SAVE` and a boot, with two files of planted partial fixes
-  (its README); they need step 2's microcode and band.
+  (its README); they need step 2's microcode and band. And
+  `generational-table-users` (P2-P5 of the review: the split retry, an RQB
+  off a page boundary refused, `PAGE-RQB`, `MAPATOMS-NR-SYM`, the Chaosnet
+  buffers), with three files planting the functions as they were.

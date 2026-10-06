@@ -278,7 +278,23 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 	  (LET ((RN (%REGION-NUMBER RQB-BUFFER)))
 	    (RETURN-ARRAY RQB-BUFFER)
 	    (%USE-UP-REGION RN))
-	  (GO L)))
+;	  (GO L)))
+	  (go l))
+	;; the generational collector (contract g3 step 2, 6.1; clarification
+	;; 11): a region of disk-buffer-area begins with its first-object
+	;; table, so in a fresh region rqb-buffer lies past the table, off a
+	;; page boundary, and the check below stopped every rqb made there
+	;; ("... has free pointer ..., which is not on a page boundary").  the
+	;; three arrays are given back, last first, the region is padded up to
+	;; the boundary (disk-buffer-region-pad-to-page), and the rqb is made
+	;; again, as the split retry above does.
+	(unless (zerop (logand (1- page-size) (%pointer rqb-buffer)))
+	  (let ((region (%region-number rqb-buffer)))
+	    (return-array rqb)
+	    (return-array rqb-8-bit-buffer)
+	    (return-array rqb-buffer)
+	    (disk-buffer-region-pad-to-page region))
+	  (go l)))
     (MAKE-SURE-FREE-POINTER-OF-REGION-IS-AT-PAGE-BOUNDARY
       'DISK-BUFFER-AREA (%REGION-NUMBER RQB))
     (%P-STORE-CONTENTS-OFFSET RQB RQB-BUFFER 1)	;Displace RQB-BUFFER to RQB
@@ -298,6 +314,25 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
     (SETF (ARRAY-LEADER RQB %DISK-RQ-LEADER-BUFFER) RQB-BUFFER)
     (SETF (ARRAY-LEADER RQB %DISK-RQ-LEADER-8-BIT-BUFFER) RQB-8-BIT-BUFFER)
     RQB))
+
+;;; the generational collector (contract g3 step 2, 6.1; clarification 11):
+;;; what must start on a page boundary in disk-buffer-area (an rqb, page-rqb)
+;;; is made, and when it is not on one, given back and made again after this
+;;; pads its region up to the boundary.  the filler is an art-32b array that
+;;; ends on the boundary: it is unboxed and holds no page's first word, so the
+;;; region's first-object table gets no entry for it, and the collector
+;;; nothing to scan.  a region wastes at most a page this way.
+(defun disk-buffer-region-pad-to-page (region)
+  "Cons an ART-32B filler in DISK-BUFFER-AREA from REGION's free pointer up to the next
+page boundary.  If the allocator puts it in another region, one with room for less than
+an RQB's first array, that region is used up, so that the next try passes it by."
+  (let ((gap (logand (- (region-free-pointer region)) (1- page-size))))
+    (unless (zerop gap)
+      (let ((filler (if (<= (1- gap) %array-max-short-index-length)
+			(make-array (1- gap) :type 'art-32b :area disk-buffer-area)
+		      (make-array (- gap 2) :type 'art-32b :area disk-buffer-area))))
+	(unless (= (%region-number filler) region)
+	  (%use-up-region (%region-number filler)))))))
 
 ;;; Use this to recover if the free pointer is off a page boundary.
 (DEFUN %USE-UP-REGION (REGION-NUMBER)
@@ -359,6 +394,15 @@ Use RETURN-DISK-RQB to release the RQB for re-use."
 			       (low (%pointer-plus rqb (- (+ (array-leader-length rqb) 2))))
 			       (high (%pointer-plus rqb (+ 1 long-array-flag
 							   (floor (array-length rqb) 2)))))
+  ;; the generational collector (contract g3 step 2, clarification 11): the
+  ;; rqb's data, its last pages, must start on a page boundary, since each ccw
+  ;; below names a page by its address truncated.  make-disk-rqb pads its
+  ;; region to one; an rqb that is not on one is refused before any transfer,
+  ;; rather than handing the disk frames that hold other words.
+  (and wire-p
+       (not (zerop (logand (1- page-size)
+			   (%pointer-plus high (- (* page-size (array-leader rqb %disk-rq-leader-n-pages)))))))
+       (ferror nil "The data of RQB ~S do not start on a page boundary" rqb))
   ;; each page from LOW's up to HIGH, counted, the address stepped by
   ;; %pointer-plus (the loop ended by a signed compare, at once past 2^31)
   (do ((loc (logand low (- page-size)) (%pointer-plus loc page-size))
@@ -2097,10 +2141,34 @@ Use SI:RECEIVE-BAND or SI:TRANSMIT-BAND for that."
 (defvar page-rqb-size (- page-size page-rqb-header-words (floor %disk-rq-ccw-list 2))) ;number of ccws
 ;(DEFVAR PAGE-RQB
 ;	(MAKE-ARRAY (* 2 (1- PAGE-SIZE)) :TYPE 'ART-16B :AREA DISK-BUFFER-AREA))
-(defvar page-rqb
-	(make-array (* 2 (- page-size page-rqb-header-words)) :type 'art-16b :area disk-buffer-area))
+;(defvar page-rqb
+;	(make-array (* 2 (- page-size page-rqb-header-words)) :type 'art-16b :area disk-buffer-area))
+;;; the generational collector (contract g3 step 2, clarification 11): page-rqb
+;;; is made on a page boundary, as make-disk-rqb's arrays are.  made right after
+;;; disk-buffer-area, in a region that begins with its first-object table, it
+;;; lay 17 words past one, across two pages, of which wire-page-rqb wired the
+;;; first alone, and a long run of page-in-words handed the disk a ccw list
+;;; running off its frame.
+(defun make-page-rqb ()
+  "An array of one page in DISK-BUFFER-AREA, starting on a page boundary, for PAGE-RQB."
+  (do ((rqb (make-array (* 2 (- page-size page-rqb-header-words)) :type 'art-16b
+			:area disk-buffer-area)
+	    (make-array (* 2 (- page-size page-rqb-header-words)) :type 'art-16b
+			:area disk-buffer-area)))
+      ((zerop (logand (1- page-size) (%pointer rqb))) rqb)
+    (let ((region (%region-number rqb)))
+      (return-array rqb)
+      (disk-buffer-region-pad-to-page region))))
+
+(defvar page-rqb (make-page-rqb))
 
 (DEFUN WIRE-PAGE-RQB () 
+  ;; the generational collector (clarification 11): the ccws lie in page-rqb's
+  ;; one page, whose first frame alone is wired, so it must start on a page
+  ;; boundary; refused before any transfer
+  (unless (zerop (logand (1- page-size) (%pointer page-rqb)))
+    (ferror nil "PAGE-RQB, at ~O, does not start on a page boundary"
+	    (%pointer-unsigned (%pointer page-rqb))))
   (WIRE-PAGE (%POINTER PAGE-RQB))
   (LET ((PADR (+ (%PHYSICAL-ADDRESS PAGE-RQB)
 ;		 1

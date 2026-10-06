@@ -34,6 +34,13 @@
 ;;; This code stores such inside wired-down 1-page-long ART-32B arrays.
 ;;; These indices start at 1 to allow for the presence of an array header.
 
+;;; the generational collector (contract g3 step 2, clarification 11): a
+;;; channel is wired a page at a time from its first word, so it needs a page
+;;; boundary, which a fresh region of disk-buffer-area, beginning with its
+;;; first-object table, does not give (make-disk-rqb pads to one).  quux has
+;;; no unibus, and nothing makes a channel on it: its one maker,
+;;; sys/io1/serial.lisp, is the cadr's unibus serial line.  a channel made on
+;;; quux would need that padding (disk-buffer-region-pad-to-page) first.
 (DEFRESOURCE UNIBUS-CHANNEL (SIZE)
   :CONSTRUCTOR (MAKE-ARRAY SIZE ':TYPE 'ART-32B ':AREA DISK-BUFFER-AREA))
 
