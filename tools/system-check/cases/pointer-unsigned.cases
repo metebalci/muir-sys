@@ -1,0 +1,17 @@
+; SI:%POINTER-UNSIGNED reads a fixnum's 25-bit pointer field as an unsigned
+; number (sys/sys/qmisc.lisp): a negative N is N + 2^25.  MIT's added the
+; shifted sign bit, whose value is negative (-2^24, so the term is -2^25),
+; which made a negative N more negative, N - 2^25: -1 gave -33554433 and
+; A-MEMORY-VIRTUAL-ADDRESS, -263168, gave -33817600.
+; Check a source change with --compile --files sys/sys/qmisc.lisp
+; The first three cases are controls: a non-negative N is itself, and
+; SI:%MAKE-POINTER-UNSIGNED, the inverse, gives the negative fixnum for an
+; unsigned number from 2^24 up.  System 1003 without the change fails the
+; other four.
+(si:%pointer-unsigned 5) => 5
+(si:%pointer-unsigned most-positive-fixnum) => 16777215
+(si:%make-pointer-unsigned (+ (expt 2 24.) 5)) => -16777211
+(si:%pointer-unsigned -1) => 33554431
+(si:%pointer-unsigned most-negative-fixnum) => 16777216
+(si:%pointer-unsigned (si:%make-pointer-unsigned (+ (expt 2 24.) 5))) => 16777221
+(si:%pointer-unsigned si:a-memory-virtual-address) => 33291264

@@ -6,7 +6,11 @@
 (DEFUN %POINTER-UNSIGNED (N)
   "Convert the fixnum N, regarded as unsigned number, into number (maybe big) with same value.
 If the argument is negative (if regarded as signed), it is expanded into a bignum."
-  (IF (MINUSP N) (+ N (ASH (%LOGDPB 1 %%Q-BOXED-SIGN-BIT 0) 1)) N))
+;  (IF (MINUSP N) (+ N (ASH (%LOGDPB 1 %%Q-BOXED-SIGN-BIT 0) 1)) N))
+  ;; the sign bit's value is -2^24, so the shifted term is -2^25: adding it
+  ;; made a negative N more negative (-1 gave -33554433, a-memory-virtual-address
+  ;; -33817600), where N + 2^25 is wanted; subtracting it gives that.
+  (if (minusp n) (- n (ash (%logdpb 1 %%q-boxed-sign-bit 0) 1)) n))
 
 (DEFUN %MAKE-POINTER-UNSIGNED (N)
   "Convert N to a fixnum which, regarded as unsigned, has same value as N.

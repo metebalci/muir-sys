@@ -12,8 +12,8 @@ Every change to a source file carries a comment in that file saying why.
   changes (below), and keeps the number 1001 until it is released (it
   becomes 1002 then).
 - **`SET-MAR` and `CLEAR-MAR` reach the page holding the range's last word**
-  (`map-mar-pages`, `sys/sys/qmisc.lisp:808-826`; `clear-mar`, `:838-848`;
-  `set-mar`, `:860-875`). Both stepped `#o200` words from the range's first
+  (`map-mar-pages`, `sys/sys/qmisc.lisp:812-830`; `clear-mar`, `:842-852`;
+  `set-mar`, `:864-879`). Both stepped `#o200` words from the range's first
   word and stopped past its last: on the CADR's 256-word pages, when the last
   word lay in the first 127 words of a later page, the last step could fall
   in the page before, depending on the first word modulo 128, so that page
@@ -51,6 +51,21 @@ Every change to a source file carries a comment in that file saying why.
   regions stay below `virtual-memory-size`, which is capped at the page of
   `a-memory-virtual-address` (`:1246-1247`), measured 16514048 words, under
   2^24 = 16777216, on System 1003's band.
+- **`%POINTER-UNSIGNED` gives N + 2^25 for a negative N**
+  (`sys/sys/qmisc.lisp:6-14`). MIT's added the sign bit shifted left once,
+  whose value is negative (-2^25), and so gave N - 2^25: -1 gave -33554433,
+  and `a-memory-virtual-address`, -263168, gave -33817600. It now subtracts
+  it, as `main` does (`sys/sys/qrand.lisp` there). Its callers on this
+  branch take region origins, lengths and free pointers
+  (`region-origin-true-value`, `region-true-length` and
+  `region-true-free-pointer`, `sys/sys/qmisc.lisp`, with `find-max-addr`,
+  `estimate-dump-size`, `describe-region`, `room`, `lowest-address-in-area`,
+  `peek-areas-region-display`, `gc-get-space-sizes` and
+  `gc-reclaim-oldspace`), and none is affected in practice: on System 1003's
+  band no region has a negative origin, and none of its 101 regions in use a
+  negative length or free pointer. `tools/system-check`'s new check
+  `pointer-unsigned`: System 1003 fails four cases (negative arguments) and
+  passes the three controls; with the change all seven pass.
 - **`%FINDCORE` returns a fixnum on the CADR, as it did**, and needs no change.
   QUUX's line found its `%FINDCORE` returning FINDCORE's bare `M-B` (data type
   0), which `PAGE-IN-WORDS` multiplied and so halted in `ILLOP`. The CADR's
