@@ -8,7 +8,9 @@ Every change to a source file carries a comment in that file saying why.
 
 - **The system number is 1004** (`sys/patch/system.patch-directory`,
   `sys/patch/system-1004.patch-directory`), now that System 1003 is released,
-  so that no band built from this branch calls itself 1003.
+  so that no band built from this branch calls itself 1003. The microcode
+  changes (below), and keeps the number 1001 until it is released (it
+  becomes 1002 then).
 - **`SET-MAR` and `CLEAR-MAR` reach the page holding the range's last word**
   (`map-mar-pages`, `sys/sys/qmisc.lisp:808-826`; `clear-mar`, `:838-848`;
   `set-mar`, `:860-875`). Both stepped `#o200` words from the range's first
@@ -61,3 +63,36 @@ Every change to a source file carries a comment in that file saying why.
   `findcore-fixnum` keeps that so: on microcode whose `%FINDCORE` returns
   the number with data type 0, System 1003's band runs macrocode but never
   reaches its TELNET prompt, and the check fails.
+- **`UN-CONS` backs the scavenger's pointer up to the free pointer**
+  (`UN-CONS-0`, `sys/ucadr/uc-storage-allocation.lisp:1653-1659`).
+  `REGION-GC-POINTER` is relative to the region's origin, as the free pointer
+  is, but MIT's `UN-CONS-1` compared it with `M-E`, the given-back object's
+  end as an address, larger than any offset, so it never backed the pointer
+  up: when the scavenger had passed words that `UN-CONS` then gave back, its
+  pointer stayed above the free pointer, past words the next object consed
+  there would hold. `M-E` is now the free pointer just written, relative.
+  Fixed on `main` in the same way, where from 2^31 up it also wrote an
+  address into the gc pointer. On the CADR it is latent: the scavenger has
+  to pass the words between a bignum's cons and its `UN-CONS`, inside one
+  instruction. `tools/microcode-check`'s new check `un-cons-gc-pointer`
+  plants that state, the gc pointer set above the free pointer before a
+  bignum sum with no carry gives its last word back: on microcode 1001 the
+  gc pointer stays 7 words above the free pointer; with the change it is
+  the free pointer. Its three controls pass on both.
+  - The microcode changes (still numbered 1001 until it is released): microcode
+    1001 with this change, one control-store word more, so every word from
+    `UN-CONS-0`'s on moves by one (`ucadr.locs`: I-memory 30436 to 30437;
+    A-memory and the dispatch memory keep their size), and `ucadr.tbl`
+    changes. Assembled twice, each on a freshly booted copy of System 1003's
+    band, the four files were the same both times; the outputs, numbered
+    1001 (sha256):
+    - `ucadr.mcr` `050b095bded5fc78a52f37a27e4f04662a9077af35620e9f0af6aeea8ea168da`
+    - `ucadr.tbl` `2b9b4b083d67e0b65ae1443fd9bb4db8c22f3a7c71f577a4d51257ad5dd21b88`
+    - `ucadr.locs` `7ec7cb2c3d2fac11b5a1909a6b4f5ff7e59ff28afd9ad5d5e6afc9dba24db8ac`
+    - `ucadr.sym` `05a829ca53eccf5779e7f5529ec6c3f79ec176823efe1ac8d944f098e34cc956`
+
+    System 1003's band boots on it, and `tools/microcode-check` (five checks,
+    22 cases) passes on micro and on rtl; `tools/lispm-check-test`,
+    `tools/system-check`'s `interpreter-closure` and
+    `interpreter-closure-scope`, and `mar-range` and `wire-range` with this
+    change's Lisp compiled, pass on micro.

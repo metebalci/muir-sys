@@ -1650,6 +1650,13 @@ UN-CONS-0
 	(JUMP-NOT-EQUAL M-TEM A-E UN-CONS-FILL)	;Something else got allocated, don't mess
 	((MD-START-WRITE) SUB MD A-2)		;Decrement free pointer.
 	(CHECK-PAGE-WRITE)
+	;; the scavenger's pointer, read at un-cons-1, is relative to the region's
+	;; origin, as the free pointer is, but m-e is the object's end as an
+	;; address, larger than any offset, so the compare there never backed the
+	;; pointer up and it stayed above the free pointer, past words the next
+	;; object consed there would hold.  m-e is now the free pointer just
+	;; written, relative, which the pointer is backed up to when above it.
+	((m-e) q-pointer md)
 	(JUMP-NOT-EQUAL M-T A-SCONS-CACHE-REGION UN-CONS-1)	;Fix free ptr in cache, too
 	((A-SCONS-CACHE-FREE-POINTER) ADD MD A-SCONS-CACHE-REGION-ORIGIN)
 UN-CONS-1

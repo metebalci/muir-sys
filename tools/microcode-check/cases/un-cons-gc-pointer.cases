@@ -1,0 +1,20 @@
+; UN-CONS backs the scavenger's pointer up to the free pointer it has just
+; lowered (sys/ucadr/uc-storage-allocation.lisp, UN-CONS-1).  Load
+; lisp/un-cons-gc-pointer.lisp first.  REGION-GC-POINTER is relative to the
+; region's origin, as the free pointer is; MIT's microcode compared it with
+; M-E, the object's end as an address, which is larger than any offset, so
+; it never backed the pointer up, and the scavenger's pointer stayed above
+; the free pointer, past words that the next object consed there would hold.
+; The scavenger passing those words between the cons and the UN-CONS is
+; planted here by setting the gc pointer above the free pointer first.
+;
+; The controls: the sum takes three words, its fourth given back, whatever
+; the gc pointer; and with the gc pointer at the free pointer before it stays at
+; or below it after.
+(first (un-cons-sum)) => 3
+(first (un-cons-sum 10.)) => 3
+(un-cons-gc-pointer-ok) => T
+; The gc pointer ten words above the free pointer before: backed up to the
+; free pointer, an offset within the region, after.
+(un-cons-gc-pointer-ok 10.) => T
+(let ((r (un-cons-sum 10.))) (= (second r) (third r))) => T
