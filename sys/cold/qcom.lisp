@@ -141,7 +141,22 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 						;15-17 [not used]
 
   %%REGION-SCAVENGE-ENABLE	1001		;If 1, scavenger touches this region
-  ;; 0503 spare bits.
+;  ;; 0503 spare bits.
+  ;; 0701 spare bit.
+  ;; the generational collector (contract g3 step 2, 3.1): <6:5>, spare
+  ;; before, say which generation a region holds.  a region of eden or a
+  ;; survivor space lies in ephemeral space and has %%region-ephemeral set;
+  ;; a tenured one lies below it, also when its area is ephemeral.  the
+  ;; transporter reads the source region's generation and copies by the
+  ;; promotion table (%gc-promotion); the mutator conses only into regions of
+  ;; its area's allocation generation, eden in an ephemeral area.  a tenured
+  ;; structure region that is not fixed or extra-pdl begins with its
+  ;; first-object table (contract 6; si:region-has-first-object-table-p).
+  %%region-generation		0502
+  %region-generation-tenured	0		;0 the tenured generation
+  %region-generation-eden	1		;1 eden: an ephemeral area's new objects
+  %region-generation-survivor-1	2		;2 survivor space 1
+  %region-generation-survivor-2	3		;3 survivor space 2
   %%REGION-SWAPIN-QUANTUM	0005		;swap this +1 pages in one disk op on swapin
 						;  if possible.
   ))
@@ -258,7 +273,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; here so that a band saved with it set keeps it (the microcode's
   ;; a-region-floor and lisp's %region-floor are set from it at boot)
   %sys-com-region-floor			;an address, a multiple of the quantum
-  ;; 3 left
+;  ;; 3 left
+  ;; the generational collector (contract g3 step 2 revision 1, 8.3.2): the
+  ;; band page of a saved band's mark bitmap's first page, right after its
+  ;; last page, a bit a page of the band's walk; 0 in a cold load, which has
+  ;; no bitmap
+  %sys-com-mark-bitmap			;a band page; 0, no bitmap
+  ;; 1 left: the check below allows #o40 entries (the old count of 3
+  ;; was stale)
   ))
 
 (AND (> (LENGTH SYSTEM-COMMUNICATION-AREA-QS) 40)
@@ -1330,6 +1352,24 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; a-ar-1-array-pointer-2, which the cold boot sets to the first unfixed
   ;; area's address unless the band holds one.
   %region-floor
+  ;; the generational collector (contract g3 step 2, 4.1, 5, 3.2): the
+  ;; microcode's a-gc-words-consed-since-flip, a-gc-promotion and
+  ;; a-gc-pretenure-threshold, in this order after a-region-floor.  each is a
+  ;; fixnum.
+  ;; the words consed since the last flip, young or tenured: the allocator
+  ;; adds every word it conses, a flip clears it.  the gc process starts a
+  ;; young collection when it reaches eden's size (si:gc-eden-words).
+  %gc-words-consed-since-flip
+  ;; the promotion table: bits <2g+1:2g> hold the generation (the values of
+  ;; %%region-generation) into which the transporter copies an object of
+  ;; generation g.  lisp writes it at each flip, inside the flip's
+  ;; without-interrupts and before %gc-flip (si:gc-promotion-table).
+  %gc-promotion
+  ;; the pretenuring threshold, in words: a cons of more words than this in
+  ;; an ephemeral area goes to a tenured region of that area, and does not
+  ;; fill the cons cache.  lisp writes it at each flip and at every boot
+  ;; from si:gc-pretenure-threshold.
+  %gc-pretenure-threshold
   ))
 
 (DEFCONST A-MEMORY-COUNTER-BLOCK-NAMES '(

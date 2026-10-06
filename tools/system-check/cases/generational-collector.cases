@@ -1,0 +1,152 @@
+; The generational collector's Lisp-visible checks (contract G3 step 2,
+; section 12, C1-C22; lisp/generational-collector.lisp).  It needs step 2's
+; microcode (E1) and a band built with step 2's Lisp (E3), at 32 MW: written
+; with E2 and not yet run.  Its cases run in USER, so the system's internal
+; names are written SI:.  Each case says the partial fix it fails on; the
+; Lisp ones are planted by lisp/generational-collector-partial-fixes.lisp,
+; given after the check's own file; the microcode's need E4's mutated
+; microcode.  Left to E4 by hand: C14 (DISK-SAVE, then a boot), C15 (a warm
+; boot), C23 (the high band and the straddle runs) and C24 (Y1's and Y2's
+; checks on E1's microcode).
+; Revision 1: C14 and C25-C29's Lisp parts are save/'s cases (a session, a
+; save and a boot; README.md); C15 stays E4's by hand.
+
+; the defaults (contract 10, 17), read before anything changes them: young
+; collections on from boot (Q-GCa), tenured ones automatic (Q-GCb), DISK-SAVE
+; tenuring every young object (Q-GCc), eden 1/16 of main memory, the
+; pretenuring threshold 32 K words, given to the microcode at boot
+; revision 1: Q-GCc settled the other way, a save keeps young objects young,
+; and its setting, GC-SAVE-TENURES-ALL, is gone
+(list si:gc-on (not (null (assq si:gc-process si:active-processes)))) => (T T)
+;(list si:gc-on-at-boot si:gc-tenured-automatic si:gc-save-tenures-all si:gc-pretenure-threshold si:%gc-pretenure-threshold) => (T T T 32768 32768)
+(list si:gc-on-at-boot si:gc-tenured-automatic (boundp 'si:gc-save-tenures-all) si:gc-pretenure-threshold si:%gc-pretenure-threshold) => (T T NIL 32768 32768)
+(= (si:gc-eden-words) (floor (si:gc-main-memory-words) 16)) => T
+(= (si:gc-tenured-growth-limit-words) (floor (si:gc-main-memory-words) 4)) => T
+; the setter's enable (word 221) is on and no write-back was refused (word 224)
+(list (si:feature-page-field #o221 #o0001) (si:feature-page-field #o224 #o0040)) => (1 0)
+(gencol-off) => T
+
+; the promotion table (contract 5): eden to survivor space 1, survivor space 1
+; to 2, or to the tenured generation past the soft cap; tenure-all.  Fails if
+; the cap is ignored (planted: 56 for the second)
+(let ((si:gc-survivor-cap 1000000000)) (si:gc-promotion-table nil)) => 56
+(let ((si:gc-survivor-cap -1)) (si:gc-promotion-table nil)) => 8
+(si:gc-promotion-table t) => 0
+
+; ephemeral areas (contract 3.3): MAKE-AREA's :GC :EPHEMERAL gives the area
+; the flag, a tenured first region, and young objects; the refusals
+(let ((a (make-area :name 'gencol-ephemeral-area :gc :ephemeral))) (list (ldb-test si:%%region-ephemeral (si:area-region-bits a)) (gencol-young-p (make-array 10 :area a)) (sort (loop for r = (si:area-region-list a) then (si:region-list-thread r) until (minusp r) collect (si:region-generation r)) #'<))) => (T T (0 1))
+(make-area :name 'gencol-pdl-area :gc :ephemeral :pdl t) =>! ephemeral
+(si:make-area-static working-storage-area) =>! ephemeral
+(si:make-area-temporary working-storage-area) =>! ephemeral
+
+; E0's MG2: FS:*PATHNAME-HASH-TABLE* holds no young key, so a young flip
+; leaves it current (today it rehashed after every flip, about 1 s).  Fails
+; if every table rehashes after every flip (planted)
+(gencol-pathname-table) => (NIL NIL)
+
+; C1, a tenured page as the only root: a young list of 10,000 fixnums, its
+; sum right after one to four young collections.  Fails if the walk skips
+; marked pages, the enable is off, or the scan misses words
+(gencol-c1-setup) => T
+(progn (gencol-young-collection) (gencol-c1-sum)) => 49995000
+; C2: the holder's page stays marked while the list is young, and the mark is
+; cleared once it is tenured.  Fails if the scan clears always or never
+(gencol-mark (aloc *gencol-holder* 0)) => 1
+(progn (gencol-young-collection) (gencol-c1-sum)) => 49995000
+(progn (gencol-young-collection) (list (gencol-c1-sum) (gencol-generation (aref *gencol-holder* 0)))) => (49995000 0)
+(progn (gencol-young-collection) (list (gencol-c1-sum) (gencol-mark (aloc *gencol-holder* 0)))) => (49995000 0)
+
+; C3, a store after the walk passed the page: the walk cleared its mark, then a
+; young object is stored there, and survives the next collection.  Fails if
+; the clear leaves the TLB entry valid
+(gencol-c3) => (T 499500)
+
+; C4, unboxed words that look like pointers: an ART-32B's data words with the
+; LIST tag and an eden address stay as they were, and its leader's young list
+; survives.  Fails with a word-by-word scan
+(gencol-c4) => (T 4950)
+
+; C5, an object across pages: a young pointer in a tenured array's fourth page.
+; Fails without the first-object table or with a stale entry
+(gencol-c5) => (T 4950)
+
+; C6, the table checker: planted (a) UN-CONS across page boundaries, (b)
+; ADJUST-ARRAY-SIZE growing in place across three pages, (c)
+; MAKE-AREA-REGIONS-STATIC on a part-filled region; then every region.  Fails
+; with any writer left out (planted: GC-RESET-FREE-POINTER's for b,
+; FILL-UP-REGION's for c; UN-CONS and CONSF are E1's)
+(gencol-c6a) => 0
+(gencol-c6b) => (T 0)
+(gencol-c6c) => 0
+(gencol-check-tables) => 0
+
+; C7, stacks: (a) a waiting process holds the only reference in a local; (b)
+; the current process, deep in its stack; (c) pointers to freed eden left
+; above a stack's top are not followed.  Fails if PDL pages are skipped (a, b)
+; or scanned past the active top (c)
+(gencol-c7a) => 499500
+(gencol-c7b) => 499500
+(gencol-c7c) => 499500
+
+; C8, the special PDL: a young value held only as a binding's saved value
+(gencol-c8) => 499500
+
+; C9, A memory: a young object held only by SELF
+(gencol-c9) => 499500
+
+; C10, ages: survivor space 1, survivor space 2, then tenured, below ephemeral
+; space.  Fails with a wrong promotion table
+(gencol-c10) => (2 3 0 T 4950)
+
+; C11, the cap: 200 K live young words with the cap at 100 K are tenured at
+; the second collection.  Fails if the cap is ignored (planted)
+(gencol-c11) => (2 0 0)
+
+; C12, pretenuring: a 1 MW array is tenured at once, a 1 K one made after it
+; is young.  Fails without pretenuring, or if the large cons filled the cache
+(gencol-c12) => (T T 0)
+
+; C13, code: compiled to core, in MACRO-COMPILED-PROGRAM below ephemeral
+; space, its young constant surviving four collections; the area stays static
+(gencol-c13) => (T T 4950)
+(si:make-area-dynamic macro-compiled-program) =>! compiled code
+
+; C16, hash tables: (a) an EQ table of symbols is not stale after a young
+; flip, and is after a tenured one; (b) an EQ table of young conses and (c) an
+; EQUAL table of keys holding a young closure are young and find every key
+; after a young flip.  Fails if young keys are not flagged (b, c; planted) or
+; if every table still rehashes (a; planted)
+(gencol-c16a) => (NIL NIL T T)
+(gencol-c16b) => (T T)
+(gencol-c16c) => (T T)
+
+; C17, a marked page swapped out before the flip (meant for 2 MW; at 32 MW it
+; holds if PAGE-OUT-WORDS evicts the page, its first value).  Fails if the
+; walk skips entries not in core
+(gencol-c17) => (T 499500)
+
+; C18, the extra PDL: a bignum stored into a tenured object during a young
+; collection survives two more
+(gencol-c18) => T
+
+; C19, a tenured collection with young objects alive: ages advance, all
+; survives, and C1 passes after it
+(gencol-c19) => (2 3 499500)
+(gencol-c1-setup) => T
+(progn (gencol-young-collections 4) (gencol-c1-sum)) => 49995000
+
+; C20, the incremental save: refused after a tenured flip only (the test
+; DISK-SAVE-INCREMENTAL makes).  Fails if it is refused after any flip (planted)
+(gencol-c20) => (NIL T)
+
+; C21, the reclaim checker: before every reclaim of a workload's young and
+; tenured collections, no pointer into oldspace outside oldspace.  Fails if
+; any root is missed.  Each check reads every word of memory: minutes each
+(gencol-install-reclaim-checker) => T
+(progn (gencol-workload) (gencol-young-collections 3) (gencol-workload) (gencol-tenured-collection) (gencol-young-collection) (list (> *gencol-reclaim-checks* 4) *gencol-reclaim-violations* *gencol-reclaim-first*)) => (T 0 NIL)
+
+; C22, after the run: word 224 is 0, at most 200 regions at any reclaim, no
+; fixed region the scavenger leaves alone ever marked; the tables still hold
+(list (si:feature-page-field #o224 #o0040) (<= *gencol-peak-regions* 200) (gencol-raw-fixed-marked-pages)) => (0 T NIL)
+(gencol-check-tables) => 0

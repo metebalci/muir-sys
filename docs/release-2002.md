@@ -488,3 +488,119 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
   `rev14-paging`'s young array of 1 M words would be pretenured under the
   collector's microcode; `REV14P-YOUNG-FILL` raises the threshold past it
   while it is made, when A 143-145 hold fixnums (`lisp/rev14-paging.lisp`).
+
+### The Lisp side
+
+Written before the microcode and the cold load that it needs; compiled on
+System 2001's band, not yet run there but for its logic. Citations are of the
+files as this step left them. Revision 1 of the contract (a save keeps young
+objects young) changed the save, the band's formats and the boot.
+
+- **The generation field and the collector's A-memory variables**
+  (`sys/cold/qcom.lisp:155`, `:1361`): `%%REGION-GENERATION`, region bits
+  `<6:5>`, spare before: 0 tenured, 1 eden, 2 survivor space 1, 3 survivor
+  space 2; after `%REGION-FLOOR`, `%GC-WORDS-CONSED-SINCE-FLIP` (the words
+  consed since the last flip, which a flip clears), `%GC-PROMOTION` (the
+  promotion table, two bits a source generation) and
+  `%GC-PRETENURE-THRESHOLD`.
+- **Young and tenured collections** (`sys/sys2/gc.lisp`): `GC-FLIP-NOW`
+  takes the kind, `:TENURED` by default, and a tenure-all flag (`:360`); a
+  young flip runs no next-flip list, resets no static region's scan pointer,
+  deallocates no region's end and makes no notification, and both write the
+  promotion table, computed before the pause from survivor space 1's words
+  against the soft cap (`GC-PROMOTION-TABLE`, `:212`). The GC process
+  (`:886`) reclaims a collection when the scavenger is done, then starts a
+  tenured collection by MIT's free-space rule or after the tenured
+  generation's growth by `GC-TENURED-GROWTH-LIMIT`, else a young one when the
+  words consed since the last flip reach eden's size (`GC-COLLECTION-DUE`,
+  `:916`); young collections report nothing (`GC-RECLAIM-OLDSPACE`, `:700`).
+  `GC-STATUS` prints the generations and the collections by kind (`:616`;
+  `GC-GET-GENERATION-SIZES`, `:195`).
+- **The settings** (`:98`-`:129`): `GC-EDEN-SIZE` (NIL, 1/16 of main
+  memory), `GC-SURVIVOR-CAP` (NIL, eden's size), `GC-TENURED-GROWTH-LIMIT`
+  (`:DEFAULT`, 1/4 of main memory) and `GC-PRETENURE-THRESHOLD` (32 K words),
+  each read at the next flip; and the answers to two of the contract's
+  questions, one variable each, both T: `GC-ON-AT-BOOT` (Q-GCa: `GC-BOOT`,
+  `:1041`, turns automatic collection on at every boot; `GC-ON` takes
+  `NO-QUERY`, `:970`, and `GC-OFF` no longer removes the boot's
+  initialization) and `GC-TENURED-AUTOMATIC` (Q-GCb). The third, Q-GCc, was
+  answered the other way (below), and its variable, `GC-SAVE-TENURES-ALL`,
+  is commented out (`:107`).
+- **A save keeps young objects young** (contract revision 1, 8.3.1;
+  `sys/sys/qmisc.lisp:1844`; `GC-PREPARE-FOR-DISK-SAVE`,
+  `sys/sys2/gc.lisp:1110`): DISK-SAVE finishes any collection, runs one young
+  collection to its reclaim with the normal promotion table, and keeps the GC
+  process stopped until the save; the ephemeral areas stay ephemeral, so what
+  DISK-SAVE conses afterwards is young, and the microcode's save writes each
+  page's young-pointer mark into the band's mark bitmap. A save that does not
+  happen enables the GC process again if automatic collection is on
+  (`GC-AFTER-DISK-SAVE-ABORT`, `:1119`). Revision 0's save, which made the
+  ephemeral areas not ephemeral and tenured every young object, is commented
+  out (`:1049`-`:1093`). DISK-SAVE itself never tenures; the build tenures
+  a band it builds before its save, with `(SI:GC-FLIP-NOW :YOUNG T)` and
+  `SI:GC-RECLAIM-OLDSPACE` (contract 9.4).
+- **No save while a mark is in the TLB only** (8.3.1, 8.3.3;
+  `sys/sys/qmisc.lisp:1954`, `:1983`): just before `%DISK-SAVE`, where the
+  incremental save's check of the regions runs, DISK-SAVE reads
+  register-page word 224, the write-backs of a page's mark that the guard
+  refused (`DISK-SAVE-REFUSED-WRITE-BACKS`, `:1994`), and refuses the save
+  while it is not 0, as it refuses a region changed since the incremental
+  save's snapshot: the band is not written, and an error says so.
+- **The mark bitmap's room** (8.3.2): `ESTIMATE-DUMP-SIZE`
+  (`sys/sys/qmisc.lisp:2026`) adds the bitmap's pages, one for each 32,768
+  pages of the band's walk (`MARK-BITMAP-PAGES`, `:2050`), to the
+  partition size it asks for; `%SYS-COM-MARK-BITMAP`
+  (`sys/cold/qcom.lisp:281`), after `%SYS-COM-REGION-FLOOR`, holds the band
+  page of the bitmap's first page, 0 in a cold load; the area has 2 spare
+  words left.
+- **Band formats 2020 and 2021** (8.3, 9.4; `sys/io/disk.lisp:1268`):
+  `BAND-FORMAT-COMPRESSED` and `BAND-FORMAT-INCREMENTAL`, which Lisp's band
+  readers compare with, are 2020 and 2021 (the cold load is 2022); step 2's
+  microcode refuses revision 14's 2010-2012.
+- **A warm boot mid-collection keeps the collection's promotion table**
+  (8.3.5): the flip keeps its table (`GC-COLLECTION-PROMOTION`,
+  `sys/sys2/gc.lisp:241`), and `GC-BOOT` and `GC-ON` give the microcode that
+  table while a region is oldspace (`GC-RUNNING-PROMOTION-TABLE`, `:250`),
+  since A memory is loaded afresh at the boot, its 0 the tenure-all table;
+  `GC-ON` gave a table computed then.
+- **Areas** (`sys/sys/qfctns.lisp:2868`; `sys/sys2/gc.lisp:1134`-`:1171`):
+  `MAKE-AREA` takes `:GC :EPHEMERAL`, which gives the area's bits
+  `%%REGION-EPHEMERAL` and a tenured first region, and refuses it with
+  `:PDL`; `MAKE-AREA-STATIC` and `MAKE-AREA-TEMPORARY` (`:2858`) refuse an
+  ephemeral area, `MAKE-AREA-DYNAMIC` (so `CLEAN-UP-STATIC-AREA` too) refuses
+  `MACRO-COMPILED-PROGRAM`; `MAKE-AREA-STATIC-INTERNAL` and
+  `MAKE-AREA-REGIONS-STATIC` (`:1343`) change tenured regions only.
+  `FULL-GC` (`:1218`) finishes any collection, flips every region with the
+  tenure-all table, and turns automatic collection back on if it was on.
+- **The first-object table's Lisp writers** (`sys/sys/qrand.lisp:1448`):
+  `REGION-HAS-FIRST-OBJECT-TABLE-P` names the regions that have one (tenured
+  structure regions not free, fixed or extra-pdl); `GC-RESET-FREE-POINTER`
+  (`:1495`) writes the entries of the pages it newly covers with the growing
+  object's start, which `ADJUST-ARRAY-SIZE` passes (`:1636`), and refuses to
+  move up in such a region without it; `FILL-UP-REGION`
+  (`sys/sys2/gc.lisp:1369`) writes each filler page's own start;
+  `RESET-TEMPORARY-AREA` (`sys/sys/qrand.lisp:1423`) resets to the table's
+  end.
+- **Hash tables rehash after a young flip only if they hold a young key**
+  (`sys/sys2/hash.lisp:87`-`:114`): `HASH-TABLE-GC-GENERATION-NUMBER` keeps
+  the generation and, negated, the young flag (n >= 0 none, -1 rehash at the
+  next miss, n <= -2 young at generation -2 - n), with the leader unchanged;
+  `%GC-TENURED-FLIP-GENERATION` is the generation after the last tenured
+  flip. `SXHASH` notes a young object hashed by address
+  (`SXHASH-HASHED-YOUNG-ADDRESS`, `sys/sys/qrand.lisp:201`;
+  `YOUNG-POINTER-P`, `:196`), `:PUT-HASH` and `PUTHASH-BOOTSTRAP` mark the
+  table (`sys/sys2/hashfl.lisp:179`, `sys/sys2/hash.lisp:394`), a rehash
+  finds the flag again (`:268`, `:301`), and `:GET-HASH`, `:REM-HASH` and
+  `INSTANCE-HASH-FAILURE` (`sys/sys2/flavor.lisp:2843`) test staleness so.
+- **The incremental save is refused after a tenured flip only**
+  (`sys/io1/inc.lisp:170`; `GC-TENURED-FLIP-SINCE-P`,
+  `sys/sys2/gc.lisp:255`): the base band may hold young objects, and a young
+  flip may have freed its young regions and reused their numbers, but pages
+  are paired by region number and place and compared word for word, so the
+  save stays right; a tenured flip moves most pages, and the save would gain
+  nothing.
+- **Checks**: `tools/system-check` gains `generational-collector`, with the
+  table checker and the reclaim checker and three files of planted partial
+  fixes, and `save/`, the save checks (C14, C25-C29's Lisp parts), each a
+  session, a `DISK-SAVE` and a boot, with two files of planted partial fixes
+  (its README); they need step 2's microcode and band.

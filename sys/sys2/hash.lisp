@@ -68,6 +68,62 @@ slot that has never been used.")
   (hash-table-instance nil :documentation
     "This is the instance whose HASH-ARRAY this hash table is."))
 
+;;; the generational collector (contract g3 step 2, 8.4).  every flip, young
+;;; or tenured, increments %gc-generation-number; a young flip moves only
+;;; young objects (eden and the survivor spaces).  so a table must rehash
+;;; after a tenured flip, but after a young one only if it holds a young key:
+;;; a key whose hash code was made from a young object's address (an eq or
+;;; eql key in ephemeral space, or an equal key for which sxhash hashed a
+;;; young object by address, sxhash-hashed-young-address).  the leader keeps
+;;; its slots (a cross build cannot carry a changed defstruct), so the young
+;;; flag is coded in hash-table-gc-generation-number:
+;;;   n >= 0   no young key; the hash codes are those of generation n
+;;;   -1       rehash at the next miss (the fasload fixup)
+;;;   n <= -2  a young key; the hash codes are those of generation -2 - n
+;;; generation g is the value of %gc-generation-number when the codes were
+;;; made, read before they were made, so a flip in between makes the table
+;;; stale rather than wrong.
+
+(defvar %gc-tenured-flip-generation 0
+  "The value of %GC-GENERATION-NUMBER after the last tenured flip.
+A hash table without a young key rehashes only when this is above its generation.")
+
+(defun hash-generation-code (generation young)
+  "The value of a hash table's HASH-TABLE-GC-GENERATION-NUMBER whose hash codes are those
+of GENERATION, with a young key if YOUNG."
+  (if young (- -2 generation) generation))
+
+(defun hash-generation-young-p (code)
+  "T if CODE, a hash table's HASH-TABLE-GC-GENERATION-NUMBER, says it holds a young key."
+  (< code -1))
+
+(defun hash-generation-stale-p (code)
+  "T if a hash table whose HASH-TABLE-GC-GENERATION-NUMBER is CODE must rehash before a
+missing key is believed: after a tenured flip since its generation, or, when it holds a
+young key, after any flip."
+  (cond ((not (minusp code)) (< code %gc-tenured-flip-generation))
+	((= code -1) t)
+	(t (not (= (- -2 code) %gc-generation-number)))))
+
+(defun hash-key-young-p (hash-code)
+  "T if a key whose hash code is HASH-CODE makes its table young: the code is a young object,
+or SXHASH-HASHED-YOUNG-ADDRESS says it was made from one's address."
+  (or sxhash-hashed-young-address
+      (young-pointer-p hash-code)))
+
+(defun note-hash-key-young (hash-table generation)
+  "Make HASH-TABLE, which a young key whose hash code was made in GENERATION has just
+entered, rehash after the next flip."
+  (without-interrupts
+    (let ((code (hash-table-gc-generation-number hash-table)))
+      ;; keep a forced rehash (-1), and the older of two young generations,
+      ;; in case another process rehashed the table after GENERATION was read
+      (when (if (hash-generation-young-p code)
+		(< generation (- -2 code))
+	      (not (= code -1)))
+	(setf (hash-table-gc-generation-number hash-table)
+	      (hash-generation-code generation t))))))
+
 
 (defun make-hash-array (&key (size #o100) area
 			((:rehash-function rhf) 'hash-table-rehash)
@@ -205,8 +261,13 @@ slot that has never been used.")
 ;;; CONTENTS is a pointer to the first word of the entry in the old hash table,
 ;;; so its CAR is the hash code.
 ;;; There is no need to lock the hash table since nobody else knows about it yet.
+;;; the generational collector (contract g3 step 2, 8.4): returns T if the
+;;; entry's key is young (hash-key-young-p).  a hash code kept from before
+;;; (not FOR-GC, with a hash function) cannot tell; the caller keeps the old
+;;; table's young flag then.
 (defun rehash-put (hash-table contents &optional for-gc
-		   &aux (hash-code
+		   &aux (sxhash-hashed-young-address nil)
+			(hash-code
 			  ;; Use the same hash code as before, to avoid swapping,
 			  ;; unless this is rehashing due to GC.
 			  (if (and for-gc (hash-table-hash-function hash-table))
@@ -230,13 +291,18 @@ slot that has never been used.")
     (when (= (%p-data-type p) dtp-null)
       (%blt-typed contents p blen 1)
       (setf (car p) hash-code)
-      (return))))
+;      (return))))
+      (return (hash-key-young-p hash-code)))))
 
 ;;; Standard rehash function.  Returns new hash array (possibly the same one).
 ;;; GROW is either the hash table's rehash-size or NIL meaning use same size array.
 ;;; ACTUAL-SIZE is so that this can be used as a subroutine of another
 ;;; rehash function which differs only in how to compute the new size.
-(defun hash-table-rehash (hash-table grow &optional actual-size)
+(defun hash-table-rehash (hash-table grow &optional actual-size
+			  ;; the generational collector (contract g3 step 2, 8.4):
+			  ;; the generation the new codes are made in, read
+			  ;; before them, and whether any key is young
+			  &aux (generation %gc-generation-number) (young nil))
   (setq hash-table (follow-structure-forwarding hash-table))
   (let* ((new-size (if (null grow)
 		       (hash-table-modulus hash-table)
@@ -272,7 +338,16 @@ slot that has never been used.")
 	(( i n))
       (when ( (%p-data-type p) dtp-null)
 	;; And store each one in the new hash table.
-	(rehash-put new-hash-table p (null grow))))
+;	(rehash-put new-hash-table p (null grow))))
+	(when (rehash-put new-hash-table p (null grow))
+	  (setq young t))))
+    ;; the generational collector (contract g3 step 2, 8.4): a rehash for the
+    ;; gc made every code again, and the table is young if a key is; one that
+    ;; grows keeps its codes, and so the old table's generation and flag
+    (setf (hash-table-gc-generation-number new-hash-table)
+	  (if grow
+	      (hash-table-gc-generation-number hash-table)
+	    (hash-generation-code generation young)))
     (setf (hash-table-fullness new-hash-table)
 	  (hash-table-fullness hash-table))
     (setf (hash-table-instance new-hash-table)
@@ -321,6 +396,11 @@ slot that has never been used.")
 			  (values-left (cons value additional-values))
 			  (hash-function (hash-table-hash-function hash-table))
 			  (compare-function (hash-table-compare-function hash-table))
+			  ;; the generational collector (contract g3 step 2, 8.4):
+			  ;; the generation the hash code is made in, and sxhash's
+			  ;; young flag for it
+			  (generation %gc-generation-number)
+			  (sxhash-hashed-young-address nil)
 			  (hash-code (if hash-function (funcall hash-function key) key)))
   (declare (return-list value old-value key-found-flag entry-pointer))
   (with-lock ((hash-table-lock hash-table))
@@ -352,7 +432,10 @@ slot that has never been used.")
 	       ;; Hash tables are not supposed to need rehash before HASHFL is loaded.
 	       ;; It wouldn't work, since the hash table instance is not there
 	       ;; for FLAVOR to use to find the new hash array.
-	       (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+	       ;; the generational collector (contract g3 step 2, 8.4): stale by
+	       ;; the young flag and the tenured flips, not by any flip
+;	       (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+	       (cond ((hash-generation-stale-p (hash-table-gc-generation-number hash-table))
 		      (ferror nil "~S claims to need rehash due to gc." hash-table))
 		     (( (+ (hash-table-fullness hash-table)
 			    (hash-table-number-of-deleted-entries hash-table))
@@ -370,6 +453,11 @@ slot that has never been used.")
 			      (t
 			       (do ((i 1 (1+ i))) ((= i blen))
 				 (%p-store-contents-offset (pop values-left) emptyp i)))))
+		      ;; the generational collector (contract g3 step 2, 8.4): the
+		      ;; volatility asked for above; a young key makes the table
+		      ;; rehash after the next flip
+		      (when (hash-key-young-p hash-code)
+			(note-hash-key-young hash-table generation))
 		      (incf (hash-table-fullness hash-table))
 		      ;; If reusing a deleted slot, decrement number of them slots.
 		      (or (eq emptyp p)

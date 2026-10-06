@@ -187,6 +187,22 @@ It may also be an instance or named structure; then it is sent a :REMPROP messag
     `(DPB ,VALUE (BYTE (- 24. ,BITS) ,BITS)
 	  (LSH ,VALUE (- ,BITS 24.)))))
 
+;;; the generational collector (contract g3 step 2, 8.4): an object is young
+;;; when it lies in eden or a survivor space, that is in ephemeral space,
+;;; 32000000000-33777777777, whose addresses alone have 1101 in <31:28>.  a
+;;; young flip moves young objects and no other, so a hash code made from a
+;;; young object's address goes stale at every flip, and one made from a
+;;; tenured object's address only at a tenured flip.
+(defun young-pointer-p (x)
+  "T if X is a pointer to an object in ephemeral space: eden or a survivor space."
+  (and (%pointerp x)
+       (= (%logldb #o3404 (%pointer x)) #o15)))
+
+(defvar sxhash-hashed-young-address nil
+  "Set to T by SXHASH when it hashes a young object by its address.
+A hash table binds it to NIL around its hash function, and a key for which it is then T
+makes the table rehash after the next flip, young or tenured (contract g3 step 2, 8.4).")
+
 ;;; We hairily arrange to return the same value as we did in the days of 24 bit pointers.
 ;;; This is to avoid making everything look "changed" when the switch happens.
 (DEFUN SXHASH (X &OPTIONAL RANDOM-OBJECT-ACTION)
@@ -231,6 +247,11 @@ change even if it is printed out and read into a different system version."
 	      (NAMED-STRUCTURE-INVOKE :SXHASH X RANDOM-OBJECT-ACTION))
 	((OR RANDOM-OBJECT-ACTION
 	     (SMALL-FLOATP X))
+	 ;; the generational collector (contract g3 step 2, 8.4): a young
+	 ;; object's address changes at every flip, so the hash table that
+	 ;; asked must rehash after the next one; it reads this flag
+	 (when (young-pointer-p x)
+	   (setq sxhash-hashed-young-address t))
 	 (SETQ X (%POINTER X))
 	 (LET ((Y (LOGXOR (LDB (- %%Q-POINTER 24.) X)
 			  (LSH X (- 24. %%Q-POINTER)))))
@@ -1408,7 +1429,50 @@ If there are no ARGS, the car of FUNCTION is applied to the cdr of FUNCTION."
       ("Make area temporary, and the reset it" (MAKE-AREA-TEMPORARY AREA))))
   (WITHOUT-INTERRUPTS				;don't let the area's region list change
     (DO REGION (AREA-REGION-LIST AREA) (REGION-LIST-THREAD REGION) (MINUSP REGION)
-      (GC-RESET-FREE-POINTER REGION 0))))
+;      (GC-RESET-FREE-POINTER REGION 0))))
+      ;; the generational collector (contract g3 step 2, 6.2): a region's
+      ;; first-object table is its first object and stays; reset to its end
+      (gc-reset-free-pointer region (region-first-object-table-end region)))))
+
+;;; the generational collector (contract g3 step 2, 6): the first-object
+;;; table.  every structure region of the tenured generation that is not
+;;; fixed or extra-pdl begins with it, an art-32b array that make-region
+;;; writes: entry k is the offset from the region's origin of an object start
+;;; at or below the first word of the region's page k, from which a walk by
+;;; %structure-total-size reaches that page; the allocator writes the start
+;;; of the object that covers the page's first word.  the marked-page walk
+;;; reads it to scan a marked page by objects.  the allocator's slow path
+;;; (consf), make-region, the cold load and the functions here and in gc
+;;; (fill-up-region) write it; an entry above the free pointer is never read.
+
+(defun region-has-first-object-table-p (region)
+  "T if REGION begins with a first-object table: a structure region of the tenured
+generation that is not free, fixed or extra-pdl."
+  (let* ((bits (region-bits region))
+	 (space (%logldb %%region-space-type bits)))
+    (and (= (%logldb %%region-representation-type bits) %region-representation-type-structure)
+	 (= (%logldb %%region-generation bits) %region-generation-tenured)
+	 (not (= space %region-space-free))
+	 (not (= space %region-space-fixed))
+	 (not (= space %region-space-extra-pdl)))))
+
+(defun region-first-object-table (region)
+  "REGION's first-object table, the art-32b array at its origin."
+  (%make-pointer dtp-array-pointer (region-origin region)))
+
+(defun region-first-object-table-end (region)
+  "The offset in REGION of the word after its first-object table, or 0 if it has none."
+  (if (region-has-first-object-table-p region)
+      (%structure-total-size (region-first-object-table region))
+    0))
+
+(defun set-first-object-table-entries (region from to start)
+  "In REGION's first-object table, make START the entry of every page whose first word's
+offset lies from FROM up to below TO."
+  (do ((table (region-first-object-table region))
+       (page (ceiling from page-size) (1+ page)))
+      ((not (< (* page page-size) to)))
+    (setf (aref table page) start)))
 
 ;;; This function is used to adjust the free pointer of a region up or down,
 ;;; for functions other than the normal microcoded CONS and UN-CONS.
@@ -1421,12 +1485,24 @@ If there are no ARGS, the car of FUNCTION is applied to the cdr of FUNCTION."
 ;;;  Reset the scavenger if it is in that region.  Could check for an actual
 ;;;   conflict, but that would be more difficult and wouldn't buy a great deal.
 ;;;  Adjust A-CONS-WORK-DONE
-(DEFUN GC-RESET-FREE-POINTER (REGION NEWFP &OPTIONAL IGNORE-IF-DOWNWARD-FLAG)
+;;; the generational collector (contract g3 step 2, 6.2): moving up in a region
+;;; with a first-object table, the pages whose first word the move covers get
+;;; OBJECT-START, the offset of the object that grows over them (as
+;;; ADJUST-ARRAY-SIZE passes), which this cannot know: without it the call
+;;; signals an error rather than leave the table wrong.  moving down writes
+;;; nothing; the entries above the free pointer are never read.
+;(DEFUN GC-RESET-FREE-POINTER (REGION NEWFP &OPTIONAL IGNORE-IF-DOWNWARD-FLAG)
+(defun gc-reset-free-pointer (region newfp &optional ignore-if-downward-flag object-start)
   (OR INHIBIT-SCHEDULING-FLAG
       (FERROR NIL "This function must be called with scheduling inhibited"))
   (LET ((OLDFP (REGION-FREE-POINTER REGION)))
     (COND ((OR (< OLDFP NEWFP)
 	       (NOT IGNORE-IF-DOWNWARD-FLAG))
+	   (when (and (< oldfp newfp)
+		      (region-has-first-object-table-p region))
+	     (or object-start
+		 (ferror nil "Moving up the free pointer of region ~S, which has a first-object table, needs the growing object's start" region))
+	     (set-first-object-table-entries region oldfp newfp object-start))
 	   (STORE (REGION-FREE-POINTER REGION) NEWFP)
 	   (COND ((> (REGION-GC-POINTER REGION) OLDFP)
 		  (FERROR NIL "The free pointer of region ~S is screwed" REGION))
@@ -1552,8 +1628,16 @@ not the old, forwarded one."
 	   (STRUCTURE-FORWARD ARRAY NEW-ARRAY)
 	   NEW-ARRAY)
 	  (T					;Array is at end of region, just make bigger
-	   (GC-RESET-FREE-POINTER REGION (+ ARRAY-DATA-BASE-RELATIVE-TO-REGION-ORIGIN
-					    NEW-DATA-LENGTH))
+;	   (GC-RESET-FREE-POINTER REGION (+ ARRAY-DATA-BASE-RELATIVE-TO-REGION-ORIGIN
+;					    NEW-DATA-LENGTH))
+	   ;; the generational collector (contract g3 step 2, 6.2): the pages
+	   ;; the array now covers get its start, its leader's if it has one, in
+	   ;; the region's first-object table
+	   (gc-reset-free-pointer region (+ array-data-base-relative-to-region-origin
+					    new-data-length)
+				  nil
+				  (%pointer-difference (%find-structure-leader array)
+						       (region-origin region)))
 	   (SETQ AR-1-ARRAY-POINTER-1 NIL)
 	   (SETQ AR-1-ARRAY-POINTER-2 NIL)
 	   (IF (ZEROP LONG-ARRAY-BIT)

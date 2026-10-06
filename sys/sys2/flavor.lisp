@@ -2842,8 +2842,11 @@ Requiring Flavor alist: ~S"
 ;;; support vector
 (DEFUN INSTANCE-HASH-FAILURE (OP &REST ARGS
 			      &AUX (HT (%FUNCTION-INSIDE-SELF)) FN-LOCATION FUNC)
-  (COND (( (DONT-OPTIMIZE (HASH-TABLE-GC-GENERATION-NUMBER HT))
-	    %GC-GENERATION-NUMBER)
+;  (COND (( (DONT-OPTIMIZE (HASH-TABLE-GC-GENERATION-NUMBER HT))
+;	    %GC-GENERATION-NUMBER)
+  ;; the generational collector (contract g3 step 2, 8.4): a method table
+  ;; rehashes after a tenured flip, or after any flip if it holds a young key
+  (cond ((hash-generation-stale-p (dont-optimize (hash-table-gc-generation-number ht)))
 	 (LET ((NEWHT (FUNCALL (DONT-OPTIMIZE (HASH-TABLE-REHASH-FUNCTION HT)) HT NIL)))
 	   ;; Some %POINTER's may have changed, try rehashing
 	   (SET-IN-INSTANCE (DONT-OPTIMIZE (HASH-TABLE-INSTANCE HT))

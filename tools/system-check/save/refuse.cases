@@ -1,0 +1,12 @@
+; The save's guard, C28 (contract G3 step 2 revision 1, section 12; README.md,
+; save/): on a band of step 2, with --files
+; lisp/generational-collector.lisp,lisp/generational-collector-save.lisp,
+; lisp/generational-collector-save-plant-224.lisp, register-page word 224's
+; reader planted to return 1.  Then the harness types (si:disk-save "LODn" t)
+; into a partition that holds a band, whose bytes it has hashed: the save
+; must be refused ("write-back ... refused (register-page word 224)" on the
+; console, the machine waiting for a warm boot) and the partition's band
+; must hash the same.  Fails if DISK-SAVE does not check word 224: the band
+; is overwritten by a band of format 2020.  Written with E2 and not yet run.
+(gcsave-off) => T
+(si:disk-save-refused-write-backs) => 1

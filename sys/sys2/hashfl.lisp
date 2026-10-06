@@ -81,7 +81,9 @@
       (format t "Each key has ~D values associated.~%"
 	      (- (hash-table-block-length hash-array) 1
 		 (if (hash-table-hash-function hash-array) 1 0))))
-  (unless (= (hash-table-gc-generation-number hash-array) %gc-generation-number)
+;  (unless (= (hash-table-gc-generation-number hash-array) %gc-generation-number)
+  ;; the generational collector (contract g3 step 2, 8.4)
+  (when (hash-generation-stale-p (hash-table-gc-generation-number hash-array))
     (format t " rehash is required due to GC.~%"))
   (format t " The rehash function is ~S with increase parameter ~D.~%"
 	  (hash-table-rehash-function hash-array) (hash-table-rehash-size hash-array))
@@ -155,7 +157,10 @@
       ;; We assume that not all slots are used!
       (when (and (= (%p-data-type p) dtp-null)
 		 (zerop (%p-pointer p)))
-	(cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+;	(cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+	;; the generational collector (contract g3 step 2, 8.4): stale by the
+	;; young flag and the tenured flips, not by any flip
+	(cond ((hash-generation-stale-p (hash-table-gc-generation-number hash-table))
 	       ;; Some %POINTER's may have changed, try rehashing
 	       (setq hash-array
 		     (funcall (hash-table-rehash-function hash-table) hash-table nil))
@@ -178,6 +183,10 @@
 	    (hash-table hash-array)
 	    (hash-function (hash-table-hash-function hash-table))
 	    (compare-function (hash-table-compare-function hash-table))
+	    ;; the generational collector (contract g3 step 2, 8.4): the
+	    ;; generation the hash code is made in, and sxhash's young flag for it
+	    (generation %gc-generation-number)
+	    (sxhash-hashed-young-address nil)
 	    (hash-code (if hash-function (funcall hash-function key) key)))
   (declare (values value old-value key-found-p entry-pointer))
   (with-lock ((hash-table-lock hash-table))
@@ -208,7 +217,9 @@
 	    ((= (%p-data-type p) dtp-null)
 	     (or emptyp (setq emptyp p))
 	     (when (zerop (%p-pointer p))
-	       (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+;	       (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+	       ;; the generational collector (contract g3 step 2, 8.4)
+	       (cond ((hash-generation-stale-p (hash-table-gc-generation-number hash-table))
 		      ;; Some %POINTER's may have changed, try rehashing
 		      (setq hash-array
 			    (funcall (hash-table-rehash-function hash-table) hash-table nil))
@@ -234,6 +245,11 @@
 			      (t
 			       (do ((i 1 (1+ i))) ((= i blen))
 				 (%p-store-contents-offset (pop values-left) emptyp i)))))
+		      ;; the generational collector (contract g3 step 2, 8.4): the
+		      ;; volatility asked for above; a young key makes the table
+		      ;; rehash after the next flip
+		      (when (hash-key-young-p hash-code)
+			(note-hash-key-young hash-table generation))
 		      (incf (hash-table-fullness hash-table))
 		      ;; If reusing a deleted slot, decrement number of them slots.
 		      (or (eq emptyp p)
@@ -272,7 +288,9 @@
       (if (and (= (%p-data-type p) dtp-null)
 	       (zerop (%p-pointer p)))
 	  (return
-	    (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+;	    (cond (( (hash-table-gc-generation-number hash-table) %gc-generation-number)
+	    ;; the generational collector (contract g3 step 2, 8.4)
+	    (cond ((hash-generation-stale-p (hash-table-gc-generation-number hash-table))
 		   ;; Some %POINTER's may have changed, try rehashing
 		   (setq hash-array
 			 (funcall (hash-table-rehash-function hash-table) hash-table nil))

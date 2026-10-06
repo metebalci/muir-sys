@@ -1258,8 +1258,15 @@ WHICH defaults to /"LOD/"."
 ;; fixed areas move (no page table or physical-page-data area), so the band's
 ;; layout keeps its form and its numbers move: 2010 saved, 2011 incremental,
 ;; and the cold load 2012 (sys: cold; coldut).  microcode 2002 refuses 2000-2002.
-(defconst band-format-compressed #o2010)
-(defconst band-format-incremental #o2011)
+;(defconst band-format-compressed #o2010)
+;(defconst band-format-incremental #o2011)
+;; the generational collector (contract g3 step 2 revision 1, 8.3, 9.1 item
+;; 8, 9.4): a band carries its pages' young-pointer marks in a mark bitmap
+;; after its last page (%sys-com-mark-bitmap), so the numbers move again:
+;; 2020 saved, 2021 incremental, and the cold load 2022, which has no
+;; bitmap.  step 2's microcode refuses 2010-2012 and 2000-2002.
+(defconst band-format-compressed #o2020)
+(defconst band-format-incremental #o2021)
 
 ;;; the words are counted in blocks, not through sys-com-page-number: an
 ;;; incremental band's valid size, which the microcode writes as its blocks
