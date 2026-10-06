@@ -91,6 +91,10 @@ because regions are allocated bigger than their data.")
 
 ;;; The three questions for Mete (contract 17), answered as recommended until
 ;;; he confirms; each default is the one setting here.
+;;; the generational collector (contract g3 step 2 revision 1, 10): q-gca and
+;;; q-gcb are answered as these defaults have them; q-gcc was answered the
+;;; other way, a save keeps young objects young and the band carries each
+;;; page's mark (8.3), so its setting, gc-save-tenures-all, is gone.
 (defvar gc-on-at-boot t
   "Q-GCa: T turns automatic garbage collection, young collections included, on at every
 cold and warm boot (GC-BOOT).  NIL: on at boot only if it was on (GC-ON), as before.")
@@ -100,12 +104,12 @@ cold and warm boot (GC-BOOT).  NIL: on at boot only if it was on (GC-ON), as bef
 by GC-TENURED-GROWTH-LIMIT.  NIL: tenured collections only by explicit calls
 /(GC-FLIP-NOW, FULL-GC, GC-IMMEDIATELY).")
 
-(defvar gc-save-tenures-all t
-  "Q-GCc: T makes DISK-SAVE finish any collection and tenure every young object first, so
-that no band holds an object in ephemeral space.  NIL leaves the collector as it is, as
-DISK-SAVE did before; a band saved so with young objects is not safe, since the marks
-of its pages are not saved (the contract's alternative, every tenured page marked at boot,
-is not built).")
+;(defvar gc-save-tenures-all t
+;  "Q-GCc: T makes DISK-SAVE finish any collection and tenure every young object first, so
+;that no band holds an object in ephemeral space.  NIL leaves the collector as it is, as
+;DISK-SAVE did before; a band saved so with young objects is not safe, since the marks
+;of its pages are not saved (the contract's alternative, every tenured page marked at boot,
+;is not built).")
 
 ;;; The settings (contract 10).  Each may be set at any time and takes effect
 ;;; at the next flip.
@@ -228,6 +232,26 @@ every generation."
   (setq %gc-promotion promotion
 	%gc-pretenure-threshold gc-pretenure-threshold))
 
+;;; the generational collector (contract g3 step 2 revision 1, 8.3.5): a
+;;; warm boot loads a memory afresh, and its initial %gc-promotion, 0, is the
+;;; tenure-all table, so a collection running across the boot would go on
+;;; with a table not its own.  the flip's table is kept here, and gc-boot and
+;;; gc-on give it back while there is oldspace; gc-on gave a table computed
+;;; then, which after a boot mid-collection is not the flip's.
+(defvar gc-collection-promotion 0
+  "The promotion table of the last flip: the running collection's while there is oldspace.")
+
+(defun gc-oldspace-p ()
+  "T if some region is oldspace, that is, a collection is running."
+  (dotimes (region size-of-area-arrays)
+    (when (= %region-space-old (%logldb %%region-space-type (region-bits region)))
+      (return t))))
+
+(defun gc-running-promotion-table ()
+  "The promotion table for the microcode now: the running collection's while there is
+oldspace, else one computed now (each flip computes and installs its own)."
+  (if (gc-oldspace-p) gc-collection-promotion (gc-promotion-table nil)))
+
 (defun gc-tenured-flip-since-p (generation)
   "T if a tenured flip happened after %GC-GENERATION-NUMBER was GENERATION."
   (> %gc-tenured-flip-generation generation))
@@ -336,7 +360,8 @@ every generation."
 (defun gc-flip-now (&optional (kind :tenured) tenure-all)
   "Start a collection.  KIND :TENURED, the default, flips every dynamic region, as MIT's
 flip did; :YOUNG flips eden and both survivor spaces.  TENURE-ALL copies every survivor
-into the tenured generation (FULL-GC, DISK-SAVE).  Finishes any collection first.
+into the tenured generation (FULL-GC, and the build before it saves a band it builds;
+DISK-SAVE never does).  Finishes any collection first.
 Returns T."
   (check-arg kind (memq kind '(:young :tenured)) ":YOUNG or :TENURED")
   (with-lock (gc-flip-lock)
@@ -372,6 +397,8 @@ Returns T."
 	;; Invalidate AR-1's cache.
 	(setq ar-1-array-pointer-1 nil)
 	(setq ar-1-array-pointer-2 nil)
+	;; kept for a warm boot during the collection (gc-running-promotion-table)
+	(setq gc-collection-promotion promotion)
 	(gc-install-settings promotion)
 	;; Don't forget to actually flip!
 	(%gc-flip (if tenured t -1))
@@ -973,7 +1000,9 @@ is possible only if there is a lot of garbage; but it has a better chance.")
     ;; the generational collector (contract g3 step 2): the microcode's
     ;; settings, and the tenured generation's size the growth limit counts
     ;; from, if not yet measured
-    (gc-install-settings (gc-promotion-table nil))
+;    (gc-install-settings (gc-promotion-table nil))
+    ;; revision 1 (8.3.5): the running collection's table while there is one
+    (gc-install-settings (gc-running-promotion-table))
     (unless gc-tenured-words-at-last-tenured-collection
       (setq gc-tenured-words-at-last-tenured-collection
 	    (gc-generation-words %region-generation-tenured)))
@@ -1005,9 +1034,14 @@ is possible only if there is a lot of garbage; but it has a better chance.")
 ;;; boot, the areas DISK-SAVE made not ephemeral are ephemeral again, the
 ;;; microcode has the pretenuring threshold, and automatic garbage
 ;;; collection is turned on if GC-ON-AT-BOOT, or if it was on.
+;;; revision 1 (8.3.1, 8.3.5): DISK-SAVE no longer makes areas not ephemeral,
+;;; so there is nothing to restore; the microcode has the pretenuring
+;;; threshold and, if a collection is running (a warm boot mid-collection),
+;;; that collection's promotion table, whether or not collection is turned on.
 (defun gc-boot ()
-  (gc-restore-ephemeral-areas)
-  (setq %gc-pretenure-threshold gc-pretenure-threshold)
+;  (gc-restore-ephemeral-areas)
+;  (setq %gc-pretenure-threshold gc-pretenure-threshold)
+  (gc-install-settings (gc-running-promotion-table))
   (when (or gc-on-at-boot gc-on)
     (gc-on t)))
 (add-initialization "GC-BOOT" '(gc-boot) '(:warm))
@@ -1021,40 +1055,70 @@ is possible only if there is a lot of garbage; but it has a better chance.")
 ;;; spaces.  the GC process is stopped, so that no flip starts before the
 ;;; save.  GC-BOOT makes the areas ephemeral again in the saved band, and
 ;;; GC-AFTER-DISK-SAVE-ABORT in this world if the save does not happen.
-(defvar gc-saved-ephemeral-areas nil
-  "The areas that DISK-SAVE made not ephemeral, to be made ephemeral again at boot.")
+;(defvar gc-saved-ephemeral-areas nil
+;  "The areas that DISK-SAVE made not ephemeral, to be made ephemeral again at boot.")
 
-(defun gc-make-ephemeral-areas-tenured ()
-  (without-interrupts
-    (dolist (name area-list)
-      (let ((area (symbol-value name)))
-	(when (ldb-test %%region-ephemeral (area-region-bits area))
-	  (push area gc-saved-ephemeral-areas)
-	  (setf (area-region-bits area)
-		(%logdpb 0 %%region-ephemeral (area-region-bits area))))))))
+;(defun gc-make-ephemeral-areas-tenured ()
+;  (without-interrupts
+;    (dolist (name area-list)
+;      (let ((area (symbol-value name)))
+;	(when (ldb-test %%region-ephemeral (area-region-bits area))
+;	  (push area gc-saved-ephemeral-areas)
+;	  (setf (area-region-bits area)
+;		(%logdpb 0 %%region-ephemeral (area-region-bits area))))))))
 
-(defun gc-restore-ephemeral-areas ()
-  (without-interrupts
-    (dolist (area gc-saved-ephemeral-areas)
-      (setf (area-region-bits area)
-	    (%logdpb 1 %%region-ephemeral (area-region-bits area)))
-      ;; empty the cons caches, which may hold the area's tenured region
-      (%gc-scav-reset (area-region-list area)))
-    (setq gc-saved-ephemeral-areas nil)))
+;(defun gc-restore-ephemeral-areas ()
+;  (without-interrupts
+;    (dolist (area gc-saved-ephemeral-areas)
+;      (setf (area-region-bits area)
+;	    (%logdpb 1 %%region-ephemeral (area-region-bits area)))
+;      ;; empty the cons caches, which may hold the area's tenured region
+;      (%gc-scav-reset (area-region-list area)))
+;    (setq gc-saved-ephemeral-areas nil)))
 
+;(defun gc-prepare-for-disk-save ()
+;  "Make the world ready to be saved: no young object, no collection running (Q-GCc)."
+;  (when gc-save-tenures-all
+;    (with-lock (gc-flip-lock)
+;      (process-disable gc-process)
+;      (gc-reclaim-oldspace)			;finish any collection
+;      (gc-make-ephemeral-areas-tenured)
+;      (gc-flip-now :young t)
+;      (gc-reclaim-oldspace))))
+
+;(defun gc-after-disk-save-abort ()
+;  "Undo GC-PREPARE-FOR-DISK-SAVE when the save does not happen."
+;  (gc-restore-ephemeral-areas)
+;  (when gc-on
+;    (process-enable gc-process)))
+
+;;; the generational collector, revision 1 (contract g3 step 2 revision 1,
+;;; 8.3.1; q-gcc as settled): a save keeps young objects young, and the band
+;;; carries each saved page's young-pointer mark, which the microcode's save
+;;; reads from the page table and the boot gives back.  so DISK-SAVE calls
+;;; GC-PREPARE-FOR-DISK-SAVE first, which finishes any collection, since no
+;;; band may hold oldspace or a walk in progress; runs one young collection
+;;; to its reclaim, in batch, with the normal promotion table, which frees
+;;; eden's garbage and leaves the survivors in survivor space 1 or 2; and
+;;; leaves the GC process stopped until the save, so that no flip starts
+;;; after it.  the ephemeral areas stay ephemeral: what DISK-SAVE conses
+;;; afterwards is young, in eden, and its referrers' pages are marked.  it
+;;; never tenures (the build tenures before it saves a band it builds, with
+;;; (gc-flip-now :young t) and gc-reclaim-oldspace, contract 9.4).  the old
+;;; version, above, tenured every young object and made the ephemeral areas
+;;; not ephemeral until the save.
 (defun gc-prepare-for-disk-save ()
-  "Make the world ready to be saved: no young object, no collection running (Q-GCc)."
-  (when gc-save-tenures-all
-    (with-lock (gc-flip-lock)
-      (process-disable gc-process)
-      (gc-reclaim-oldspace)			;finish any collection
-      (gc-make-ephemeral-areas-tenured)
-      (gc-flip-now :young t)
-      (gc-reclaim-oldspace))))
+  "Make the world ready to be saved: no collection running, and one young collection
+just done.  The GC process stays stopped until the save (GC-AFTER-DISK-SAVE-ABORT)."
+  (with-lock (gc-flip-lock)
+    (process-disable gc-process)
+    (gc-reclaim-oldspace)			;finish any collection
+    (gc-flip-now :young)
+    (gc-reclaim-oldspace)))
 
 (defun gc-after-disk-save-abort ()
-  "Undo GC-PREPARE-FOR-DISK-SAVE when the save does not happen."
-  (gc-restore-ephemeral-areas)
+  "Undo GC-PREPARE-FOR-DISK-SAVE when the save does not happen: the GC process runs
+again if automatic collection is on."
   (when gc-on
     (process-enable gc-process)))
 

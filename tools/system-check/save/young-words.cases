@@ -1,0 +1,8 @@
+; C29 (contract G3 step 2 revision 1, section 12; README.md, save/): the
+; young words of a built band, by generation (eden, survivor spaces 1 and 2),
+; recorded, not checked: E3 runs it on band4 saved without the build's
+; tenure-all and on every band built with it, and the hand-over band's go in
+; the hand-over.  On a band of step 2; it needs no files.  The second case is
+; the same figure in words in all.
+(cdr (multiple-value-list (si:gc-get-generation-sizes)))
+(apply #'+ (cdr (multiple-value-list (si:gc-get-generation-sizes))))

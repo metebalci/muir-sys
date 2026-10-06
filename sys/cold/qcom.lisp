@@ -273,7 +273,14 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;; here so that a band saved with it set keeps it (the microcode's
   ;; a-region-floor and lisp's %region-floor are set from it at boot)
   %sys-com-region-floor			;an address, a multiple of the quantum
-  ;; 3 left
+;  ;; 3 left
+  ;; the generational collector (contract g3 step 2 revision 1, 8.3.2): the
+  ;; band page of a saved band's mark bitmap's first page, right after its
+  ;; last page, a bit a page of the band's walk; 0 in a cold load, which has
+  ;; no bitmap
+  %sys-com-mark-bitmap			;a band page; 0, no bitmap
+  ;; 1 left: the check below allows #o40 entries (the old count of 3
+  ;; was stale)
   ))
 
 (AND (> (LENGTH SYSTEM-COMMUNICATION-AREA-QS) 40)

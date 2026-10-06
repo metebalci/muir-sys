@@ -157,6 +157,16 @@ calls it after its process is flushed, where an error cannot be shown."
 	  ;; held none (disk-save tenures them all), so the regions it was booted
 	  ;; with stay in place; with young collections on there is one after
 	  ;; every few megawords consed.
+	  ;; revision 1 (8.3.6): the band may hold young objects now (disk-save
+	  ;; keeps them young), and a young flip since the boot may have freed
+	  ;; its young regions and reused their numbers.  the save stays right:
+	  ;; the compare pairs each page with the base band's page of the same
+	  ;; region number and place and saves it unless their words are equal,
+	  ;; and the restore takes an omitted page from that same place.  a
+	  ;; tenured flip still refuses it, since it moves most pages and the
+	  ;; save would gain nothing.  the band's young-pointer marks are the
+	  ;; incremental band's own bitmap, which %disk-save writes for every
+	  ;; page of its walk, saved or not.
 	  (when (gc-tenured-flip-since-p
 		  (%logdpb (aref (rqb-buffer system-communication-area-rqb)
 				 (1+ (* 2 %sys-com-gc-generation-number)))

@@ -1,0 +1,61 @@
+; The save checks of the generational collector, second session (contract
+; G3 step 2 revision 1, section 12, C14, C25, C26, C27's Lisp part, C29's
+; record): on the band before.cases's session saved, booted cold, with
+; collections off (before.cases turned them off for the boot too).  It needs
+; no --files: the helpers were saved in the band.  Each case names the
+; partial fix it fails on; the microcode's (no bitmap saved, none restored,
+; a bitmap indexed by a region's first page, a restore path left out, a mark
+; left in the TLB only) need E4's mutated microcode; the Lisp one is planted
+; in the first session by lisp/generational-collector-save-plant-tenure.lisp.
+; Written with E2 and not yet run.  Its cases run in USER.
+
+; collections are off and none is running
+(list si:gc-on (si:gc-oldspace-p)) => (NIL NIL)
+
+; C27, its Lisp part: the band is format 2020 by the system's constants
+; (2020 and 2021 octal), and its mark bitmap word is set.  Fails with
+; disk.lisp's constants left at 2010-2011, or a save that writes no bitmap
+(gcsave-c27) => (1040 1041 T T)
+
+; C29, recorded: the band's young words by generation, eden, survivor
+; spaces 1 and 2, before any collection
+(gcsave-young-words)
+
+; C14 (a): every list is young: those consed before the save's young
+; collection in survivor space 1 (generation 2), C14 (d)'s, consed by the
+; BEFORE-COLD initialization after it, in eden (1).  Fails if
+; GC-PREPARE-FOR-DISK-SAVE still tenures (planted: (0 1 0 0) and
+; (NIL T NIL NIL))
+(gcsave-young-addresses) => (T T T T)
+(gcsave-generations) => (2 1 2 2)
+
+; C14 (b), C14 (d), C25: before any collection, the page of each list's
+; only referrer is marked: C14's static array (a paged page, C25 (c)), C14
+; (d)'s slot (marked just before %DISK-SAVE), NIL's property list (a wired
+; page, C25 (a)), the symbol of C25 (b).  Fails without the save's bitmap,
+; without its restore, with the restore reaching fewer than its three paths
+; (C25), or with C14 (d)'s mark left in the TLB only
+(gcsave-referrer-marks) => (1 1 1 1)
+
+; C26: every bit of the band's mark bitmap, read from the partition, has its
+; mark in the page's entry (no bit missing); the bitmap's word is set and the
+; band's valid pages are the bitmap's first page plus its pages.  Fails with
+; an off-by-one page order or bits ORed into the wrong entries.  Format 2020
+; is 1040.  The whole result is recorded after it: the walk's pages, the
+; bits, the marks without a bit (pages Lisp marked since the boot, a few)
+(let ((r (gcsave-c26))) (list (first r) (second r) (third r) (sixth r))) => (1040 T T 0)
+(gcsave-c26)
+
+; C14 (c), C25: the sums after one young collection, with the reclaim
+; checker (C21) finding no pointer into oldspace before its reclaim, then
+; after two more.  Fails if any of the marks above was not restored
+(gencol-install-reclaim-checker) => T
+(progn (gencol-young-collection) (list (gcsave-sums) (plusp *gencol-reclaim-checks*) *gencol-reclaim-violations* *gencol-reclaim-first*)) => ((49995000 49995000 49995000 49995000) T 0 NIL)
+(gcsave-reclaim-checker-off) => T
+(progn (gencol-young-collection) (gcsave-sums)) => (49995000 49995000 49995000 49995000)
+(progn (gencol-young-collection) (gcsave-sums)) => (49995000 49995000 49995000 49995000)
+
+; word 224 is 0 after the run (C22); the BEFORE-COLD initialization and the
+; property lists removed
+(si:disk-save-refused-write-backs) => 0
+(gcsave-clean-up) => T

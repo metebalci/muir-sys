@@ -36,4 +36,50 @@ status is 0 when every check passes.
 | `rev14-ephemeral` | Revision 14's ephemeral run (contract G3 revision 14, section 12's Y4 checks): a new area flagged ephemeral (`%%REGION-EPHEMERAL`) made the default cons area and the bignums' (`SI:NUMBER-CONS-AREA`), so that every object the workloads make lies in ephemeral space, past 2^31 words, and the ephemeral-reference setter's enable on (register-page word 221); then muir-sim's profile workloads (`examples/profile.rs`), stores of young objects into old ones, `SET-MAR` on a young object (one write a `SET-MAR`: after a MAR break a page's later writes do not break until the next `SET-MAR`, on revision 13 as on 14), every region's free pointer and scavenger pointer checked to be offsets within it (`rev14e-bad-regions`: microcode whose `UN-CONS` wrote an object's address into an ephemeral region's `REGION-GC-POINTER` fails it), and the pages whose entry has `<19>` read from the page table (`rev14e-marked-report`, the last case), for comparing with a replay of the run's stores by the setter's rule (A14.8). The young-object cases (a new list, an array, a bignum, a sorted list) and the old FEF are the controls. Register-page word 224 is 0 throughout. It needs revision 14 and a band of System 2002. 35 cases, about 46 s on micro at 32 M words; microcode 2002 before the `UN-CONS` fix fails 1 of the 35, `rev14e-bad-regions` after the workloads. |
 | `rev14-straddle-working-storage`, `rev14-straddle-pdl`, `rev14-straddle-disk-buffer`, `rev14-straddle-macro-compiled-program` | Revision 14's four straddle runs (contract G3 revision 14, 10.11): the workloads again, with the next region of `WORKING-STORAGE-AREA` (lists consed through 2^31), `PDL-AREA` (a stack group whose regular PDL lies across 2^31, the workloads run in it), `DISK-BUFFER-AREA` (an RQB whose data lie across 2^31, band reads into it compared) or `MACRO-COMPILED-PROGRAM` (the workloads' FEFs across and above 2^31) placed across 2^31 words with the region floor, which is raised just before that region is made and put back after (`lisp/rev14-straddle.lisp`, which each names on its first line). One region can hold 2^31 at a time, so each is a session of its own. They need revision 14 and a band of System 2002 whose floor is the default. 9, 9, 10 and 7 cases, 25 to 80 s each on micro at 32 M words. |
 | `rev14-code-anywhere` | Revision 14's code anywhere (contract G3 revision 14, 10.4, LC's checks L1-L7 at the system level): planted FEFs in regions of `MACRO-COMPILED-PROGRAM` placed with the region floor: a loop of 100 calls and short branches across 2^30 words, its exit branch carrying into `LC<32>` and its loop branch borrowing back (L1, L2, L4); an FEF whose start PC lies past 3 x 2^30 words (L5); an unwind-protect continued and one thrown through, at and above `30000000000` (L6); and an FEF above 2^31 entered, whose loops defer sequence breaks with interrupts off (L5, L7). `lisp/rev14-code-anywhere.lisp`. It needs revision 14 and a band of System 2002 whose floor is the default. 16 cases, about 21 s on micro at 32 M words. |
-| `generational-collector` | The generational collector's Lisp-visible checks (contract G3 step 2, section 12, C1-C13 and C16-C22): its defaults (young collections on from boot, tenured ones automatic, DISK-SAVE tenuring every young object, eden 1/16 of main memory, the pretenuring threshold 32 K words), the promotion table, ephemeral areas and their refusals, FS:*PATHNAME-HASH-TABLE* left current by a young flip, a tenured page as the only root and its mark, a store after the walk passed its page, unboxed words that look like pointers, an object across pages, the first-object tables (`GENCOL-CHECK-TABLES`, the table checker), stacks, the special PDL, A memory, ages, the soft cap, pretenuring, compiled code, hash tables with and without young keys, a marked page swapped out, the extra PDL, a tenured collection with young objects alive, the incremental save, and `GENCOL-INSTALL-RECLAIM-CHECKER`, the reclaim checker, which before every reclaim reads all of memory for a pointer into oldspace (minutes each). It needs step 2's microcode and a band of System 2002 built with step 2's Lisp, at 32 MW; it turns automatic collection off and makes its collections itself. Three files plant the Lisp side's partial fixes, each given after the check's own file: `lisp/generational-collector-plant-gc.lisp` (the cap, two first-object table writers, the incremental save's test) fails the second promotion-table case, C6 (b) and (c), C11 and C20; `-plant-young-keys.lisp` fails C16 (b) and (c); `-plant-every-flip.lisp` fails C16 (a) and the pathname table's case. The microcode's partial fixes need E4's mutated microcode. Left to E4 by hand: C14, C15, C23, C24. |
+| `generational-collector` | The generational collector's Lisp-visible checks (contract G3 step 2, section 12, C1-C13 and C16-C22): its defaults (young collections on from boot, tenured ones automatic, no `GC-SAVE-TENURES-ALL`, eden 1/16 of main memory, the pretenuring threshold 32 K words), the promotion table, ephemeral areas and their refusals, FS:*PATHNAME-HASH-TABLE* left current by a young flip, a tenured page as the only root and its mark, a store after the walk passed its page, unboxed words that look like pointers, an object across pages, the first-object tables (`GENCOL-CHECK-TABLES`, the table checker), stacks, the special PDL, A memory, ages, the soft cap, pretenuring, compiled code, hash tables with and without young keys, a marked page swapped out, the extra PDL, a tenured collection with young objects alive, the incremental save, and `GENCOL-INSTALL-RECLAIM-CHECKER`, the reclaim checker, which before every reclaim reads all of memory for a pointer into oldspace (minutes each). It needs step 2's microcode and a band of System 2002 built with step 2's Lisp, at 32 MW; it turns automatic collection off and makes its collections itself. Three files plant the Lisp side's partial fixes, each given after the check's own file: `lisp/generational-collector-plant-gc.lisp` (the cap, two first-object table writers, the incremental save's test) fails the second promotion-table case, C6 (b) and (c), C11 and C20; `-plant-young-keys.lisp` fails C16 (b) and (c); `-plant-every-flip.lisp` fails C16 (a) and the pathname table's case. The microcode's partial fixes need E4's mutated microcode. C14 and C25-C29 are `save/`'s (below); left to E4 by hand: C15, C23, C24. |
+
+## The save checks (`save/`)
+
+The generational collector's save keeps young objects young, and the band
+carries each page's young-pointer mark in its mark bitmap (contract G3 step 2
+revision 1, 8.3; section 12's C14 and C25-C29). A check of it is a session, a
+save and a boot, which `run` does not do, so its case files are in `save/`,
+not `cases/`; a harness runs them as `tools/cross-build`'s `incremental` step
+runs its sessions, on a pack that keeps what is saved:
+
+1. `save/before.cases` on a band of step 2, with `--files
+   lisp/generational-collector.lisp,lisp/generational-collector-save.lisp`:
+   automatic collection off, now and at the saved band's boot; a young list
+   held only by a static array's slot on a page that is not its region's
+   first (C14), and by NIL's property list, in a wired page, and a symbol's
+   between the band's wired size and `1000000`, a page wired for the
+   restore (C25 (a), (b); (c) is C14's array, a paged page); a
+   `BEFORE-COLD` initialization that conses and stores a fourth list after
+   the save's young collection (C14 (d)). The harness then types
+   `(si:disk-save "LODn" t)` and waits for the partition to hold a band of
+   format 2020.
+2. `save/after.cases` on that band, booted: the format and the bitmap's word
+   (C27's Lisp part), the young words by generation (C29, recorded), every
+   list young (C14 (a)), each referrer's page marked before any collection
+   (C14 (b), (d), C25), every bit of the band's bitmap, read from the
+   partition with the band's own region tables, marked in its page's entry,
+   and the valid pages the bitmap's first page plus its pages (C26,
+   `GCSAVE-C26`), then the sums after one young collection with the reclaim
+   checker, and after two more (C14 (c)).
+3. `save/refuse.cases`, C28: with `lisp/generational-collector-save-plant-224.lisp`
+   after the two files, register-page word 224's reader returns 1; the
+   harness types `DISK-SAVE` into a partition that holds a band, and the
+   partition must keep its bytes.
+4. `save/young-words.cases`, C29: the young words of a built band by
+   generation, recorded, for band4 without the build's tenure-all and every
+   band built with it.
+
+`lisp/generational-collector-save-plant-tenure.lisp`, given in step 1 after
+the two files, plants revision 0's save, which tenured every young object:
+`after.cases` must then fail C14 (a). The microcode's partial fixes (no
+bitmap saved or restored, a bitmap indexed by a region's first page, a
+restore path left out, a mark left in the TLB only) need E4's mutated
+microcode. A cold load's boot applies no bitmap: `GCSAVE-MARKED-PAGES`
+counts the marked pages, for a harness to read before the cold load stores
+a young object. They need step 2's microcode and band, at 32 MW; written
+with E2 and not yet run.

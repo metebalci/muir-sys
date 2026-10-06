@@ -1784,7 +1784,8 @@ INCREMENTAL means to write out only those parts of the world which have changed
 	  (inc-states nil)
 	  (inc-process nil)
 	  (inc-mouse-sheet nil)
-	  (inc-changed nil))
+	  (inc-changed nil)
+	  (refused-write-backs 0))
     ;; quux revision 13: microcode 2001 has no incremental save (its
     ;; %disk-save halts at incremental-band-not-supported), so it is refused
     ;; here, with an error, before anything is changed.
@@ -1832,6 +1833,13 @@ you should not save this environment."
     ;; save does not happen, the world is given its young collections back.
     ;; a band saved before SYS: SYS2; GC is loaded (the cold load's) has no
     ;; collector to prepare
+    ;; revision 1 (contract g3 step 2 revision 1, 8.3.1): no band holds a
+    ;; collection in progress, but young objects stay young.  any collection
+    ;; is finished, one young collection is run, and the gc process is
+    ;; stopped until the save, so no flip starts after it; what is consed
+    ;; from here on is young, and %disk-save saves each page's young-pointer
+    ;; mark in the band's mark bitmap.  if the save does not happen, the gc
+    ;; process runs again (gc-after-disk-save-abort).
     (when (fboundp 'gc-prepare-for-disk-save)
       (gc-prepare-for-disk-save))
     (unwind-protect (progn
@@ -1935,7 +1943,17 @@ will take a few minutes.")
 	;; after check-partition-size's late error, the machine wants a warm
 	;; boot: measured, the console did not answer again.
 	(setq inc-changed (and incremental (disk-save-incremental-verify inc-states)))
-	(when inc-changed
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.1,
+	;; 8.3.3): %disk-save reads each page's young-pointer mark from its page
+	;; table entry, where the hardware writes every mark it sets, except a
+	;; write-back the guard refused, which register-page word 224 counts;
+	;; such a mark is in the tlb only, and a band saved without it would
+	;; lose a young object at its first young collection.  so the save is
+	;; refused as a changed region refuses it, here, where nothing runs
+	;; until %disk-save.
+	(setq refused-write-backs (disk-save-refused-write-backs))
+;	(when inc-changed
+	(when (or inc-changed (not (zerop refused-write-backs)))
 	  ;; enabled while there is no current process, as process-initialize
 	  ;; does: with one, process-consider-runnability flushes a process
 	  ;; whose stack group is the running one, this one
@@ -1943,7 +1961,8 @@ will take a few minutes.")
 	  (process-enable inc-process)
 	  (setq current-process inc-process)
 	  (setq tv:mouse-sheet inc-mouse-sheet))
-	(unless inc-changed
+;	(unless inc-changed
+	(unless (or inc-changed (not (zerop refused-write-backs)))
 	(%DISK-SAVE (IF INCREMENTAL
 			(- (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
 		      (SYSTEM-COMMUNICATION-AREA %SYS-COM-MEMORY-SIZE))
@@ -1958,7 +1977,24 @@ will take a few minutes.")
     (when inc-changed
       (send tv:main-screen :expose)
       (ferror nil "Region ~O changed during the incremental save (free pointer ~O, then ~O); the band is not saved.  Warm boot please."
-	      inc-changed (aref inc-states (* 2 inc-changed)) (region-free-pointer inc-changed)))))
+	      inc-changed (aref inc-states (* 2 inc-changed)) (region-free-pointer inc-changed)))
+    ;; the generational collector (contract g3 step 2 revision 1, 8.3.1): the
+    ;; save refused above for a mark the page table lacks
+    (unless (zerop refused-write-backs)
+      (send tv:main-screen :expose)
+      (ferror nil "~D write-back~:P of a page's young-pointer mark ~:[was~;were~] refused (register-page word 224), so the page table lacks a mark; the band is not saved.  Warm boot please."
+	      refused-write-backs (> refused-write-backs 1)))))
+
+;;; the generational collector (contract g3 step 2 revision 1, 8.3.1, 8.5):
+;;; a write-back of a page's young-pointer mark that the guard refused leaves
+;;; the mark in the tlb and not in the page table, where %disk-save reads it,
+;;; and register-page word 224 counts it (appendix a14.6, a14.9).  DISK-SAVE
+;;; refuses to save while it is not 0.  conses nothing for a count below
+;;; 2^31: DISK-SAVE reads it with no current process.
+(defun disk-save-refused-write-backs ()
+  "Register-page word 224: the write-backs of a page's young-pointer mark the guard
+refused since it was last cleared."
+  (feature-page-field #o224 #o0040))
 
 ;;; 1024-word pages (contract g2, option (w)): PART-SIZE is blocks, as a
 ;;; partition's size is, and a page dumped takes disk-blocks-per-page of them.
@@ -1991,12 +2027,29 @@ will take a few minutes.")
   (DO ((REGION 0 (1+ REGION))
        (SIZE 0))
       ((= REGION (REGION-LENGTH REGION-LENGTH))
-       SIZE)
+;       SIZE)
+       ;; the generational collector (contract g3 step 2 revision 1, 8.3.1,
+       ;; 8.3.2): the band's mark bitmap follows its last page, a bit for
+       ;; each page of the walk counted here
+       (+ size (mark-bitmap-pages size)))
     ;; Check each region.  If it is free, ignore it.  Otherwise,
     ;; add how many pages it will take to dump it.
     (IF ( (LDB %%REGION-SPACE-TYPE (REGION-BITS REGION))
 	   %REGION-SPACE-FREE)
 	(SETQ SIZE (+ SIZE (CEILING (REGION-TRUE-FREE-POINTER REGION) PAGE-SIZE))))))
+
+;;; the generational collector (contract g3 step 2 revision 1, 8.3.2): a
+;;; saved band's mark bitmap has a bit for each page of the band's walk (the
+;;; regions from region 0, each to the end of the page its free pointer is
+;;; in, free regions skipped), 32 bits in each word, a fixnum, and lies in
+;;; the band right after its last page; %sys-com-mark-bitmap holds the band
+;;; page of its first page, 0 in a cold load.
+(defconst mark-bitmap-bits-per-page (* 32. page-size)
+  "The pages of a band's walk whose marks one page of its mark bitmap holds.")
+
+(defun mark-bitmap-pages (band-pages)
+  "The pages of the mark bitmap of a band whose walk has BAND-PAGES pages."
+  (ceiling band-pages mark-bitmap-bits-per-page))
 
 ;;; Find the highest address in the virtual memory.  If you call this without
 ;;; inhibiting interrupts, the result is not strictly correct since some

@@ -8,13 +8,18 @@
 ; microcode.  Left to E4 by hand: C14 (DISK-SAVE, then a boot), C15 (a warm
 ; boot), C23 (the high band and the straddle runs) and C24 (Y1's and Y2's
 ; checks on E1's microcode).
+; Revision 1: C14 and C25-C29's Lisp parts are save/'s cases (a session, a
+; save and a boot; README.md); C15 stays E4's by hand.
 
 ; the defaults (contract 10, 17), read before anything changes them: young
 ; collections on from boot (Q-GCa), tenured ones automatic (Q-GCb), DISK-SAVE
 ; tenuring every young object (Q-GCc), eden 1/16 of main memory, the
 ; pretenuring threshold 32 K words, given to the microcode at boot
+; revision 1: Q-GCc settled the other way, a save keeps young objects young,
+; and its setting, GC-SAVE-TENURES-ALL, is gone
 (list si:gc-on (not (null (assq si:gc-process si:active-processes)))) => (T T)
-(list si:gc-on-at-boot si:gc-tenured-automatic si:gc-save-tenures-all si:gc-pretenure-threshold si:%gc-pretenure-threshold) => (T T T 32768 32768)
+;(list si:gc-on-at-boot si:gc-tenured-automatic si:gc-save-tenures-all si:gc-pretenure-threshold si:%gc-pretenure-threshold) => (T T T 32768 32768)
+(list si:gc-on-at-boot si:gc-tenured-automatic (boundp 'si:gc-save-tenures-all) si:gc-pretenure-threshold si:%gc-pretenure-threshold) => (T T NIL 32768 32768)
 (= (si:gc-eden-words) (floor (si:gc-main-memory-words) 16)) => T
 (= (si:gc-tenured-growth-limit-words) (floor (si:gc-main-memory-words) 4)) => T
 ; the setter's enable (word 221) is on and no write-back was refused (word 224)
