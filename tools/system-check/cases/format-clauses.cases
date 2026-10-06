@@ -1,0 +1,19 @@
+; lisp: format-clauses.lisp
+; FORMAT's cached clause buffer holds no string it gave back
+; (sys/io/format.lisp, FORMAT-RECLAIM-CLAUSES; lisp/format-clauses.lisp).
+; FORMAT-PARSE-CLAUSES conses each clause's string in FORMAT-TEMPORARY-AREA
+; and FORMAT-RECLAIM-CLAUSES returns it with RETURN-ARRAY; the buffer,
+; FORMAT-CLAUSES-ARRAY, is kept for the next call, and the collector scans it
+; whole, past its fill pointer too.  A pointer it keeps to a returned string
+; is transported as an object, and once that storage has been consed again
+; or created fresh the transporter halts (format-clauses-gc).  FORMAT::FC-HELD
+; is (the arrays the buffer holds, of them the ones lying at or above their
+; region's free pointer).  Run with
+;   --compile --files sys/io/format.lisp,tools/system-check/lisp/format-clauses.lisp
+; on any band.  The first two cases are controls; System 2002 without the
+; change fails the other three (measured).
+(format nil "~[a~;b~]" 1) => "b"
+(format nil "~10<a~;b~>") => "a        b"
+(progn (format nil "~[a~;b~;c~]" 0) (format::fc-held)) => (0 0)
+(progn (format nil "~10<a~;b~>") (format::fc-held)) => (0 0)
+(progn (format nil "~:[no~;yes~]" t) (format::fc-held)) => (0 0)

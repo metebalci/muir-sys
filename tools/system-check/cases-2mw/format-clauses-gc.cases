@@ -1,0 +1,23 @@
+; lisp: format-clauses.lisp
+; The collector's halt from FORMAT's clause buffer (sys/io/format.lisp,
+; FORMAT-RECLAIM-CLAUSES; lisp/format-clauses.lisp), planted at 2 M words of
+; main memory: run it only when named, on a machine of 2 M words
+; (--main-memory-size 2MW through a --quux wrapper); at more nothing is
+; forced out and the first case fails.  FORMAT's temporary consing goes to an
+; area of the check's own; a call with three clauses gives their strings back
+; with the area's free pointer on a page boundary; that page is forced out;
+; a call with one clause conses its string at the boundary, so the page comes
+; back fresh (CONSF's M-DONT-SWAP-IN) and the second clause's string is gone;
+; then a collection.  A buffer that still points to that string makes the
+; scavenger transport it, and %FIND-STRUCTURE-HEADER's scan back from it meets
+; the first string's GC-FORWARD words: ILLOP, HALT-CONS from XFSHS1+2, and the
+; machine stops (no answer to the collection case).  Run with
+;   --compile --files sys/io/format.lisp,tools/system-check/lisp/format-clauses.lisp
+; The planting cases are the controls: they pass with and without the change.
+; System 2002 (handover-2002-a07a05c) and System 2001 without the change halt
+; in the collection case (measured).
+(<= (si:system-communication-area si:%sys-com-memory-size) (* 2 1024 1024)) => T
+(format::fc-plant-1) => T
+(format::fc-plant-2) => (T T 0)
+(format::fc-collect) => T
+(format nil "~[a~;b~]" 1) => "b"

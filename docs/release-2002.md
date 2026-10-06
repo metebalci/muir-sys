@@ -13,6 +13,20 @@ file carries a comment in that file saying why.
   2026-10-04). As for 2000 and 2001, the version is not in the sources but
   given to the assembler (`ua:version-number` and the output's version for
   `UCADR`, the version asked for `PROMH`), so no source changed for it.
+- **FORMAT forgets the clause strings it gives back**
+  (`sys/io/format.lisp:1315`, FORMAT-RECLAIM-CLAUSES). The clause buffer,
+  FORMAT-CLAUSES-ARRAY, kept for the next call, still held each `~[`, `~<`
+  or `~:[` clause's string after RETURN-ARRAY gave its storage back, and the
+  collector scans the buffer whole, past its fill pointer. Once that
+  storage's page was brought back fresh by CONSF (`M-DONT-SWAP-IN`),
+  `%FIND-STRUCTURE-HEADER`'s scan back from the pointer could meet the
+  GC-FORWARD words of an object copied before it, and the machine halted in
+  ILLOP (HALT-CONS from XFSHS1+2): muir-sim's profile with continuous flips
+  at 2 M words halted so on revision 14, and a planted run halts System 2001
+  as well. The string's and the parameters'
+  slots are now cleared as they are given back. `tools/system-check` gains
+  `format-clauses` and `format-clauses-gc` (`cases-2mw/`, at 2 M words; its
+  `run` now takes `cases-2mw/` as `tools/microcode-check`'s does).
 
 ## Revision 14
 
