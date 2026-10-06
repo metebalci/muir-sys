@@ -49,3 +49,15 @@ Every change to a source file carries a comment in that file saying why.
   regions stay below `virtual-memory-size`, which is capped at the page of
   `a-memory-virtual-address` (`:1246-1247`), measured 16514048 words, under
   2^24 = 16777216, on System 1003's band.
+- **`%FINDCORE` returns a fixnum on the CADR, as it did**, and needs no change.
+  QUUX's line found its `%FINDCORE` returning FINDCORE's bare `M-B` (data type
+  0), which `PAGE-IN-WORDS` multiplied and so halted in `ILLOP`. The CADR's
+  `XFINDCORE` returns `M-B` as `PHTDELX` popped it, pushed with `DTP-FIX` by
+  `COREFOUND2` (`sys/ucadr/uc-page-fault.lisp`); measured on System 1003, the
+  data type is `DTP-FIX` before and after the scan pointer wrapped (frame
+  2493, then 487 after a 2.5 M-word array was made on 2 M words), and
+  `PAGE-IN-WORDS` of four pages not in core pages them in equal to their
+  blocks in the PAGE partition. `tools/microcode-check`'s new check
+  `findcore-fixnum` keeps that so: on microcode whose `%FINDCORE` returns
+  the number with data type 0, System 1003's band runs macrocode but never
+  reaches its TELNET prompt, and the check fails.

@@ -1,0 +1,19 @@
+; %FINDCORE returns the frame's number as a fixnum (sys/ucadr/uc-page-fault.lisp,
+; XFINDCORE, which returns FINDCORE's M-B as COREFOUND2 pushed it, with
+; DTP-FIX), and PAGE-IN-WORDS pages a run of pages in with it.  Load
+; lisp/findcore-fixnum.lisp first.  QUUX's line found its FINDCORE returning
+; a word of data type 0, which PAGE-IN-WORDS' arithmetic took to ILLOP; the
+; CADR's returns a fixnum before and after its scan pointer wraps (measured
+; on System 1003), and this check keeps it so: with a %FINDCORE that returns
+; data type 0, System 1003's band never reaches its TELNET prompt, so the
+; check fails before its cases (measured).  PAGE-IN-WORDS is reached
+; whenever its range holds a page not in core, as most of P-N-STRING's pages
+; are after a boot; the window system and the GC page areas and arrays in
+; through it.
+;
+; The control: four pages of P-N-STRING in a row are not in core.
+(not (null (findcore-out-run 4))) => T
+(findcore-type) => T
+; The four paged in by PAGE-IN-WORDS in one transfer, each equal to its
+; blocks in the PAGE partition.
+(findcore-page-in 4) => (T T)
