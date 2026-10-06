@@ -1332,11 +1332,25 @@ This is obsolete -- You probably want PRINT-HERALD"
 (DEFUN UNWIRE-PAGE (ADDRESS)
   (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-NORMAL NIL))
 
-(DEFUN WIRE-WORDS (FROM SIZE &OPTIONAL (WIRE-P T) SET-MODIFIED DONT-BOTHER-PAGING-IN)
-  (DO ((ADR (- FROM (LOGAND FROM (1- PAGE-SIZE))) (+ ADR PAGE-SIZE))
-       (N   (- PAGE-SIZE (LOGAND FROM (1- PAGE-SIZE))) (+ N PAGE-SIZE)))
-      (( N SIZE))
-    (WIRE-PAGE ADR WIRE-P SET-MODIFIED DONT-BOTHER-PAGING-IN)))
+;(DEFUN WIRE-WORDS (FROM SIZE &OPTIONAL (WIRE-P T) SET-MODIFIED DONT-BOTHER-PAGING-IN)
+;  (DO ((ADR (- FROM (LOGAND FROM (1- PAGE-SIZE))) (+ ADR PAGE-SIZE))
+;       (N   (- PAGE-SIZE (LOGAND FROM (1- PAGE-SIZE))) (+ N PAGE-SIZE)))
+;      (( N SIZE))
+;    (WIRE-PAGE ADR WIRE-P SET-MODIFIED DONT-BOTHER-PAGING-IN)))
+;;; The pages from FROM's to the last word's, counted, the address stepped
+;;; by %pointer-plus from FROM's page, taken from FROM's pointer field.  The
+;;; old loop tested its end before each page, so it never wired the range's
+;;; last page, nor any page of a range within one page; and FROM, the
+;;; structure itself when WIRE-STRUCTURE called it, was taken by neither
+;;; LOGAND nor -, so WIRE-STRUCTURE signalled an error every time.
+(defun wire-words (from size &optional (wire-p t) set-modified dont-bother-paging-in)
+  (do ((adr (logand (%pointer from) (- page-size)) (%pointer-plus adr page-size))
+       (n (if (plusp size)
+	      (ceiling (+ (logand (%pointer from) (1- page-size)) size) page-size)
+	    0)
+	  (1- n)))
+      ((not (plusp n)))
+    (wire-page adr wire-p set-modified dont-bother-paging-in)))
 
 (DEFUN UNWIRE-WORDS (FROM SIZE)
   (WIRE-WORDS FROM SIZE NIL))
@@ -1818,9 +1832,14 @@ FROM and TO are lists of subscripts, or NIL."
       (OR (NULL (SETQ STS (%PAGE-STATUS ADDR)))	;Swapped out
 	  ( (LDB %%PHT1-SWAP-STATUS-CODE STS)
 	     %PHT-SWAP-STATUS-WIRED)	;Wired
-	  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-FLUSHABLE
-			       (LDB %%REGION-MAP-BITS
-				    (REGION-BITS (%REGION-NUMBER ADDRESS))))))))
+;	  (%CHANGE-PAGE-STATUS ADDRESS %PHT-SWAP-STATUS-FLUSHABLE
+;			       (LDB %%REGION-MAP-BITS
+;				    (REGION-BITS (%REGION-NUMBER ADDRESS))))))))
+	  ;; each page of the range is offered, ADDR: the old call named
+	  ;; ADDRESS, the first page, every time
+	  (%change-page-status addr %pht-swap-status-flushable
+			       (ldb %%region-map-bits
+				    (region-bits (%region-number addr))))))))
 
 (DEFUN PAGE-IN-WORDS (ADDRESS NWDS &AUX (CCWX 0) CCWP BASE-ADDR)
   (WITHOUT-INTERRUPTS

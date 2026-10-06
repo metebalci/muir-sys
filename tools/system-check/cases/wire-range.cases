@@ -1,0 +1,21 @@
+; WIRE-WORDS, WIRE-STRUCTURE and PAGE-OUT-WORDS over a range of words
+; (sys/io/disk.lisp): each takes every page from the range's first word's to
+; its last word's.  The pages are given as offsets from a page boundary
+; inside an array, read from their swap status (lisp/wire-range.lisp).  The
+; old WIRE-WORDS tested the end before each page, so it never wired the
+; range's last page, and nothing of a range within one page; WIRE-STRUCTURE
+; passed WIRE-WORDS the structure itself, which LOGAND does not take, so it
+; signalled an error every time; PAGE-OUT-WORDS offered the range's first
+; page once for each page.  Check a source change with
+;   --compile --files sys/io/disk.lisp,tools/system-check/lisp/wire-range.lisp
+; The first case is the control: no page of the array is wired or flushable
+; before.  System 1003 without the change fails the four WIRE-WORDS cases
+; after it, the WIRE-STRUCTURE case and the PAGE-OUT-WORDS case of three pages.
+(progn (wire-touch) (list (wire-pages-with si:%pht-swap-status-wired) (wire-pages-with si:%pht-swap-status-flushable))) => (NIL NIL)
+(wire-words-pages 200. 100.) => (0 256)
+(wire-words-pages 0 10.) => (0)
+(wire-words-pages 0 256.) => (0)
+(wire-words-pages 0 750.) => (0 256 512)
+(wire-structure-pages) => T
+(page-out-words-pages 100. 20.) => (0)
+(page-out-words-pages 300. 600.) => (256 512 768)
