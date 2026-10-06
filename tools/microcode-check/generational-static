@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/generational-static: a static check of the
+generational collector's A-memory places (contract G3 step 2, 9.1 item 7;
+tools/microcode-check/README.md), with no band.
+
+Usage: tools/microcode-check/generational-static UCADR.SYM [QCOM.LISP]
+
+UCADR.SYM is an assembled microcode's symbol table.  Its three fixnums Lisp
+names must follow a-region-floor at once, in qcom's order:
+a-gc-words-consed-since-flip, a-gc-promotion and a-gc-pretenure-threshold at A
+143, 144 and 145 (a-region-floor at 142), while a-pdl-buffer-virtual-address
+and a-pdl-buffer-head stay at A 430 and 431, where the PDL buffer redirect
+snoops them.  With QCOM.LISP (a qcom that names them, the Lisp side's), each of
+%region-floor, %gc-words-consed-since-flip, %gc-promotion and
+%gc-pretenure-threshold must be at the index in A-MEMORY-LOCATION-NAMES that
+puts it at that place (A 40 plus the index).  Prints a line a check; exit
+status 0 when all pass.
+"""
+import re
+import sys
+
+WANT = [('A-REGION-FLOOR', 0o142), ('A-GC-WORDS-CONSED-SINCE-FLIP', 0o143),
+        ('A-GC-PROMOTION', 0o144), ('A-GC-PRETENURE-THRESHOLD', 0o145),
+        ('A-PDL-BUFFER-VIRTUAL-ADDRESS', 0o430), ('A-PDL-BUFFER-HEAD', 0o431)]
+NAMES = [('%REGION-FLOOR', 0o142), ('%GC-WORDS-CONSED-SINCE-FLIP', 0o143),
+         ('%GC-PROMOTION', 0o144), ('%GC-PRETENURE-THRESHOLD', 0o145)]
+
+
+def a_places(sym):
+    t = open(sym, encoding='latin-1').read().split()
+    return {t[k].upper(): int(t[k + 2], 8) for k in range(len(t) - 2)
+            if t[k + 1] == 'A-MEM' and re.match(r'[0-7]+$', t[k + 2])}
+
+
+def location_names(qcom):
+    """A-MEMORY-LOCATION-NAMES's symbols in order, comments left out."""
+    text = open(qcom, encoding='latin-1').read()
+    m = re.search(r'\(DEFCONST\s+A-MEMORY-LOCATION-NAMES\s+\'\(', text, re.I)
+    if not m:
+        raise SystemExit('generational-static: no A-MEMORY-LOCATION-NAMES in %s' % qcom)
+    names, depth, i, tok = [], 1, m.end(), ''
+    while depth:
+        c = text[i]
+        if c == ';':
+            i = text.index('\n', i)
+            continue
+        if c in '() \t\n\r':
+            if tok:
+                names.append(tok.upper())
+                tok = ''
+            depth += {'(': 1, ')': -1}.get(c, 0)
+        else:
+            tok += c
+        i += 1
+    return names
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit(__doc__)
+    places = a_places(sys.argv[1])
+    ok = True
+    for name, want in WANT:
+        got = places.get(name)
+        good = got == want
+        ok &= good
+        print('%s %s at A %s, want %o' % ('PASS' if good else 'FAIL', name,
+                                          '%o' % got if got is not None else 'nowhere', want))
+    if len(sys.argv) == 3:
+        names = location_names(sys.argv[2])
+        for name, want in NAMES:
+            good = name in names and 0o40 + names.index(name) == want
+            ok &= good
+            print('%s %s at index %s of A-MEMORY-LOCATION-NAMES, A %s, want %o' % (
+                'PASS' if good else 'FAIL', name,
+                names.index(name) if name in names else 'none',
+                '%o' % (0o40 + names.index(name)) if name in names else '-', want))
+    print('RESULT %s' % ('PASS' if ok else 'FAIL'))
+    return 0 if ok else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

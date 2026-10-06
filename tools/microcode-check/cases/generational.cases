@@ -1,0 +1,81 @@
+; The generational collector's microcode (contract G3 step 2, 9.1 items 1-7;
+; lisp/generational.lisp, which says how).  It drives the microcode itself:
+; young flips by (%gc-flip -1) with a promotion table written in A memory,
+; reclaimed by GC-RECLAIM-OLDSPACE, with automatic collection off.  On a band
+; of System 2002 under the collector's microcode at 32 M words: E3's band, or
+; revision 14's band under the pre-E3 test variant.  Under revision 14's
+; microcode the cases fail and nothing is written to A memory.  Run it with
+; lispm-check's --compile (tools/microcode-check/run generational --
+; --compile ...): compiled, the whole file takes about a minute on micro.
+;
+; setup: collection off, the test areas made; the microcode is the collector's
+(si:gen-setup) => T
+; item 7: A 143 and 144 hold fixnums, A 145 the pretenuring threshold, 32768
+(si:gen-a-memory) => (T T 32768)
+; item 7: on a band whose qcom names them, the names are those places
+(si:gen-qcom-names) => T
+; item 6: the ephemeral-reference setter's enable, register-page word 221, is
+; 1 at every start
+(si:gen-register #o221) => 1
+; item 1: the words consed since the last flip count a list of 2000 words
+(si:gen-words-delta) => T
+; item 1: an ephemeral area's array and cons go to eden, in ephemeral space;
+; the control, an area that is not ephemeral: tenured, below it
+(si:gen-tenured-cons) => (0 NIL 0 NIL)
+(si:gen-young-cons) => (1 T 1 T)
+; item 1: an ephemeral area's first region is tenured, and the mutator's
+; conses do not go there
+(si:gen-first-region-untouched) => (0 T)
+; item 1: pretenuring (C12): a 64 K-word array lies in a tenured region below
+; ephemeral space at once, and a 10-word and a 1 K-word one made right after it
+; in eden (the large cons did not fill the cons cache); at the threshold,
+; 32768 words, still young, and one word more tenured
+(si:gen-pretenure) => (0 NIL 1 T 1 T)
+(si:gen-pretenure-edge) => (1 0)
+; item 2: the first-object table: a new area's first region, dynamic and
+; static, begins with an art-32b array of an entry a page, entry 0 is 0, and
+; the free pointer starts after it
+(si:gen-new-region-table (make-area :name (gensym) :region-size #o400000)) => (T 0 T)
+(si:gen-new-region-table (make-area :name (gensym) :gc :static :region-size #o400000)) => (T 0 T)
+; item 2: consf writes each page's entry, the start of the object holding the
+; page's first word
+(si:gen-table-entries) => (T T)
+; item 2: a region of more than 1777 pages has a long header, and the entries
+; of the table's own two pages are 0
+(si:gen-big-region-table) => (T T T 0 0 T)
+; item 2: an eden region has no table
+(si:gen-young-no-table) => T
+; item 2: bignums made, shrunk and given back by UN-CONS in an area with a
+; table, around a page boundary, then small arrays from the cons cache: the
+; table stays exact
+(si:gen-uncons-search) => T
+; item 4: a young flip makes an eden region oldspace (1) and leaves a tenured
+; new region new (2); it clears the words consed
+(si:gen-flip-test) => (1 2 T)
+; item 3: ages by the promotion table (C10): eden, survivor space 1, survivor
+; space 2, tenured
+(si:gen-ages) => (1 2 3 0)
+; item 3: the tenure-all table, and survivor space 1 past its cap
+(si:gen-tables) => (0 2 0)
+; item 5: the marked-page walk: a tenured page as the only root (C1)
+(si:gen-c1) => (49995000 49995000 49995000 49995000)
+; item 5: the mark kept while a young pointer is left, cleared after (C2)
+(si:gen-c2) => ((1 1 0) 4950)
+; item 5: a store after the walk cleared the page marks it again (C3)
+(si:gen-c3) => (T 1 499500)
+; item 5: unboxed words that look like pointers are not scanned (C4)
+(si:gen-c4) => (T 4950)
+; item 5: an object across pages, scanned from the page's table entry (C5)
+(si:gen-c5) => 499500
+; item 5: stacks and the special PDL as roots (C7 (a), (b), C8)
+(si:gen-c7a) => 49995000
+(si:gen-c7b 300) => 49995000
+(si:gen-c8) => 49995000
+; item 3: an extra-PDL bignum stored during a collection goes to its area's
+; allocation generation, eden, and survives (C18)
+(si:gen-c18) => (1 T)
+; register-page word 224, the guarded write-backs refused, is 0
+(si:gen-register #o224) => 0
+; item 2: an object as big as its area's regions fits a new region, table
+; included (last: without the table's room the cons would loop)
+(si:gen-big-object) => (T T)

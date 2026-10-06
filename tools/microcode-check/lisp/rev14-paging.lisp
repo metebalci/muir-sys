@@ -18,9 +18,16 @@
 (defun rev14p-loc (a) (%make-pointer dtp-locative a))
 (defun rev14p-amem (k) (%p-ldb (byte 32 0) (rev14p-loc (%make-pointer-unsigned (+ #o35700000000 k)))))
 (defun rev14p-word (k) (%p-ldb (byte 32 0) (rev14p-loc (%make-pointer-unsigned (+ #o35777777400 k)))))
+;(defun rev14p-counters ()
+;  "The paging counters, A 154, 155 and 157: page reads, page writes, fresh pages."
+;  (list (rev14p-amem #o154) (rev14p-amem #o155) (rev14p-amem #o157)))
+;; the paging counters by their meter names: the generational collector's three
+;; A-memory fixnums moved the counter block from revision 14's A 154, 155 and
+;; 157, and read-meter finds it wherever the microcode puts it
 (defun rev14p-counters ()
-  "The paging counters, A 154, 155 and 157: page reads, page writes, fresh pages."
-  (list (rev14p-amem #o154) (rev14p-amem #o155) (rev14p-amem #o157)))
+  "The paging counters: page reads, page writes, fresh pages."
+  (list (read-meter 'sys:%count-disk-page-reads) (read-meter 'sys:%count-disk-page-writes)
+	(read-meter 'sys:%count-fresh-pages)))
 (defun rev14p-memory-words ()
   (system-communication-area %sys-com-memory-size))
 
@@ -73,11 +80,33 @@ each is its own address, the fresh fill."
 ;;; G3 revision 14, section 12's Y4 planted tests): its pages' slots are read
 ;;; from their entries (base-slot, page-in-words, sys/io/disk.lisp).
 (defvar *rev14p-young* nil)
+;(defun rev14p-young-fill (n)
+;  (let ((area (make-area :name (gensym) :gc :dynamic :region-size #o200000)))
+;    (setf (area-region-bits area) (%logdpb 1 %%region-ephemeral (area-region-bits area)))
+;    (%use-up-region (area-region-list area))
+;    (setq *rev14p-young* (make-array n :area area))
+;    (dotimes (i n) (aset (- i) *rev14p-young* i))
+;    (list (= (ldb (byte 4 28) (%pointer *rev14p-young*)) #o15) n)))
+;; the generational collector's microcode pretenures a cons of more words than
+;; its pretenuring threshold, A 145, into a tenured region outside ephemeral
+;; space, so the array of N words would not be young: while it is made, the
+;; threshold is 2N, past the array and its header.  that microcode is the one
+;; whose A 143-145 hold fixnums (revision 14's hold A-V-NIL, A-V-TRUE and
+;; A-FLOATING-ZERO there, and nothing is written).
 (defun rev14p-young-fill (n)
-  (let ((area (make-area :name (gensym) :gc :dynamic :region-size #o200000)))
+  (let ((area (make-area :name (gensym) :gc :dynamic :region-size #o200000))
+	(threshold (rev14p-loc (%make-pointer-unsigned (+ #o35700000000 #o145))))
+	(collector (loop for k from #o143 to #o145
+			 always (= (%p-data-type (rev14p-loc (%make-pointer-unsigned
+							      (+ #o35700000000 k))))
+				   dtp-fix))))
     (setf (area-region-bits area) (%logdpb 1 %%region-ephemeral (area-region-bits area)))
     (%use-up-region (area-region-list area))
-    (setq *rev14p-young* (make-array n :area area))
+    (let ((old (and collector (%p-contents-offset threshold 0))))
+      (unwind-protect
+	  (progn (when collector (%p-store-contents threshold (* 2 n)))
+		 (setq *rev14p-young* (make-array n :area area)))
+	(when collector (%p-store-contents threshold old))))
     (dotimes (i n) (aset (- i) *rev14p-young* i))
     (list (= (ldb (byte 4 28) (%pointer *rev14p-young*)) #o15) n)))
 (defun rev14p-young-in-core ()

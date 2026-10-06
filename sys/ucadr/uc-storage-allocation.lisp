@@ -228,6 +228,10 @@ SCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 SCONSR		(ERROR-TABLE RESTART SCONSR)
 	(CALL CONS-GET-AREA)				;Set up M-S
     (ERROR-TABLE ARGTYP AREA M-S NIL SCONSR)
+	;; the generational collector (contract g3 step 2, 3.2): the generation this
+	;; cons goes into, which the region it takes must hold (cons-check-new,
+	;; cons-check-copy, rcons).
+	(call cons-generation)
 	((VMA-START-READ) ADD M-S A-V-AREA-REGION-LIST)	;Find appropriate region of the area
 SCONS0	(CHECK-PAGE-READ)
 	(JUMP-IF-BIT-SET BOXED-SIGN-BIT READ-MEMORY-DATA SCONS5)	;No region found
@@ -240,6 +244,11 @@ SCONS2	((VMA-START-READ) ADD M-K A-V-REGION-BITS)	;Get attributes of that region
 	;; Returns with M-K region, M-T allocated guy, M-3 new free pointer, M-E origin
 	;; Cache this information then return via scavenger
 	(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCAVT)	;Transporter must avoid cache
+	;; the generational collector (contract g3 step 2, 3.2): a pretenured cons
+	;; does not fill the cache, which would send the area's next small conses
+	;; to its tenured region.
+	((m-tem) a-cons-pretenured)
+	(jump-not-equal m-tem a-zero scav0)
 	((A-SCONS-CACHE-AREA) M-S)
 	((A-SCONS-CACHE-REGION) M-K)
 	((A-SCONS-CACHE-REGION-ORIGIN) M-E)
@@ -276,6 +285,8 @@ LCONS-N	(CALL-LESS-OR-EQUAL M-B A-ZERO TRAP)
 LCONSR		(ERROR-TABLE RESTART LCONSR)
 	(CALL CONS-GET-AREA)			;Set up M-S
     (ERROR-TABLE ARGTYP AREA M-S NIL LCONSR)
+	;; the generational collector (contract g3 step 2, 3.2): as sconsr
+	(call cons-generation)
 	((VMA-START-READ) ADD M-S A-V-AREA-REGION-LIST)	;Find appropriate region of the area
 LCONS0	(CHECK-PAGE-READ)
 	(JUMP-IF-BIT-SET BOXED-SIGN-BIT READ-MEMORY-DATA LCONS5)	;No region found
@@ -288,6 +299,10 @@ LCONS2	((VMA-START-READ) ADD M-K A-V-REGION-BITS)	;Get attributes of that region
 	;; Returns with M-K region, M-T allocated guy, M-3 new free pointer, M-E origin
 	;; Cache this information then return via scavenger
 	(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCAVT)	;Transporter must avoid cache
+	;; the generational collector (contract g3 step 2, 3.2): as scons2, a
+	;; pretenured cons does not fill the cache
+	((m-tem) a-cons-pretenured)
+	(jump-not-equal m-tem a-zero scav0)
 	((A-LCONS-CACHE-AREA) M-S)
 	((A-LCONS-CACHE-REGION) M-K)
 	((A-LCONS-CACHE-REGION-ORIGIN) M-E)
@@ -307,7 +322,10 @@ LCONS1	(JUMP-XCT-NEXT LCONS0)			;TRY NEXT REGION
 
 	;This region is the right type, see if adequate free space, if so do it.
 	;Called as subroutine from both SCONS and LCONS.
-CONSF	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)
+	;; the generational collector (contract g3 step 2, 6.2): md is the region's
+	;; bits, kept for consf-table below.
+consf	((a-cons-region-bits) md)
+	((vma-start-read) add m-k a-v-region-length)
 	(CHECK-PAGE-READ)
 	((M-3) Q-POINTER READ-MEMORY-DATA)	;Length of region
 	((VMA-START-READ) ADD M-K A-V-REGION-FREE-POINTER)
@@ -327,23 +345,141 @@ CONSF	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)
 CONSF1	((M-DONT-SWAP-IN) DPB (M-CONSTANT -1) A-FLAGS)	;Create pages without disk read
 CONSF2	(CHECK-PAGE-READ)			;Now take fault for previous VMA-START-READ
 	((M-4) SUB M-4 (A-CONSTANT (EVAL PAGE-SIZE)))
-	(POPJ-LESS-OR-EQUAL-XCT-NEXT M-4 A-ZERO)
+;	(POPJ-LESS-OR-EQUAL-XCT-NEXT M-4 A-ZERO)
+	;; the generational collector (contract g3 step 2, 6.2): the first-object
+	;; table's entries, then the return (consf-table)
+	(jump-less-or-equal-xct-next m-4 a-zero consf-table)
        ((M-FLAGS) SETA A-CONS-TEM READ-MEMORY-DATA);Restore flags, complete memory cycle
 	(JUMP-XCT-NEXT CONSF1)
        ((VMA-START-READ) ADD VMA (A-CONSTANT (EVAL PAGE-SIZE)))
+
+;; the generational collector (contract g3 step 2, 6.1, 6.2): a tenured
+;; structure region that is not fixed or extra-pdl begins with its first-object
+;; table, an art-32b array at its origin (make-region writes it), entry k the
+;; offset from the origin of an object start at or below the first word of the
+;; region's page k.  every object that holds a page's first word comes here,
+;; since the cons caches stop at a page boundary and the transporter does not
+;; use them, so here each page whose first word lies in the new object gets
+;; the object's start: m-t the object's address, m-b its words, m-e the
+;; region's origin, m-k the region, a-cons-region-bits its bits.  the entries
+;; are fixnums; the flags are restored, so a table page out of core is read in.
+;; keeps m-3, m-t, m-e, m-k, m-b; clobbers m-4, vma, md, tems.
+consf-table
+	((md) a-cons-region-bits)
+	(call first-object-table-p)
+	(popj-equal m-tem a-zero)
+	;; s, the object's start in the region; the first page whose first word
+	;; it holds, (s + 1777) / 2000, and the last, (s + m-b - 1) / 2000
+	((m-4) sub m-t a-e)
+	((m-4) q-pointer m-4)
+	((a-cons-table-start) dpb m-4 q-pointer (a-constant (byte-value q-data-type dtp-fix)))
+	((m-tem) add m-4 a-b)
+	((m-tem) sub m-tem (a-constant 1))
+	((m-tem) vma-page-addr-part m-tem)	;the last page
+	((m-4) add m-4 (a-constant (eval (1- page-size))))
+	((m-4) vma-page-addr-part m-4)		;the first page
+	(popj-greater-than m-4 a-tem)		;no page's first word in it
+	((m-tem) sub m-tem a-4)
+	((a-cons-table-count) add m-tem (a-constant 1))	;the entries to write
+	;; the table's header, at the origin: its entries follow it, or the long
+	;; length word after it
+	((vma-start-read) m-e)
+	(check-page-read)
+	(call consf-table-check)
+	(jump-if-bit-clear (lisp-byte %%array-long-length-flag) md consf-table-1)
+	((m-4) add m-4 (a-constant 1))
+consf-table-1
+	((m-4) add m-4 (a-constant 1))		;the entry's offset from the origin
+	((vma) add m-4 a-e)
+consf-table-2
+	((write-memory-data) a-cons-table-start)
+	((vma-start-write) vma)
+	(check-page-write)
+	((m-tem) a-cons-table-count)
+	((a-cons-table-count) sub m-tem (a-constant 1))
+	(popj-less-or-equal m-tem (a-constant 1))
+	(jump-xct-next consf-table-2)
+       ((vma) add vma (a-constant 1))
+
+;; consf-table-check: md, a region's first word, must be a first-object
+;; table's header, an art-32b array of one dimension; else the band or the
+;; tables are wrong, and the machine halts here rather than misparse the
+;; region.  the walk (scav-walk-page) checks it the same way.  clobbers m-tem.
+consf-table-check
+	((m-tem) q-data-type md)
+	(call-not-equal m-tem (a-constant (eval dtp-array-header)) first-object-table-missing)
+	((m-tem) (lisp-byte %%array-type-field) md)
+	(call-not-equal m-tem (a-constant (eval (ldb %%array-type-field art-32b)))
+		first-object-table-missing)
+	((m-tem) (lisp-byte %%array-number-dimensions) md)
+	(call-not-equal m-tem (a-constant 1) first-object-table-missing)
+	(popj)
+
+;; consf-table-check and the walk come here when a region that should begin
+;; with a first-object table does not.  the halt shows this location.
+first-object-table-missing
+	(call illop)
 
 CONSF4	((M-GARBAGE) MICRO-STACK-DATA-POP)
 CONSF5	(DISPATCH (BYTE-FIELD 2 0) M-E D-CONS-NEXT-REGION)
 
 ;Trying to cons in newspace
+;CONS-CHECK-NEW
+;	(POPJ-AFTER-NEXT POPJ-IF-BIT-CLEAR M-TRANSPORT-FLAG)
+;       (DISPATCH (BYTE-FIELD 2 0) M-E D-CONS-NEXT-REGION)
+;; the generational collector (contract g3 step 2, 3.2): the mutator conses
+;; only into regions of the cons's generation, a-cons-generation (eden in an
+;; ephemeral area, tenured in any other or past the pretenuring threshold);
+;; the transporter never into newspace.  md is the region's bits.  a region
+;; refused: the next one (consf4 drops the return address).
 CONS-CHECK-NEW
-	(POPJ-AFTER-NEXT POPJ-IF-BIT-CLEAR M-TRANSPORT-FLAG)
-       (DISPATCH (BYTE-FIELD 2 0) M-E D-CONS-NEXT-REGION)
+	(jump-if-bit-set m-transport-flag consf4)
+cons-check-generation
+	((m-tem) region-generation md)
+	(popj-equal m-tem a-cons-generation)
+	(jump consf4)
 
 ;Trying to cons in copyspace
+;CONS-CHECK-COPY
+;	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET M-TRANSPORT-FLAG)
+;       (DISPATCH (BYTE-FIELD 2 0) M-E D-CONS-NEXT-REGION)
+;; the generational collector (contract g3 step 2, 3.2): the transporter
+;; conses only into copy regions of its destination's generation
+;; (a-cons-generation, from a-trans-generation); the mutator never.
 CONS-CHECK-COPY
-	(POPJ-AFTER-NEXT POPJ-IF-BIT-SET M-TRANSPORT-FLAG)
-       (DISPATCH (BYTE-FIELD 2 0) M-E D-CONS-NEXT-REGION)
+	(jump-if-bit-clear m-transport-flag consf4)
+	(jump cons-check-generation)
+
+;; the generational collector (contract g3 step 2, 3.2, 5): cons-generation
+;; sets a-cons-generation, the generation the cons being made goes into, and
+;; a-cons-pretenured.  m-s the area (a fixnum, cons-get-area's), m-b the
+;; words.  the transporter's copy goes to its destination, a-trans-generation;
+;; extra-pdl-trap's (a-trans-generation 4) and the mutator's to the area's
+;; allocation generation: eden if the area is ephemeral (%%region-ephemeral in
+;; its area bits), unless the cons has more words than the pretenuring
+;; threshold, which makes it tenured; tenured in any other area.  clobbers
+;; m-tem, vma, md.
+cons-generation
+	((a-cons-pretenured) a-zero)
+	(jump-if-bit-clear m-transport-flag cons-generation-area)
+	((m-tem) a-trans-generation)
+	(jump-equal m-tem (a-constant 4) cons-generation-area)
+	(popj-after-next (a-cons-generation) m-tem)
+       (no-op)
+cons-generation-area
+	((vma-start-read) add m-s a-v-area-region-bits)
+	(check-page-read)
+	(jump-if-bit-clear (lisp-byte %%region-ephemeral) md cons-generation-tenured)
+	((m-tem) a-gc-pretenure-threshold)
+	((m-tem) q-pointer m-tem)
+	(jump-greater-than-unsigned m-b a-tem cons-generation-pretenured)
+	(popj-after-next (a-cons-generation) (a-constant region-generation-eden))
+       (no-op)
+cons-generation-pretenured
+	((a-cons-pretenured) (a-constant 1))
+cons-generation-tenured
+	(popj-after-next (a-cons-generation) (a-constant region-generation-tenured))
+       (no-op)
 
 (LOCALITY D-MEM)
 (START-DISPATCH 4 0)
@@ -357,7 +493,10 @@ D-CONS-1	;DISPATCH ON SPACE TYPE
 	(P-BIT INHIBIT-XCT-NEXT-BIT CONS-CHECK-NEW) ;6 NEW4 (only if not in transporter)
 	(P-BIT INHIBIT-XCT-NEXT-BIT CONS-CHECK-NEW) ;7 NEW5 (only if not in transporter)
 	(P-BIT INHIBIT-XCT-NEXT-BIT CONS-CHECK-NEW) ;10 NEW6 (only if not in transporter)
-	(P-BIT R-BIT)				;11 STATIC
+;	(P-BIT R-BIT)				;11 STATIC
+	;; the generational collector (contract g3 step 2, 3.2): a static region is
+	;; tenured, so a cons of another generation (eden's) does not take it
+	(p-bit inhibit-xct-next-bit cons-check-generation)	;11 static
 	(INHIBIT-XCT-NEXT-BIT CONSF5)		;12 FIXED (try next region; will get error)
 	(P-BIT R-BIT)				;13 EXTRA-PDL
 	(P-BIT INHIBIT-XCT-NEXT-BIT CONS-CHECK-COPY) ;14 COPY (only if in transporter)
@@ -398,6 +537,11 @@ D-CONS-NEXT-REGION	;DISPATCH ON REPRESENTATION TYPE
 ;avoid attempting to scavenge the newly-allocated object, which is not yet initialized.
 SCAV0	;(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCAVT) ;If in transporter, don't invoke scavenger
 	((M-E) DPB M-B (BYTE-FIELD Q-POINTER-WIDTH 2) A-ZERO) ;4 times number of Q's consed (K=4)
+	;; the generational collector (contract g3 step 2, 4.1): the words the
+	;; mutator conses, a fixnum, which every flip clears (lisp's
+	;; %gc-words-consed-since-flip); the transporter's copies go to scavt.
+	((m-tem) add m-b a-gc-words-consed-since-flip)
+	((a-gc-words-consed-since-flip) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((A-CONS-WORK-DONE Q-R) ADD M-E A-CONS-WORK-DONE)
 	(JUMP-LESS-THAN-XCT-NEXT Q-R A-SCAV-WORK-DONE SCAV0X)	;Return if not yet
        ((A-CONS-NEW-FREE-POINTER) M-3)				; time to scavenge
@@ -489,7 +633,17 @@ D-SCAV6	(INHIBIT-XCT-NEXT-BIT SCAV7)		;0 list
 (END-DISPATCH)
 (LOCALITY I-MEM)
 
-SCAV3	((M-K) A-ZERO)				;Check every region
+;SCAV3	((M-K) A-ZERO)				;Check every region
+	;; the generational collector (contract g3 step 2, 4.4): while the
+	;; marked-page walk is armed and no copy region has been consed into since
+	;; the region loop last found every region clean, the walk goes on without
+	;; another pass of the region loop.
+scav3	((m-tem) a-scav-walk-armed)
+	(jump-equal m-tem a-zero scav3-regions)
+	((m-tem) a-scav-region-dirty)
+	(jump-equal m-tem a-zero scav-walk)
+scav3-regions
+	((m-k) a-zero)				;check every region
 SCAV4	((VMA-START-READ) ADD M-K A-V-REGION-BITS)
 	(CHECK-PAGE-READ)
 	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%REGION-SCAVENGE-ENABLE) READ-MEMORY-DATA SCAV5)
@@ -508,6 +662,12 @@ SCAV4	((VMA-START-READ) ADD M-K A-V-REGION-BITS)
 
 SCAV5	(JUMP-LESS-THAN-XCT-NEXT M-K (A-CONSTANT (EVAL SIZE-OF-AREA-ARRAYS)) SCAV4)
        ((M-K) ADD M-K (A-CONSTANT 1))
+	;; the generational collector (contract g3 step 2, 4.4): every region is
+	;; clean.  copyspace first, then the walk, until both are clean: while the
+	;; walk is armed it goes on; the flip is ready only when it is done.
+	((a-scav-region-dirty) a-zero)
+	((m-tem) a-scav-walk-armed)
+	(jump-not-equal m-tem a-zero scav-walk)
 	;;No scavenging needed anywhere, shut off the scavenger and enable flipping
 	((A-GC-FLIP-READY) A-V-TRUE)
 	((A-SCAV-WORK-DONE) (BYTE-FIELD 31. 0) (M-CONSTANT -1))  ;Maximum possible
@@ -517,12 +677,281 @@ SCAVX	((M-SCAVENGE-FLAG) DPB (M-CONSTANT 0) A-FLAGS)
 	(POPJ-AFTER-NEXT (VMA-START-WRITE) ADD M-TEM A-DISK-RUN-LIGHT)
        (CHECK-PAGE-WRITE)			;This also makes sure VMA not pointing at gbg
 
+;;; the generational collector (contract g3 step 2, 4.4, 4.5): the marked-page
+;;; walk.  a young collection's roots beyond the machine's state are the
+;;; tenured pages whose entry's <19> the setter marked (appendix a14.8): the
+;;; walk visits every page, from its origin to its free pointer's page, of
+;;; every region of the tenured generation whose space is new, copy, static or
+;;; fixed (a fixed one only if scavenged: the cold load leaves raw ones out),
+;;; reading its entry through the physical memory window, so it fills no tlb
+;;; entry; a marked page is scanned and perhaps cleared as one step
+;;; (scav-walk-page).  it is part of the scavenger, per cons and in idle
+;;; time: an entry is a unit of work, a scanned word another.  after a marked
+;;; page the region loop runs first if the transporter consed meanwhile
+;;; (copyspace first); when every page is walked, the walk is disarmed and the
+;;; region loop runs once more before the flip is ready (scav5).  xflip arms it
+;;; at a young flip, and beg0000 when a boot finds oldspace.  m-e is the work
+;;; to do; clobbers m-e, m-k, m-3, m-4, tems, as the scavenger may.
+scav-walk
+	((a-scav-walk-budget) m-e)
+scav-walk-1
+	(jump-less-or-equal m-e a-zero scav-walk-out)	;this call's work is done
+	((m-k) a-scav-walk-region)
+	(jump-greater-or-equal m-k (a-constant (eval size-of-area-arrays)) scav-walk-done)
+	((vma-start-read) add m-k a-v-region-bits)
+	(check-page-read)
+	((m-tem) region-generation md)
+	(jump-not-equal m-tem (a-constant region-generation-tenured) scav-walk-next-region)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem (a-constant (eval %region-space-new)) scav-walk-2)
+	(jump-equal m-tem (a-constant (eval %region-space-copy)) scav-walk-2)
+	(jump-equal m-tem (a-constant (eval %region-space-static)) scav-walk-2)
+	(jump-not-equal m-tem (a-constant (eval %region-space-fixed)) scav-walk-next-region)
+	(jump-if-bit-clear (lisp-byte %%region-scavenge-enable) md scav-walk-next-region)
+scav-walk-2
+	((a-scav-walk-bits) md)
+	((vma-start-read) add m-k a-v-region-free-pointer)
+	(check-page-read)
+	((m-tem) q-pointer md)
+	((a-scav-walk-limit) m-tem)		;the free pointer, relative
+	((m-tem) add m-tem (a-constant (eval (1- page-size))))
+	((m-tem) vma-page-addr-part m-tem)	;the pages to the free pointer's
+	((m-3) a-scav-walk-page)
+	(jump-greater-or-equal m-3 a-tem scav-walk-next-region)
+	((vma-start-read) add m-k a-v-region-origin)
+	(check-page-read)
+	((m-4) q-pointer md)
+	((a-scav-walk-origin) m-4)
+	((m-tem) dpb m-3 vma-page-addr-part a-zero)
+	((m-4) add m-4 a-tem)			;the page's address
+	((a-scav-walk-va) m-4)
+	(call-xct-next find-page-entry)		;its entry, through the window
+       ((a-tem1) m-4)
+	((m-e) sub m-e (a-constant 1))		;an entry is a unit of work
+	((m-tem) map-status-code md)
+	(jump-equal m-tem a-zero scav-walk-next-page)	;no entry
+	(jump-if-bit-clear map-ephemeral-reference-bit md scav-walk-next-page)	;not marked
+	(call scav-walk-page)			;marked: scanned, perhaps cleared
+	((m-tem) a-scav-walk-page)
+	((a-scav-walk-page) add m-tem (a-constant 1))
+	(call scav-walk-account)
+	(jump-less-or-equal m-e a-zero scavx)
+	(jump scav3)				;copyspace first, if the scan transported
+scav-walk-next-page
+	((m-tem) a-scav-walk-page)
+	(jump-xct-next scav-walk-1)
+       ((a-scav-walk-page) add m-tem (a-constant 1))
+scav-walk-next-region
+	((a-scav-walk-page) a-zero)
+	((m-tem) a-scav-walk-region)
+	(jump-xct-next scav-walk-1)
+       ((a-scav-walk-region) add m-tem (a-constant 1))
+scav-walk-out
+	(call scav-walk-account)
+	(jump scavx)
+scav-walk-done					;every page walked: disarmed, and the
+	((a-scav-walk-armed) a-zero)		; region loop once more (scav5)
+	((a-scav-region-dirty) (a-constant 1))
+	(call scav-walk-account)
+	(jump scav3)
+
+;; scav-walk-account: the walk's work since a-scav-walk-budget was set goes to
+;; a-scav-work-done, as the region loop's does (scavl2).
+scav-walk-account
+	((m-tem) a-scav-walk-budget)
+	((m-tem) sub m-tem a-e)
+	(popj-after-next (a-scav-work-done) add m-tem a-scav-work-done)
+       ((a-scav-walk-budget) m-e)
+
+;; scav-walk-page: the marked page at a-scav-walk-va of the region whose origin,
+;; bits and free pointer (relative) are a-scav-walk-origin, -bits and -limit,
+;; its page a-scav-walk-page.  its boxed words below the free pointer are read
+;; and transported through transport-scav, as the region loop scans them: a
+;; list page word by word; a structure page object by object from the first
+;; object at or before its first word (the region's first-object table's entry
+;; for the page, or a fixed region's origin, which has no table), only the
+;; words in this page; a pdl only to its active top.  if no word left there is
+;; a young pointer, <19> is cleared in the page's entry and its tlb entry
+;; invalidated, with no reference to the page in between: one step, which runs
+;; no lisp (the transporter cannot sequence-break, and check-page-read and
+;; -write take page faults and interrupts in microcode), so a young pointer
+;; stored after the clear finds <19> 0 in the reloaded entry and marks the page
+;; again.  the interrupt handlers store no pointer into ephemeral space.
+;; m-e is reduced by the words read.  clobbers m-k, m-3, m-4, tems, vma, md.
+scav-walk-page
+	((a-scav-walk-young) a-zero)
+	((m-4) a-scav-walk-limit)		;the scan's end: the free pointer,
+	((m-4) add m-4 a-scav-walk-origin)	; or the page's end if lower
+	((m-3) a-scav-walk-va)
+	((m-3) add m-3 (a-constant (eval page-size)))
+	(jump-less-or-equal-unsigned m-4 a-3 scav-walk-page-1)
+	((m-4) m-3)
+scav-walk-page-1
+	((a-scav-walk-limit) m-4)		;now the scan's end, an address
+	((m-tem) a-scav-walk-bits)
+	((m-tem) (lisp-byte %%region-representation-type) m-tem)
+	(jump-not-equal m-tem (a-constant (eval %region-representation-type-list))
+		scav-walk-page-structure)
+	((a-scav-walk-ptr) a-scav-walk-va)	;a list page: every word
+	(call-xct-next scav-walk-words)
+       ((a-scav-walk-to) m-4)
+	(jump scav-walk-page-clear)
+scav-walk-page-structure
+	((m-4) a-scav-walk-origin)
+	((m-tem) a-scav-walk-bits)
+	((m-tem) (lisp-byte %%region-space-type) m-tem)
+	(jump-equal m-tem (a-constant (eval %region-space-fixed)) scav-walk-page-2)
+	((vma-start-read) m-4)			;the table's header, at the origin
+	(check-page-read)
+	(call consf-table-check)
+	((m-tem) a-scav-walk-page)		;entry k: after the header, and the
+	((m-tem) add m-tem (a-constant 1))	; long length word if there is one
+	(jump-if-bit-clear (lisp-byte %%array-long-length-flag) md scav-walk-page-3)
+	((m-tem) add m-tem (a-constant 1))
+scav-walk-page-3
+	((vma-start-read) add m-4 a-tem)
+	(check-page-read)
+	((m-tem) q-pointer md)
+	((m-4) add m-4 a-tem)			;an object start at or before the page
+	(call-greater-than-unsigned m-4 a-scav-walk-va first-object-table-missing)
+scav-walk-page-2
+	((a-scav-walk-obj) m-4)
+scav-walk-page-4				;each object, while it starts before the end
+	((m-4) a-scav-walk-obj)
+	(jump-greater-or-equal-unsigned m-4 a-scav-walk-limit scav-walk-page-clear)
+	(call-xct-next scav-walk-sinf)		;m-3 its boxed words, m-4 all its words
+       ((md) m-4)
+	((m-tem) a-scav-walk-obj)
+	((m-3) add m-3 a-tem)			;its boxed words' end
+	((m-4) add m-4 a-tem)			;the next object
+	(call-equal m-4 a-tem illop)		;an object of no words: a broken region
+	((a-scav-walk-obj) m-4)
+	((m-4) a-scav-walk-va)			;the boxed words in the page: from the
+	(jump-greater-or-equal-unsigned m-4 a-tem scav-walk-page-5)	; later of the
+	((m-4) m-tem)				; page's start and the object's
+scav-walk-page-5
+	((a-scav-walk-ptr) m-4)
+	((m-4) a-scav-walk-limit)		;to the earlier of the scan's end and
+	(jump-less-or-equal-unsigned m-4 a-3 scav-walk-page-6)	; the boxed words'
+	((m-4) m-3)
+scav-walk-page-6
+	(call-xct-next scav-walk-words)
+       ((a-scav-walk-to) m-4)
+	(jump scav-walk-page-4)
+scav-walk-page-clear				;no young pointer left: <19> 0
+	((m-tem) a-scav-walk-young)
+	(popj-not-equal m-tem a-zero)
+	(call-xct-next find-page-entry)
+       ((a-tem1) a-scav-walk-va)
+	((md) andca md (a-constant (byte-mask map-ephemeral-reference-bit)))
+	((vma-start-write) vma)
+	(illop-if-page-fault)
+	((md) a-scav-walk-va)			;and the tlb's copy
+	((vma-write-map) (a-constant write-map-invalidate))
+	(popj-after-next (vma) a-v-nil)
+       (no-op)
+
+;; scav-walk-words: the words from a-scav-walk-ptr to below a-scav-walk-to,
+;; each read and dispatched through transport-scav, as scavl3 does, which
+;; transports a pointer to oldspace and writes the new one back; then the word
+;; left in the page (md, or read again if the transporter followed a
+;; forwarding pointer, vma moved) is tested, and a young pointer sets
+;; a-scav-walk-young.  m-e is reduced by the words.  clobbers tems, vma, md.
+scav-walk-words
+	((m-tem) a-scav-walk-ptr)
+	(popj-greater-or-equal-unsigned m-tem a-scav-walk-to)
+	((vma-start-read) a-scav-walk-ptr)
+	(check-page-read)
+	((m-e) sub m-e (a-constant 1))
+	(dispatch transport-scav read-memory-data)
+	((m-tem) q-pointer vma)
+	(jump-equal m-tem a-scav-walk-ptr scav-walk-words-1)
+	((vma-start-read) a-scav-walk-ptr)
+	(check-page-read)
+scav-walk-words-1
+	((m-tem) address-space-nibble md)
+	(call-equal m-tem (a-constant ephemeral-space-nibble) scav-walk-young-type)
+	((m-tem) a-scav-walk-ptr)
+	(jump-xct-next scav-walk-words)
+       ((a-scav-walk-ptr) add m-tem (a-constant 1))
+
+;; scav-walk-young-type: md's address is in ephemeral space; if its type is
+;; one the pointer-type register holds (the assembler's constants for
+;; register-page words 222 and 223, appendix a14.5, a14.9), md is a young
+;; pointer and a-scav-walk-young is set.  clobbers m-tem.
+scav-walk-young-type
+	((m-tem) q-data-type md)
+	(jump-greater-or-equal m-tem (a-constant 40) scav-walk-young-type-1)
+	((a-scav-walk-type) m-tem)
+	(jump-xct-next scav-walk-young-type-2)
+       ((m-tem) (a-constant pointer-type-register-0-31))
+scav-walk-young-type-1
+	((m-tem) sub m-tem (a-constant 40))
+	((a-scav-walk-type) m-tem)
+	((m-tem) (a-constant pointer-type-register-32-63))
+scav-walk-young-type-2
+	;; an ldb of the type's bit: its rotate is 50 less the position, ored into
+	;; the next instruction (see slot-bit, uc-page-fault)
+	((oa-reg-low) sub (m-constant 50) a-scav-walk-type)
+	((m-tem) (byte-field 1 0) m-tem)
+	(popj-equal m-tem a-zero)
+	(popj-after-next (a-scav-walk-young) (a-constant 1))
+       (no-op)
+
+;; scav-walk-sinf: structure-info of the object at md, as scav-structure-info
+;; calls it, so that a pdl's words past its active top are skipped (a-sinf-pad):
+;; m-3 its boxed words to scan, m-4 all its words.  keeps m-a, m-b, m-t;
+;; clobbers m-k and the a-scav-save- locations, and leaves a-scav-pdl-base 0,
+;; as the region loop has no object while the walk runs.
+scav-walk-sinf
+	((a-scav-save-a) m-a)
+	((a-scav-save-b) m-b)
+	((a-scav-save-t) m-t)
+	((a-scav-pdl-base) q-pointer md)
+	(call-xct-next structure-info)
+       ((a-sinf-pdl-base) (a-constant 0))
+	((m-4) add m-3 a-4)
+	((m-3) sub m-3 a-sinf-pad)
+	((a-scav-pdl-base) a-zero)
+	((m-t) a-scav-save-t)
+	(popj-after-next (m-b) a-scav-save-b)
+       ((m-a) a-scav-save-a)
+
+;; scav-walk-arm: the walk from its start (xflip at a young flip; beg0000).
+scav-walk-arm
+	((a-scav-walk-region) a-zero)
+	((a-scav-walk-page) a-zero)
+	((a-scav-region-dirty) (a-constant 1))
+	(popj-after-next (a-scav-walk-armed) (a-constant 1))
+       (no-op)
+
+;; scav-walk-arm-if-oldspace (contract g3 step 2 revision 1, 8.3.5): beg0000
+;; forgets the scavenger's state, and a warm boot loads a memory afresh,
+;; which holds the walk's place; so with any region oldspace, a collection is
+;; running, and the walk starts again, so that every page still marked is
+;; scanned before the reclaim.  clobbers m-k, m-tem, vma, md.
+scav-walk-arm-if-oldspace
+	((a-scav-walk-armed) a-zero)
+	((a-scav-region-dirty) (a-constant 1))
+	((m-k) (a-constant (eval size-of-area-arrays)))
+scav-walk-arm-if-oldspace-1
+	((vma-start-read) add m-k a-v-region-bits)
+	(illop-if-page-fault)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem (a-constant (eval %region-space-old)) scav-walk-arm)
+	(jump-greater-than-xct-next m-k a-zero scav-walk-arm-if-oldspace-1)
+       ((m-k) sub m-k (a-constant 1))
+	(popj)
+
 ;CONSing inside transporter.  If also inside scavenger, count as scavenger
 ;work done.  In either case, don't count as cons work done since this is not
 ;fresh consing but just copying, and don't invoke the scavenger.
 SCAVT	((WRITE-MEMORY-DATA) M-3)	;Write back the free pointer
 	((VMA-START-WRITE) ADD M-K A-V-REGION-FREE-POINTER)
 	(CHECK-PAGE-WRITE)
+	;; the generational collector (contract g3 step 2, 4.4): a copy is made,
+	;; so the region loop runs again before the marked-page walk goes on
+	((a-scav-region-dirty) (a-constant 1))
 	(JUMP-NOT-EQUAL M-K A-SCONS-CACHE-REGION SCAVT1)	;Cache interference
 	((A-SCONS-CACHE-AREA) SETZ)
 SCAVT1	(JUMP-NOT-EQUAL M-K A-LCONS-CACHE-REGION SCAVT2)
@@ -549,6 +978,9 @@ SCVRST (MISC-INST-ENTRY %GC-SCAV-RESET)
 	((M-K) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;arg 1 - region number
 	((A-SCONS-CACHE-AREA) SETZ)			;Clear cons cache
 	((A-LCONS-CACHE-AREA) SETZ)
+	;; the generational collector (contract g3 step 2, 4.4): a region reset
+	;; may need scanning, so the region loop runs before the walk goes on
+	((a-scav-region-dirty) (a-constant 1))
 	(JUMP-NOT-EQUAL M-K A-SCAV-REGION XFALSE)	;nothing if scavenger not looking here
 	(JUMP-XCT-NEXT XTRUE)
        ((A-SCAV-COUNT) M-ZERO)			;Else make scavenger forget its state
@@ -556,6 +988,10 @@ SCVRST (MISC-INST-ENTRY %GC-SCAV-RESET)
 ;Adjust A-CONS-WORK-DONE
 XGCCW (MISC-INST-ENTRY %GC-CONS-WORK)
 	(CALL FXUNPK-P-1)				;M-1 gets adjustment
+	;; the generational collector (contract g3 step 2, 4.1): the words consed
+	;; since the flip move by the adjustment too
+	((m-tem) add m-1 a-gc-words-consed-since-flip)
+	((a-gc-words-consed-since-flip) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((M-1) DPB M-1 (BYTE-FIELD 30. 2) A-ZERO)	;Multiply by 4
 	(JUMP-XCT-NEXT XFALSE)
        ((A-CONS-WORK-DONE) ADD M-1 A-CONS-WORK-DONE)
@@ -661,11 +1097,29 @@ RCONS0	((VMA-START-READ) ADD M-K A-V-REGION-LENGTH)	;USE TOTAL SIZE NOT ALLOCATE
 	(CHECK-PAGE-READ)
 	(JUMP-IF-BIT-CLEAR-XCT-NEXT BOXED-SIGN-BIT READ-MEMORY-DATA RCONS0)
        ((M-K) Q-POINTER READ-MEMORY-DATA)
+	;; the generational collector (contract g3 step 2, 6.1): the words the new
+	;; region must hold, a-cons-region-need: m-b, and room for the first-object
+	;; table a tenured structure region begins with, more than its 1 or 2
+	;; header words and an entry a page (two words for each page of m-b, and 24
+	;; for the quantum's rounding).  without it, an object that fills a region
+	;; of the area's size would find no room in a new region either, and the
+	;; cons would make regions for ever.
+	((a-cons-region-need) m-b)
+	(jump-not-equal m-e (a-constant (eval %region-representation-type-structure)) rcons-need)
+	((m-tem) a-cons-generation)
+	(jump-not-equal m-tem (a-constant region-generation-tenured) rcons-need)
+	((m-tem) vma-page-addr-part m-b)
+	((m-tem) dpb m-tem (byte-field 31. 1) a-zero)
+	((m-tem) add m-tem (a-constant 30))
+	((a-cons-region-need) add m-tem a-b)
+rcons-need
 	((VMA-START-READ) ADD M-S A-V-AREA-REGION-SIZE)
 	(CHECK-PAGE-READ)
 	((M-3) Q-POINTER READ-MEMORY-DATA)	;NORMAL AMOUNT TO ALLOCATE
-	(JUMP-GREATER-THAN M-3 A-B RCONS1)
-	((M-3) M-B)				;M-3 AMOUNT WE WANT TO ALLOCATE
+;	(JUMP-GREATER-THAN M-3 A-B RCONS1)
+;	((M-3) M-B)				;M-3 AMOUNT WE WANT TO ALLOCATE
+	(jump-greater-than m-3 a-cons-region-need rcons1)
+	((m-3) a-cons-region-need)		;m-3 amount we want to allocate
 RCONS1	((VMA-START-READ) ADD M-S A-V-AREA-MAXIMUM-SIZE)
 	(CHECK-PAGE-READ)
 	((MD) Q-POINTER READ-MEMORY-DATA)
@@ -677,11 +1131,16 @@ RCONS1	((VMA-START-READ) ADD M-S A-V-AREA-MAXIMUM-SIZE)
 	((M-4) SUB MD A-4)			;M-4 AMOUNT LEFT BEFORE OVERFLOW
 	(JUMP-GREATER-OR-EQUAL M-4 A-3 RCONS2)	;JUMP IF NO OVERFLOW PROBLEM
 	(JUMP-IF-BIT-SET M-TRANSPORT-FLAG RCONS2A) ;INHIBIT EMBARRASSING TRAP OUT OF TRANSP
-	(CALL-GREATER-THAN M-B A-4 TRAP)
+;	(CALL-GREATER-THAN M-B A-4 TRAP)
+	;; the generational collector (contract g3 step 2, 6.1): m-b and the
+	;; first-object table's room (a-cons-region-need, above)
+	((m-tem) a-cons-region-need)
+	(call-greater-than m-tem a-4 trap)
     (ERROR-TABLE AREA-OVERFLOW M-S)
 	(JUMP-XCT-NEXT RCONS2)			;CONS MAXIMAL SIZE REGION
        ((M-3) M-4)
-RCONS2A	((M-3) M-B)				;ALMOST OVERFLOWING, ALLOCATE LESS (WIN?)
+;RCONS2A	((M-3) M-B)				;ALMOST OVERFLOWING, ALLOCATE LESS (WIN?)
+rcons2a	((m-3) a-cons-region-need)		;almost overflowing, allocate less (win?)
 RCONS2	((VMA-START-READ) ADD M-S A-V-AREA-REGION-BITS)	;GET BITS FOR THIS REGION 
 	(CHECK-PAGE-READ)
 	(JUMP-IF-BIT-SET-XCT-NEXT M-TRANSPORT-FLAG RCONS4)
@@ -689,6 +1148,19 @@ RCONS2	((VMA-START-READ) ADD M-S A-V-AREA-REGION-BITS)	;GET BITS FOR THIS REGION
 	(DISPATCH-XCT-NEXT (LISP-BYTE %%REGION-SPACE-TYPE) M-4 D-RCONS)	;Check region type
 	     (ERROR-TABLE RCONS-FIXED)
 RCONS3 ((M-4) IOR M-4 (A-CONSTANT (BYTE-MASK %%REGION-OLDSPACE-META-BIT))) ;Not oldspace
+	;; the generational collector (contract g3 step 2, 3.1, 3.2): the new region
+	;; holds the cons's generation (a-cons-generation: the mutator's allocation
+	;; generation, or the transporter's destination), and its bit 13 says it
+	;; lies in ephemeral space exactly when that is not tenured, whatever the
+	;; area's bit 13 says: an ephemeral area's tenured regions lie below it.
+	((m-tem) a-cons-generation)
+	((m-4) dpb m-tem region-generation a-4)
+	(jump-equal m-tem (a-constant region-generation-tenured) rcons-tenured)
+	(jump-xct-next rcons-make)
+       ((m-4) dpb (m-constant -1) (lisp-byte %%region-ephemeral) a-4)
+rcons-tenured
+	((m-4) dpb m-zero (lisp-byte %%region-ephemeral) a-4)
+rcons-make
 	(CALL-XCT-NEXT MAKE-REGION)		;ALLOCATE A REGION OF THAT SIZE (TO M-K)
        ((M-4) DPB M-E (LISP-BYTE %%REGION-REPRESENTATION-TYPE) A-4)
 	;Cons into area region list - for now we just put it at the front
@@ -898,12 +1370,83 @@ make-region-entries
 	((m-d) c-pdl-buffer-pointer-pop)
 	((m-b) c-pdl-buffer-pointer-pop)
 	((m-a) c-pdl-buffer-pointer-pop)
+	;; the generational collector (contract g3 step 2, 6.1, 6.2): a region with
+	;; a first-object table (first-object-table-p) gets it now, its pages'
+	;; entries made: m-t its words, where the free pointer and the gc pointer
+	;; start; 0 for any other region, as before.
+	((m-t) a-zero)
+	((md) m-4)
+	(call first-object-table-p)
+	(call-not-equal m-tem a-zero make-region-table)
 	;; Finish setting up tables
-	((WRITE-MEMORY-DATA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX))) ;FREE PTR = 0
+;	((WRITE-MEMORY-DATA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX))) ;FREE PTR = 0
+	((write-memory-data) dpb m-t q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	((VMA-START-WRITE) ADD M-K A-V-REGION-FREE-POINTER)
 	(CHECK-PAGE-WRITE)
 	(POPJ-AFTER-NEXT (VMA-START-WRITE) ADD M-K A-V-REGION-GC-POINTER)
        (CHECK-PAGE-WRITE)
+
+;; make-region-table (contract g3 step 2, 6.1, 6.2): the first-object table of
+;; the region made, whose end is m-e and whose words are m-3: an art-32b array
+;; at its origin with an entry for each page, a short header if 1777 entries
+;; or fewer, else a long one and its length word; entry 0, and the entry of
+;; every other page the table itself covers, is 0, the table's own start.  the
+;; other entries are written as objects come to hold their pages' first words
+;; (consf).  returns its words in m-t.  clobbers m-e, m-tem, vma, md.
+make-region-table
+	((m-e) sub m-e a-3)			;the origin
+	((m-t) vma-page-addr-part m-3)		;its pages, an entry each
+	(jump-greater-than m-t (a-constant (eval %array-max-short-index-length)) make-region-table-long)
+	((md) ior m-t (a-constant (plus (byte-value q-data-type dtp-array-header)
+					(byte-value %%array-number-dimensions 1)
+					(eval art-32b))))
+	((vma-start-write) m-e)
+	(check-page-write)
+	(jump-xct-next make-region-table-1)
+       ((m-t) add m-t (a-constant 1))		;its words: the header, the entries
+make-region-table-long
+	((md) (a-constant (plus (byte-value q-data-type dtp-array-header)
+				(byte-value %%array-number-dimensions 1)
+				(byte-value %%array-long-length-flag 1)
+				(eval art-32b))))
+	((vma-start-write) m-e)
+	(check-page-write)
+	((md) dpb m-t q-pointer (a-constant (byte-value q-data-type dtp-fix)))	;the length
+	((vma-start-write) add m-e (a-constant 1))
+	(check-page-write)
+	((m-t) add m-t (a-constant 2))		;its words: the header, the length, the entries
+make-region-table-1				;vma is the word before entry 0
+	((m-tem) sub m-t (a-constant 1))
+	((m-tem) vma-page-addr-part m-tem)	;the last page the table covers
+	((a-cons-table-count) add m-tem (a-constant 1))
+	((md) (a-constant (byte-value q-data-type dtp-fix)))	;entries of 0
+make-region-table-2
+	((vma-start-write) add vma (a-constant 1))
+	(check-page-write)
+	((m-tem) a-cons-table-count)
+	((a-cons-table-count) sub m-tem (a-constant 1))
+	(jump-greater-than m-tem (a-constant 1) make-region-table-2)
+	(popj)
+
+;; first-object-table-p (contract g3 step 2, 6.1; clarification 4): m-tem 1 if
+;; the region whose bits are md begins with a first-object table, a tenured
+;; structure region that is not free, fixed or extra-pdl (static and temporary
+;; areas' included), else 0.  clobbers m-tem.
+first-object-table-p
+	((m-tem) (lisp-byte %%region-representation-type) md)
+	(jump-not-equal m-tem (a-constant (eval %region-representation-type-structure))
+		first-object-table-p-1)
+	((m-tem) region-generation md)
+	(jump-not-equal m-tem (a-constant region-generation-tenured) first-object-table-p-1)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem (a-constant (eval %region-space-free)) first-object-table-p-1)
+	(jump-equal m-tem (a-constant (eval %region-space-fixed)) first-object-table-p-1)
+	(jump-equal m-tem (a-constant (eval %region-space-extra-pdl)) first-object-table-p-1)
+	(popj-after-next (m-tem) (a-constant 1))
+       (no-op)
+first-object-table-p-1
+	(popj-after-next (m-tem) a-zero)
+       (no-op)
 
 ;;; SUBROUTINE TO CREATE A REGION, CALLED ONLY BY AREA-CREATOR
 ;;; EXISTS MAINLY BECAUSE THE MICROCODE HAS TO KNOW HOW TO DO THIS ANYWAY
@@ -1830,7 +2373,18 @@ XFLIP (MISC-INST-ENTRY %GC-FLIP)
 	((A-TV-CURRENT-SHEET) A-V-NIL)		;Must recompute sheet data
 	((A-SCONS-CACHE-AREA) SETZ)		;Clear cache
 	((A-LCONS-CACHE-AREA) SETZ)		;Clear cache
+	;; the generational collector (contract g3 step 2, 4.1, 4.2, 7): every flip
+	;; clears the words consed since the last; the marked-page walk is for a
+	;; young collection only, so it is disarmed here and a young flip arms it.
+	((a-gc-words-consed-since-flip) (a-constant (byte-value q-data-type dtp-fix)))
+	((a-scav-walk-armed) a-zero)
+	((a-scav-region-dirty) (a-constant 1))
 	((M-K) Q-TYPED-POINTER C-PDL-BUFFER-POINTER-POP) ;Region spec
+	;; (%gc-flip -1) is a young flip (contract g3 step 2, 4.2; clarification 3):
+	;; each region whose generation is not tenured (eden, survivor space 1 and
+	;; 2) and whose space is new or copy becomes oldspace; (%gc-flip t), a
+	;; tenured one, flips every new and copy region, as before.
+	(jump-equal m-k (a-constant (plus (byte-value q-data-type dtp-fix) 37777777777)) xflip-young)
 	((M-TEM) Q-DATA-TYPE M-K)
 	(JUMP-EQUAL M-TEM (A-CONSTANT (EVAL DTP-FIX)) XFLIP4) ;Single region
 	;Do all areas.  We do this by looking through the region-tables
@@ -1873,6 +2427,30 @@ XFLIPW2	((OA-REG-HIGH) DPB M-E OAH-A-SRC A-ZERO)
 
 XFLIP3	(JUMP-XCT-NEXT XFLIP2)
        (CALL XFLIP5)
+
+;; the young flip (contract g3 step 2, 4.2): the regions of eden and both
+;; survivor spaces, new or copy, become oldspace (xflip5; update-region-pht
+;; keeps each entry's <19:18>); the marked-page walk is armed, its roots
+;; beyond the machine's state; then xflipw transports the machine's state as
+;; for any flip.
+xflip-young
+	((m-k) (a-constant (eval size-of-area-arrays)))
+xflip-young-1
+	((vma-start-read) add m-k a-v-region-bits)
+	(check-page-read)
+	((m-tem) region-generation read-memory-data)
+	(jump-equal m-tem (a-constant region-generation-tenured) xflip-young-2)
+	((m-tem) (lisp-byte %%region-space-type) read-memory-data)
+	(jump-equal m-tem (a-constant (eval %region-space-new)) xflip-young-3)
+	(jump-equal m-tem (a-constant (eval %region-space-copy)) xflip-young-3)
+xflip-young-2
+	(jump-greater-than-xct-next m-k a-zero xflip-young-1)
+       ((m-k) sub m-k (a-constant 1))
+	(call scav-walk-arm)
+	(jump xflipw)
+xflip-young-3
+	(jump-xct-next xflip-young-2)
+       (call xflip5)
 
 XFLIP4	((MICRO-STACK-DATA-PUSH) (A-CONSTANT (I-MEM-LOC XFLIPW)))
 	((VMA-START-READ) ADD M-K A-V-REGION-BITS)
@@ -1922,6 +2500,17 @@ UN-CONS-0
 	((m-e) q-pointer md)
 	(JUMP-NOT-EQUAL M-T A-SCONS-CACHE-REGION UN-CONS-1)	;Fix free ptr in cache, too
 	((A-SCONS-CACHE-FREE-POINTER) ADD MD A-SCONS-CACHE-REGION-ORIGIN)
+	;; the generational collector (contract g3 step 2, 6.2): the cache's limit
+	;; stays at the end of the page the old free pointer was in, so with the
+	;; free pointer moved back across a page boundary the fast path could cons
+	;; across it without consf, which writes the first-object table's entries:
+	;; in a region with a table the cache is cleared.  a region without one
+	;; (the extra pdl's, where bignums are given back) keeps its cache.
+	((vma-start-read) add m-t a-v-region-bits)
+	(check-page-read)
+	(call first-object-table-p)
+	(jump-equal m-tem a-zero un-cons-1)
+	((a-scons-cache-area) setz)
 UN-CONS-1
 	((VMA-START-READ) ADD M-T A-V-REGION-GC-POINTER)	;back up scav pointer if necc
 	(CHECK-PAGE-READ)

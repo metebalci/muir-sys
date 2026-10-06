@@ -4,7 +4,9 @@
 # through tools/lispm-check, with lisp/CHECK.lisp loaded first when there is
 # one; with no CHECK, every case file runs.  Arguments after -- go to every
 # lispm-check run (--band, --ubin, --engine and so on).  Exit status 0 when
-# every check passes, else the first failing run's status.  The checks of
+# every check passes, else the first failing run's status.  A case file whose
+# first line is "; lisp: A.lisp,B.lisp" has those files of lisp/ loaded
+# instead.  The checks of
 # cases-2mw/ want a machine of 2 M words of main memory and run only when
 # named (README.md).
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,6 +26,10 @@ for c in "${checks[@]}"; do
     [ -f "$cases" ] || { echo "microcode-check: no $here/cases/$c.cases" >&2; exit 2; }
     files=()
     [ -f "$here/lisp/$c.lisp" ] && files=(--files "$here/lisp/$c.lisp")
+    # or the files its first line names, "; lisp: A.lisp,B.lisp", which
+    # several checks share (as tools/system-check/run takes one)
+    lisp=$(sed -n '1s/^; lisp: \(.*\)$/\1/p' "$cases")
+    [ -n "$lisp" ] && files=(--files "$(echo "$lisp" | sed "s|\([^,]*\)|$here/lisp/\1|g")")
     echo "##### $c"
     python3 "$tool" "${files[@]}" "${args[@]}" "$cases"
     s=$?

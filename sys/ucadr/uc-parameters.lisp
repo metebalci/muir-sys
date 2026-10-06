@@ -172,6 +172,25 @@
 (assign negative-setz -1_31.)	;smallest value that fits in a fixnum
 (def-data-field bits-above-fixnum 10 40)  ;bits not used in representing fixnum.
 
+;; the generational collector (contract g3 step 2, 3.1; 9.1 item 1): the
+;; generation field of the region bits, qcom's %%region-generation, <6:5>: 0
+;; tenured, 1 eden, 2 survivor space 1, 3 survivor space 2.  defined here, so
+;; that this microcode assembles the same against a qcom without the name;
+;; the assembly stops if qcom names it elsewhere.
+(def-data-field region-generation 2 5)
+(assign-eval region-generation-qcom-check
+	(eval (if (and (boundp '%%region-generation) (not (= %%region-generation #o0502)))
+		  ;; a symbol's name, not a string: the assembler read a string
+		  ;; here as symbols, and the ferror stopped on an unbound one
+		  (ferror nil (string 'qcom-names-another-%%region-generation-than-6-5))
+		0)))
+(assign region-generation-tenured 0)
+(assign region-generation-eden 1)
+;; a young pointer (contract g3 step 2, terms): a word of a type in the
+;; pointer-type register whose address's <31:28> is 1101, ephemeral space.
+(def-data-field address-space-nibble 4 28.)
+(assign ephemeral-space-nibble 15)
+
 ;"INVOKE" OPS	;GIVEN TO INVOKED ROUTINE TO TELL IT WHAT IS TRYING TO BE DONE TO IT
 ;These never got used.  DATA-TYPE-INVOKE-OP is the only one of these
 ;that actually got put in the code, except for CAR and CDR, etc.,
@@ -859,6 +878,28 @@ A-AR-1-ARRAY-POINTER-2 ((BYTE-VALUE Q-DATA-TYPE DTP-SYMBOL) 0)
 ;; went below and a-swapin-slot came, so a-pdl-buffer-virtual-address and
 ;; a-pdl-buffer-head stay at a 430 and 431, where the redirect snoops them.
 a-region-floor ((byte-value q-data-type dtp-fix) 0)
+;; the generational collector (contract g3 step 2, 4.1, 5, 3.2; 9.1 item 7):
+;; three fixnums lisp names, in this order after a-region-floor, as qcom's
+;; a-memory-location-names has them (%gc-words-consed-since-flip,
+;; %gc-promotion, %gc-pretenure-threshold).  three locations more here, and
+;; a-disk-doing-read-compare, a-disk-cyl-beg and a-disk-cyl-end (unused) gone
+;; below, so a-pdl-buffer-virtual-address and a-pdl-buffer-head stay at a 430
+;; and 431, where the redirect snoops them.
+;; the words consed since the last flip, young or tenured: every cons the
+;; mutator makes adds its words (scav0), %gc-cons-work adds its argument, and
+;; every flip clears it.  lisp's gc process starts a young collection when it
+;; reaches eden's size.
+a-gc-words-consed-since-flip ((byte-value q-data-type dtp-fix) 0)
+;; the promotion table: bits <2g+1:2g> hold the generation (region bits
+;; <6:5>) into which the transporter copies an object of generation g.  lisp
+;; writes it before each %gc-flip; 0, its value at load, is the tenure-all
+;; table.
+a-gc-promotion ((byte-value q-data-type dtp-fix) 0)
+;; the pretenuring threshold, in words: a cons of more words than this in an
+;; ephemeral area goes to a tenured region of that area and does not fill the
+;; cons cache.  32768 (decisions of 6 oct: 32 k words) until lisp writes it,
+;; so a boot behaves as the default says before gc-boot runs.
+a-gc-pretenure-threshold ((plus (byte-value q-data-type dtp-fix) 100000))
 ;END OF VECTOR AREA
 
 ;Following locations are gc-able but not user-referenceable.
@@ -1071,7 +1112,10 @@ A-DISK-MA	(0)		;MA read back (last memory location referenced)
 A-DISK-FINAL-ADDRESS (0)	;Disk address read back
 A-DISK-ECC	(0)		;Error correction data read back
 A-DISK-RETRY-STATE (0)		;Count of retries
-A-DISK-DOING-READ-COMPARE (0)	;quux: unused (block-disk has no read-compare); kept in place
+;A-DISK-DOING-READ-COMPARE (0)	;quux: unused (block-disk has no read-compare); kept in place
+;; the generational collector (contract g3 step 2, 9.1 item 7): this unused
+;; location, and a-disk-cyl-beg and a-disk-cyl-end below, make room for the
+;; three a-gc- variables after a-region-floor, so that a 430 and 431 stay put.
 A-DISK-IDLE-TIME (0)		;Time since last disk op (other than background)
 A-DISK-RESERVED-FOR-USER (0)	;%DISK-OP in progress (inhibits background disk ops)
 
@@ -1123,9 +1167,12 @@ A-DISK-SAVE-MODE (0)		;save A-PGF-MODE
 A-DISK-SAVE-PI (0)
 A-DISK-SAVE-FLAGS (0)
 
-A-DISK-CYL-BEG (0)	;Typeless virtual address that lies at start of a cylinder
-A-DISK-CYL-END (0)	;Typeless virtual address that lies at start of next cylinder
-			;quux: these two are unused (block-disk has no cylinders); kept in place
+;A-DISK-CYL-BEG (0)	;Typeless virtual address that lies at start of a cylinder
+;A-DISK-CYL-END (0)	;Typeless virtual address that lies at start of next cylinder
+;			;quux: these two are unused (block-disk has no cylinders); kept in place
+;; the generational collector (contract g3 step 2, 9.1 item 7): these two
+;; unused locations go, with a-disk-doing-read-compare above, for the three
+;; a-gc- variables after a-region-floor; a 430 and 431 stay put.
 
 ;PARAMETERS OF THE CURRENTLY SELECTED SCREEN (SEE TV-SELECT-SCREEN)
 ;NOT PRESERVED THROUGH SEQUENCE BREAKS
@@ -1544,6 +1591,97 @@ a-inc-next-slot
 	(0)
 ;; quux revision 14: p-b-fiddle-again's word (uc-page-fault).  last.
 a-pdl-fiddle-md
+	(0)
+;; the generational collector (contract g3 step 2; uc-storage-allocation,
+;; uc-transporter, uc-cold-disk).  last, so that no earlier location moves.
+;; a-cons-generation: the generation (region bits <6:5>) the cons being made
+;; goes into, set where a cons looks for its region (cons-generation): the
+;; area's allocation generation for the mutator, eden in an ephemeral area
+;; unless the cons is past the pretenuring threshold; the transporter's
+;; destination, a-trans-generation, for a copy.  a-cons-pretenured: 1 when
+;; that cons was pretenured, so it does not fill the cons cache.
+;; a-trans-generation: the transporter's destination generation for the
+;; object it copies, from the promotion table (trans-old-copy), or 4 for
+;; extra-pdl-trap's copy, a new object, which takes its area's allocation
+;; generation.  a-cons-region-bits: consf's region's bits, for the
+;; first-object table; a-cons-table-start, a-cons-table-count: consf's entries
+;; (and make-region's); a-cons-region-need: the words rcons's new region must
+;; hold, the cons's and its first-object table's.
+a-cons-generation
+	(0)
+a-cons-pretenured
+	(0)
+a-trans-generation
+	(0)
+a-cons-region-bits
+	(0)
+a-cons-table-start
+	(0)
+a-cons-table-count
+	(0)
+a-cons-region-need
+	(0)
+;; the marked-page walk (contract g3 step 2, 4.4; uc-storage-allocation): armed
+;; at a young flip and by a boot that finds oldspace, it visits every page of
+;; every tenured region, a-scav-walk-region and a-scav-walk-page its place;
+;; a-scav-region-dirty is 1 while copyspace may hold objects the scavenger has
+;; not scanned (the transporter consed, a region was reset), so the region loop
+;; runs before the walk goes on.  the rest are a marked page's scan's.
+a-scav-walk-armed
+	(0)
+a-scav-region-dirty
+	(0)
+a-scav-walk-region
+	(0)
+a-scav-walk-page
+	(0)
+a-scav-walk-budget
+	(0)
+a-scav-walk-bits
+	(0)
+a-scav-walk-origin
+	(0)
+a-scav-walk-va
+	(0)
+a-scav-walk-limit
+	(0)
+a-scav-walk-obj
+	(0)
+a-scav-walk-ptr
+	(0)
+a-scav-walk-to
+	(0)
+a-scav-walk-young
+	(0)
+a-scav-walk-type
+	(0)
+;; the mark bitmap (contract g3 step 2 revision 1, 8.3; uc-cold-disk): the save
+;; builds it a 32-bit word at a time, a-mark-acc the word, a-mark-mask the
+;; page's bit in it, a-mark-k the walk's page, a-mark-w the word in the buffer
+;; page; a-mark-first-page the band page of its first page.  the restore keeps
+;; the band's bitmap page (a-mark-bitmap-page, 0 for none) and the band's first
+;; block (a-mark-band-start) from disk-restore-1 to cold-swap-in, which applies
+;; it, a-mark-n the walk's pages, a-mark-loaded the bitmap page read and
+;; a-mark-buffer the frame it is read into.
+a-mark-acc
+	(0)
+a-mark-mask
+	(0)
+a-mark-k
+	(0)
+a-mark-w
+	(0)
+a-mark-first-page
+	(0)
+a-mark-bitmap-page
+	(0)
+a-mark-band-start
+	(0)
+a-mark-n
+	(0)
+a-mark-loaded
+	(0)
+a-mark-buffer
 	(0)
 
 ;Arrays at fixed locations in A memory, used for the mouse

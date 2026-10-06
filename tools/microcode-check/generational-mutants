@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/generational-mutants: the generational collector's
+microcode (contract G3 step 2, 9.1 items 1-10) with one partial fix planted,
+each assembled, so that the checks generational and generational-save can be
+shown to fail under it (tools/microcode-check/README.md).
+
+Usage:
+  tools/microcode-check/generational-mutants --out DIR [--src TREE] [--revision R]
+      [--jobs N] [MUTANT...] [-- LISPM-CHECK-ARGS...]
+  tools/microcode-check/generational-mutants --list
+
+Each MUTANT (all of them when none is named) is a copy of TREE's sys/ and site/
+(this tree's by default) with one change to sys/ucadr/, assembled at revision
+14 as microcode 2002 on a band through tools/lispm-check, as rev14-mutants
+does (its --band, --ubin and --quux after --, or LISPM_CHECK_BAND and the
+others), N at a time (--jobs, 2 by default).  DIR/MUTANT/ gets ucadr.mcr,
+.tbl, .locs and .sym, the case file and lispm-check's output, and plant.diff
+the change.  The mutant none plants nothing: TREE's microcode as it is.
+The machine's revision for --quux is its own unless --revision gives
+MUIR_QUUX_REVISION.
+
+  none               nothing planted
+  alloc-any-generation   item 1: the mutator takes a new region of any
+                     generation, so an ephemeral area's conses go to its
+                     tenured first region
+  pretenure-none     item 1: no cons is pretenured: a 64 K-word array of an
+                     ephemeral area lies in eden
+  pretenure-cache    item 1: a pretenured cons fills the cons cache, so the
+                     area's next small cons lands in the tenured region
+  words-uncounted    item 1: scav0 does not count the words consed
+  table-none         item 2: make-region writes no first-object table
+  consf-no-entries   item 2: consf writes no entry
+  rcons-no-room      item 2: rcons makes no room for the table, so an object
+                     as big as the area's region size never fits
+  uncons-keeps-cache item 2: un-cons does not clear the cache of a region
+                     with a table
+  trans-tenured      item 3: the transporter copies every object into the
+                     tenured generation, whatever the promotion table says
+  extra-pdl-promoted item 3: extra-pdl-trap's copy takes the last transport's
+                     destination, not its area's allocation generation
+  flip-tenured-too   item 4: (%gc-flip -1) flips tenured regions too
+  flip-keeps-count   item 4: a flip does not clear the words consed
+  flip-unarmed       item 5: the young flip does not arm the marked-page walk
+  walk-clears-always item 5: a scanned page's mark is cleared even when a
+                     young pointer is left in it
+  walk-no-invalidate item 5: the clear leaves the page's tlb entry valid
+  walk-word-by-word  item 5: a structure page is scanned word by word from its
+                     first word, unboxed words included
+  walk-skips-out     item 5: a marked page not in core is not scanned
+  enable-off         item 6: initial-map leaves register-page word 221 0
+  names-swapped      item 7: a-gc-promotion and a-gc-pretenure-threshold
+                     swapped
+  save-no-marks      item 8: the save's bitmap holds no mark
+  restore-no-marks   item 8: the restore applies no bitmap
+  bitmap-off-by-one  item 8: the restore reads page k's mark from bit k + 1
+  accept-2010        item 9: a band of format 2010 is restored, not refused
+  no-bitmap-check    item 9: a 2020 band with no bitmap is restored
+  warm-unarmed       item 10: a boot that finds oldspace leaves the walk
+                     disarmed
+"""
+import difflib
+import os
+import shutil
+import subprocess
+import sys
+import threading
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+AC = SourceFileLoader('assembler_check', os.path.join(TREE, 'tools', 'assembler-check', 'run')).load_module()
+
+SA, TR, CD, PA = ('uc-storage-allocation.lisp', 'uc-transporter.lisp', 'uc-cold-disk.lisp',
+                  'uc-parameters.lisp')
+# name: (file, the text, its replacement, a text before it that makes it
+# unique), or None for none
+MUTANTS = {
+    'none': None,
+    'alloc-any-generation': (
+        SA, b'\t(jump-if-bit-set m-transport-flag consf4)\ncons-check-generation\n',
+        b'\t(jump-if-bit-set m-transport-flag consf4)\n\t(popj)\t;planted\ncons-check-generation\n',
+        b'\nCONS-CHECK-NEW\n'),
+    'pretenure-none': (
+        SA, b'\t(jump-greater-than-unsigned m-b a-tem cons-generation-pretenured)\n',
+        b'\t(no-op)\t;planted\n', b'\ncons-generation-area\n'),
+    'pretenure-cache': (
+        SA, b'\t((m-tem) a-cons-pretenured)\n\t(jump-not-equal m-tem a-zero scav0)\n',
+        b'\t(no-op)\t;planted\n', b'\nSCONS2\t'),
+    'words-uncounted': (
+        SA, b'\t((a-gc-words-consed-since-flip) dpb m-tem q-pointer'
+            b' (a-constant (byte-value q-data-type dtp-fix)))\n',
+        b'\t(no-op)\t;planted\n', b'\nSCAV0\t'),
+    'table-none': (
+        SA, b'\t(call-not-equal m-tem a-zero make-region-table)\n',
+        b'\t(no-op)\t;planted\n', b'\nMAKE-REGION\n'),
+    'consf-no-entries': (
+        SA, b'\t(popj-equal m-tem a-zero)\n', b'\t(popj)\t;planted\n', b'\nconsf-table\n'),
+    'rcons-no-room': (
+        SA, b'\t((a-cons-region-need) add m-tem a-b)\n', b'\t(no-op)\t;planted\n', b'\nRCONS\t'),
+    'uncons-keeps-cache': (
+        SA, b'\t((a-scons-cache-area) setz)\nUN-CONS-1\n', b'\t(no-op)\t;planted\nUN-CONS-1\n',
+        b'\nUN-CONS\t'),
+    'trans-tenured': (
+        TR, b'\t((a-trans-generation) m-tem)\n', b'\t((a-trans-generation) a-zero)\t;planted\n',
+        b'\nTRANS-OLD-COPY\n'),
+    'extra-pdl-promoted': (
+        TR, b'\t((a-trans-generation) (a-constant 4))\n', b'\t(no-op)\t;planted\n',
+        b'\nEXTRA-PDL-TRAP-2\n'),
+    'flip-tenured-too': (
+        SA, b'\t(jump-equal m-tem (a-constant region-generation-tenured) xflip-young-2)\n',
+        b'\t(no-op)\t;planted\n', b'\nxflip-young-1\n'),
+    'flip-keeps-count': (
+        SA, b'\t((a-gc-words-consed-since-flip) (a-constant (byte-value q-data-type dtp-fix)))\n',
+        b'\t(no-op)\t;planted\n', b'\nXFLIP (MISC-INST-ENTRY %GC-FLIP)\n'),
+    'flip-unarmed': (
+        SA, b'\t(call scav-walk-arm)\n', b'\t(no-op)\t;planted\n', b'\nxflip-young-2\n'),
+    'walk-clears-always': (
+        SA, b'\t((m-tem) a-scav-walk-young)\n\t(popj-not-equal m-tem a-zero)\n',
+        b'\t((m-tem) a-scav-walk-young)\n\t(no-op)\t;planted\n', b'\nscav-walk-page-clear'),
+    'walk-no-invalidate': (
+        SA, b'\t((vma-write-map) (a-constant write-map-invalidate))\n', b'\t(no-op)\t;planted\n',
+        b'\nscav-walk-page-clear'),
+    'walk-word-by-word': (
+        SA, b'\t(jump-not-equal m-tem (a-constant (eval %region-representation-type-list))\n'
+            b'\t\tscav-walk-page-structure)\n',
+        b'\t(no-op)\t;planted\n', b'\nscav-walk-page-1\n'),
+    'walk-skips-out': (
+        SA, b'\t(jump-equal m-tem a-zero scav-walk-next-page)\t;no entry\n',
+        b'\t(jump-equal m-tem a-zero scav-walk-next-page)\t;no entry\n'
+        b'\t(jump-equal m-tem (a-constant 1) scav-walk-next-page)\t;planted\n',
+        b'\nscav-walk-2\n'),
+    'enable-off': (
+        CD, b'\t((md) (a-constant 1))\n\t(call-xct-next phys-mem-write)\n'
+            b'       ((vma) (a-constant quux-ephemeral-enable-physical-address))\t;word 221\n',
+        b'\t(no-op)\t;planted\n', b'\nINITIAL-MAP\n'),
+    'names-swapped': (
+        PA, b'a-gc-promotion ((byte-value q-data-type dtp-fix) 0)\n', b';planted: moved below\n',
+        b'\na-gc-words-consed-since-flip '),
+    'save-no-marks': (
+        CD, b'\t(jump-if-bit-clear map-ephemeral-reference-bit md dsr-mark-page-1)\n',
+        b'\t(jump dsr-mark-page-1)\t;planted\n', b'\ndsr-mark-page\n'),
+    'restore-no-marks': (
+        CD, b'\t(call-not-equal m-tem a-zero apply-mark-bitmap)\n', b'\t(no-op)\t;planted\n',
+        b'\nCOLD-SWAP-IN\n'),
+    'bitmap-off-by-one': (
+        CD, b'\t((a-mark-k) a-zero)\n\t((a-walk-region) a-zero)\nmark-apply-region\n',
+        b'\t((a-mark-k) (a-constant 1))\t;planted\n\t((a-walk-region) a-zero)\nmark-apply-region\n',
+        b'\napply-mark-bitmap\n'),
+    'accept-2010': (
+        CD, b'\t(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2010))'
+            b' band-not-generational)\n',
+        b'\t(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2010))'
+        b' restore-copy)\t;planted\n',
+        b'\nDISK-RESTORE-1\n'),
+    'no-bitmap-check': (
+        CD, b'\t(jump-equal m-tem a-zero mark-bitmap-missing)\n', b'\t(no-op)\t;planted\n',
+        b'\nrestore-marked\n'),
+    'warm-unarmed': (
+        CD, b'\t(call scav-walk-arm-if-oldspace)\n', b'\t(no-op)\t;planted\n', b'\nBEG0000\t'),
+}
+# names-swapped's second half: a-gc-promotion after a-gc-pretenure-threshold,
+# so that the two swap places (a 144 the threshold, a 145 the table)
+SECOND = {
+    'names-swapped': (
+        PA, b'a-gc-pretenure-threshold ((plus (byte-value q-data-type dtp-fix) 100000))\n',
+        b'a-gc-pretenure-threshold ((plus (byte-value q-data-type dtp-fix) 100000))\n'
+        b'a-gc-promotion ((byte-value q-data-type dtp-fix) 0)\t;planted: after the threshold\n',
+        b';planted: moved below\n'),
+}
+
+
+def plant_one(spec, copy):
+    f, old, new, after = spec
+    path = os.path.join(copy, 'sys', 'ucadr', f)
+    data = open(path, 'rb').read()
+    start = data.index(after)
+    at = data.index(old, start)
+    changed = data[:at] + new + data[at + len(old):]
+    open(path, 'wb').write(changed)
+    return ''.join(difflib.unified_diff(data.decode('latin-1').splitlines(True),
+                                        changed.decode('latin-1').splitlines(True),
+                                        'a/sys/ucadr/' + f, 'b/sys/ucadr/' + f))
+
+
+def plant(name, copy):
+    if MUTANTS[name] is None:
+        return ''
+    diff = plant_one(MUTANTS[name], copy)
+    if name in SECOND:
+        diff += plant_one(SECOND[name], copy)
+    return diff
+
+
+def copy_tree(src, dest):
+    shutil.rmtree(dest, ignore_errors=True)
+    for top in ('sys', 'site'):
+        shutil.copytree(os.path.join(src, top), os.path.join(dest, top),
+                        ignore=shutil.ignore_patterns('ubin'))
+    # the assembler writes UCADR's outputs into SYS: UBIN;, which the tree
+    # does not carry
+    os.makedirs(os.path.join(dest, 'sys', 'ubin'))
+
+
+def build(name, src, out, extra, env, results):
+    d = os.path.join(out, name)
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    copy = os.path.join(d, 'tree')
+    copy_tree(src, copy)
+    open(os.path.join(d, 'plant.diff'), 'w').write(plant(name, copy))
+    lines = ['; tools/microcode-check/generational-mutants: %s' % name,
+             "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+             '(setq ua:*word-width* 40.) => 40', '(setq ua:*hardware-revision* 14.) => 14',
+             '(setq ua:version-number 2002.) => 2002', AC.assemble_form(2002) + ' => T']
+    cases = os.path.join(d, 'cases.cases')
+    open(cases, 'w').write('\n'.join(lines) + '\n')
+    log = os.path.join(d, 'lispm-check.out')
+    with open(log, 'w') as f:
+        rc = subprocess.run([sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--tree', copy,
+                             '--timeout', '3000', '--keep'] + extra + [cases],
+                            stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    text = open(log, encoding='latin-1').read()
+    run = [l.split('kept in ')[1].strip() for l in text.split('\n') if 'run files kept in' in l]
+    got = 0
+    warned = False
+    if run:
+        for f in AC.OUTPUTS:
+            p = os.path.join(run[0], 'served', 'sys', 'ubin', f)
+            if os.path.exists(p):
+                shutil.copy2(p, d)
+                got += 1
+        # the micro-assembler only warns of an undefined name (CONS-LAP-BARF)
+        t = os.path.join(run[0], 'telnet.log')
+        if os.path.exists(t):
+            shutil.copy2(t, d)
+            warned = b'UNDEFINED-SYM' in open(t, 'rb').read()
+        shutil.rmtree(run[0], ignore_errors=True)
+    shutil.rmtree(copy, ignore_errors=True)
+    results[name] = rc == 0 and got == len(AC.OUTPUTS) and not warned
+
+
+def main():
+    argv = sys.argv[1:]
+    extra = argv[argv.index('--') + 1:] if '--' in argv else []
+    argv = argv[:argv.index('--')] if '--' in argv else argv
+    out, src, names, env, jobs = None, TREE, [], dict(os.environ), 2
+    while argv:
+        a = argv.pop(0)
+        if a == '--out':
+            out = os.path.abspath(argv.pop(0))
+        elif a == '--src':
+            src = os.path.abspath(argv.pop(0))
+        elif a == '--jobs':
+            jobs = int(argv.pop(0))
+        elif a == '--revision':
+            env['MUIR_QUUX_REVISION'] = argv.pop(0)
+        elif a == '--list':
+            print('\n'.join(MUTANTS))
+            return 0
+        elif a in MUTANTS:
+            names.append(a)
+        else:
+            raise SystemExit(__doc__)
+    if not out:
+        raise SystemExit(__doc__)
+    names = names or list(MUTANTS)
+    # every plant must find its text before anything is assembled
+    for n in names:
+        probe = os.path.join(out, '.probe')
+        copy_tree(src, probe)
+        try:
+            plant(n, probe)
+        except ValueError:
+            raise SystemExit('generational-mutants: %s: its text is not in %s' % (n, src))
+        finally:
+            shutil.rmtree(probe, ignore_errors=True)
+    results = {}
+    for k in range(0, len(names), jobs):
+        ts = [threading.Thread(target=build, args=(n, src, out, extra, env, results))
+              for n in names[k:k + jobs]]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    for n in names:
+        print('%s %s' % (n, 'assembled' if results.get(n) else 'FAILED'))
+    return 0 if all(results.get(n) for n in names) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

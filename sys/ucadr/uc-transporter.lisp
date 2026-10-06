@@ -97,8 +97,33 @@ TRANS-OLD-COPY
 	((C-PDL-BUFFER-POINTER-PUSH) M-A)	;Protect regs used by XARN
 	((C-PDL-BUFFER-POINTER-PUSH) M-B)
 	((C-PDL-BUFFER-POINTER-PUSH) M-T)
-	(CALL-XCT-NEXT XARN)			;M-T gets area# object is in
-       ((C-PDL-BUFFER-POINTER-PUSH) A-TRANS-MD)
+;	(CALL-XCT-NEXT XARN)			;M-T gets area# object is in
+;       ((C-PDL-BUFFER-POINTER-PUSH) A-TRANS-MD)
+	;; the generational collector (contract g3 step 2, 5): xarn's two steps,
+	;; with the source region's generation read between them: the copy goes to
+	;; the generation the promotion table, a-gc-promotion, gives for it, bits
+	;; <2g+1:2g> for generation g (a-trans-generation, which cons-generation
+	;; takes for the copy's cons).  an object in no region (none is in
+	;; oldspace) keeps today's way, the default area, and goes tenured.  the
+	;; push is a microcycle apart from xrgn's pop: the pdl buffer has no
+	;; pass-around, so a pop in the microcycle right after the push reads the
+	;; word that was there before (xarn's own call gave that microcycle).
+	((c-pdl-buffer-pointer-push) a-trans-md)
+	(call xrgn)				;m-t gets the region object is in
+	((a-trans-generation) (a-constant region-generation-tenured))
+	(jump-equal m-t a-v-nil trans-old-copy-1)
+	((vma-start-read) add m-t a-v-region-bits)
+	(check-page-read)
+	((m-tem) region-generation read-memory-data)
+	((a-trans-tem) dpb m-tem (byte-field 5 1) a-zero)	;2g, the entry's position
+	((m-tem) a-gc-promotion)
+	;; an ldb at the position: its rotate is 50 less it, ored into the next
+	;; instruction (see slot-bit, uc-page-fault)
+	((oa-reg-low) sub (m-constant 50) a-trans-tem)
+	((m-tem) (byte-field 2 0) m-tem)
+	((a-trans-generation) m-tem)
+	(call region-to-area)			;m-t gets area# object is in
+trans-old-copy-1
 	((M-TEM) M-T)				;Allocate new copy in same area
 	((M-T) C-PDL-BUFFER-POINTER-POP)	;Restore registers
 	((M-B) C-PDL-BUFFER-POINTER-POP)
@@ -517,6 +542,10 @@ EXTRA-PDL-TRAP-2
 	((A-TRANS-COPY-FWD-DTP)			;Forward with header forwards
 		(A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-HEADER-FORWARD)
 				  (BYTE-VALUE Q-CDR-CODE CDR-ERROR))))
+	;; the generational collector (contract g3 step 2, 3.2): the copy is a new
+	;; object, so it goes to its area's allocation generation (eden for working
+	;; storage), not by the promotion table: cons-generation's 4.
+	((a-trans-generation) (a-constant 4))
 	(CALL-XCT-NEXT TRANS-COPY)		;Copy the frob in A-TRANS-MD
        ((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-BACKGROUND-CONS-AREA) ;into default area
 	((PDL-PUSH) MD)

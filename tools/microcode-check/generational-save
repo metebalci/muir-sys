@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/generational-save: the generational collector's save
+and restore of the young-pointer marks (contract G3 step 2 revision 1, 8.3;
+9.1 item 8; the microcode's part of C14, C25 and C26), a session, a save and a
+boot (tools/microcode-check/README.md).
+
+Usage:
+  tools/microcode-check/generational-save --out DIR --disk DISK --ubin UBIN
+      --quux QUUX --ozd OZD --ports LO-HI [--save LODn] [--engine micro|rtl]
+      [--incremental]
+
+DISK holds a band of System 2002 current in LOD1 and the microcode under test in
+MCR1; it is copied, never written.  UBIN is that microcode's sys/ubin/ with
+PROM 2002's promh.mcr beside it; QUUX is muir-sim's quux, run at revision 14.
+The tools of tools/cross-build (its sessions, disks and band headers) do the
+work:
+
+1. a session on the copy, booted read-write, loads lisp/generational.lisp and
+   lisp/generational-save.lisp, makes young lists held only by a static array's
+   slot not on its page's first word (a paged page), by NIL's property list (a
+   wired page) and, through a BEFORE-COLD initialization, by a static array's
+   slot stored just before %DISK-SAVE, runs one young collection (the first two
+   lists to survivor space 1, so that after the boot only the marks find
+   them); then (si:disk-save "LODn" t), and waits
+   for LODn to hold a band of format 2020 that stays the same for 60 s;
+2. the band's mark bitmap is read from the partition: %SYS-COM-MARK-BITMAP (its
+   first page), the valid size, and the walk places whose bit is 1;
+3. the band, booted (lispm-check, which boots it cold for its checkpoint, so
+   the restore applies the bitmap), must have the holders' pages marked and
+   the lists young before any collection, every page whose bit is 1 marked in
+   its entry, and the lists' sums right after one, two and three young
+   collections.
+
+With --incremental the save is incremental, (si:disk-save "LODn" t t), a band
+of format 2021 over LOD1 (its base band), and the steps that read the band's
+own region tables, which an incremental band holds only where they changed,
+are left out: the walk's start, the bitmap's size against the walk, the
+holders' bits, and the boot's check of every marked page; the boot's checks of
+the holders' marks and the lists stay.  The incremental compare makes RQBs in a
+fresh DISK-BUFFER-AREA region, so this mode needs the Lisp side's MAKE-DISK-RQB,
+which pads past the region's first-object table (clarification 11).
+
+DIR gets record.txt, ending RESULT PASS or RESULT FAIL, the session's logs and
+the boot's.  Exit status 0 on PASS.
+"""
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+CB = SourceFileLoader('cross_build', os.path.join(TREE, 'tools', 'cross-build', 'run')).load_module()
+CB.FORMAT_SAVED = 0o2020              # the collector's saved band (contract 9.4)
+WORD_MARK_BITMAP = 30                 # %sys-com-mark-bitmap, after %sys-com-region-floor
+
+
+class Args:
+    pass
+
+
+class Run(CB.Run):
+    def __init__(self, a):
+        self.a = a
+        self.out = a.out
+        self.work = a.work
+        lo, hi = a.ports
+        self.lc_ports = '%d-%d' % (lo, hi - 16)
+        self.qld_ports = list(range(hi - 15, hi + 1))
+        self.ubin = a.ubin
+        import threading
+        self.lock = threading.Lock()
+
+    def record(self, text):
+        line = '%s %s' % (time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), text)
+        print(line, flush=True)
+        with open(os.path.join(self.out, 'record.txt'), 'a') as f:
+            f.write(line + '\n')
+
+
+def words(path, first_block, page, n):
+    """The fields <31:0> of N words from page PAGE of the band at FIRST_BLOCK."""
+    with open(path, 'rb') as f:
+        f.seek((first_block + 5 * page) * 1024)
+        b = f.read(5 * n)
+    return [int.from_bytes(b[5 * k:5 * k + 4], 'little') for k in range(n)]
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('--out', required=True)
+    p.add_argument('--disk', required=True)
+    p.add_argument('--ubin', required=True)
+    p.add_argument('--quux', required=True)
+    p.add_argument('--ozd', required=True)
+    p.add_argument('--ports', required=True)
+    p.add_argument('--save', default='LOD2')
+    p.add_argument('--engine', default='micro')
+    p.add_argument('--work')
+    p.add_argument('--incremental', action='store_true')
+    x = p.parse_args()
+    want = 0o2021 if x.incremental else 0o2020
+    a = Args()
+    a.out = os.path.abspath(x.out)
+    a.work = os.path.abspath(x.work or os.path.join(os.path.expanduser('~'), '.cache',
+                                                   'generational-save', os.path.basename(a.out)))
+    a.ubin, a.quux, a.ozd, a.engine = (os.path.abspath(x.ubin), os.path.abspath(x.quux),
+                                       os.path.abspath(x.ozd), x.engine)
+    a.ports = tuple(int(v) for v in x.ports.split('-'))
+    a.builder = None
+    os.makedirs(a.out, exist_ok=True)
+    shutil.rmtree(a.work, ignore_errors=True)
+    os.makedirs(a.work)
+    r = Run(a)
+    ok = True
+    disk = os.path.join(a.work, 'disk.img')
+    subprocess.run(['cp', '--sparse=always', x.disk, disk], check=True)
+    lisp = [os.path.join(HERE, 'lisp', f) for f in ('generational.lisp', 'generational-save.lisp')]
+    forms = [('(progn (load "HOST: //home//lispm//generational.lisp") t)', 120),
+             ('(progn (load "HOST: //home//lispm//generational-save.lisp") t)', 120),
+             ('(si:gs-setup)', 600), ('(si:gs-sums)', 120), ('(si:gs-holder-pages)', 300),
+             ('(si:gen-register #o224)', 60)]
+    res = r.session(os.path.join(a.out, 'session'), disk, TREE, forms, save_part=x.save, files=lisp,
+                    incremental=x.incremental)
+    before = {f: t.strip() for f, k, t in res}
+    setup = before.get('(si:gs-setup)')
+    r.record('  before the save: marks and generations %s (want (1 1 2 2))' % setup)
+    ok &= setup == '(1 1 2 2)'
+    holders = [int(v) for v in before['(si:gs-holder-pages)'].strip('()').split()]
+    # the band's bitmap, read from the partition
+    part = r.part(disk, x.save)
+    fmt, valid = r.band_header(disk, part[2])
+    head = words(disk, part[2], 1, 40)
+    first = head[WORD_MARK_BITMAP]
+    vpages = -(-valid // 1024)
+    nbm = vpages - first
+    bits = []
+    for pg in range(nbm):
+        for w, v in enumerate(words(disk, part[2], first + pg, 1024)):
+            for b in range(32):
+                if v >> b & 1:
+                    bits.append(pg * 32768 + w * 32 + b)
+    r.record('  saved: format %o, valid %d pages, mark bitmap at band page %d, %d page(s), %d bits set'
+             % (fmt, vpages, first, nbm, len(bits)))
+    ok &= fmt == want and 0 < first < vpages and nbm >= 1
+    bitsfile = os.path.join(a.work, 'gs-bits.lisp')
+    open(bitsfile, 'w').close()           # served in both modes; filled for a full save
+    if not x.incremental:
+        # the band's walk from its own region tables, band pages 3-6 (physical
+        # pages 4-7, REGION-ORIGIN, -LENGTH, -BITS and -FREE-POINTER: regions 0-2
+        # have a page each in the walk and the micro-code symbol area none): each
+        # region from 0, free ones skipped, to its free pointer's page
+        origin, length, rbits, rfp = (words(disk, part[2], 3 + t, 1024) for t in range(4))
+        walk = []
+        for reg in range(1024):
+            if (rbits[reg] >> 9) & 0o17 == 0:
+                continue
+            walk += [(origin[reg] + i * 1024) & 0xffffffff for i in range(-(-rfp[reg] // 1024))]
+        r.record('  the band\'s walk begins %s (want 0 2000 4000 10000: regions 0-2, then the'
+                 ' region tables)' % ' '.join('%o' % v for v in walk[:4]))
+        ok &= walk[:4] == [0, 0o2000, 0o4000, 0o10000]
+        r.record('  the band\'s walk: %d pages, its bitmap %d page(s): first page + pages = %d, valid'
+                 ' pages %d' % (len(walk), -(-len(walk) // 32768), first + -(-len(walk) // 32768), vpages))
+        ok &= first + -(-len(walk) // 32768) == vpages
+        with open(bitsfile, 'w') as f:
+            f.write(''.join('%d\n' % walk[k] for k in bits))
+        marked = set(walk[k] for k in bits if k < len(walk))
+        held = [h in marked for h in holders]
+        r.record('  the holders\' pages %s: bits %s (want all set)'
+                 % (' '.join('%o' % h for h in holders), held))
+        ok &= all(held)
+    # the band, booted
+    r.set_current(disk, ['MCR1', x.save])
+    cases = ('(si:gs-after) => (1 1 1 2 2 1)\n'
+             + ('' if x.incremental else
+                '(si:gs-bitmap-marked "HOST: //home//lispm//gs-bits.lisp") => (%d 0 NIL)\n' % len(bits))
+             + '(si:gs-sums) => (49995000 499500 4950)\n'
+             '(si:gs-collect-sums) => ((49995000 499500 4950) (49995000 499500 4950)'
+             ' (49995000 499500 4950))\n'
+             '(si:gen-register #o224) => 0\n')
+    rc, text = r.lispm_check(os.path.join(a.out, 'boot'), cases, disk, a.ubin,
+                             r.wrapper(CB.REVISION, os.path.join(a.ubin, 'promh.mcr')), TREE, 900,
+                             extra=['--file-server', 'device', '--files', bitsfile])
+    for line in text.splitlines():
+        if line.startswith(('PASS', 'FAIL', 'ERROR', 'lispm-check:')):
+            r.record('  boot: ' + line[:300])
+    ok &= rc == 0
+    r.record('RESULT %s' % ('PASS' if ok else 'FAIL'))
+    os.unlink(disk)
+    return 0 if ok else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

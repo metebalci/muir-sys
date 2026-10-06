@@ -26,6 +26,13 @@
 (assign-eval sys-com-region-floor
 	(eval (if (boundp '%sys-com-region-floor) %sys-com-region-floor
 		(+ %sys-com-pointer-width 3))))
+;; the generational collector (contract g3 step 2 revision 1, 8.3.2): the word
+;; after the region floor's, %sys-com-mark-bitmap, holds the band page of a
+;; saved band's mark bitmap's first page (0 in a cold load), taken by its name
+;; when qcom has it, else by its place.
+(assign-eval sys-com-mark-bitmap
+	(eval (if (boundp '%sys-com-mark-bitmap) %sys-com-mark-bitmap
+		(+ %sys-com-pointer-width 4))))
 
 ;; quux revision 14: reset-machine (below) resets the devices and then sets the
 ;; memory system's words; the cold boot resets the devices alone, before the
@@ -418,6 +425,13 @@ INITIAL-MAP
 	((md) (a-constant pointer-type-register-32-63))
 	(call-xct-next phys-mem-write)
        ((vma) (a-constant quux-pointer-types-32-63-physical-address))	;word 223
+	;; the generational collector (contract g3 step 2, 8.3.5; 9.1 item 6): the
+	;; ephemeral-reference setter's enable, word 221, which -reset clears, is 1
+	;; at every start, after the pointer-type register, so that no store before
+	;; lisp runs goes unmarked.
+	((md) (a-constant 1))
+	(call-xct-next phys-mem-write)
+       ((vma) (a-constant quux-ephemeral-enable-physical-address))	;word 221
 	((md) a-zero)				;not a window's address
 	((vma-write-map) (a-constant write-map-empty))
 	((vma) a-v-nil)
@@ -500,6 +514,30 @@ prom-entry-read
 ;; physical-page-data areas among them, which this microcode does not have.
 ;; the halt shows this location.
 band-not-revision-14
+	(call illop)
+
+;; band-not-generational: disk-restore-1 comes here when the band is revision
+;; 14's without the generational collector, format 2010, 2011 or 2012
+;; (contract g3 step 2 revision 1, 9.1 item 9, 9.4): its regions have no
+;; generation and no first-object table, and a saved one carries no mark
+;; bitmap; such a band is moved by the cross build.  the halt shows this
+;; location.
+band-not-generational
+	(call illop)
+
+;; mark-bitmap-missing: disk-restore-1 comes here when a saved or incremental
+;; band (format 2020 or 2021) has no mark bitmap, %sys-com-mark-bitmap 0
+;; (contract g3 step 2 revision 1, 8.3.4): its young objects' referrers would
+;; lose their marks.  the halt shows this location.
+mark-bitmap-missing
+	(call illop)
+
+;; mark-bitmap-wrong-size: cold-swap-in comes here when the band's mark bitmap
+;; does not end where the band does, its first page plus one page a 32768
+;; pages of the band's walk being not the band's valid pages (contract g3 step
+;; 2 revision 1, 8.3.4): the bits would be another band's or another walk's.
+;; the halt shows this location.
+mark-bitmap-wrong-size
 	(call illop)
 
 ;; initial-map-a comes here when the level-1 map is narrower than machine-id
@@ -632,6 +670,10 @@ phys-mem-write-1
 ;The second and third arguments may be zero to specify the current partition.
 ;The first arg may also be minus the main-memory-size, to dump an incremental band.
 DISK-SAVE (MISC-INST-ENTRY %DISK-SAVE)
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.4): the
+	;; return from the save through cold-swap-in applies no mark bitmap: its
+	;; entries kept their marks
+	((a-mark-bitmap-page) a-zero)
 ;	((M-4) PDL-POP)
 	;; quux revision 13 (appendix a1.11, rule 5): the band's name is compared
 	;; with m-3, which is built by ldb from the gpt and so untagged: take the
@@ -943,6 +985,10 @@ dsr-next-region
        ((a-walk-region) add m-tem (a-constant 1))
 dsr-done
 	(call dsr-copy-run)
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.2,
+	;; 8.3.3): the mark bitmap, right after the last page written, inside the
+	;; valid size below, and %sys-com-mark-bitmap its first page's place
+	(call dsr-mark-bitmap)
 	((M-Q) SUB M-Q A-COPY-BAND-TEM1)
 	;; quux revision 13: m-q is blocks, 5 a page; the valid size is words, a
 	;; fixnum, of the pages written.  the system communication area is page 1,
@@ -953,6 +999,10 @@ dsr-done
 	((md) dpb m-1 vma-page-addr-part (a-constant (byte-value q-data-type dtp-fix)))
 	((vma-start-write) (a-constant (eval (plus 2000 %sys-com-valid-size))))
 	(ILLOP-IF-PAGE-FAULT)
+	((m-tem) a-mark-first-page)
+	((md) q-pointer m-tem (a-constant (byte-value q-data-type dtp-fix)))
+	((vma-start-write) (a-constant (plus 2000 sys-com-mark-bitmap)))
+	(illop-if-page-fault)
 	((m-b) (a-constant 1))			;core page frame number
 	((m-1) a-copy-band-tem1)		;the band's first block
 	((m-1) add m-1 (a-constant blocks-per-page))	;its second page
@@ -972,6 +1022,250 @@ DSR-COPY-RUN
 	(call disk-save-section)		;m-q moves on
 	(popj-after-next (a-run-count) a-zero)
        (no-op)
+
+;;; the mark bitmap (contract g3 step 2 revision 1, 8.3.2, 8.3.3; amendment 6).
+;;; a saved or incremental band carries each page's young-pointer mark, its
+;;; entry's <19>, so that a save keeps young objects young: bit k is the mark
+;;; of the k-th page of the band's walk, the regionwise one from region 0, each
+;;; region to the end of its free pointer's page, free ones skipped (the
+;;; incremental mask's order, clarification 29); bit k is bit k mod 32 of word
+;;; k / 32, the first page in bit 0, each word a fixnum, 1024 words (32768
+;;; pages) a page.  every page of the walk has a bit, tenured or young, saved
+;;; in this band or not.
+
+;; dsr-mark-bitmap: after the band's pages (disk-save-regionwise-subr), a second
+;; walk over the same pages reads each one's entry and writes its bit; each
+;; full page of bits, and the last, is written to the band at m-q, which moves
+;; past it, from the copy buffer (copy-buffer-page-origin, free once the pages
+;; are copied); a-mark-first-page is the band page of the bitmap's first page.
+;; the table holds every mark here: the setter's write-back reaches it before
+;; the reference's own cycle (appendix a14.6), eviction keeps <19:18>
+;; (swap-out-all-pages evicted every pageable page), wired entries are not
+;; rewritten, no lisp runs inside %disk-save, and disk-save refuses while
+;; register-page word 224 (write-backs the guard refused) is not 0.  clobbers
+;; m-a, m-b, m-c, m-t, m-1, m-2, m-tem, a-tem1..3, vma, md, the a-walk- and
+;; a-mark- variables.
+dsr-mark-bitmap
+	((m-1) m-q)
+	((m-1) sub m-1 a-copy-band-tem1)
+	(call divide-by-blocks-per-page)	;the band pages before it
+	((a-mark-first-page) m-1)
+	((a-mark-k) a-zero)
+	((a-mark-w) a-zero)
+	((a-mark-acc) a-zero)
+	((a-mark-mask) (a-constant 1))
+	(call dsr-mark-clear)
+	((a-walk-region) a-zero)
+dsr-mark-region
+	((m-a) a-walk-region)
+	((m-tem) a-v-region-length)
+	((m-tem) sub m-tem a-v-region-origin)
+	(jump-greater-or-equal m-a a-tem dsr-mark-done)
+	((vma-start-read) add m-a a-v-region-bits)
+	(illop-if-page-fault)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem a-zero dsr-mark-next-region)	;free region, forget it.
+	((vma-start-read) add m-a a-v-region-origin)
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	((a-walk-va) m-tem)
+	((vma-start-read) add m-a a-v-region-free-pointer)
+	(illop-if-page-fault)
+	((m-tem) add md (a-constant (eval (1- page-size))))
+	((m-tem) vma-page-addr-part m-tem)
+	((a-walk-n) m-tem)			;its pages in the walk
+	((a-walk-i) a-zero)
+dsr-mark-page
+	((m-tem) a-walk-i)
+	(jump-greater-or-equal m-tem a-walk-n dsr-mark-next-region)
+	(call-xct-next find-page-entry)		;its mark
+       ((a-tem1) a-walk-va)
+	(jump-if-bit-clear map-ephemeral-reference-bit md dsr-mark-page-1)
+	((m-tem) a-mark-mask)
+	((a-mark-acc) ior m-tem a-mark-acc)
+dsr-mark-page-1
+	((m-tem) a-mark-mask)			;the next page's bit
+	((a-mark-mask) add m-tem a-tem)
+	((m-tem) a-mark-k)
+	((m-tem) add m-tem (a-constant 1))
+	((a-mark-k) m-tem)
+	((m-tem) (byte-field 5 0) m-tem)
+	(call-equal m-tem a-zero dsr-mark-word)	;32 pages: the word is full
+	((m-tem) a-walk-va)
+	((a-walk-va) add m-tem (a-constant (eval page-size)))
+	((m-tem) a-walk-i)
+	(jump-xct-next dsr-mark-page)
+       ((a-walk-i) add m-tem (a-constant 1))
+dsr-mark-next-region
+	((m-tem) a-walk-region)
+	(jump-xct-next dsr-mark-region)
+       ((a-walk-region) add m-tem (a-constant 1))
+dsr-mark-done
+	((m-tem) a-mark-k)
+	((m-tem) (byte-field 5 0) m-tem)
+	(call-not-equal m-tem a-zero dsr-mark-word)	;the last word, part full
+	((m-tem) a-mark-w)
+	(popj-equal m-tem a-zero)		;the bitmap ended on a page
+	(jump dsr-mark-write)			;the last page, part full
+
+;; dsr-mark-word: a-mark-acc, a fixnum, is the buffer's word a-mark-w; the next
+;; word starts empty; a full page is written (dsr-mark-write).
+dsr-mark-word
+	((m-tem) a-mark-acc)
+	((md) q-pointer m-tem (a-constant (byte-value q-data-type dtp-fix)))
+	((m-tem) a-mark-w)
+	((a-tem3) m-tem)
+	((m-tem) (a-constant copy-buffer-page-origin))
+	(call-xct-next phys-mem-write)
+       ((vma) dpb m-tem vma-phys-page-addr-part a-tem3)
+	((a-mark-acc) a-zero)
+	((a-mark-mask) (a-constant 1))
+	((m-tem) a-mark-w)
+	((m-tem) add m-tem (a-constant 1))
+	((a-mark-w) m-tem)
+	(popj-less-than m-tem (a-constant (eval page-size)))
+;; dsr-mark-write: the buffer page goes to the band at m-q, which moves past
+;; it, and the buffer is emptied.
+dsr-mark-write
+	((m-tem) (a-constant blocks-per-page))
+	((m-tem) add m-q a-tem)
+	(call-greater-or-equal m-tem a-copy-band-tem band-not-big-enough)
+	((m-1) m-q)
+	((m-2) (a-constant 1))
+	((m-b) (a-constant copy-buffer-page-origin))
+	((m-c) (a-constant copy-buffer-ccw-origin))
+	(call cold-disk-write)
+	((m-q) add m-q (a-constant blocks-per-page))
+	((a-mark-w) a-zero)
+;; dsr-mark-clear: the buffer page's words are fixnum 0.  clobbers m-b, m-tem,
+;; a-tem1, a-tem2, vma, md.
+dsr-mark-clear
+	((m-b) (a-constant copy-buffer-page-origin))
+	(jump-xct-next fill-frame)
+       ((a-tem2) (a-constant (byte-value q-data-type dtp-fix)))
+
+;; apply-mark-bitmap (contract g3 step 2 revision 1, 8.3.4): cold-swap-in
+;; comes here after a restore of a saved or incremental band, once every entry
+;; is made (build-tables's wired ones, cold-swap-in's for the pages wired for
+;; the restore past the band's wired size, build-region-entries's for the
+;; rest) and before the tlb is emptied and lisp runs: each page of the walk
+;; whose bit is 1 gets <19> ored into its entry (a tlb entry loaded meanwhile
+;; holds at most a stale 0, and the tlb is emptied anyway).  the bitmap's size
+;; is checked first: its first page, a-mark-bitmap-page, plus a page for each
+;; 32768 pages of the walk must be the band's valid pages
+;; (mark-bitmap-wrong-size).  its pages are read from the band (its first
+;; block a-mark-band-start) one at a time into the frame below the tables,
+;; free until lisp runs.  an incremental band's own bitmap is applied, never
+;; its base band's.  clobbers m-a, m-b, m-c, m-t, m-1, m-2, m-tem, a-tem1..3,
+;; vma, md, the a-walk- and a-mark- variables.
+apply-mark-bitmap
+	(call mark-walk-count)			;a-mark-n, the walk's pages
+	((m-tem) a-mark-n)
+	((m-tem) add m-tem (a-constant 77777))
+	((m-tem) (byte-field 17. 15.) m-tem)	;its pages of bits
+	((m-tem) add m-tem a-mark-bitmap-page)
+	((a-tem3) m-tem)			;where the bitmap ends
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant (eval (plus 2000 %sys-com-valid-size))))
+	((m-tem) vma-page-addr-part md)		;the band's valid pages
+	(call-not-equal m-tem a-tem3 mark-bitmap-wrong-size)
+	((m-tem) a-table-page-frame)		;the buffer: the frame below the tables
+	((a-mark-buffer) sub m-tem (a-constant 1))
+	((a-mark-loaded) m-minus-one)		;no page of bits read yet
+	((a-mark-k) a-zero)
+	((a-walk-region) a-zero)
+mark-apply-region
+	((m-a) a-walk-region)
+	((m-tem) a-v-region-length)
+	((m-tem) sub m-tem a-v-region-origin)
+	(jump-greater-or-equal m-a a-tem mark-apply-done)
+	((vma-start-read) add m-a a-v-region-bits)
+	(illop-if-page-fault)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem a-zero mark-apply-next-region)	;free region
+	((vma-start-read) add m-a a-v-region-origin)
+	(illop-if-page-fault)
+	((m-tem) q-pointer md)
+	((a-walk-va) m-tem)
+	((vma-start-read) add m-a a-v-region-free-pointer)
+	(illop-if-page-fault)
+	((m-tem) add md (a-constant (eval (1- page-size))))
+	((m-tem) vma-page-addr-part m-tem)
+	((a-walk-n) m-tem)
+	((a-walk-i) a-zero)
+mark-apply-page
+	((m-tem) a-walk-i)
+	(jump-greater-or-equal m-tem a-walk-n mark-apply-next-region)
+	((m-tem) a-mark-k)			;the page of bits holding bit k
+	((m-tem) (byte-field 17. 15.) m-tem)
+	(call-not-equal m-tem a-mark-loaded mark-apply-read)
+	((m-tem) a-mark-k)			;its word, k / 32 mod 2000
+	((m-tem) (byte-field 10. 5) m-tem)
+	((a-tem3) m-tem)
+	((m-tem) a-mark-buffer)
+	((m-tem) dpb m-tem vma-phys-page-addr-part a-tem3)
+	(call-xct-next phys-mem-read)
+       ((vma) m-tem)
+	((m-tem) a-mark-k)			;its bit, k mod 32: an ldb by a rotate
+	((m-tem) (byte-field 5 0) m-tem)	; of 50 less the position, ored into
+	((oa-reg-low) sub (m-constant 50) a-tem)	; the next instruction (slot-bit)
+	((m-tem) (byte-field 1 0) md)
+	(jump-equal m-tem a-zero mark-apply-page-1)
+	(call-xct-next find-page-entry)		;marked: <19> ored into the entry
+       ((a-tem1) a-walk-va)
+	((m-tem) map-status-code md)
+	(call-equal m-tem a-zero illop)		;a page of the walk has no entry
+	((md) ior md (a-constant (byte-mask map-ephemeral-reference-bit)))
+	((vma-start-write) vma)
+	(illop-if-page-fault)
+mark-apply-page-1
+	((m-tem) a-mark-k)
+	((a-mark-k) add m-tem (a-constant 1))
+	((m-tem) a-walk-va)
+	((a-walk-va) add m-tem (a-constant (eval page-size)))
+	((m-tem) a-walk-i)
+	(jump-xct-next mark-apply-page)
+       ((a-walk-i) add m-tem (a-constant 1))
+mark-apply-next-region
+	((m-tem) a-walk-region)
+	(jump-xct-next mark-apply-region)
+       ((a-walk-region) add m-tem (a-constant 1))
+mark-apply-done
+	(popj-after-next (a-mark-bitmap-page) a-zero)	;applied once
+       (no-op)
+
+;; mark-apply-read: the band's bitmap page m-tem is read into the buffer frame.
+mark-apply-read
+	((a-mark-loaded) m-tem)
+	((m-tem) add m-tem a-mark-bitmap-page)	;its band page
+	((m-1) dpb m-tem (byte-field 30. 2) a-zero)
+	((m-1) add m-1 a-tem)			;times 5: its first block in the band
+	((m-1) add m-1 a-mark-band-start)
+	(jump-xct-next cold-disk-read-1)
+       ((m-b) a-mark-buffer)
+
+;; mark-walk-count: a-mark-n, the pages of the band's walk, from the region
+;; tables.  clobbers m-a, m-tem, vma, md.
+mark-walk-count
+	((a-mark-n) a-zero)
+	((m-a) a-zero)
+mark-walk-count-1
+	((m-tem) a-v-region-length)
+	((m-tem) sub m-tem a-v-region-origin)
+	(popj-greater-or-equal m-a a-tem)
+	((vma-start-read) add m-a a-v-region-bits)
+	(illop-if-page-fault)
+	((m-tem) (lisp-byte %%region-space-type) md)
+	(jump-equal m-tem a-zero mark-walk-count-2)	;free region
+	((vma-start-read) add m-a a-v-region-free-pointer)
+	(illop-if-page-fault)
+	((m-tem) add md (a-constant (eval (1- page-size))))
+	((m-tem) vma-page-addr-part m-tem)
+	((m-tem) add m-tem a-mark-n)
+	((a-mark-n) m-tem)
+mark-walk-count-2
+	(jump-xct-next mark-walk-count-1)
+       ((m-a) add m-a (a-constant 1))
 
 ;; dsr-mask-bit: the incremental band's mask bit for the page a-mask-k, in
 ;; m-tem: the mask is in memory at inc-band-bitmap-buffer-origin, physical, a
@@ -2027,15 +2321,43 @@ restore-mem-size-done
 	(CALL-XCT-NEXT PHYS-MEM-READ)
        ((vma) (a-constant (plus 2000 (eval %sys-com-band-format))))
 	((a-restore-cold) a-zero)
-	(jump-equal md (a-constant band-format-saved) restore-copy)
-	(jump-equal md (a-constant band-format-incremental) disk-restore-incremental)
+;	(jump-equal md (a-constant band-format-saved) restore-copy)
+;	(jump-equal md (a-constant band-format-incremental) disk-restore-incremental)
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.4): a
+	;; saved or incremental band's mark bitmap is checked here and applied by
+	;; cold-swap-in; a cold load applies none.
+	((a-mark-bitmap-page) a-zero)
+	(jump-equal md (a-constant band-format-saved) restore-marked)
+	(jump-equal md (a-constant band-format-incremental) restore-marked)
 	((a-restore-cold) (a-constant 1))
 	(jump-equal md (a-constant band-format-cold-load) restore-copy)
+	;; revision 14's bands without the generational collector: 2010 saved, 2011
+	;; incremental, 2012 a cold load
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2010)) band-not-generational)
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2011)) band-not-generational)
+	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2012)) band-not-generational)
 	;; revision 13's bands: 2000 saved, 2001 incremental, 2002 a cold load
 	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2000)) band-not-revision-14)
 	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2001)) band-not-revision-14)
 	(jump-equal md (a-constant (plus (byte-value q-data-type dtp-fix) 2002)) band-not-revision-14)
 	(jump band-not-40-bit)
+
+;; restore-marked (contract g3 step 2 revision 1, 8.3.4): a saved or
+;; incremental band, its format in md, must have a mark bitmap: its first band
+;; page, from %sys-com-mark-bitmap, and the band's first block, m-i, are kept
+;; for cold-swap-in, which checks its size and applies it once every entry is
+;; made.  then the restore goes on by the format.
+restore-marked
+	((a-tem3) md)
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant (plus 2000 sys-com-mark-bitmap)))
+	((m-tem) q-pointer md)
+	(jump-equal m-tem a-zero mark-bitmap-missing)
+	((a-mark-bitmap-page) m-tem)
+	((a-mark-band-start) m-i)
+	((md) a-tem3)
+	(jump-equal md (a-constant band-format-incremental) disk-restore-incremental)
+	(jump restore-copy)
 
 ;; the band's pages, all it holds, are copied into the paging partition's
 ;; slots from 0, page k to slot k: the valid pages the system communication
@@ -2091,9 +2413,16 @@ restore-copy-2
 
 ;; the band formats (appendix a14.13): 2010 saved, 2011 incremental, 2012 a
 ;; cold load, fixnums; revision 13's 2000-2002 are refused.
-(assign band-format-saved (plus (byte-value q-data-type dtp-fix) 2010))
-(assign band-format-incremental (plus (byte-value q-data-type dtp-fix) 2011))
-(assign band-format-cold-load (plus (byte-value q-data-type dtp-fix) 2012))
+;(assign band-format-saved (plus (byte-value q-data-type dtp-fix) 2010))
+;(assign band-format-incremental (plus (byte-value q-data-type dtp-fix) 2011))
+;(assign band-format-cold-load (plus (byte-value q-data-type dtp-fix) 2012))
+;; the generational collector (contract g3 step 2 revision 1, 8.3, 9.1 items 8
+;; and 9; amendment 5): 2020 saved and 2021 incremental, each with its mark
+;; bitmap after its last page, and 2022 a cold load, which has none; revision
+;; 14's 2010-2012 are refused (band-not-generational), as revision 13's are.
+(assign band-format-saved (plus (byte-value q-data-type dtp-fix) 2020))
+(assign band-format-incremental (plus (byte-value q-data-type dtp-fix) 2021))
+(assign band-format-cold-load (plus (byte-value q-data-type dtp-fix) 2022))
 
 ;;; build-tables: the tables' frames at the top of the memory m-s found
 ;;; (appendix a14.3, a14.12): the directory, four frames, the last ones (memory
@@ -2409,6 +2738,11 @@ cold-swap-in-free
 	(illop-if-page-fault)
 	((m-b) add m-b (a-constant 1))
 	(jump-less-than m-b a-table-page-frame cold-swap-in-free)
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.4): a
+	;; restored saved or incremental band's marks, now that every entry is
+	;; made; none after a save or for a cold load (a-mark-bitmap-page 0)
+	((m-tem) a-mark-bitmap-page)
+	(call-not-equal m-tem a-zero apply-mark-bitmap)
 	((md) a-zero)				;not a window's address
 	((vma-write-map) (a-constant write-map-empty))
 	;; the system communication area
@@ -2489,6 +2823,10 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	;; as well as possibly other things.
 	((A-NUM-CNSADF) Q-TYPED-POINTER READ-MEMORY-DATA)
 	(CALL GET-AREA-ORIGINS)
+	;; the generational collector (contract g3 step 2 revision 1, 8.3.5): with
+	;; any region oldspace a collection is running, and the marked-page walk,
+	;; whose place a memory held, starts again (uc-storage-allocation)
+	(call scav-walk-arm-if-oldspace)
 	;; quux revision 14 (contract g3 revision 14, 10.11): the region floor, as
 	;; the band was saved with it (disk-save), or the first unfixed area's
 	;; address, the default, if it holds none or one out of range.

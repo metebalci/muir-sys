@@ -1,0 +1,10 @@
+; lisp: generational.lisp
+; P1 (contract G3 step 2, clarification 11; the review of the first-object
+; table, section 5): an RQB in a fresh region of DISK-BUFFER-AREA, which begins
+; with a first-object table.  It needs the collector's microcode and the Lisp
+; side's MAKE-DISK-RQB, which pads the region to a page boundary; main's, which
+; does not, is the control: the compare and GET-DISK-RQB signal "... not on a
+; page boundary".  Run it before any collection: the incremental save's compare
+; refuses after one.
+(si:gen-p1) => (T T T T T T T T)
+(si:gen-register #o224) => 0

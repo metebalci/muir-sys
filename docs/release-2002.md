@@ -375,3 +375,116 @@ Citations are of the files as this step left them.
   defining form names a compile-time definition `sys/cold/crossdefs.lisp`
   lists as `:changed` or `:new` (revision 14's `PRINTING-RANDOM-OBJECT` in
   the `:PRINT-SELF` methods of 10 files).
+
+## The generational collector
+
+Step 2 (contract G3 step 2): MIT's incremental copying collector, extended
+with generations. An ephemeral area's new objects are made in eden; a young
+collection flips eden and both survivor spaces and copies each survivor one
+step on, to survivor space 1, survivor space 2, then the tenured generation;
+a tenured collection is MIT's collection over every dynamic region.
+
+### The microcode
+
+Microcode 2002 still (it is unreleased); its files changed, and the receivers
+get the new checksums. Labels are cited, in `sys/ucadr/`.
+
+- **A region's generation** (contract 3.1, 9.1 item 1): region bits <6:5>,
+  `REGION-GENERATION` (`uc-parameters.lisp`; 0 tenured, 1 eden, 2 survivor
+  space 1, 3 survivor space 2), qcom's `%%REGION-GENERATION`; the assembly
+  stops if qcom names it elsewhere (`REGION-GENERATION-QCOM-CHECK`).
+- **Allocation by generation** (3.2): a cons goes into a region of its
+  generation (`CONS-GENERATION`, `uc-storage-allocation.lisp`): the
+  mutator's in an ephemeral area (`%%REGION-EPHEMERAL` in its area bits) is
+  eden's, in any other area tenured; a transporter's copy goes to the
+  destination the promotion table gives. CONS-CHECK-NEW and CONS-CHECK-COPY
+  take only a region of that generation, and a static region only a tenured
+  cons (`D-CONS-1`); RCONS makes a new region with that generation, in
+  ephemeral space (bit 13) exactly when it is not tenured, so an ephemeral
+  area's tenured regions lie below it.
+- **Pretenuring** (3.2): a cons of more words than the pretenuring threshold
+  in an ephemeral area goes to a tenured region (`CONS-GENERATION-PRETENURED`)
+  and does not fill the cons cache (`SCONS2`, `LCONS2`), so the area's next
+  small conses still go to eden.
+- **The words consed since the last flip** (4.1): SCAV0 adds every word the
+  mutator conses, `%GC-CONS-WORK` (XGCCW) its argument, and every flip clears
+  them (XFLIP).
+- **The first-object table** (6.1, 6.2; item 2): MAKE-REGION begins a tenured
+  structure region that is not fixed or extra-pdl (`FIRST-OBJECT-TABLE-P`)
+  with an ART-32B array of an entry a page, a long header past 1777 pages,
+  entry 0 and the entries of the table's own pages 0, and the free pointer
+  and the scavenger's pointer after it (`MAKE-REGION-TABLE`); CONSF writes,
+  for each page whose first word the new object holds, the object's start
+  (`CONSF-TABLE`); RCONS makes a new region big enough for the object and its
+  table (`RCONS-NEED`), without which an object as big as the area's regions
+  never fitted; UN-CONS clears the cons cache of a region with a table, whose
+  limit it left past a page boundary. A region that should begin with a
+  table and does not halts at FIRST-OBJECT-TABLE-MISSING
+  (`CONSF-TABLE-CHECK`).
+- **The transporter** (5; item 3): TRANS-OLD-COPY reads the source region's
+  generation and the promotion table, `A-GC-PROMOTION`, bits <2g+1:2g>, for
+  the copy's destination (`uc-transporter.lisp`); EXTRA-PDL-TRAP's copy, a
+  new object, takes its area's allocation generation.
+- **The young flip** (4.2; item 4): `(%gc-flip -1)` flips only the regions
+  whose generation is not tenured, new or copy (`XFLIP-YOUNG`), and arms the
+  marked-page walk; `(%gc-flip t)` is the tenured flip, as before.
+- **The marked-page walk** (4.4, 4.5; item 5): beside the region loop, the
+  scavenger visits every page to its free pointer's page of every tenured
+  region that is new, copy, static or a scavenged fixed one, reading its entry
+  through the physical memory window; a page whose <19> the setter marked is
+  scanned as one step, a list page word by word, a structure page object by
+  object from its first-object table's entry (a fixed region's from its
+  origin), only the boxed words in the page and a PDL to its active top,
+  each through TRANSPORT-SCAV; if no young pointer is left there, <19> is
+  cleared in the entry and the TLB entry invalidated, with no reference to the
+  page between (`SCAV-WALK`, `SCAV-WALK-PAGE`, `SCAV-WALK-WORDS`). Copyspace
+  first: after a scanned page the region loop runs again if the transporter
+  has consed; when the walk is done the region loop runs once more, and only
+  then is `%GC-FLIP-READY` set (`SCAV3`, `SCAV5`).
+- **The setter's enable at every start** (8.3.5; item 6): INITIAL-MAP writes
+  register-page word 221 = 1 after the pointer-type register
+  (`uc-cold-disk.lisp`).
+- **Lisp's three names** (item 7): `A-GC-WORDS-CONSED-SINCE-FLIP`,
+  `A-GC-PROMOTION` and `A-GC-PRETENURE-THRESHOLD` follow `A-REGION-FLOOR`, at
+  A 143-145, as qcom's A-MEMORY-LOCATION-NAMES has them; the unused
+  `A-DISK-DOING-READ-COMPARE`, `A-DISK-CYL-BEG` and `A-DISK-CYL-END` are
+  commented out, so `A-PDL-BUFFER-VIRTUAL-ADDRESS` and `A-PDL-BUFFER-HEAD`
+  stay at A 430 and 431. The threshold is 32768 until Lisp writes it.
+- **The mark bitmap** (8.3; item 8): after a save's pages, a second walk over
+  them from region 0 writes each page's <19> as a bit, 32 to a fixnum word,
+  32768 to a page, right after the band's last page and inside its valid
+  size; `%SYS-COM-MARK-BITMAP` (system communication area word 30) holds its
+  first band page (`DSR-MARK-BITMAP`, `uc-cold-disk.lisp`). A restore of a
+  saved or incremental band checks it (below) and, once every entry is made
+  and before the TLB is emptied, ORs each 1 bit into its page's entry
+  (`APPLY-MARK-BITMAP`, from COLD-SWAP-IN); a cold load and the return from
+  a save apply none.
+- **The band formats** (8.3, 9.1 items 8 and 9): 2020 saved, 2021
+  incremental, 2022 a cold load. A band of 2010-2012, revision 14's, halts at
+  BAND-NOT-GENERATIONAL; 2000-2002 still at BAND-NOT-REVISION-14. A saved or
+  incremental band whose `%SYS-COM-MARK-BITMAP` is 0 halts at
+  MARK-BITMAP-MISSING, and one whose bitmap does not end where the band
+  does (its first page plus a page per 32768 pages of the walk not its valid
+  pages) at MARK-BITMAP-WRONG-SIZE.
+- **The warm boot** (8.3.5; item 10): BEG0000 arms the marked-page walk again
+  when any region is oldspace (`SCAV-WALK-ARM-IF-OLDSPACE`), since a warm
+  boot loads A memory afresh and forgets the walk's place.
+- **Checks**: `tools/microcode-check` gains `generational` (items 1-7: the
+  three A-memory fixnums, the setter's enable, allocation by generation and
+  pretenuring, the first-object table, the young flip, ages by the promotion
+  table, and C1-C5, C7, C8 and C18's microcode parts), `generational-save`
+  (item 8: a session, a save and a boot), `generational-static` (item 7 in the
+  symbol table, and against a qcom that names them) and
+  `generational-mutants` (a partial fix of each item planted and assembled),
+  in its README, `cases-2mw/generational-2mw` (C17, a marked page out of
+  core, at 2 M words) and `generational-rqb` (an RQB in a fresh
+  `DISK-BUFFER-AREA` region, whose first-object table leaves its free pointer
+  off a page boundary: it passes once the Lisp side's `MAKE-DISK-RQB` pads the
+  region, and fails with this tree's). `tools/microcode-check/run` loads the Lisp files a case
+  file's first line names (`; lisp: A.lisp,B.lisp`), so that two checks share
+  one. The three new A-memory fixnums move the counter block up by three, so
+  `tools/cross-build/lisp/coldrun.lisp` and `lisp/rev14-paging.lisp` read the
+  paging counters with `SI:READ-METER` instead of at A 154, 155 and 157.
+  `rev14-paging`'s young array of 1 M words would be pretenured under the
+  collector's microcode; `REV14P-YOUNG-FILL` raises the threshold past it
+  while it is made, when A 143-145 hold fixnums (`lisp/rev14-paging.lisp`).

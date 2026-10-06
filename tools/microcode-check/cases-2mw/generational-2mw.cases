@@ -1,0 +1,12 @@
+; lisp: generational.lisp
+; The generational collector's marked-page walk at 2 M words of main memory
+; (contract G3 step 2, C17; lisp/generational.lisp): a marked tenured page
+; forced out of core before a young flip is scanned (its first read pages it
+; in).  Run it on a machine of 2 M words (quux --main-memory-size 2MW, through
+; a --quux wrapper); at more nothing is forced out and the first case fails.
+(<= (si:system-communication-area si:%sys-com-memory-size) (* 2 1024 1024)) => T
+(si:gen-setup) => T
+; after one young collection, the holder's page marked (1) and out of core
+; (status 1) before the next flip; the list intact after two more collections
+(si:gen-c17) => ((1 1) 49995000)
+(si:gen-register #o224) => 0
