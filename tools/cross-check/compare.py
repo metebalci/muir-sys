@@ -20,6 +20,11 @@ machine, is same40.py, word by word):
   generated names  the words differ only in the numbers of generated symbols
   #.             the word holds, as a token, the value a #. of a changing
                  constant gave
+  definition     its defining form in the source names a compile-time
+                 definition that sys/cold/crossdefs.lisp lists as :changed or
+                 :new for the target (the cross compile expands the target's,
+                 the base tree's QFASLs the builder's): a macro or defsubst
+                 whose expansion the target changed
 Files whose source differs between the trees are listed apart.  Exits 1 when a
 file with the same source has a difference not explained.
 """
@@ -63,12 +68,57 @@ def short(name):
     return re.sub(r'[A-Za-z0-9*%-]*::?', '', str(name))
 
 
+CROSSDEF = re.compile(r'\(\s*"[^"]*"\s+\S+\s+"([^"]+)"\s+:(\w+)\s*\)')
+
+
+def changed_definitions(tree):
+    """The names crossdefs.lisp marks :changed or :new (a compile for the
+    target expands its own definition of each)."""
+    p = os.path.join(tree, 'sys', 'cold', 'crossdefs.lisp')
+    if not os.path.exists(p):
+        return set()
+    return {m.group(1).upper() for m in CROSSDEF.finditer(open(p, encoding='latin-1').read())
+            if m.group(2).lower() in ('changed', 'new')}
+
+
+def top_forms(src):
+    """The source's top-level forms' texts, upper case: each from a line
+    that starts with an open parenthesis to the next such line."""
+    lines = open(src, encoding='latin-1').read().upper().split('\n')
+    starts = [i for i, l in enumerate(lines) if l.startswith('(')] + [len(lines)]
+    return ['\n'.join(lines[a:b]) for a, b in zip(starts, starts[1:])]
+
+
+def defining_forms(forms, name):
+    """The top-level forms that define the function NAME (short()'s
+    spelling): a DEFMETHOD of (FLAVOR [TYPE] MESSAGE), a DEFSELECT of a
+    named structure's (:PROPERTY X NAMED-STRUCTURE-INVOKE) holding the
+    message, or a DEF... of the name."""
+    n = name.upper()
+    m = re.match(r'\(:?METHOD (\S+) (?::?\S+ )?:?(\S+)\)$', n)
+    if m:
+        pat = re.compile(r'\(DEFMETHOD\s+\((?:\S+:)?%s\s+(?::?\S+\s+)?:%s[\s)]'
+                         % (re.escape(m.group(1)), re.escape(m.group(2))))
+        return [f for f in forms if pat.search(f)]
+    m = re.match(r'\(:?SELECT-METHOD \(:?PROPERTY (\S+) NAMED-STRUCTURE-INVOKE\) :?(\S+)\)$', n)
+    if m:
+        # (:PROPERTY X NAMED-STRUCTURE-INVOKE), or the older (X NAMED-STRUCTURE-INVOKE)
+        pat = re.compile(r'\(DEFSELECT\s+\(\((?::PROPERTY\s+)?(?:\S+:)?%s\s+'
+                         r'(?:\S+:)?NAMED-STRUCTURE-INVOKE\)' % re.escape(m.group(1)))
+        return [f for f in forms if pat.search(f) and ':' + m.group(2) in f]
+    if re.match(r'[^\s()]+$', n):
+        pat = re.compile(r'\(DEF\S*\s+(?:\S+:)?%s[\s)]' % re.escape(n))
+        return [f for f in forms if pat.match(f)]
+    return []
+
+
 def main():
     args = sys.argv[1:]
     prefix = 'x'
     if args[:1] == ['--prefix']:
         prefix, args = args[1], args[2:]
     cross, native, logs = args[0], args[1], args[2:]
+    defs = changed_definitions(cross)
     table = sorted(glob.glob(os.path.join(logs[0], prefix + '*cross-table.txt')))[0]
     changed = set()
     for line in open(table, encoding='latin-1'):
@@ -111,6 +161,7 @@ def main():
             out.append('  cannot decode %s: %s' % (rel, e))
             counts['decode error'] += 1
             continue
+        forms = top_forms(src_c) if src_same else []
         fc = collections.defaultdict(list)
         fn = collections.defaultdict(list)
         for f in dc.fefs:
@@ -135,6 +186,12 @@ def main():
                     why.append('float')
                 if key in declined:
                     why.append('lsh or rot left to the target')
+                used = set()
+                for form in defining_forms(forms, key):
+                    used |= {d for d in defs
+                             if re.search(r'[\s(:]%s[\s)]' % re.escape(d), form)}
+                if used:
+                    why.append('definition ' + ' '.join(sorted(used)))
                 for u, v in zip(x.qs[1:], y.qs[1:]):
                     if norm(u) == norm(v):
                         continue

@@ -221,11 +221,18 @@ It takes about two hours and twenty minutes on the micro engine.
   - every fold and `#.` that names a constant that changes is evaluated again
     on the host, with the target's values and with this world's, and the
     logged value must be the target's.
-- `compare.py` compares the target QFASLs with System 2000's native ones,
+- `compare.py` compares the target QFASLs with the base tree's native ones,
   function by function: every function that differs must be explained (a
   constant that changes, a float, an `LSH` left to the target, closure
-  slots, generated names, a `#.` value). This previews contract G2 section
-  7's check (a).
+  slots, generated names, a `#.` value, or a compile-time definition that
+  `sys/cold/crossdefs.lisp` lists as `:changed` or `:new`, named in the
+  function's defining form in the source: the target's expansion of it, as
+  `PRINTING-RANDOM-OBJECT` in revision 14's `:PRINT-SELF` methods). This
+  previews contract G2 section 7's check (a). Measured on revision 14's
+  cross build (commit a07a05c, against System 2001's QFASLs): the 10 files
+  whose `:PRINT-SELF` methods differ are explained by it, and with
+  `PRINTING-RANDOM-OBJECT` taken out of the list, or marked `:floats`, all
+  10 are unexplained again.
 - The check keeps its copy of the tree (`run/cross-check/check2/tree/`), with
   the QFASLs each part made. So if the machine stops, `run check2` again goes
   on where it stopped, in `part2/`, and the analysis reads every part; use

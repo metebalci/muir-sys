@@ -371,4 +371,7 @@ Citations are of the files as this step left them.
   `tools/system-check` gains `rev14-ephemeral`, the four
   `rev14-straddle-*` runs and `rev14-code-anywhere` (their READMEs).
   `tools/cold-compare` reads revision 14's cold load, whose AREA-NAME is area
-  11, not 13.
+  11, not 13. `tools/cross-check/compare.py` explains a function whose
+  defining form names a compile-time definition `sys/cold/crossdefs.lisp`
+  lists as `:changed` or `:new` (revision 14's `PRINTING-RANDOM-OBJECT` in
+  the `:PRINT-SELF` methods of 10 files).
