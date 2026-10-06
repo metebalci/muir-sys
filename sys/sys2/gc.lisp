@@ -799,6 +799,15 @@ unless there is a lot of garbage to be freed.")
 	      (%BLT-TYPED SYMBOL NEW (%STRUCTURE-TOTAL-SIZE SYMBOL) 1)
 	      (STRUCTURE-FORWARD SYMBOL NEW))
 	    (INCF SYMBOLS-MOVED 1))))
+    ;; intern-local made a new symbol in tem-pkg for each first pname, and the
+    ;; loop moves some of those into worthless-symbol-area, a static area the
+    ;; collector scans, with their package cell still tem-pkg.  return-storage
+    ;; below gives tem-pkg's storage back, so that cell would point to storage
+    ;; consed again: the symbol's package becomes another object, and at the
+    ;; next flip, pkg-area being cleaned up, the scavenger transports whatever
+    ;; lies there.  so tem-pkg's symbols are left with no package first.
+    (do-local-symbols (sym tem-pkg)
+      (setf (symbol-package sym) nil))
     (KILL-PACKAGE TEM-PKG)
     (RETURN-STORAGE TEM-PKG)
     (CLEAN-UP-STATIC-AREA PKG-AREA)

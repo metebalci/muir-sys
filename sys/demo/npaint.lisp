@@ -945,7 +945,11 @@
 	      (SETQ PAINT-SUBC-PHASE NIL))))
 
 (DEFUN PAINT-COM-TEXT-LEAVE NIL 
-   (RETURN-ARRAY PAINT-TEXT-HOLDING-STRING))
+;  (RETURN-ARRAY PAINT-TEXT-HOLDING-STRING))
+   ;; the special kept the string after return-array gave its storage back,
+   ;; a pointer the collector scans to storage consed again; it is cleared
+   ;; as the string is given back.
+   (return-array (prog1 paint-text-holding-string (setq paint-text-holding-string nil))))
 
 (DEFUN PAINT-TEXT-BLINK NIL 
        (COND ((NULL PAINT-SUBC-PHASE)

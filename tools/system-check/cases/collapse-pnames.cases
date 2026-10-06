@@ -1,0 +1,15 @@
+; No symbol keeps the package COLLAPSE-DUPLICATE-PNAMES gives back
+; (sys/sys2/gc.lisp; lisp/collapse-pnames.lisp).  It interns every pname in
+; the package "GC Temporary", which makes a new symbol there for each first
+; pname, moves some of those into WORTHLESS-SYMBOL-AREA, a static area the
+; collector scans, then kills the package and gives its storage back with
+; RETURN-STORAGE.  A symbol whose package cell still holds it points to
+; storage given back.  SI::CP-RUN is (the storage was given back, the symbols
+; whose package it still is, of them in WORTHLESS-SYMBOL-AREA).  Run with
+;   --compile --files sys/sys2/gc.lisp,tools/system-check/lisp/collapse-pnames.lisp
+; on any band.  The last three cases are controls; System 1003 without the
+; change fails the first, (T 25116 2) (measured).
+(si:cp-run) => (T 0 0)
+(find-package "GC Temporary") => NIL
+(eq (symbol-package 'car) (find-package "GLOBAL")) => T
+(eq (symbol-package (intern "CP-NEW-SYMBOL" "USER")) (find-package "USER")) => T

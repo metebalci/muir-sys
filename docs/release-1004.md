@@ -155,3 +155,27 @@ Every change to a source file carries a comment in that file saying why.
   controls; `format-clauses-gc` passes its planting cases and halts in the
   collection case, muir reporting the stop at PC 5317, `XFSHS1+3`, on
   microcode 1001. With the change both pass, five cases each.
+- **COLLAPSE-DUPLICATE-PNAMES leaves no symbol in the package it gives back**
+  (`sys/sys2/gc.lisp:802-810`, run by `FULL-GC` with `:DUPLICATE-PNAMES`).
+  It interns every pname in the package "GC Temporary", which makes a new
+  symbol there for each first pname, moves the ones with no value,
+  definition or properties into `WORTHLESS-SYMBOL-AREA`, a static area the
+  collector scans, then kills the package and gives its storage back with
+  `RETURN-STORAGE`. Those symbols kept the package in their package cell: on
+  System 1003's band 25,116 symbols, 2 of them in `WORTHLESS-SYMBOL-AREA`.
+  Once that storage was consed again, reading such a symbol's package halted
+  the machine (an array consed where the package was, then `TYPEP` and
+  `ARRAY-LENGTH` of the package: HALT-CONS at PC 11004, `GAHD1+6`, on
+  microcode 1001). The package's symbols are now left with no package
+  before it is killed. `tools/system-check` gains `collapse-pnames`; without
+  the change its first case gives `(T 25116 2)` where `(T 0 0)` is
+  expected, with it all four cases pass. Fixed on `main` in the same way.
+- **The demo's PAINT-COM-TEXT-LEAVE forgets the string it gives back**
+  (`sys/demo/npaint.lisp:947-952`). It returned the special
+  `PAINT-TEXT-HOLDING-STRING`'s string with `RETURN-ARRAY` and left the
+  special naming it, a pointer the collector scans to storage given back.
+  The file does not load on this system (`DEFCLASS` is gone), so this is
+  for the record. `tools/system-check` gains `npaint-text-leave`, which reads
+  that one definition from the file: without the change the special names
+  the string consed next, `(T T T)` where `(NIL NIL NIL)` is expected; with
+  it both cases pass. Fixed on `main` in the same way.
