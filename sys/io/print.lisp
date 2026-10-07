@@ -627,11 +627,30 @@ Pathnames, editor buffers, host objects, and many other hairy things
 		  (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
 	     (SEND STREAM :STRING-OUT
 		   (IF SMALL "s0" "f0"))))
-	(T (IF (PLUSP X)
-	       (SETQ X (- X))
-	     (SEND STREAM :TYO (PTTBL-MINUS-SIGN *READTABLE*)))
-	   ;; X is now negative
-	   (COND ((OR (> X -1.0s-3) ( X -1.0s7) FORCE-E-FORMAT)
+	(t
+;	 (IF (PLUSP X)
+;	       (SETQ X (- X))
+;	     (SEND STREAM :TYO (PTTBL-MINUS-SIGN *READTABLE*)))
+	   ;; x is made negative, as before, except the least positive float of
+	   ;; each format, 2^-128 short and 2^-1024 single: a mantissa of exactly
+	   ;; 1/2 at the smallest exponent has no negative of the same magnitude,
+	   ;; as a negative mantissa is normalized to [-1, -1/2) and -1/2 becomes -1
+	   ;; at the exponent below, so (- x) signalled "MINUS produced a result too
+	   ;; small" and LEAST-POSITIVE-SHORT-FLOAT and LEAST-POSITIVE-SINGLE-FLOAT
+	   ;; did not print.  That x stays positive; SCALE-FLONUM takes either sign.
+	   ;; -127 and -1023 are FLOAT-EXPONENT's smallest values, an exponent field
+	   ;; of 1 less the offsets #o200 and #o2000 (sys/sys2/numdef.lisp).
+	   (cond ((minusp x)
+		  (send stream :tyo (pttbl-minus-sign *readtable*)))
+		 ((not (and (= (float-exponent x) (if (typep x 'short-float) -127. -1023.))
+			     (= (float-fraction x) 0.5)))
+		  (setq x (- x))))
+	   ;; x is now negative, or the least positive float
+;	   (COND ((OR (> X -1.0s-3) ( X -1.0s7) FORCE-E-FORMAT)
+	   (cond ((or (if (plusp x)
+			  (or (< x 1.0s-3) (>= x 1.0s7))
+			(or (> x -1.0s-3) (<= x -1.0s7)))
+		      force-e-format)
 		  ;; Must go to E format.
 		  (MULTIPLE-VALUE-SETQ (X EXPT) (SCALE-FLONUM X))
 		  ;; X is now positive
@@ -649,7 +668,9 @@ Pathnames, editor buffers, host objects, and many other hairy things
 		  (PRINT-FIXNUM-1 EXPT 10. STREAM))
 		 (T
 		  ;; It is in range, don't use E-format.
-		  (PRINT-FLONUM-INTERNAL (- X) SMALL STREAM MAX-DIGITS)
+;		  (PRINT-FLONUM-INTERNAL (- X) SMALL STREAM MAX-DIGITS)
+		  ;; abs, as x may be the least positive float (above)
+		  (print-flonum-internal (abs x) small stream max-digits)
 		  (IF (NEQ (NULL SMALL)
 			   (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
 		      (SEND STREAM :STRING-OUT
@@ -665,17 +686,40 @@ Pathnames, editor buffers, host objects, and many other hairy things
 ;;; the result is consistently too low when expt is large and negtive.
 
 ;;; Note: X is -ve on entry, +ve on exit
-(defun scale-flonum (x &aux (short (typep X 'short-float)) tem expt wastoobig)
+;;; Now X may be of either sign: PRINT-FLONUM passes it negative, except the
+;;; least positive float, which has no negative, and FORMAT passes its
+;;; absolute value.  The result is positive.
+;(defun scale-flonum (x &aux (short (typep X 'short-float)) tem expt wastoobig)
+(defun scale-flonum (x &aux (short (typep x 'short-float)) (neg (minusp x)) tem expt wastoobig)
   (setq expt (truncate (// (float-exponent x) (log 10s0 2s0))))
   (tagbody
       again
 	 (if (minusp expt)
-	     (setq tem (* x (aref powers-of-10f0-table (- expt))))
+;	     (setq tem (* x (aref powers-of-10f0-table (- expt))))
+	     (setq tem (scale-flonum-up x (- expt)))
 	   (setq tem (// x (aref powers-of-10f0-table expt))))
-	 (cond ((and ( tem -10s0) (not wastoobig)) (incf expt) (go again))
-	       ((> tem -1s0)  (decf expt) (setq wastoobig t) (go again))
-	       (t (return-from scale-flonum (values (- (if short (float tem 0s0) tem))
-						    expt))))))
+;	 (cond ((and ( tem -10s0) (not wastoobig)) (incf expt) (go again))
+;	       ((> tem -1s0)  (decf expt) (setq wastoobig t) (go again))
+;	       (t (return-from scale-flonum (values (- (if short (float tem 0s0) tem))
+;						    expt))))))
+	 ;; the same steps for a positive x, with the bounds' signs turned
+	 (cond ((and (if neg (<= tem -10s0) (>= tem 10s0)) (not wastoobig))
+		(incf expt) (go again))
+	       ((if neg (> tem -1s0) (< tem 1s0))
+		(decf expt) (setq wastoobig t) (go again))
+	       (t (setq tem (if short (float tem 0s0) tem))
+		  (return-from scale-flonum (values (if neg (- tem) tem) expt))))))
+
+;;; X times 10^N.  POWERS-OF-10F0-TABLE holds the powers up to 10^307, the
+;;; largest below the largest float, but a float below about 10^-307 needs a
+;;; larger one (the least positive float, 2^-1024, is 5.56 / 10^309), and
+;;; AREF signalled "The subscript 308 ... was out of range" for each of them.
+;;; Such an X is multiplied by 10^307 and then by the rest.
+(defun scale-flonum-up (x n)
+  (if (< n powers-of-10f0-table-length)
+      (* x (aref powers-of-10f0-table n))
+    (* (* x (aref powers-of-10f0-table (1- powers-of-10f0-table-length)))
+       (aref powers-of-10f0-table (- n (1- powers-of-10f0-table-length))))))
 
 ;;; Print the mantissa.
 ;;; X is a positive non-zero flonum, SMALL is T if it's a small-flonum.

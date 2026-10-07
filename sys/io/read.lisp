@@ -1150,9 +1150,26 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
 					       INDEX
 					       STRING-LENGTH
 					       10.))))
-  (LET ((NUM (IF SFL-P (SMALL-FLOAT (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))
+;  (LET ((NUM (IF SFL-P (SMALL-FLOAT (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))
+  ;; xr-small-float: the least positive short float printed reads back (below)
+  (let ((num (if sfl-p (xr-small-float (xr-flonum-cons high-part low-part power-10))
 	       (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))))
     (IF POSITIVE NUM (- NUM))))
+
+;;; SMALL-FLOAT of a float F, not negative, except that an F below the least
+;;; positive short float, 2^-128, by at most half a short float's last place
+;;; there, 2^-145, gives that float, the short float nearest to it, rather
+;;; than an error.  The printer gives the least positive short float, 2^-128 or
+;;; 2.9387359e-39, as "2.93872s-39", having rounded the scaled mantissa to a
+;;; short float, and SMALL-FLOAT of 2.93872e-39 signalled "SMALL-FLOAT produced
+;;; a result too small".  The constant is built here, since this file is in
+;;; the cold load and LEAST-POSITIVE-SHORT-FLOAT (sys/sys2/numer.lisp) is not.
+(defun xr-small-float (f)
+  (let ((least (%make-pointer dtp-small-flonum #o600000)))
+    (if (and (< f least)
+	     (>= f (- least (// least (float #o400000)))))	;least - least * 2^-17
+	least
+      (small-float f))))
 
 (DEFUN XR-ACCUMULATE-DIGITS (STRING POST-DECIMAL &AUX CHAR)
   (DECLARE (SPECIAL HIGH-PART LOW-PART NDIGITS INDEX COUNT POWER-10))
@@ -1182,6 +1199,14 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
   (SETQ FLOAT-NUMBER (%FLOAT-DOUBLE (LSH HIGH -1)
 				    (LOGIOR (ROT (LOGAND HIGH 1) -1) LOW)))
   (COND ((< POWER-10 0) (* FLOAT-NUMBER (XR-GET-POWER-10 (- POWER-10))))
+	;; POWERS-OF-10F0-TABLE holds the powers up to 10^307, so a larger power
+	;; divides by 10^307 and then by the rest: the least positive float,
+	;; 2^-1024, printed 5.562684648e-309, has a POWER-10 of 318 and was refused,
+	;; "318 is larger than the maximum allowed exponent".  A rest still beyond
+	;; the table is refused as before.
+	((>= power-10 powers-of-10f0-table-length)
+	 (// (// float-number (xr-get-power-10 (1- powers-of-10f0-table-length)))
+	     (xr-get-power-10 (- power-10 (1- powers-of-10f0-table-length)))))
 	((> POWER-10 0) (// FLOAT-NUMBER (XR-GET-POWER-10 POWER-10)))
 	(T FLOAT-NUMBER)))
 

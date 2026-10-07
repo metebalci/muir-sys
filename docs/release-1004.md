@@ -197,3 +197,28 @@ Every change to a source file carries a comment in that file saying why.
   (TRAP 1203, `THROW-TRAP`: no pending catch for
   `SI::PROCESS-WAIT-IN-SCHEDULER`), and the TELNET connection closes; with
   it all six cases pass.
+- **The least positive floats print, and read back** (`print-flonum`,
+  `sys/io/print.lisp:643-653`, `:673`; `scale-flonum`, `:693-711`;
+  `scale-flonum-up`, `:718-722`; `xr-small-float`, `sys/io/read.lisp:1155`,
+  `:1167-1171`; `xr-flonum-cons`, `:1207-1209`; MIT's). The printer made a
+  positive float negative before scaling it, but a negative mantissa is
+  normalized to [-1, -1/2), so the least positive float of each format, a
+  mantissa of 1/2 at the smallest exponent (2^-128 short, 2^-1024 single),
+  has no negative: printing `LEAST-POSITIVE-SHORT-FLOAT` or
+  `LEAST-POSITIVE-SINGLE-FLOAT` signalled "MINUS produced a result too
+  small". That float now stays positive, and `scale-flonum` takes either
+  sign. Every single float below about 10^-307, `LEAST-NEGATIVE-SINGLE-FLOAT`
+  among them, needed a power of ten past the table's 10^307 and signalled
+  "The subscript 308 ... was out of range"; it is now scaled by 10^307 and
+  then by the rest, and the reader divides the same way where it refused
+  ("318 is larger than the maximum allowed exponent" for
+  `5.562684648e-309`). The least positive short float prints as
+  `2.93872s-39`, below it by less than half its last place, and the reader
+  now gives it for such a text, the short float nearest, where
+  `SMALL-FLOAT` signalled. Every other float prints as before (5370 floats
+  of both formats and signs, identical text). FORMAT's `~E`, which passes
+  `scale-flonum` a positive float, signalled "The subscript 308" for every
+  float and now prints (`(format nil "~,3E" 1.5)` is `"1.500e+0"`).
+  `tools/system-check` gains `float-print-least`: without the change the
+  cadr line's band and System 1001's fail eight of its 14 cases; with it all
+  pass.

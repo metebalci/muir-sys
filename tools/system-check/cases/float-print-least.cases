@@ -1,0 +1,28 @@
+; The least positive floats print, and their printed text reads back as the
+; same float (sys/io/print.lisp, PRINT-FLONUM and SCALE-FLONUM;
+; sys/io/read.lisp, XR-FLONUM-CONS and XR-SMALL-FLOAT;
+; lisp/float-print-least.lisp).  SI:FPL-ROUND-TRIP is T, or the printed text
+; when it reads back as another float.  The printer made x negative before
+; scaling it, and the least positive float of each format, a mantissa of 1/2
+; at the smallest exponent, has no negative: "MINUS produced a result too
+; small".  A float below about 10^-307 needed a power of ten past the table's
+; 10^307 to print ("The subscript 308 ... was out of range") and to read.
+; Run with --compile --files sys/io/print.lisp,sys/io/read.lisp,
+; tools/system-check/lisp/float-print-least.lisp on any band.
+; The first six cases are controls: ordinary floats, the least negative short
+; float and two short floats near the least positive one.  The cadr line's
+; band without the change fails the other eight (measured).
+(si:fpl-round-trip 1.5) => T
+(si:fpl-round-trip -1.5s0) => T
+(si:fpl-round-trip 1.0e-300) => T
+(si:fpl-round-trip least-negative-short-float) => T
+(si:fpl-round-trip (- (* 3 least-positive-short-float))) => T
+(si:fpl-round-trip (si:fpl-next-short least-positive-short-float)) => T
+(prin1-to-string least-positive-short-float) => "2.93872s-39"
+(prin1-to-string least-positive-single-float) => "5.562684648e-309"
+(si:fpl-round-trip least-positive-short-float) => T
+(si:fpl-round-trip least-positive-single-float) => T
+(si:fpl-round-trip least-negative-single-float) => T
+(si:fpl-round-trip (* 2 least-positive-single-float)) => T
+(si:fpl-round-trip (- (* 3 least-positive-single-float))) => T
+(si:fpl-round-trip (read-from-string "1.0e-308")) => T
