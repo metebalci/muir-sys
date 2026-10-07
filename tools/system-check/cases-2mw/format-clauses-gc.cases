@@ -16,6 +16,12 @@
 ; The planting cases are the controls: they pass with and without the change.
 ; System 2002 (handover-2002-a07a05c) and System 2001 without the change halt
 ; in the collection case (measured).
+; the generational collector (contract G3 step 2, Q-GCa) turns automatic
+; collection on at boot; its flips, a tenured one after the large arrays below
+; above all, move what this check plants (measured on step 2's first band:
+; the planted area's region was freed, and fc-plant-2 met an address "in no
+; region").  Off first, as revision 14's band had it.
+(progn (when si:gc-on (si:gc-off)) si:gc-on) => NIL
 (<= (si:system-communication-area si:%sys-com-memory-size) (* 2 1024 1024)) => T
 (format::fc-plant-1) => T
 (format::fc-plant-2) => (T T 0)

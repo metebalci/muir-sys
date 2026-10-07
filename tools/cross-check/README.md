@@ -20,6 +20,11 @@ the target's do, a marked file is foreign only when the target's word is not
 the builder's (`cold:cross-foreign-file-p`): the builder loads the
 revision-14 QFASLs it compiles as they are.
 
+**The generational collector** (contract G3 step 2 revision 1, 9.4): its
+cross build runs on System 2002's revision-14 hand-over band, with that
+band's own tree as the base (`--base-tree`), against which
+`sys/cold/crossdefs.lisp` is listed; `tools/cross-build/run` runs it.
+
 ```
 tools/cross-check/run all                 # checks 1 and 3 and the native control, at once
 tools/cross-check/run check1              # one of them
@@ -153,6 +158,26 @@ declares it and defines nothing; every compile for the target starts with
 those declarations, and the builder's own definitions do not change. A listed
 name that expands without such a declaration stops the file.
 
+The tree's special variables are compile-time definitions too: a `DEFVAR`,
+`DEFPARAMETER`, `DEFCONST`, `DEFCONSTANT` or `DEFGLOBAL` proclaims its variable
+special only while its own file compiles, and natively every later compile
+knows it from the loaded file, but the builder has not loaded the tree. So a
+compile for the target of another file that binds the variable bound it
+lexically: `sys/sys2/hashfl.lisp`'s `:PUT-HASH` bound
+`SXHASH-HASHED-YOUNG-ADDRESS` (`sys/sys/qrand.lisp`'s) as a local, which the
+route's check (a) found (its FEF differed from the native build's), and the
+cross-built band kept `SXHASH`'s young flag set in the global value, so every
+hash table counted as holding a young key. `crossdefs.py` therefore also lists
+every special variable of the tree that the base has not (those definers and a
+top-level `SPECIAL`, `PROCLAIM` or `DECLARE` of `SPECIAL`, a name compared
+without its package prefix), as `cold:*cross-specials*`, status `:special`;
+`cold:cross-begin` proclaims each special in the builder unless it already is
+(`:specials` in its value, the number proclaimed) and `cold:cross-end` makes
+them plain again. One the base has and the tree has not is listed `:gone`, and
+`cold:cross-begin` refuses it, as it cannot unproclaim one without changing the
+builder. Check 1 checks that they are special while the cross build is on, and
+plain again after it, and none for this world's own target.
+
 Before a check that cross-builds, `run` checks with `--check` that
 `sys/cold/crossdefs.lisp` is what the sources give, and runs `--census`: no
 `#,` may sit inside a compile-time definition, since `#,` puts in the value of
@@ -180,7 +205,17 @@ in the run. The partition's pages are then copied to `home/cold40.img`.
   the words `MAKE-COLD` reported;
 - the band format is 2012 for revision 14's parameters, with no page hash
   table area (2002 for revision 13's), and the pointer width 32. `check3.py
-  --qcom QCOM` reads another tree's parameters, as the native control does.
+  --qcom QCOM` reads another tree's parameters, as the native control does;
+- for the generational collector's parameters (contract G3 step 2, 9.3: QCOM
+  defines `%%REGION-GENERATION`), the format is 2022 and
+  `%SYS-COM-MARK-BITMAP` 0; every region is tenured; `WORKING-STORAGE-AREA`'s
+  area bits carry `%%REGION-EPHEMERAL` and its region's do not; each region
+  the rule of contract 6.1 names (a tenured structure region that is not
+  free, fixed or extra-pdl, and has any length) begins with its first-object
+  table, an `ART-32B` array with an entry a page, its entries below the free
+  pointer offsets at or below their pages' first words, in order; and
+  `NR-SYM` holds symbols alone after its table, counted (the review of the
+  first-object table, P6).
 
 Also run on this check:
 
@@ -194,10 +229,15 @@ Also run on this check:
 `cases/native.cases`. On the builder's own tree and QFASLs, System 2001's,
 the cold load made by this tree's cold-load generator must be byte for byte
 the one the builder's generator makes. This tree's generator is served as
-`SYS: CROSS-CHECK; COLDUT-NEW` and `COLDLD-NEW`. It writes revision 14's
+`SYS: CROSS-CHECK; COLDUT-NEW` and `COLDLD-NEW`; the builder's own is
+compiled from its tree's `SYS: COLD;` sources in the same session, since
+System 2002's hand-over tree carries no QFASL of it. It writes revision 14's
 layout only for parameters without the page hash table area
 (`COLD:TARGET-HAS-PAGE-HASH-TABLE-P`), so revision 13's must give their cold
-load unchanged. `check3.py --qcom`, with the builder's tree's parameters, must
+load unchanged, and the generational collector's layout only for parameters
+that define `%%REGION-GENERATION` (`COLD:TARGET-HAS-GENERATIONS-P`), so on
+System 2002's revision-14 builder revision 14's must give theirs (format
+2012) unchanged. `check3.py --qcom`, with the builder's tree's parameters, must
 pass on that image (40-bit words, 1024-word pages, format 2002). G2's control,
 on System 2000's 32-bit tree, also made the cold load at 1024-word pages of
 32-bit words (`lisp/pages32.lisp`), which a 40-bit builder has already.

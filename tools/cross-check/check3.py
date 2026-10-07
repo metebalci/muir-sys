@@ -18,6 +18,16 @@ a census of the words by data type.  The data types, areas and array types are
 read from the parameters the cold load was made with: QCOM, by default the
 tree this script is in (sys/cold/qcom.lisp); the native control gives its own
 tree's.  Exits 1 on a failure.
+
+With the generational collector's parameters (contract G3 step 2, 9.3: QCOM
+defines %%REGION-GENERATION) the band format is 2022 and %SYS-COM-MARK-BITMAP
+0; every region whose bits ask for a first-object table (a tenured structure
+region that is not free, fixed or extra-pdl; clarification 4) begins with one,
+an ART-32B array of one dimension with an entry a page of the region, each
+entry below the free pointer a fixnum offset at or below its page's first
+word, in order, 0 for the pages the table covers; WORKING-STORAGE-AREA's area
+bits carry %%REGION-EPHEMERAL and its region's bits do not, and every region
+is tenured.
 """
 import collections
 import os
@@ -43,6 +53,23 @@ DTP = {n: i for i, n in enumerate(qlist(QCOM, 'Q-DATA-TYPES'))}
 AREAS = qlist(QCOM, 'AREA-LIST')
 SYSCOM = qlist(QCOM, 'SYSTEM-COMMUNICATION-AREA-QS')
 ARTS = qlist(QCOM, 'ARRAY-TYPES')
+
+
+def qalt(path, name):
+    """The NAME VALUE pairs of an alternating DEFCONST list, values octal."""
+    text = open(path, 'rb').read().decode('latin-1')
+    m = re.search(r"\(DEFCONST %s '\((.*?)\)\)" % re.escape(name), text, re.S | re.I)
+    toks = re.sub(r';[^\n]*', '', m.group(1)).split()
+    return {toks[i].upper(): int(toks[i + 1], 8) for i in range(0, len(toks) - 1, 2)}
+
+
+# the region bits' fields, as byte specifiers (position, size) and values
+RB = qalt(QCOM, 'Q-REGION-BITS-VALUES')
+GENERATIONS = '%%REGION-GENERATION' in RB
+
+
+def field(value, spec):
+    return (value >> (spec >> 6)) & ((1 << (spec & 0o77)) - 1)
 CDR = {'NORMAL': 0, 'ERROR': 1, 'NIL': 2, 'NEXT': 3}
 
 
@@ -93,6 +120,75 @@ class Image:
             field = w2 & 0xFFFFFFFF
             chars += [(field >> (8 * k)) & 0xFF for k in range(4)]
         return ''.join(chr(c) for c in chars[:n]), None
+
+
+def tables(im, sc, page, origins, expect, out):
+    """The generational collector's cold load (contract G3 step 2, 6.1, 9.3)."""
+    mb = im.fixnum(sc + SYSCOM.index('%SYS-COM-MARK-BITMAP'))
+    expect('%SYS-COM-MARK-BITMAP is 0', mb == 0, repr(mb))
+    bits = {n: im.fixnum(origins['REGION-BITS'] + i) for i, n in enumerate(AREAS)}
+    area_bits = {n: im.fixnum(origins['AREA-REGION-BITS'] + i) for i, n in enumerate(AREAS)}
+    length = {n: im.fixnum(origins['REGION-LENGTH'] + i) for i, n in enumerate(AREAS)}
+    fp = {n: im.fixnum(origins['REGION-FREE-POINTER'] + i) for i, n in enumerate(AREAS)}
+    gen, eph = RB['%%REGION-GENERATION'], RB['%%REGION-EPHEMERAL']
+    expect('every region is tenured', all(field(bits[n], gen) == RB['%REGION-GENERATION-TENURED']
+                                          for n in AREAS))
+    wsa = 'WORKING-STORAGE-AREA'
+    expect('WORKING-STORAGE-AREA\'s area bits carry %%REGION-EPHEMERAL, its region\'s do not',
+           field(area_bits[wsa], eph) == 1 and field(bits[wsa], eph) == 0,
+           'area bits %o, region bits %o' % (area_bits[wsa], bits[wsa]))
+    expect('no other area is ephemeral',
+           all(field(area_bits[n], eph) == 0 for n in AREAS if n != wsa))
+    rule, words = [], 0
+    for n in AREAS:
+        b = bits[n]
+        space = field(b, RB['%%REGION-SPACE-TYPE'])
+        # a region of no length (the last area's, FASL-TEMP-AREA) holds none
+        if length[n] and (field(b, RB['%%REGION-REPRESENTATION-TYPE']) == RB['%REGION-REPRESENTATION-TYPE-STRUCTURE']
+                and field(b, gen) == RB['%REGION-GENERATION-TENURED']
+                and space not in (RB['%REGION-SPACE-FREE'], RB['%REGION-SPACE-FIXED'],
+                                  RB['%REGION-SPACE-EXTRA-PDL'])):
+            rule.append(n)
+    for n in rule:
+        o, pages = origins[n], length[n] // page
+        cdr, dtp, ptr, w = im.split(o)
+        art = (ptr >> 19) & 0o37
+        ndims = (ptr >> 12) & 7
+        long_ = (ptr >> 11) & 1
+        n_entries = im.fixnum(o + 1) if long_ else ptr & 0o1777
+        head = 2 if long_ else 1
+        ok = (dtp == DTP['DTP-ARRAY-HEADER'] and ARTS[art] == 'ART-32B' and ndims == 1
+              and n_entries == pages and length[n] % page == 0)
+        detail = 'origin %o: dtp %d %s %d dims, %s entries for %d pages' % (
+            o, dtp, ARTS[art] if art < len(ARTS) else art, ndims, n_entries, pages)
+        bad = None
+        if ok:
+            prev, end = 0, head + pages
+            for k in range(-(-fp[n] // page)):
+                c2, d2, e, w2 = im.split(o + head + k)
+                if (c2, d2) != (0, DTP['DTP-FIX']) or e > k * page or e < prev or \
+                        (k * page < end and e != 0) or (k == 0 and e != 0):
+                    bad = 'entry %d: tag %o, %o' % (k, w2 >> 32, e)
+                    break
+                prev = e
+        expect('%s begins with its first-object table' % n, ok and bad is None,
+               detail + (', ' + bad if bad else ', free pointer %o' % fp[n]))
+        words += head + pages
+        # NR-SYM holds symbols alone, 5 words each, from the table's end: the
+        # generator's count, which the cold load's first boot compares with
+        # MAPATOMS-NR-SYM's visits (the review of the first-object table, P6)
+        if n == 'NR-SYM' and ok:
+            start, syms, others = head + pages, 0, 0
+            for a in range(o + start, o + fp[n], 5):
+                if im.split(a)[1] == DTP['DTP-SYMBOL-HEADER']:
+                    syms += 1
+                else:
+                    others += 1
+            expect('NR-SYM holds symbols alone after its table', others == 0
+                   and (fp[n] - start) % 5 == 0, '%d symbols, %d other words at a stride of 5'
+                   % (syms, others))
+            out.append('     NR-SYM symbols: %d' % syms)
+    out.append('     first-object tables: %d regions (%s), %d words' % (len(rule), ' '.join(rule), words))
 
 
 def main():
@@ -150,8 +246,10 @@ def main():
     # G2, option (w)); 0 for 32-bit words at 256-word pages (A1.12).  revision
     # 14's 40-bit cold load, without the page hash table area, is 2012 (contract
     # G3 revision 14, 10.6; appendix A14.13)
-    want = ((0o2002 if 'PAGE-TABLE-AREA' in AREAS else 0o2012) if bits == 40
-            else 0o1102 if page == 1024 else 0)
+    # the generational collector's 40-bit cold load is 2022 (contract G3 step 2,
+    # 9.3)
+    want = ((0o2002 if 'PAGE-TABLE-AREA' in AREAS else 0o2022 if GENERATIONS else 0o2012)
+            if bits == 40 else 0o1102 if page == 1024 else 0)
     expect('%%SYS-COM-BAND-FORMAT is %o' % want,
            bf == want, 'octal %o' % bf if bf is not None else 'not a fixnum')
     pw = im.fixnum(sc + SYSCOM.index('%SYS-COM-POINTER-WIDTH'))
@@ -160,6 +258,8 @@ def main():
     expect('%SYS-COM-VALID-SIZE is within the image',
            vs is not None and vs * im.nbytes <= len(im.data) + page * im.nbytes,
            'octal %o, image ends at %o' % (vs or 0, len(im.data) // im.nbytes))
+    if GENERATIONS:
+        tables(im, sc, page, origins, expect, out)
     # a census of the image's words by data type, and its first floats and bignums
     census = collections.Counter()
     floats, bignums = [], []

@@ -659,9 +659,15 @@
 	(offset 0)
 	(area 'sym::macro-compiled-program))	;(m-arft sym::fasl-frame-area)
      (setq fasl-group-length (qfasl-next-nibble))	;amount of stuff that follows
+;     (setq fef (vmake-pointer sym::dtp-fef-pointer	;Store header
+;			      (storeq area (vmake-pointer sym::dtp-header
+;							  (m-fasl-next-value)))))
+     ;; the generational collector (contract g3 step 2, 9.3): the header
+     ;; begins the fef; its boxed and unboxed words continue it (allocate-block)
      (setq fef (vmake-pointer sym::dtp-fef-pointer	;Store header
 			      (storeq area (vmake-pointer sym::dtp-header
-							  (m-fasl-next-value)))))
+							  (m-fasl-next-value))
+				      t)))
      (qfasl-next-nibble)			;skip modifier nibble for header q
      (do ((i 1 (1+ i))) (( i q-count))		;fill in boxed qs
        (multiple-value (m-obj obj) (m-q-fasl-next-value))	;get object to be stored

@@ -42,6 +42,11 @@
 ; the 40-bit machine, with the tree's compile-time definitions that
 ; SYS: COLD; CROSSDEFS lists, each declared, and each checked
 (let ((r (cold:cross-begin :log-directory "HOST: //home//lispm//t40-"))) (and (plusp (getf r :definitions)) (= (getf r :definitions) (getf r :checked) (length cold:*cross-definitions*)))) => T
+; the tree's special variables that the builder's system has not
+; (cold:*cross-specials*) are special while the cross build is on, so that a
+; file binding one, other than its own, binds it specially as natively
+(and (plusp (length cold:*cross-made-special*)) (loop for s in cold:*cross-made-special* always (get s 'special))) => T
+(progn (defvar cross-check-made-special nil) (setq cross-check-made-special cold:*cross-made-special*) t) => T
 (cold:cross-write-table)
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//t40-family.qfasl")
 (qc-file "SYS: CROSS-CHECK; PLANTED LISP" "HOST: //home//lispm//t40-planted.qfasl")
@@ -56,6 +61,8 @@
 (qc-file "SYS: CROSS-CHECK; SHORTFLOAT LISP" "HOST: //home//lispm//t40-shortfloat.qfasl") =>! short float of this world
 (probe-file "HOST: //home//lispm//t40-shortfloat.qfasl") => NIL
 (cold:cross-end)
+; and plain again after it
+(loop for s in cross-check-made-special never (get s 'special)) => T
 ; the check's control: NUMDEF's definitions not given, still checked.  QFASL
 ; open-codes %SHORT-FLOAT-EXPONENT, so its compile stops and no QFASL is written
 (let ((r (cold:cross-begin :log-directory "HOST: //home//lispm//omit-" :definitions '(:omit "SYS: SYS2; NUMDEF"))) (n (loop for d in cold:*cross-definitions* count (string-equal (car d) "SYS: SYS2; NUMDEF")))) (and (plusp n) (= (- (getf r :checked) (getf r :definitions)) n))) => T
@@ -66,6 +73,8 @@
 ; the 40-bit machine of 1024-word pages (contract G2), so WORLD puts back every
 ; parameter this world has over it
 (cold:cross-begin :overlays '("SYS: CROSS-CHECK; WORLD LISP") :log-directory "HOST: //home//lispm//id-" :definitions nil)
+; no special variable of the tree is proclaimed for this world's own target
+(null cold:*cross-made-special*) => T
 (list cold:word-bits cold:blocks-per-page cold-symbols:page-size) => (32 1 256)
 (qc-file "SYS: CROSS-CHECK; FAMILY LISP" "HOST: //home//lispm//id-family.qfasl")
 (cold:cross-end)

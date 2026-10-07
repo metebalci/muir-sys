@@ -1,16 +1,26 @@
 ; The native control, on the builder's own tree and QFASLs (System 2001's,
-; revision 13's parameters): its cold load made by the builder's cold-load
+; revision 13's parameters; for step 2, System 2002's revision 14's, and
+; contract G3 step 2, 9.4): its cold load made by the builder's cold-load
 ; generator and by this tree's (served here as SYS: CROSS-CHECK; COLDUT-NEW
 ; and COLDLD-NEW), which must be byte for byte the same.  This tree's generator
 ; writes revision 14's layout only for parameters without the page hash table
-; area (sys/cold/coldut.lisp, TARGET-HAS-PAGE-HASH-TABLE-P).  G2's control, on
+; area (sys/cold/coldut.lisp, TARGET-HAS-PAGE-HASH-TABLE-P), and step 2's
+; (first-object tables, format 2022) only for parameters that define
+; %%REGION-GENERATION (TARGET-HAS-GENERATIONS-P).  G2's control, on
 ; System 2000's 32-bit tree, also made the cold load at 1024-word pages of
 ; 32-bit words; a 40-bit builder has those pages already.
 (boundp 'si:cold-load-file-list) => T
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDPK LISP"))
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDUT QFASL"))
+;(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDUT QFASL"))
+;(cold:load-parameters)
+;(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDLD QFASL"))
+; the builder's own generator compiled from its tree's sources here: System
+; 2002's hand-over tree carries no QFASL of it (System 2001's did)
+(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//coldut-old.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldut-old.qfasl"))
 (cold:load-parameters)
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDLD QFASL"))
+(qc-file "SYS: COLD; COLDLD LISP" "HOST: //home//lispm//coldld-old.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldld-old.qfasl"))
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: CROSS-CHECK; COPY-PARTITION LISP"))
 (list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
 (cold:xc-make-cold "LOD3")
@@ -21,6 +31,11 @@
 (qc-file "SYS: CROSS-CHECK; COLDLD-NEW LISP" "HOST: //home//lispm//coldld-new.qfasl")
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldld-new.qfasl"))
 (list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
-(cold:target-has-page-hash-table-p) => T
+; the builder's own parameters ask for no first-object tables (the
+; generational collector's cold load, contract G3 step 2, 9.3, 9.4): for them
+; this tree's generator writes the builder's layout (System 2001's revision 13,
+; or System 2002's revision 14, as the builder is)
+;(cold:target-has-page-hash-table-p) => T
+(cold:target-has-generations-p) => NIL
 (cold:xc-make-cold "LOD3")
 (cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-new.img" (* 5 (ceiling cold:vmem-highest-address 1024)))

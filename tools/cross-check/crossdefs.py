@@ -9,6 +9,17 @@ mechanically, every compile-time definition of the tree whose text is not
 BASE's: new, changed, or gone (BASE has it and the tree does not).  Text is
 compared as tokens, comments dropped, case folded outside strings.
 
+It lists too the tree's special variables that BASE has not (*cross-specials*):
+a DEFVAR, DEFPARAMETER, DEFCONST, DEFCONSTANT or DEFGLOBAL, or a top-level
+SPECIAL, PROCLAIM or DECLARE of SPECIAL.  Each proclaims its variable special
+when its own file compiles, and natively every later compile knows it from the
+loaded file; the builder has not loaded the tree, so a compile for the target
+of another file that binds the variable bound it lexically (hashfl.lisp's
+:PUT-HASH and SXHASH-HASHED-YOUNG-ADDRESS, qrand.lisp's, found by the route's
+check (a)).  A special BASE has and the tree has not is listed :gone, which
+the cross build refuses, as it cannot unproclaim one without changing the
+builder.
+
 Usage:
   crossdefs.py TREE BASE [--lisp OUT]   list; --lisp writes the list as Lisp
                                         (cold:*cross-definitions*)
@@ -210,6 +221,55 @@ def definitions(form, out, top=True):
             definitions(sub, out, False)
 
 
+# the definers that proclaim their variable special when their file compiles:
+# DEFVAR, DEFPARAMETER and DEFCONSTANT expand to (eval-when (compile)
+# (proclaim '(special x))) (sys/sys2/lmmac.lisp), DEFCONST is DEFPARAMETER,
+# and ZWEI's DEFGLOBAL is a DEFVAR (sys/zwei/defs.lisp)
+SPECIAL_DEFINERS = {'DEFVAR', 'DEFPARAMETER', 'DEFCONST', 'DEFCONSTANT', 'DEFGLOBAL'}
+
+
+def specials(form, out):
+    """(kind, name) for each variable a top-level FORM makes special: a
+    special-variable definer's, (SPECIAL a ...), or (PROCLAIM '(SPECIAL a ...))
+    or (DECLARE (SPECIAL a ...)) at top level, through the forms that hold
+    others."""
+    if not isinstance(form, list) or not form or isinstance(form[0], list):
+        return
+    head = str(form[0])
+    if head in SPECIAL_DEFINERS:
+        if len(form) > 1 and isinstance(form[1], Tok):
+            out.append((head, str(form[1])))
+    elif head == 'SPECIAL':
+        out.extend((head, str(x)) for x in form[1:] if isinstance(x, Tok))
+    elif head in ('PROCLAIM', 'DECLARE'):
+        for x in form[1:]:
+            if isinstance(x, list) and x and str(x[0]) == 'SPECIAL':
+                out.extend((head, str(y)) for y in x[1:] if isinstance(y, Tok))
+    elif head in WRAPPERS:
+        for sub in form[2:] if head in ('EVAL-WHEN', 'LOCAL-DECLARE', 'COMPILER-LET') else form[1:]:
+            specials(sub, out)
+
+
+def special_rows(t, b):
+    """(rel, kind, name, status, package) for each special variable of the
+    tree that BASE has not (status special), and of BASE that the tree has not
+    (gone); a name is compared without its package prefix."""
+    def collect(scanned):
+        found = {}
+        for rel in sorted(scanned):
+            att, _, _, forms = scanned[rel]
+            for fm in forms:
+                out = []
+                specials(fm, out)
+                for k, n in out:
+                    found.setdefault(n.split(':')[-1], (rel, k, n, att.get('PACKAGE', 'USER')))
+        return found
+    ts, bs = collect(t), collect(b)
+    rows = [(rel, k, n, 'special', pkg) for key, (rel, k, n, pkg) in ts.items() if key not in bs]
+    rows += [(rel, k, n, 'gone', pkg) for key, (rel, k, n, pkg) in bs.items() if key not in ts]
+    return sorted(rows)
+
+
 FLOAT = re.compile(r'^[-+]?(\d+\.\d+|\.\d+)([esfdlESFDL][-+]?\d+)?$|^[-+]?\d+(\.\d*)?[esfdlESFDL][-+]?\d+$')
 FUNCTION_KINDS = {'DEFMACRO', 'DEFSUBST', 'MACRO', 'DEFF-MACRO', 'DEFLAMBDA-MACRO', 'DEFMACRO-DISPLACE'}
 
@@ -314,7 +374,7 @@ def compare(tree, base, every=False):
     return rows, t, b
 
 
-def lisp_text(rows):
+def lisp_text(rows, srows):
     out = [';;; -*- Mode:LISP; Package:COLD; Base:10; Lowercase:T; Readtable:ZL -*-',
            '',
            ';;; The tree\'s compile-time definitions that the cross build gives every',
@@ -328,6 +388,18 @@ def lisp_text(rows):
            '',
            '(setq *cross-definitions* \'(']
     for rel, k, n, status, _ in rows:
+        out.append('  ("%s" %s "%s" :%s)' % (logical(rel), k.lower(), n.replace('/', '//').replace('"', '/"'),
+                                            status))
+    out.append('  ))')
+    out += ['',
+            ';;; The tree\'s special variables that the builder\'s system has not, which',
+            ';;; the cross build proclaims special in the builder while it compiles for',
+            ';;; the target (cold:cross-begin): each (file kind name status), status',
+            ';;; :special, or :gone (the builder\'s system has it and the tree does not),',
+            ';;; which the cross build refuses.',
+            '',
+            '(setq *cross-specials* \'(']
+    for rel, k, n, status, _ in srows:
         out.append('  ("%s" %s "%s" :%s)' % (logical(rel), k.lower(), n.replace('/', '//').replace('"', '/"'),
                                             status))
     out.append('  ))')
@@ -402,7 +474,8 @@ def main():
         out, bad = census(t, b, table)
         print('\n'.join(out))
         return 1 if bad else 0
-    text = lisp_text(rows)
+    srows = special_rows(t, b)
+    text = lisp_text(rows, srows)
     if '--check' in a:
         f = a[a.index('--check') + 1]
         cur = open(f, encoding='latin-1').read() if os.path.exists(f) else ''
@@ -410,11 +483,11 @@ def main():
             print('crossdefs: %s is not the list the sources give; run crossdefs.py %s %s --lisp %s'
                   % (f, tree, base, f))
             return 1
-        print('crossdefs: %s is current (%d definitions)' % (f, len(rows)))
+        print('crossdefs: %s is current (%d definitions, %d special variables)' % (f, len(rows), len(srows)))
         return 0
     if '--lisp' in a:
         open(a[a.index('--lisp') + 1], 'w', encoding='latin-1').write(text)
-    for rel, k, n, status, pkg in rows:
+    for rel, k, n, status, pkg in rows + srows:
         print('%-8s %-32s %-18s %s' % (status, rel, k, n))
     return 0
 

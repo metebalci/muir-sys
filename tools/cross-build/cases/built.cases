@@ -1,0 +1,12 @@
+; A band the route built (tools/cross-build's step built; contract G3 step 2
+; revision 1, 9.4, C29; the review of the first-object table, section 5,
+; P7), lisp/built.lisp loaded first.  P7: every RQB of the RQB resource and
+; PAGE-RQB lie on page boundaries, and the table
+; checker passes on DISK-BUFFER-AREA's regions; recorded: the area's regions
+; and filler words, the band's young words by generation (C29).
+(let ((r (built-rqbs))) (and (plusp (first r)) (= (first r) (second r)))) => T
+(built-aligned-p (%pointer si:page-rqb)) => T
+(third (built-disk-buffer-area)) => NIL
+(built-rqbs)
+(built-disk-buffer-area)
+(built-young-words)

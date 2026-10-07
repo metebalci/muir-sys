@@ -48,8 +48,8 @@ late store's slot."
 
 (defun gs-after ()
   "After the boot, before any collection: the holders' pages' marks and the lists'
-generations (survivor space 1, 2, for the two stored before the save's collection, eden,
-1, for the BEFORE-COLD one)."
+generations (survivor space 2, 3, for the two stored before the save, which DISK-SAVE's own
+young collection moved on from survivor space 1; eden, 1, for the BEFORE-COLD one)."
   (list (gen-mark (aloc *gs-holder* 1500)) (gen-mark (locf (plist nil)))
 	(gen-mark (aloc *gs-late* 5))
 	(gen-generation (aref *gs-holder* 1500)) (gen-generation (plist nil))

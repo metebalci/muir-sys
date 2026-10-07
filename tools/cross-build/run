@@ -29,6 +29,10 @@ step does and what it needs.  The steps, in order:
             region across 2^31, saved
   incremental  an incremental save of native6's band and of the high band, each
             with a young array in an ephemeral region, restored and compared
+  built     the built bands (contract G3 step 2, C29; P7): band4 saved once more
+            without the build's tenure-all, and in each band the RQBs and
+            PAGE-RQB on page boundaries, DISK-BUFFER-AREA's tables, the young
+            words by generation
 
 --from STEP continues a run whose record shows the earlier steps passed;
 --to STEP stops after STEP.  Output in --out: record.txt (a line a step and
@@ -55,12 +59,16 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.dirname(os.path.dirname(HERE))
 STEPS = ['export', 'assemble', 'cross', 'target', 'band4', 'native5', 'native6', 'checks',
-         'guards', 'high', 'incremental']
+         'guards', 'high', 'incremental', 'built']
 # the system's number, its microcode's and the hardware revision the band is for
 SYSTEM, MICROCODE, REVISION = 2002, 2002, 14
 BAND_GUID = uuid.UUID('a3b30470-c5d4-41c1-87a8-d26590424cb8').bytes_le
 # the band formats the microcode writes: saved, incremental, cold load (A14.13)
-FORMAT_SAVED = 0o2010
+#FORMAT_SAVED = 0o2010
+# the generational collector (contract G3 step 2 revision 1, 8.3, 9.4): its
+# saved band is 2020 and its incremental band 2021, each with its mark bitmap;
+# its cold load is 2022
+FORMAT_SAVED = 0o2020
 UC_FILES = ['UC-PARAMETERS', 'UC-CADR', 'UC-MACROCODE', 'UC-CALL-RETURN',
             'UC-STORAGE-ALLOCATION', 'UC-FCTNS', 'UC-ARRAY', 'UC-LOGICAL', 'UC-ARITH',
             'UC-STRING', 'UC-TRANSPORTER', 'UC-STACK-CLOSURE', 'UC-METER', 'UC-HACKS',
@@ -158,10 +166,14 @@ class Run:
         path = os.path.join(d, 'quux%d-%s' % (rev, hashlib.sha256('\n'.join(text).encode())
                                                .hexdigest()[:12]))
         if not os.path.exists(path):
-            with open(path + '.tmp', 'w') as f:
+            # the step's threads may write the same wrapper at once: each its
+            # own temporary file (one thread's os.replace took another's
+            # .tmp from under its chmod, and the assembly step failed)
+            tmp = '%s.%d.%d.tmp' % (path, os.getpid(), threading.get_ident())
+            with open(tmp, 'w') as f:
                 f.write('\n'.join(text) + '\n')
-            os.chmod(path + '.tmp', 0o755)
-            os.replace(path + '.tmp', path)
+            os.chmod(tmp, 0o755)
+            os.replace(tmp, path)
         return path
 
     def lispm_check(self, where, cases, band, ubin, quux, tree, timeout, keep=('home',),
@@ -392,11 +404,14 @@ class Run:
 
     # ----------------------------------------------------------- QLD
 
-    def qld(self, where, disk, tree, timeout=QLD_TIMEOUT):
+    def qld(self, where, disk, tree, timeout=QLD_TIMEOUT, tenure=True):
         """Boot DISK's current band, a cold load, on quux at the target's
         revision with TREE served as HOST's / on the file device and COLDRUN
         running QLD and DISK-SAVE into LOD4; wait for the save to settle;
-        stop the machine.  Returns the band's format and valid size."""
+        stop the machine.  Returns the band's format and valid size.  With
+        TENURE (the default), COLDRUN tenures every young object before the
+        save (contract G3 step 2 revision 1, 9.4); without it, the band keeps
+        QLD's young objects, for C29's record."""
         os.makedirs(where, exist_ok=True)
         root = os.path.join(self.work, 'qld-' + os.path.basename(where))
         shutil.rmtree(root, ignore_errors=True)
@@ -405,7 +420,8 @@ class Run:
             shutil.copytree(os.path.join(tree, d), os.path.join(root, d), symlinks=True)
         shutil.rmtree(os.path.join(root, 'sys', 'ubin'), ignore_errors=True)
         shutil.copytree(self.ubin, os.path.join(root, 'sys', 'ubin'))
-        coldrun = open(os.path.join(HERE, 'lisp', 'coldrun.lisp')).read().replace('@SAVE@', 'LOD4')
+        coldrun = (open(os.path.join(HERE, 'lisp', 'coldrun.lisp')).read().replace('@SAVE@', 'LOD4')
+                   .replace('@TENURE@', 't' if tenure else 'nil'))
         open(os.path.join(root, 'site', 'coldrun.lisp'), 'w').write(coldrun)
         with self.lock:
             port = self.qld_ports.pop(0)
@@ -544,8 +560,11 @@ class Run:
             os.makedirs(tree)
             for d in ('sys', 'site'):
                 shutil.copytree(os.path.join(self.src, d), os.path.join(tree, d), symlinks=True)
+            # the assembling band's PROM: --asm-prom, or the builder's when the
+            # builder assembles (a revision-14 band needs PROM 2002)
             rc, text = self.lispm_check(where, '\n'.join(head + [last]) + '\n', self.a.asm_band,
-                                        self.a.asm_ubin, self.wrapper(self.a.asm_revision, None,
+                                        self.a.asm_ubin, self.wrapper(self.a.asm_revision,
+                                                                      self.a.asm_prom,
                                                                       self.a.asm_quux),
                                         tree, 4000, keep=(keep,))
             results[name] = rc
@@ -682,12 +701,12 @@ class Run:
             sum(1 for _ in open(os.path.join(self.out, 'target', 'qfasl.sha256'))), len(n3),
             sha256(os.path.join(self.work, 'cold-3.img'))))
 
-    def boot_and_save(self, name, cold, tree):
+    def boot_and_save(self, name, cold, tree, tenure=True):
         """A disk with the microcode in MCR1 and the cold load COLD in LOD3,
         current; QLD; the saved band on its own disk in bands/."""
         disk = os.path.join(self.work, name + '-qld.img')
         self.make_disk(disk, os.path.join(self.ubin, 'ucadr.mcr'), {'LOD3': cold})
-        self.qld(os.path.join(self.out, name, 'qld'), disk, tree)
+        self.qld(os.path.join(self.out, name, 'qld'), disk, tree, tenure=tenure)
         os.makedirs(self.bands, exist_ok=True)
         band = os.path.join(self.bands, name + '.img')
         fmt, valid = self.band_disk(disk, 'LOD4', band, name)
@@ -891,22 +910,36 @@ class Run:
                       ' (process-sleep 1)))) (make-area :name (quote inc-grow)'
                       ' :region-size #o4000000)) t)', 60),
                      ('(progn (process-sleep 120.) (plusp *inc-grown*))', 60),
-                     ('(progn (setq *inc-area* (make-area :name (quote inc-young) :gc :dynamic'
-                      ' :region-size #o200000)) (setf (si:area-region-bits *inc-area*) (%logdpb 1'
-                      ' si:%%region-ephemeral (si:area-region-bits *inc-area*))) (si:%use-up-region'
-                      ' (si:area-region-list *inc-area*)) (setq *inc-young* (make-array 100000.'
-                      ' :area *inc-area*)) (dotimes (i 100000.) (aset (- i) *inc-young* i))'
-                      ' (setq *inc-mark* (list 2011. (si:%pointer-unsigned (%pointer *inc-young*))))'
+#                     ('(progn (setq *inc-area* (make-area :name (quote inc-young) :gc :dynamic'
+#                      ' :region-size #o200000)) (setf (si:area-region-bits *inc-area*) (%logdpb 1'
+#                      ' si:%%region-ephemeral (si:area-region-bits *inc-area*))) (si:%use-up-region'
+#                      ' (si:area-region-list *inc-area*)) (setq *inc-young* (make-array 100000.'
+#                      ' :area *inc-area*)) (dotimes (i 100000.) (aset (- i) *inc-young* i))'
+#                      ' (setq *inc-mark* (list 2011. (si:%pointer-unsigned (%pointer *inc-young*))))'
+#                      ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15))', 600)]
+                     # the generational collector (contract G3 step 2, 3.3, 3.2): an
+                     # ephemeral area (MAKE-AREA :GC :EPHEMERAL), whose new objects
+                     # are young, in eden; the array is 30,000 words, below the
+                     # pretenuring threshold (32 K words), which would put
+                     # revision 14's 100,000 into a tenured region
+                     ('(progn (setq *inc-area* (make-area :name (quote inc-young) :gc :ephemeral'
+                      ' :region-size #o200000)) (setq *inc-young* (make-array 30000.'
+                      ' :area *inc-area*)) (dotimes (i 30000.) (aset (- i) *inc-young* i))'
+                      ' (setq *inc-mark* (list 2021. (si:%pointer-unsigned (%pointer *inc-young*))))'
                       ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15))', 600)]
             res = self.session(W, disk, os.path.join(self.work, 'native6-tree'), forms,
                                save_part='LOD2', incremental=True)
             self.set_current(disk, ['MCR1', 'LOD2'])
+            # the generational collector (contract G3 step 2 revision 1,
+            # 8.3.1): the save's young collection copies the array into
+            # survivor space 1, so it is young after the boot, but no longer
+            # where *INC-MARK* saw it before the save; its address is recorded
             rc, text = self.lispm_check(
                 os.path.join(W, 'boot'),
-                '(first *inc-mark*) => 2011\n'
-                '(list (length *inc-young*) (loop for i below 100000. count (not (eq (aref *inc-young* i) (- i))))'
-                ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15)'
-                ' (= (si:%pointer-unsigned (%pointer *inc-young*)) (second *inc-mark*))) => (100000 0 T T)\n'
+                '(first *inc-mark*) => 2021\n'
+                '(list (length *inc-young*) (loop for i below 30000. count (not (eq (aref *inc-young* i) (- i))))'
+                ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15)) => (30000 0 T)\n'
+                '(list (si:%pointer-unsigned (%pointer *inc-young*)) (second *inc-mark*))\n'
                 '(let ((x (make-array 10 :area *inc-area*))) (= (ldb (byte 4 28) (%pointer x)) #o15)) => T\n',
                 disk, self.ubin, self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')),
                 os.path.join(self.work, 'native6-tree'), 600, extra=['--file-server', 'device'])
@@ -915,6 +948,40 @@ class Run:
             os.unlink(disk)
         if not ok:
             raise Failed('an incremental band did not restore its young array')
+
+    def step_built(self):
+        """The built bands (contract G3 step 2 revision 1, 9.4 and C29; the
+        review of the first-object table, section 5, P7): check 3's cold load
+        booted, run through QLD and saved once more without the tenure-all
+        (bands/band4-untenured.img); then in it and in each band built
+        (band4, native5, native6, high) every RQB of the RQB resource and
+        PAGE-RQB on page boundaries and DISK-BUFFER-AREA's first-object tables
+        passing the table checker (cases/built.cases); the area's filler
+        words and the young words by generation are recorded."""
+        B = os.path.join(self.out, 'built')
+        self.boot_and_save('band4-untenured', os.path.join(self.work, 'cold-3.img'),
+                           os.path.join(self.work, 'target'), tenure=False)
+        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'))
+        cases = open(os.path.join(HERE, 'cases', 'built.cases')).read()
+        bad = []
+        for name, tree in (('band4-untenured', 'target'), ('band4', 'target'), ('native5', 'native5-tree'),
+                           ('native6', 'native6-tree'), ('high', 'native6-tree')):
+            rc, text = self.lispm_check(
+                os.path.join(B, name), cases, os.path.join(self.bands, name + '.img'), self.ubin, quux,
+                os.path.join(self.work, tree), 1800,
+                extra=['--file-server', 'device', '--compile', '--files',
+                       os.path.join(HERE, 'lisp', 'built.lisp')])
+            got = dict((m.group(1), m.group(2)) for m in
+                       re.finditer(r'^\S+\s+\((built-\S+)\)\s+-> (.*)$', text, re.M))
+            self.record('  built %s: lispm-check exit %d; RQBs (all, aligned) %s; DISK-BUFFER-AREA '
+                        '(regions, with tables, table failures, filler words) %s; young words (eden, '
+                        'survivor 1, survivor 2) %s' % (name, rc, got.get('built-rqbs'),
+                                                        got.get('built-disk-buffer-area'),
+                                                        got.get('built-young-words')))
+            if rc:
+                bad.append(name)
+        if bad:
+            raise Failed('a built band failed P7: %s (%s)' % (', '.join(bad), B))
 
     def step_guards(self):
         from importlib.machinery import SourceFileLoader
@@ -944,6 +1011,14 @@ def main():
     p.add_argument('--asm-revision', type=int, default=int(env('asm-revision', '13')),
                    help="--asm-band's revision; 0, --asm-quux's default")
     p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
+    p.add_argument('--asm-prom', default=env('asm-prom'),
+                   help="--asm-band's PROM (default the builder's when the builder assembles)")
+    # contract G3 revision 14's guards (A14.13) boot revision 13's pieces beside
+    # the builder's, which for step 2's route is itself revision 14's
+    p.add_argument('--previous-band', default=env('previous-band'),
+                   help="revision 13's disk, System 2001's, for A14.13's guards")
+    p.add_argument('--previous-ubin', default=env('previous-ubin'),
+                   help="that disk's sys/ubin/ (microcode and PROM 2001)")
     p.add_argument('--ubin-ref', default=env('ubin-ref'),
                    help='a sys/ubin/ the assembly must equal (.mcr, .tbl, .locs)')
     p.add_argument('--quux', default=env('quux'), help="muir-sim's quux, with revision %d" % REVISION)
@@ -965,9 +1040,11 @@ def main():
         os.environ.get('XDG_CACHE_HOME', os.path.join(os.path.expanduser('~'), '.cache')), 'cross-build',
         os.path.basename(a.out)))
     for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'ozd', 'asm_band', 'asm_quux',
-              'asm_ubin', 'ubin_ref'):
+              'asm_ubin', 'ubin_ref', 'asm_prom', 'previous_band', 'previous_ubin'):
         if getattr(a, k):
             setattr(a, k, os.path.abspath(getattr(a, k)))
+    if not a.asm_band or a.asm_band == a.builder:
+        a.asm_prom = a.asm_prom or a.builder_prom
     a.asm_band = a.asm_band or a.builder
     a.asm_ubin = a.asm_ubin or a.builder_ubin
     lo, hi = (int(x) for x in a.ports.split('-'))

@@ -68,8 +68,14 @@ machine only reads its GPT.
      with `dd` (the file is in partition order), move bit 48 from LOD2 to
      LOD3 with `sgdisk -A 5:clear:48 -A 6:set:48`, serve the new microcode's
      four files in `SYS: UBIN;`, and start the machine: a cold boot.
-5. **QLD and save.** COLDRUN runs QLD as in steps 5 and 6; then
-   `(si:disk-save "LOD4" t)`. The save closes the TELNET connection, at
+5. **QLD and save.** COLDRUN runs QLD as in steps 5 and 6; then, from
+   the generational collector on (System 2002, contract G3 step 2 revision
+   1, 9.4), `(si:gc-flip-now :young t)` and `(si:gc-reclaim-oldspace)`,
+   which tenure every young object; then `(si:disk-save "LOD4" t)`. QLD runs
+   with no collection, so without the tenuring its working-storage objects
+   would be young in the band, and the first young collection after every
+   boot would copy them into the tenured generation again. `DISK-SAVE`
+   itself never tenures. The save closes the TELNET connection, at
    once or when ozd gives up on the host, up to three minutes later: ozd
    carries the TELNET listener here too, though it serves no file
    (`docs/lispm-check.md`, "The file server").
@@ -848,6 +854,15 @@ For an unattended load, generate `site/coldrun.lisp`, served as
 ```lisp
 (si:qld '(:noconfirm :no-reload-system-declaration) nil)
 (si:mini-report "qld-complete")
+```
+
+A band of the generational collector (System 2002 on) that is to be saved
+is tenured first, as "Building a band on QUUX" says in its step 5:
+
+```lisp
+(si:gc-flip-now :young t)
+(si:gc-reclaim-oldspace)
+(si:disk-save "LOD4" t)
 ```
 
 The cold load reads and runs this script before entering its listener.

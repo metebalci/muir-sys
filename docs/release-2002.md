@@ -726,6 +726,60 @@ objects young) changed the save, the band's formats and the boot.
   of each region of `NR-SYM` and `WORTHLESS-SYMBOL-AREA` for symbols; it and
   `PRINT-INT-PKT-STATUS` (`sys/network/chaos/chsncp.lisp:2207`) now start
   at `REGION-FIRST-OBJECT-TABLE-END`.
+- **The cold load** (contract 9.3, 9.4; `sys/cold/coldut.lisp`), keyed on
+  the target's parameters defining `%%REGION-GENERATION`
+  (`TARGET-HAS-GENERATIONS-P`, `:621`), so that revision 14's still give
+  their cold load (2012) byte for byte (the cross build's native control):
+  each region of the rule of contract 6.1 begins with its first-object
+  table (`MAKE-FIRST-OBJECT-TABLES`, `:656`, called by `CREATE-AREAS`,
+  `:796`); `ALLOCATE-BLOCK` (`:811`) gives each page whose first word a
+  block holds the start of the object the block belongs to, its callers
+  saying which blocks begin an object (a string, a symbol, a bignum, an
+  array's leader or header, a FEF's header, `sys/cold/coldld.lisp:668`).
+  A region of no length, FASL-TEMP-AREA's, the cold load's last area, has
+  no room for a table and gets none; nothing is consed in it.
+  WORKING-STORAGE-AREA's area bits carry `%%REGION-EPHEMERAL` while its
+  region stays tenured (`:788`); the format is 2022 (`:1517`) and
+  `%SYS-COM-MARK-BITMAP` 0 (`:1483`), the system communication area 31
+  words (`:1453`): revision 14's cold load left that word as the partition
+  held it.
+- **The first band's route** (contract 9.4): `tools/cross-build/run` builds
+  from System 2002's revision-14 hand-over band (`--builder-revision 14`,
+  its PROM, its tree as the base; `sys/cold/crossdefs.lisp` listed against
+  it), its bands are format 2020, and `tools/cross-build/lisp/coldrun.lisp`
+  tenures every young object before each save the build makes (a young flip
+  with the tenure-all table, reclaimed), reporting the young words before and
+  after, as `docs/building.md` does by hand. Its guards (`guards.py`) add
+  C27's lines; the step `built` saves band4 once more without the tenuring
+  and records each band's young words (C29), and checks its RQBs and
+  `DISK-BUFFER-AREA`'s tables (`cases/built.cases`). `tools/cross-check`'s
+  `check3.py` checks step 2's cold load (the tables, the ephemeral working
+  storage, 2022, the bitmap's word, NR-SYM's symbols) and `native.cases`
+  asks for no generations in the builder's own parameters, compiling the
+  builder's own generator from its sources, since System 2002's hand-over
+  tree carries no QFASL of it. The step high counts a region of a dynamic
+  area below the floor as holding objects only past its first-object table
+  (`tools/cross-build/lisp/high.lisp`): FASL-TABLE-AREA's region that the
+  full collection leaves empty holds its table alone, 49 words, and was
+  taken for one holding an object.
+- **The cross build gives the compile the tree's special variables**
+  (`sys/cold/cross.lisp`, `CROSS-DECLARE-SPECIALS`, `CROSS-END`;
+  `tools/cross-check/crossdefs.py`, `sys/cold/crossdefs.lisp`'s
+  `*CROSS-SPECIALS*`). A `DEFVAR` proclaims its variable special only while
+  its own file compiles; natively every later compile knows it from the loaded
+  file, but the builder has not loaded the tree, so `sys/sys2/hashfl.lisp`'s
+  `:PUT-HASH`, compiled for the target, bound `SXHASH-HASHED-YOUNG-ADDRESS`
+  (`sys/sys/qrand.lisp:201`) as a local. On the cross-built band `SXHASH`'s
+  young flag then stayed set in the global value and every hash table counted
+  as holding a young key: an EQ table given a symbol after an EQUAL table was
+  given a young array was young, `(T T)` where the native band gives
+  `(NIL NIL)`. The route's check (a) found the FEF differing from the native
+  build's. `crossdefs.py` now lists every special variable of the tree that
+  the builder's system has not (16 proclaimed on System 2002's revision-14
+  band, of 20 listed), and `CROSS-BEGIN` proclaims them for the cross build's
+  duration; a special the tree dropped stops it. `hashfl.lisp` compiled so on
+  the builder is the native build's, as `same40.py` compares them; check 1
+  gains three cases.
 - **Checks**: `tools/system-check` gains `generational-collector`, with the
   table checker and the reclaim checker and three files of planted partial
   fixes, and `save/`, the save checks (C14, C25-C29's Lisp parts), each a
@@ -734,3 +788,14 @@ objects young) changed the save, the band's formats and the boot.
   `generational-table-users` (P2-P5 of the review: the split retry, an RQB
   off a page boundary refused, `PAGE-RQB`, `MAPATOMS-NR-SYM`, the Chaosnet
   buffers), with three files planting the functions as they were.
+- **Checks run on step 2's first band**: automatic collection is on at
+  every boot there, and its flips moved what two checks of 2 M words plant
+  (`rev14-paging`'s fresh pages read back other than their fill,
+  `format-clauses-gc`'s planted region was freed), so both turn it off first,
+  as revision 14's band had it
+  (`tools/microcode-check/cases-2mw/rev14-paging.cases`,
+  `tools/system-check/cases-2mw/format-clauses-gc.cases`).
+  `generational-save` expects survivor space 2 for the two lists stored
+  before the save, since `DISK-SAVE`'s own young collection moves them on
+  from survivor space 1 (`tools/microcode-check/generational-save:184`,
+  `lisp/generational-save.lisp`).

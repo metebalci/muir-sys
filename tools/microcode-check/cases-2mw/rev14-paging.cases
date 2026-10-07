@@ -2,6 +2,13 @@
 ; and section 12's Y2 checks; lisp/rev14-paging.lisp).  Run it on a machine of
 ; 2 M words of main memory (quux --main-memory-size 2MW, through a --quux
 ; wrapper); at more nothing is forced out and the first case fails.
+; the generational collector (contract G3 step 2, Q-GCa) turns automatic
+; collection on at boot; its flips, a tenured one after the large arrays below
+; above all, touch the pages this check plants (measured on step 2's first
+; band: of the 400 fresh pages, the ones out of core had taken slots, 388 of
+; them, and 200 read back other than the fresh fill).  Off first, as revision
+; 14's band had it.
+(progn (when si:gc-on (si:gc-off)) si:gc-on) => NIL
 (<= (si:rev14p-memory-words) (* 2 1024 1024)) => T
 (si:rev14p-word #o224) => 0
 ; Fresh pages: 400 pages read, never written, each the fresh fill.

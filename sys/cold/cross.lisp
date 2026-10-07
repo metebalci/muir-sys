@@ -98,6 +98,24 @@
 (defvar *cross-made-constant* nil
   "The symbols cross-begin made system constants, which cross-end makes plain again.")
 
+;;; the tree's special variables that the builder's system has not (SYS: COLD;
+;;; CROSSDEFS, written by tools/cross-check/crossdefs.py), proclaimed special
+;;; here while the cross build is on (cross-declare-specials).  a defvar
+;;; proclaims its variable special only while its own file compiles; natively
+;;; every later compile knows it from the loaded file, but the builder has not
+;;; loaded the tree, so a compile for the target of another file that binds
+;;; the variable bound it lexically: hashfl.lisp's :put-hash bound
+;;; sxhash-hashed-young-address (qrand.lisp's) as a local, so sxhash's young
+;;; flag stayed set in the global value and every hash table counted as
+;;; holding a young key (the route's check (a) found the fef differing from
+;;; the native build's).  the ones made special here are made plain again by
+;;; cross-end (*cross-made-special*).
+(defvar *cross-specials* nil
+  "(file kind name status) for each special variable of the tree that the builder's system has not.")
+
+(defvar *cross-made-special* nil
+  "The symbols cross-begin proclaimed special, which cross-end makes plain again.")
+
 ;;; Per compiled file.
 (defvar *cross-file* nil)
 (defvar *cross-lines* nil "This file's log lines, newest first.")
@@ -709,11 +727,49 @@ all but FILEs'."
 ;  (list :word-bits word-bits :page-size sym:page-size
 ;	:watched (cross-count *cross-watch*) :changed (length *cross-changed*)
 ;	:without-value (length *cross-unset*)))
+;  (list :word-bits word-bits :page-size sym:page-size
+;	:watched (cross-count *cross-watch*) :changed (length *cross-changed*)
+;	:without-value (length *cross-unset*)
+;	:definitions (length *cross-declarations*)
+;	:checked (if *cross-definition-names* (cross-count *cross-definition-names*) 0)))
+  ;; :specials, the tree's special variables proclaimed here (cross-declare-specials)
   (list :word-bits word-bits :page-size sym:page-size
 	:watched (cross-count *cross-watch*) :changed (length *cross-changed*)
 	:without-value (length *cross-unset*)
 	:definitions (length *cross-declarations*)
-	:checked (if *cross-definition-names* (cross-count *cross-definition-names*) 0)))
+	:checked (if *cross-definition-names* (cross-count *cross-definition-names*) 0)
+	:specials (length *cross-made-special*)))
+
+;;; the tree's special variables (*cross-specials*), each proclaimed special
+;;; in this world unless it is already, for every compile while the cross build
+;;; is on, a compile for this world too; one the tree no longer has (:gone)
+;;; stops the cross build, which cannot unproclaim it without changing this
+;;; world.  the number proclaimed
+(defun cross-declare-specials ()
+  (setq *cross-made-special* nil)
+  (dolist (d *cross-specials*)
+    (when (eq (fourth d) :gone)
+      (ferror nil "The cross build cannot take back this world's special variable ~A (~A), which the tree no longer has"
+	      (third d) (first d))))
+  (dolist (d *cross-specials*)
+    (let ((sym (cross-special-symbol (first d) (third d))))
+      (unless (get sym 'special)
+	(putprop sym t 'special)
+	(push sym *cross-made-special*))))
+  (length *cross-made-special*))
+
+;;; the symbol NAME reads as in FILE's package, interned as the compile of a
+;;; file in that package reads it
+(defun cross-special-symbol (file name)
+  (let* ((attr (with-open-file (s file)
+		 ;; getf takes a place, as cross-definition-symbol gives it
+		 (let ((attrs (fs:extract-attribute-list s)))
+		   (getf attrs :package))))
+	 (pkg (and attr (pkg-find-package (if (consp attr) (car attr) attr) :find))))
+    (unless pkg
+      (ferror nil "~A: no package ~S for its special variable ~A" file attr name))
+    (let ((*package* pkg))
+      (read-from-string name))))
 
 ;;; DEFINITIONS: t, every definition SYS: COLD; CROSSDEFS lists; nil, none and
 ;;; no check (this world's own target, the identity control); or (:omit FILE...),
@@ -724,6 +780,8 @@ all but FILEs'."
   (when definitions
     (let ((si:inhibit-fdefine-warnings :just-warn))
       (load "SYS: COLD; CROSSDEFS LISP" "COLD"))
+    ;; the tree's special variables, which crossdefs lists too
+    (cross-declare-specials)
     (setq *cross-definition-names* (make-hash-table :test 'eq))
     (let ((omit (and (consp definitions) (eq (car definitions) :omit) (cdr definitions)))
 	  (files nil))
@@ -839,6 +897,9 @@ all but FILEs'."
   ;; the target's system constants that are not this world's
   (dolist (s *cross-made-constant*) (remprop s 'si:system-constant))
   (setq *cross-made-constant* nil)
+  ;; the tree's special variables that are not this world's
+  (dolist (s *cross-made-special*) (remprop s 'special))
+  (setq *cross-made-special* nil)
   (setq *cross-saved* nil
 	compiler:*cross-target* nil
 	*cross-active* nil)

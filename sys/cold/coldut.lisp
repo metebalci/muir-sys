@@ -613,6 +613,69 @@
   "T if the target's parameters have revision 13's page hash table area (PAGE-TABLE-AREA)."
   (and (memq 'sym:page-table-area sym:area-list) t))
 
+;;; the generational collector (contract g3 step 2, 9.3, 9.4): the target's
+;;; parameters say whether to write step 2's cold load: first-object tables,
+;;; working storage ephemeral, format 2022 and the mark bitmap's word.  each
+;;; difference is made only for it, so that revision 14's parameters still give
+;;; their cold load (2012) byte for byte (the cross build's native control).
+(defun target-has-generations-p ()
+  "T if the target's parameters have the generational collector's region generation field."
+  (boundp 'sym:%%region-generation))
+
+;;; the generational collector (contract g3 step 2, 6.1, 6.2; clarification 4):
+;;; a tenured structure region that is not free, fixed or extra-pdl begins with
+;;; its first-object table, an art-32b array at its origin, entry k the offset
+;;; from the origin of an object start at or below the first word of the
+;;; region's page k.  make-first-object-tables writes the cold load's, the
+;;; first block of each such area's one region, its entries 0 (the table's own
+;;; start); allocate-block then gives each page whose first word a block holds
+;;; the start of the object that block belongs to.  a block that begins an
+;;; object says so (its caller passes allocate-block's starts-object); a block
+;;; that continues one (an array's header after its leader, its data, a fef's
+;;; words after its header) does not, and its pages get the object's start.  a
+;;; start missed would leave an earlier object's start, which is still valid,
+;;; since a walk from it reaches the page: only a block that does not begin an
+;;; object must never say it does.
+(defvar area-first-object-table-headers (make-array #o400)
+  "For each area whose region has a first-object table, its header's words (1, or 2 for a
+long table); NIL for the others.")
+(defvar area-object-starts (make-array #o400)
+  "For each area whose region has a first-object table, the address of the object its
+last block belongs to.")
+
+(defun cold-region-has-first-object-table-p (area-number)
+  "T if the cold load's region of AREA-NUMBER gets a first-object table, by the bits
+create-areas gave it."
+  (let ((bits (vread (+ (get-area-origin 'sym:region-bits) area-number))))
+    (and (= (ldb sym:%%region-representation-type bits) sym:%region-representation-type-structure)
+	 (= (ldb sym:%%region-generation bits) sym:%region-generation-tenured)
+	 (not (memq (ldb sym:%%region-space-type bits)
+		    (list sym:%region-space-free sym:%region-space-fixed
+			  sym:%region-space-extra-pdl))))))
+
+(defun make-first-object-tables ()
+  (fillarray area-first-object-table-headers '(nil))
+  (when (target-has-generations-p)
+    ;; a region of no length, the cold load's last area's (fasl-temp-area),
+    ;; has no room for a table and gets none; nothing is consed in it
+    (loop for i from 0 below (length sym:area-list)
+	  when (and (cold-region-has-first-object-table-p i)
+		    (> (aref area-alloc-bounds i) (aref area-origins i)))
+	    do (let* ((n (truncate (- (aref area-alloc-bounds i) (aref area-origins i))
+				   sym:page-size))
+		      (long (> n sym:%array-max-short-index-length))
+		      (header (if long 2 1))
+		      (adr (allocate-block i (+ header n))))
+		 (vwrite adr (vmake-pointer sym:dtp-array-header
+					    (+ sym:array-dim-mult (symeval 'sym:art-32b)
+					       (if long sym:array-long-length-flag n))))
+		 (when long
+		   (vwrite (1+ adr) (vfix n)))
+		 (dotimes (k n)
+		   (vwrite-unboxed (+ adr header k) 0))
+		 (aset header area-first-object-table-headers i)
+		 (aset adr area-object-starts i)))))
+
 (defun create-areas (&aux high-loc the-region-bits)
   (do ((l sym:cold-load-area-sizes (cddr l)))	;Area sizes in pages
       ((null l))
@@ -713,12 +776,24 @@
 				((memq (car al) sym:static-areas) 1)	;Static needs scav
 				(t 0))		;Newspace doesn't need scavenging
 			  sym:%%region-scavenge-enable 0) ))))
+;    (vwrite (+ (get-area-origin 'sym:area-region-bits) i)
+;	    the-region-bits)
+    ;; the generational collector (contract g3 step 2, 3.1, 3.3, 9.3;
+    ;; clarification 5): working storage is an ephemeral area, its area bits
+    ;; carrying %%region-ephemeral, so that its new objects go to eden, while
+    ;; its cold-load region, in the region bits, stays tenured (generation 0,
+    ;; bit 13 clear): the area's first region, below ephemeral space.
     (vwrite (+ (get-area-origin 'sym:area-region-bits) i)
-	    the-region-bits)
+	    (if (and (eq (car al) 'sym:working-storage-area) (target-has-generations-p))
+		(dpb 1 sym:%%region-ephemeral the-region-bits)
+	      the-region-bits))
     (vwrite (+ (get-area-origin 'sym:region-origin) i)
 	    (vfix (aref area-origins i)))
     (vwrite (+ (get-area-origin 'sym:region-length) i)
-	    (vfix (- (aref area-alloc-bounds i) (aref area-origins i))))))
+	    (vfix (- (aref area-alloc-bounds i) (aref area-origins i)))))
+  ;; the generational collector (contract g3 step 2, 9.3): the first-object
+  ;; tables, before anything is stored in their areas
+  (make-first-object-tables))
 
 (defun get-area-number (area)
   (cond ((numberp area) area)
@@ -728,7 +803,12 @@
 (defun get-area-origin (area)
   (aref area-origins (get-area-number area)))
 
-(defun allocate-block (area size &aux address high)
+;(defun allocate-block (area size &aux address high)
+;; the generational collector (contract g3 step 2, 6.2, 9.3): STARTS-OBJECT
+;; says that the block begins an object; in an area whose region has a
+;; first-object table, each page whose first word the block holds gets the
+;; start of the object the block belongs to (make-first-object-tables).
+(defun allocate-block (area size &optional starts-object &aux address high)
   (setq area (get-area-number area))
   (setq address (aref area-alloc-pointers area))
   (setq high (+ address size))
@@ -740,6 +820,15 @@
        (hpn (ceiling high sym:page-size)))
       (( vpn hpn))
     (vmem-find-page (* vpn sym:page-size) nil))
+  (when (aref area-first-object-table-headers area)
+    (when starts-object
+      (aset address area-object-starts area))
+    (let ((origin (aref area-origins area))
+	  (entries (+ (aref area-origins area) (aref area-first-object-table-headers area)))
+	  (start (aref area-object-starts area)))
+      (do ((page (ceiling (- address origin) sym:page-size) (1+ page)))
+	  ((not (< (* page sym:page-size) (- high origin))))
+	(vwrite-unboxed (+ entries page) (- start origin)))))
   address)
 
 ;;; In pages
@@ -835,7 +924,8 @@
      (and (> n-chars sym:%array-max-short-index-length)
 	  (setq long-flag t
 		n-words (1+ n-words)))
-     (setq adr (allocate-block area n-words))
+;     (setq adr (allocate-block area n-words))
+     (setq adr (allocate-block area n-words t))	;an object (allocate-block)
      (vwrite adr (vmake-pointer sym:dtp-array-header
 				(+ sym:array-dim-mult	;1-dim
 				   sym:art-string
@@ -877,7 +967,8 @@
 A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 			real-atom-name atom-name path  package-name)))))
      (setq pname (store-string 'sym:p-n-string (string real-atom-name)))
-     (setq adr (allocate-block area sym:length-of-atom-head))
+;     (setq adr (allocate-block area sym:length-of-atom-head))
+     (setq adr (allocate-block area sym:length-of-atom-head t))	;an object (allocate-block)
      (vwrite-cdr adr sym:cdr-next (vmake-pointer sym:dtp-symbol-header pname))
      (vwrite-cdr (+ adr 1) sym:cdr-next (vmake-pointer sym:dtp-null adr))
      (vwrite-cdr (+ adr 2) sym:cdr-next (vmake-pointer sym:dtp-null adr))
@@ -900,7 +991,8 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   ;; creation date is one (set-file-loaded-id).
   (if (= word-bits 32.)
   (let* ((size (%structure-total-size number))
-	 (adr (allocate-block area size)))
+;	 (adr (allocate-block area size)))
+	 (adr (allocate-block area size t)))	;an object (allocate-block)
     (loop for i from 0 below size
 	  do (vwrite-low (+ adr i) (%p-ldb-offset 0020 number i))
 	     (vwrite-high (+ adr i) (%p-ldb-offset 2020 number i)))
@@ -920,7 +1012,8 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
       (ferror nil "~S, a ~S, has no format in a ~D-bit cold load"
 	      number (type-of number) word-bits))
   (let* ((size (%structure-total-size number))
-	 (adr (allocate-block area size)))
+;	 (adr (allocate-block area size)))
+	 (adr (allocate-block area size t)))	;an object (allocate-block)
     (vwrite adr (vmake-pointer sym:dtp-header (%p-ldb-offset %%q-pointer number 0)))
     (loop for i from 1 below size
 ;	  do (vwrite-unboxed (+ adr i) (dpb (%p-ldb-offset #o2020 number i) #o2020
@@ -979,8 +1072,12 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
       (vwrite-cdr adr (if (= number 1) sym:cdr-nil sym:cdr-next) qnil))
     adr))
 
-(defun storeq (area data)
-  (let ((adr (allocate-block area 1)))
+;(defun storeq (area data)
+;  (let ((adr (allocate-block area 1)))
+;; the generational collector (contract g3 step 2, 9.3): STARTS-OBJECT, for a
+;; word that begins an object, as a fef's header does (allocate-block)
+(defun storeq (area data &optional starts-object)
+  (let ((adr (allocate-block area 1 starts-object)))
     (vwrite adr data)
     adr))
 
@@ -1022,7 +1119,9 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 	       (ferror nil "~S bad array type" type)))
 	(setq tem (cdr tem))
 	(cond ((not (null leader))
-	       (setq adr (allocate-block area leader-length))
+;	       (setq adr (allocate-block area leader-length))
+	       ;; the leader begins the array (allocate-block)
+	       (setq adr (allocate-block area leader-length t))
 	       (vwrite adr (vmake-pointer sym:dtp-header
 					  (dpb sym:%header-type-array-leader
 					       sym:%%header-type-field
@@ -1048,7 +1147,9 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 	      ((null long-array-flag)
 		(setq tem 1 header-q (+ header-q index-length)))
 	      (t (setq tem 2 header-q (+ header-q sym:array-long-length-flag))))
-	(setq tem1 (setq adr (allocate-block area (+ tem ndims -1))))
+;	(setq tem1 (setq adr (allocate-block area (+ tem ndims -1))))
+	;; the header begins the array if it has no leader (allocate-block)
+	(setq tem1 (setq adr (allocate-block area (+ tem ndims -1) (null leader))))
 	(vwrite adr header-q)
 	(and (= tem 2) (vwrite (setq adr (1+ adr)) (vfix index-length)))
 	;Store all dimensions except for last
@@ -1346,7 +1447,13 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 ;(defun init-system-communication-area (&aux (nqs 27.) adr)
 ;; quux revision 14 (contract g3 revision 14, 3.2; appendix a14.12): two
 ;; words more, the slot bitmap's address and the commit limit
-(defun init-system-communication-area (&aux (nqs (if (target-has-page-hash-table-p) 27. 30.)) adr)
+;(defun init-system-communication-area (&aux (nqs (if (target-has-page-hash-table-p) 27. 30.)) adr)
+;; the generational collector (contract g3 step 2, 8.3.2, 9.3): one word
+;; more, %sys-com-mark-bitmap
+(defun init-system-communication-area (&aux (nqs (cond ((target-has-page-hash-table-p) 27.)
+						       ((target-has-generations-p) 31.)
+						       (t 30.)))
+					    adr)
   (setq adr (allocate-block 'sym:system-communication-area nqs))
   (vwrite (+ adr sym:%sys-com-area-origin-pntr)
 	  (vmake-pointer sym:dtp-locative (get-area-origin 'sym:region-origin)))
@@ -1367,7 +1474,13 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
 	 ;; the region floor (contract g3 revision 14, 10.11): its default,
 	 ;; the first unfixed area's address, where make-region starts
 	 (vwrite (+ adr sym:%sys-com-region-floor)
-		 (vfix (aref area-origins (1+ (get-area-number 'sym:init-list-area)))))))
+		 (vfix (aref area-origins (1+ (get-area-number 'sym:init-list-area)))))
+	 ;; the generational collector (contract g3 step 2, 8.3.2, 9.3;
+	 ;; clarification 10): a cold load holds no young object and no mark,
+	 ;; so it has no mark bitmap, and the word says so.  revision 14's cold
+	 ;; load left this word, the one after its 30, as the partition held it.
+	 (when (target-has-generations-p)
+	   (vwrite (+ adr sym:%sys-com-mark-bitmap) (vfix 0)))))
   (vwrite (+ adr sym:%sys-com-obarray-pntr) (qintern 'sym:obarray))
   (vwrite (+ adr sym:%sys-com-ether-free-list) qnil)
   (vwrite (+ adr sym:%sys-com-ether-transmit-list) qnil)
@@ -1387,10 +1500,22 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   ;; quux revision 14 (contract g3 revision 14, 10.6; appendix a14.13): the
   ;; fixed areas move, so a 40-bit cold load is format 2012, which microcode
   ;; 2002 asks for, refusing system 2001's 2000-2002
+;  (vwrite (+ adr sym:%sys-com-band-format)
+;	  ;; not /=, which this readtable reads as = (/ escapes)
+;	  (vfix (cond ((not (= word-bits 32.))
+;		       (if (target-has-page-hash-table-p) 2002 2012))
+;		      ((= sym:page-size #o2000) 1102)
+;		      (t 0))))
+  ;; the generational collector (contract g3 step 2, 8.3, 9.1 item 8, 9.3): a
+  ;; 40-bit cold load with first-object tables is format 2022, which step 2's
+  ;; microcode asks for, refusing revision 14's 2010-2012, and which tells the
+  ;; cold boot to apply no mark bitmap
   (vwrite (+ adr sym:%sys-com-band-format)
 	  ;; not /=, which this readtable reads as = (/ escapes)
 	  (vfix (cond ((not (= word-bits 32.))
-		       (if (target-has-page-hash-table-p) 2002 2012))
+		       (cond ((target-has-page-hash-table-p) 2002)
+			     ((target-has-generations-p) 2022)
+			     (t 2012)))
 		      ((= sym:page-size #o2000) 1102)
 		      (t 0))))
   (vwrite (+ adr sym:%sys-com-gc-generation-number) (vfix 0))

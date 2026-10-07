@@ -8,7 +8,8 @@
 
 (defun high-region-report ()
   "(regions across 2^31, regions of dynamic areas below the floor that hold objects,
-regions in use, empty regions of dynamic areas below the floor), each region as
+regions in use, empty regions of dynamic areas below the floor, empty as holding nothing past
+a first-object table), each region as
 (number area-name origin length free-pointer space-type), origins octal."
   (let ((two31 (si:%make-pointer-unsigned #o20000000000))
 	(floor si:%region-floor)
@@ -34,7 +35,15 @@ regions in use, empty regions of dynamic areas below the floor), each region as
 			   (si:%pointer-lessp o floor))
 		  ;; an empty one holds no object: the oldspace region an
 		  ;; area keeps when the collection leaves it no other
-		  (if (plusp (si:region-free-pointer r))
+;		  (if (plusp (si:region-free-pointer r))
+		  ;; the generational collector (contract g3 step 2, 6.1): a
+		  ;; tenured structure region begins with its first-object
+		  ;; table, so an empty one's free pointer is the table's end
+		  ;; (fasl-table-area's kept region, 49 words), not 0
+		  (if (> (si:region-free-pointer r)
+			 (if (fboundp 'si:region-first-object-table-end)
+			     (si:region-first-object-table-end r)
+			   0))
 		      (push row low)
 		    (push row empty)))))))))
     (list across low n empty)))
