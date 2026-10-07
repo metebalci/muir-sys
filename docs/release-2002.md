@@ -459,6 +459,25 @@ Citations are of the files as this step left them.
   defining form names a compile-time definition `sys/cold/crossdefs.lisp`
   lists as `:changed` or `:new` (revision 14's `PRINTING-RANDOM-OBJECT` in
   the `:PRINT-SELF` methods of 10 files).
+- **`tools/lispm-check`'s setup waits on the machine, not on a clock**
+  (`tools/lispm-check:51-59`, `:155-236`, `:451-494`, `:671-730`, `:862`,
+  `:876-877`, `:1035`, `:1149-1152`, `:1213-1215`; `docs/lispm-check.md:44-52`,
+  `:83-84`, `:213-216`, `:234`): on a loaded host the cold boot and the setup's
+  forms took longer than their fixed limits (300 s to the TELNET banner, 120 s
+  a form) while the machine still ran, so a loaded machine reported a failure
+  at setup. The setup and the probe now wait as long as the machine gets CPU
+  time. A machine that gets none for 60 s (stopped), or that runs without
+  answering until `--setup-limit` (1800 s by default,
+  `LISPM_CHECK_SETUP_LIMIT`), is reported as a hang, exit status 3, distinct
+  from a failure (2).
+- **`tools/cross-build/run`'s wrapper race**: the step's threads that wrote
+  the same wrapper at once shared one temporary file, so one thread's
+  `os.replace` took it from under another's `chmod` and that thread raised
+  `FileNotFoundError`; each writer now has its own temporary file
+  (`tools/cross-build/run:190-198`). A thread that raises now fails its step
+  and is named (`in_threads`, `tools/cross-build/run:109-129`, used at `:594`,
+  `:649` and `:835`); before, the step judged only by the other threads'
+  results and went on.
 
 ## The generational collector
 

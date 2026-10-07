@@ -106,6 +106,28 @@ def result_of(text, script):
 def stamp():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
+def in_threads(*calls):
+    """Run each (function, args) in a thread of its own and wait for all.
+    A thread that raised fails the step, naming it: a thread's exception
+    otherwise only prints, and a step that judged by the results the other
+    threads left went on (the wrapper race failed two of the assembly's three
+    threads, and the step named only the third)."""
+    raised = []
+
+    def guarded(f, args):
+        try:
+            f(*args)
+        except BaseException as e:
+            raised.append('%s: %s: %s' % (f.__name__, type(e).__name__, e))
+            raise
+    threads = [threading.Thread(target=guarded, args=(f, tuple(args))) for f, args in calls]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if raised:
+        raise Failed('a thread of the step raised: %s' % '; '.join(raised))
+
 
 class Run:
     def __init__(self, a):
@@ -569,13 +591,9 @@ class Run:
                                         tree, 4000, keep=(keep,))
             results[name] = rc
             shutil.rmtree(tree, ignore_errors=True)
-        threads = [threading.Thread(target=one, args=a) for a in
-                   (('ucadr-1', form_uc(), 'sys'), ('ucadr-2', form_uc(), 'sys'),
-                    ('promh', form_prom, 'sys'))]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        in_threads(*[(one, a) for a in
+                     (('ucadr-1', form_uc(), 'sys'), ('ucadr-2', form_uc(), 'sys'),
+                      ('promh', form_prom, 'sys'))])
         if any(results.values()):
             raise Failed('an assembly failed: %s' % results)
         A = os.path.join(self.out, 'assemble')
@@ -628,13 +646,8 @@ class Run:
             cases = open(os.path.join(HERE, 'cases', name + '.cases')).read()
             rc, _ = self.builder_check(os.path.join(X, name), cases, self.src, 7200, keep=keep)
             results[name] = rc
-        threads = [threading.Thread(target=checks),
-                   threading.Thread(target=other, args=('site', ('home', 'site'))),
-                   threading.Thread(target=other, args=('wormch', ('home', 'sys')))]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        in_threads((checks, ()), (other, ('site', ('home', 'site'))),
+                   (other, ('wormch', ('home', 'sys'))))
         C = os.path.join(self.work, 'cross-check')
         for c in ('check3', 'check2'):
             r = os.path.join(C, c, 'result.txt') if c == 'check3' else None
@@ -819,11 +832,7 @@ class Run:
             rc, _ = self.builder_check(os.path.join(K, 'b1-cross'), cases, n5, 7200)
             results['b1-cross'] = (rc, os.path.join(K, 'b1-cross', 'home', 'cold.img'),
                                    os.path.join(self.work, 'cold-native5.img'))
-        threads = [threading.Thread(target=b1_native), threading.Thread(target=b1_cross)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        in_threads((b1_native, ()), (b1_cross, ()))
         for k, (rc, made, want) in sorted(results.items()):
             same = (rc == 0 and os.path.exists(made)
                     and open(made, 'rb').read() == open(want, 'rb').read())

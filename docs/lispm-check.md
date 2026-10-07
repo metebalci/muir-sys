@@ -9,7 +9,7 @@ cases in one listener session, printing one line per case.
 tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
                   [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
                   [--compile] [--file-server auto|device|ozd]
-                  [--engine micro|rtl] [--timeout S] [--keep]
+                  [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
                   [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 ```
 
@@ -42,7 +42,14 @@ since on rtl it otherwise listens for a debugger's cable on a TCP port. Below,
    which host its `SYS:` is on and stops unless that is the server's, logs in
    to that host, compiles a small helper that runs each case, and has the
    machine write the checkpoint at the prompt. This takes about 15 s, most of it the
-   cold boot.
+   cold boot, unloaded; on a loaded host much longer (twelve setups of System
+   2000's band at once under 24 busy processes took 680 to 914 s each, single
+   forms up to 311 s). So the setup has no limit on each step: it waits as long as the
+   machine runs, gives up as a hang (exit status 3) when the machine gets no
+   CPU time at all for 60 s (stopped), and has one hard limit on its wall
+   clock, `--setup-limit` (1800 s), which ends a machine that runs but never
+   answers, also as a hang. The probe of [the file server](#the-file-server)
+   waits the same way.
 2. **Each check** takes four free ports of its own, serves a copy of the
    tree's `sys/` and `site/` with the changed files laid over it, starts a
    private ozd, resumes the checkpoint, and loads each file (`load` of the
@@ -73,7 +80,8 @@ The copy is served the way the band reads its `SYS:` files, since a band
 boots to its prompt only with its `SYS:` host served: a band whose `SYS:` is
 on OZ served by the file device alone, or one whose `SYS:` is on HOST served
 by ozd alone, waits at boot with no TELNET server, and ozd logs "No server
-for this contact name" until the tool gives up after 300 s. So does a band
+for this contact name" until the setup gives up at `--setup-limit` and
+reports a hang (exit status 3). So does a band
 the machine cannot run: a System 1002 band for QUUX (microcode 1000) on quux
 revision 11 or later (see [Defaults](#defaults)).
 
@@ -202,7 +210,10 @@ is 0 when every case passes, 1 when a case fails or errors, and 2 when the run
 itself failed: bad arguments, a boot that did not reach the prompt, a file
 that did not load or compile (a compiler heading `<< Error ...` counts, since
 `qc-file` still writes a QFASL after a reader error), or a case with no answer
-within `--timeout` seconds (120 by default). A failed run keeps its TELNET,
+within `--timeout` seconds (120 by default). It is 3 when the machine hung in
+the setup's cold boot or the probe's: it got no CPU time for 60 s (a stopped
+machine), or ran without answering until `--setup-limit` (above). A failed
+run keeps its TELNET,
 machine and ozd logs in its run directory under the cache and prints where;
 `--keep` keeps them always.
 
@@ -220,6 +231,7 @@ Each is overridden by its flag or an environment variable.
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
 | `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
 | `--engine` | `LISPM_CHECK_ENGINE` | `micro` ([the engine](#the-engine)) |
+| `--setup-limit` | `LISPM_CHECK_SETUP_LIMIT` | 1800: the hard limit in seconds on the setup's and the probe's wall clock |
 | `--ozd-file-dates` | `LISPM_CHECK_OZD_FILE_DATES` | none: ozd's own, `utc` ([ozd's dates](#ozds-dates)) |
 | `--ozd-timezone` | `LISPM_CHECK_OZD_TIMEZONE` | none: ozd's own |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |

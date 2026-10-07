@@ -5,7 +5,7 @@ Usage:
   tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
                     [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
                     [--compile] [--file-server auto|device|ozd]
-                    [--engine micro|rtl] [--timeout S] [--keep]
+                    [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
                     [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
 
 The band runs on the simulator's executable for this line's system, MACHINE
@@ -51,9 +51,12 @@ compiler or the loader printed about it.
 Exit status: 0 if every case passes, 1 if any fails or errors, 2 if the run
 itself failed (bad arguments, a boot, a file that would not load or compile,
 where a compiler heading "<< Error ..." counts as not compiling, or a case
-that did not answer within --timeout).  A failed run keeps its run directory
-(TELNET, the machine's and ozd's logs) under the cache and says where; --keep
-keeps it always.
+that did not answer within --timeout), 3 if the machine hung in the setup's
+cold boot (or the probe's): stopped, with no CPU time for 60 s, or running
+without answering until --setup-limit (1800 s), the hard limit on the setup's
+wall clock, within which it waits as long as the machine runs, however loaded
+the host.  A failed run keeps its run directory (TELNET, the machine's and
+ozd's logs) under the cache and says where; --keep keeps it always.
 
 --files takes paths, comma separated.  A file inside the tree's sys/ is served
 at its own place and loaded by its logical name (sys/io1/time.lisp as
@@ -147,6 +150,89 @@ def now():
 
 class RunFailed(Exception):
     """The run itself failed: exit status 2."""
+
+
+class RunHung(RunFailed):
+    """The machine hung in the setup or the probe, its cold boot: exit status
+    3, distinct from a failure.  Said when the machine got no CPU time at all
+    for SETUP_STALL s (stopped), or when the setup's hard limit passed with
+    the machine running but not answering (Progress).  STOPPED: the former,
+    for which the hints about the band and its files do not apply."""
+    def __init__(self, message, stopped=False):
+        RunFailed.__init__(self, message)
+        self.stopped = stopped
+
+
+# The setup's and the probe's waits are on the machine's progress, not on a
+# fixed wall-clock limit for each step: on a loaded host the cold boot and
+# each setup form took longer than the old limits (300 s to the banner, 120 s
+# a form) while the machine still ran and later answered, so a loaded machine
+# reported false failures.  Twelve setups of System 2000's band at once under
+# 24 busy processes: 58 to 311 s a form, 680 to 914 s a setup, each finished;
+# unloaded the setup takes 16 s, 0.8 to 1.5 s a form.  No budget of the
+# machine's CPU time is safe either: with its clock on the host's (quux's
+# "timing: sync"), the machine at about 0.2x hardware executed 14 to 19
+# times the microcycles for the same setup (3.3 to 4.5 G against 0.24 G
+# unloaded, at 0.6x).  So a wait goes on while the machine gets CPU time,
+# ends as a hang at once when it gets none for SETUP_STALL s (a stopped
+# machine), and as a hang at --setup-limit, the hard limit on the setup's
+# wall clock, which still ends a machine that runs but never answers (a band
+# that never reaches its TELNET listener).
+SETUP_STALL = 60           # wall seconds with no CPU time at all: stopped
+SETUP_LIMIT = 1800         # --setup-limit's default: the hard limit, wall
+
+
+def session_cpu(sid):
+    """CPU seconds used so far by the processes of session SID (the machine
+    is started in a session of its own, so a wrapper script that runs it
+    without exec is counted with it), or None when there is none."""
+    total, found = 0, False
+    for pid in os.listdir('/proc'):
+        if not pid.isdigit():
+            continue
+        try:
+            with open('/proc/%s/stat' % pid) as f:
+                st = f.read()
+        except OSError:
+            continue
+        # the fields after the command's ")": state is the first, session
+        # the fourth, utime, stime, cutime and cstime the 12th to 15th
+        fields = st[st.rfind(')') + 2:].split()
+        if int(fields[3]) == sid:
+            found = True
+            total += sum(int(x) for x in fields[11:15])
+    return total / os.sysconf('SC_CLK_TCK') if found else None
+
+
+class Progress:
+    """A wait in the setup or the probe on the machine's answer to WHAT, by
+    the machine's progress: check() raises RunHung once the machine got no
+    CPU time at all for SETUP_STALL s (stopped), or at END, the setup's hard
+    limit (a now() value)."""
+    def __init__(self, machine, what, end):
+        self.pid, self.what, self.end = machine.proc.pid, what, end
+        self.t0 = self.t_cpu = self.t_sample = now()
+        self.cpu0 = self.cpu = session_cpu(self.pid) or 0.0
+
+    def used(self):
+        """(wall seconds, the machine's CPU seconds) since the wait began."""
+        return now() - self.t0, self.cpu - self.cpu0
+
+    def check(self):
+        t = now()
+        if t - self.t_sample >= 1:
+            self.t_sample = t
+            c = session_cpu(self.pid)
+            if c is not None and c > self.cpu:
+                self.cpu, self.t_cpu = c, t
+        if t - self.t_cpu > SETUP_STALL:
+            raise RunHung('no answer to %s, and the machine got no CPU time for %.0f s'
+                          ' (stopped?)' % (self.what, t - self.t_cpu), stopped=True)
+        if t > self.end:
+            wall, cpu = self.used()
+            raise RunHung('no answer to %s within the setup\'s hard limit, --setup-limit:'
+                          ' %.0f s on it, the machine running (%.0f s of its CPU time)'
+                          % (self.what, wall, cpu))
 
 
 # --------------------------------------------------------------------------
@@ -362,10 +448,15 @@ class OzdFileServer:
                 '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
                 '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
 
-    def connect_listener(self, machine_alive, deadline):
+    def connect_listener(self, machine_alive, deadline, progress=None):
         """Connect to the band's TELNET listener through ozd and return the
-        socket and the text read up to its banner."""
+        socket and the text read up to its banner.  With PROGRESS (the
+        setup's cold boot), its check() ends the wait, not DEADLINE."""
+        if progress:
+            deadline = progress.end
         while now() < deadline:
+            if progress:
+                progress.check()
             if not machine_alive():
                 raise RunFailed('%s exited before the TELNET banner' % MACHINE)
             if self.proc.poll() is not None:
@@ -379,8 +470,13 @@ class OzdFileServer:
                 time.sleep(0.1)
                 continue
             s.settimeout(0.2)
-            text, until = '', min(deadline, now() + 30)
+            # A connection that stays silent is given up after 30 s and made
+            # again; in the setup it is kept until ozd closes it (refused, or
+            # the band not heard for 180 s), so that a slow banner is not cut
+            text, until = '', deadline if progress else min(deadline, now() + 30)
             while now() < until:
+                if progress:
+                    progress.check()
                 try:
                     d = s.recv(4096)
                 except socket.timeout:
@@ -393,6 +489,8 @@ class OzdFileServer:
                     return s, text
             s.close()
             time.sleep(0.1)
+        if progress:
+            raise RunHung('no TELNET banner within the setup\'s limit, --setup-limit')
         raise RunFailed('no TELNET banner in time')
 
     def stop(self):
@@ -570,7 +668,7 @@ class Session:
             return None
         return m
 
-    def run(self, form, timeout):
+    def run(self, form, timeout, progress=None):
         """Evaluate form; return ('value', printed value, output before it),
         ('error', message, output before it), ('asked', the question, output
         before it), a question asked through FQUERY, which ended the form, or
@@ -582,8 +680,9 @@ class Session:
         HELPER, compiled at setup, since the listener takes 0.3 s more to
         evaluate a condition-case form than to call a compiled function.  The
         markers are printed with ~D from numbers, so the echo of the form
-        never holds them."""
-        deadline = now() + timeout
+        never holds them.  With PROGRESS (the setup's forms), its check()
+        ends the wait rather than TIMEOUT, and the time taken is logged."""
+        deadline = progress.end if progress else now() + timeout
         if self.pending is not None:
             self._settle(deadline, form)
         self.tag += 1
@@ -603,6 +702,9 @@ class Session:
             if m:
                 # what the form printed: after the echoed line, before the answer
                 out = self.buf[:m.start()].split(echo_end, 1)[-1]
+                if progress:
+                    self.log.write('\n=== %.2f answered in %.1f s, %.1f s of the machine\'s CPU time\n'
+                                   % ((now(),) + progress.used()))
                 return {'{': 'value', '!': 'error', '?': 'asked'}[m.group(1)], m.group(2), out
             m = ERROR_RE.search(self.buf)
             if m and ('(Y or N)' in self.buf[m.start():] or '\n->' in self.buf[m.start():]):
@@ -622,7 +724,9 @@ class Session:
                     self.pending = k
                     self.buf = ''
                     return 'question', q.group(1).strip(), out[:q.start()]
-            if now() > deadline:
+            if progress:
+                progress.check()
+            elif now() > deadline:
                 raise RunFailed('no answer in %g s to %s' % (timeout, oneline(form)))
             self._read()
 
@@ -755,6 +859,7 @@ def ensure_checkpoint(a, key):
         print('lispm-check: setting up a checkpoint for this band and %s, files served by %s,'
               ' engine %s (cold boot)' % (MACHINE, a.file_server, a.engine), flush=True)
         run_dir = run_dir_new('setup')
+        end = now() + a.setup_limit
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
         server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
@@ -765,25 +870,28 @@ def ensure_checkpoint(a, key):
             server.start()
             machine.start(checkpoint_out=tmp)
             try:
-                sock, _ = server.connect_listener(machine.alive, now() + 300)
+                sock, _ = server.connect_listener(
+                    machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
             except RunFailed as e:
+                if getattr(e, 'stopped', False):
+                    raise
                 # A band whose SYS: is on HOST waits at boot, with no TELNET
                 # server, when its files are not on quux's file device.
                 # Or the band is not one this machine runs: a System 1002 band
                 # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
                 # on quux revision 11 and later, which moved block-disk off
                 # 17377774, and so gives no sign but this.
-                raise RunFailed('%s: the band did not reach its TELNET prompt with its files served'
-                                ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s'
-                                % (e, a.file_server, server.login_host, MACHINE,
-                                   ' (a System 1002 band does not run on quux revision 11 and later)'
-                                   if MACHINE == 'quux' else ''))
+                raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
+                              ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s'
+                              % (e, a.file_server, server.login_host, MACHINE,
+                                 ' (a System 1002 band does not run on quux revision 11 and later)'
+                                 if MACHINE == 'quux' else ''))
             sock.settimeout(0.2)
             sess = Session(sock, log, helper=False)
             # The server must be the one the band reads SYS: from: a band
             # whose SYS: is on OZ boots with the tree on the file device too,
             # but would then load every SYS: file from nowhere.
-            r = sess.run(SYS_HOST, 120)
+            r = sess.run(SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
             if r[0] != 'value':
                 raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
             sys_host = r[1].strip('"')
@@ -794,7 +902,7 @@ def ensure_checkpoint(a, key):
             # access after a resume opens a new one rather than using a
             # connection whose ozd has gone (which closed the TELNET session).
             for form in (server.login(), HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
-                r = sess.run(form, 120)
+                r = sess.run(form, None, Progress(machine, oneline(form), end))
                 if r[0] != 'value':
                     raise RunFailed('setup: %s: %s' % (form, r[1]))
             sock.close()
@@ -924,6 +1032,7 @@ def probe_sys_host(a):
     """Boot the band cold with the tree served both ways and ask it which
     host its SYS: is on (about 15 s)."""
     run_dir = run_dir_new('probe')
+    end = now() + a.setup_limit
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
     server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
@@ -933,9 +1042,11 @@ def probe_sys_host(a):
         server.lay_out(a.tree, a.ubin)
         server.start()
         machine.start()
-        sock, _ = server.connect_listener(machine.alive, now() + 300)
+        sock, _ = server.connect_listener(
+            machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
         sock.settimeout(0.2)
-        r = Session(sock, log, helper=False).run(SYS_HOST, 120)
+        r = Session(sock, log, helper=False).run(
+            SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
         sock.close()
         if r[0] != 'value':
             raise RunFailed('probe: %s: %s' % (SYS_HOST, r[1]))
@@ -1035,6 +1146,10 @@ def main():
     p.add_argument('--file-timeout', type=float, default=900,
                    help='seconds a file may take to compile or load')
     p.add_argument('--keep', action='store_true', help='keep the run directory')
+    p.add_argument('--setup-limit', type=float,
+                   default=float(os.environ.get('LISPM_CHECK_SETUP_LIMIT') or SETUP_LIMIT),
+                   help="the hard limit in wall seconds on the setup's and the probe's cold"
+                        " boot; within it they wait as long as the machine runs (exit 3 past it)")
     p.add_argument('--ozd-file-dates', choices=('mit', 'utc'),
                    default=os.environ.get('LISPM_CHECK_OZD_FILE_DATES') or None,
                    help="ozd's --file-dates: FILE's dates in UTC (ozd's default), or at"
@@ -1095,6 +1210,9 @@ def main():
         if t_setup is not None:
             print('lispm-check: checkpoint made in %.1f s' % t_setup)
         results, t_banner, t_all = check(a, chk, cases)
+    except RunHung as e:
+        print('lispm-check: HANG: %s' % e, file=sys.stderr)
+        return 3
     except RunFailed as e:
         print('lispm-check: %s' % e, file=sys.stderr)
         return 2
