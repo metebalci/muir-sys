@@ -387,7 +387,11 @@
   ;; 32-bit band, contract g2): see SYS: SYS; UASHADOW.
   (:module shadow "SYS: SYS; UASHADOW")
   (:readfile shadow)
-  (:MODULE ASS "SYS: SYS; CADRLP")
+;  (:MODULE ASS "SYS: SYS; CADRLP")
+  ;; the target description, every parameter of the machine an assembly is
+  ;; for (contract g3 revision 15, 7), is loaded before the assembler that
+  ;; reads it: SYS: SYS; UATARGET.
+  (:module ass ("SYS: SYS; UATARGET" "SYS: SYS; CADRLP"))
   (:MODULE MAIN ("SYS: SYS; CDMP"
 		 "SYS: SYS; QWMCR"
 		 "SYS: IO; FREAD"

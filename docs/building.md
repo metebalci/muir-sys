@@ -1022,6 +1022,29 @@ At 13 every output is what it was. `tools/assembler-check` checks all of it
 revision 14's two-level page table, and the boot PROM's `promh.text`, also
 assembled at 14, refuses a machine and a microcode of another revision.
 
+**Revision 15.** `(setq ua:*hardware-revision* 15.)` assembles for QUUX's
+revision 15 (contract G3 revision 15, appendix A15b). `ua:*word-width*` and
+`ua:*hardware-revision*` name a target description, every parameter of the
+machine an assembly is for, in one place (`sys/sys/uatarget.lisp`): 32 bits at
+13 is the CADR, 40 bits at 13, 14 or 15 QUUX's revisions; the assembler and
+the `.mcr` writer read its parameters and nothing of the world they run in,
+so a 32-bit band and a 40-bit band write the same files. At 15 the
+microinstruction is 64 bits, the extension in `<63:48>`; the OA selects
+`oa-low-select` and `oa-high-select` (`<60>`, `<61>`) are names only
+revision 15 takes; the `.mcr` is the self-describing format (A15b.7: the
+format word `0x51550001`, the number of sections, then each section's 8-word
+header and its items: 6 the hardware revision, 1 the control store at 64 bits,
+2 the dispatch memory, 3 the symbol area at 40 bits with the fixnum tag, 4 A
+memory), the boot PROM's own control store section starting at 36000; and
+every assembly, `PROMH`'s too, is held to the OA select check (A15b.15,
+`check-oa-selects`), which refuses a word that writes `OA-REG-LOW` or
+`OA-REG-HIGH` unless every word that can run next selects it, a selecting
+word entered other than right after such a write, and the selects' bit rules.
+The sources' microcode has no selects yet, so it is refused at 15; with
+`(setq ua:*oa-select-check-refuses* nil)` the breaches are printed, kept in
+`ua:*oa-select-breaches*`, and the files written, for measuring only.
+`tools/assembler-check`'s `rev15`, `oa-refused` and `oa-select` check this.
+
 **Reboot before assembling again.** A second `ua:assemble-system` in the
 same band reuses the source it read the first time, even when the files have
 changed: on 2026-09-23 a second assembly after a source edit came out byte for

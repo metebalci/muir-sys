@@ -50,6 +50,8 @@ option's name (`CROSS_BUILD_BUILDER`). No path is written in the tool.
 | `--builder-prom`, `--builder-revision` | the builder's PROM (default quux's own) and revision (13) |
 | `--base-tree` | the builder's own tree with its QFASLs, a tarball (`tools/cross-check`'s `--base-tree`) |
 | `--asm-band`, `--asm-ubin`, `--asm-quux`, `--asm-revision`, `--asm-prom` | the band that assembles the microcode and PROM, its quux and PROM (default the builder, with the builder's PROM) |
+| `--asm-target` | the hardware revision the microcode and PROM are assembled for (`ua:*hardware-revision*`; default 14). At 15 the `.mcr` files are revision 15's self-describing format (contract G3 revision 15, 7) |
+| `--oa-select-check` | `refuse` (the default) or `report`: with `report` a revision-15 assembly that the OA select check would refuse is written all the same, and each assembly's case output gives the breaches by rule and the words rule 1 refuses; for measuring microcode that has no selects yet, never for a build |
 | `--previous-band`, `--previous-ubin` | revision 13's disk and `sys/ubin/` (System 2001's), for A14.13's guards when the builder is itself revision 14 |
 | `--ubin-ref` | a `sys/ubin/` the assembled `.mcr`, `.tbl` and `.locs` must equal |
 | `--quux` | muir-sim's `quux` with the new revision (14) and the file device |

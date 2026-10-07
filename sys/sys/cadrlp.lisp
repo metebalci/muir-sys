@@ -258,8 +258,16 @@
 ;;    arithmetic function other than add, sub, m+1 and m-1, which lc's adder
 ;;    serves (a14.11, contract 10.4).
 ;; set it before assembling, (setq ua:*hardware-revision* 14.).
+;; quux revision 15 (contract g3 revision 15, appendix a15b): at 15. the
+;; microinstruction is 64 bits, revision 14's word in <47:0> and the extension
+;; in <63:48>, whose oa selects, oa-low-select and oa-high-select (cadsym), only
+;; a revision-15 assembly may name; the .mcr is the self-describing format
+;; (a15b.7, qwmcr); and every assembly, the boot prom's too, is held to the oa
+;; select check (a15b.15, check-oa-selects) as well as to revision 14's.
+;; *word-width* and *hardware-revision* together name the target description,
+;; whose parameters the assembler and the writer read (sys: sys; uatarget).
 (defvar *hardware-revision* 13.
-  "The hardware revision a 40-bit assembly is for: 13. (microcode 2001) or 14. (contract g3).")
+  "The hardware revision a 40-bit assembly is for: 13. (microcode 2001), 14. or 15. (contract g3).")
 
 ;; quux revision 14: the pointer-type register's set (appendix a14.5, a14.9),
 ;; the data types whose map bits a dispatch looks up.  it must hold every type
@@ -286,7 +294,15 @@
 	     write-map-operation write-map-entry write-map-none write-map-direct-write
 	     write-map-invalidate write-map-empty
 	     pointer-type-register-0-31 pointer-type-register-32-63))
-  (putprop s t 'cons-lap-revision-14))
+;  (putprop s t 'cons-lap-revision-14))
+  ;; quux revision 15: the mark is the first revision that decodes the name,
+  ;; so that revision 15, which keeps revision 14's word, takes these too.
+  (putprop s 14. 'cons-lap-revision))
+
+;; quux revision 15 (appendix a15b.2, a15b.15): the oa selects, extension bits
+;; <60> and <61>, which only a revision-15 machine reads.
+(dolist (s '(oa-low-select oa-high-select))
+  (putprop s 15. 'cons-lap-revision))
 
 ;; quux revision 14: a word of the pointer-type register (appendix a14.9),
 ;; register-page word 222 for first 0 and 223 for first 32.: bit k is type
@@ -301,8 +317,11 @@
     word))
 
 (defun d-mem-size ()
-  "The dispatch memory's number of entries for *word-width*: 4000 at 32. bits, 10000 at 40."
-  (if (= *word-width* 40.) 10000 4000))
+;  "The dispatch memory's number of entries for *word-width*: 4000 at 32. bits, 10000 at 40."
+;  (if (= *word-width* 40.) 10000 4000))
+  ;; quux revision 15: the target description's (4000 at 32. bits, 10000 at 40.).
+  "The dispatch memory's number of entries in the target (assembly-target)."
+  (target-parameter :dispatch-memory-words))
 
 (defun cons-lap-word-value (v exp)
   "V, the value of a constant or of an a or m location's initial value, as the word that holds it.
@@ -341,15 +360,19 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	(SETQ BASE-VERSION-NUMBER (GETF INIT-STATE 'VERSION-NUMBER))
 	;; quux: a word width other than g2's two would assemble fields that
 	;; fit no machine.
-	(unless (memq *word-width* '(32. 40.))
-	  (ferror nil "~D is not a word width the micro-assembler knows: 32. or 40." *word-width*))
+;	(unless (memq *word-width* '(32. 40.))
+;	  (ferror nil "~D is not a word width the micro-assembler knows: 32. or 40." *word-width*))
 	;; quux: revision 14 is a 40-bit machine's; any other revision would
 	;; assemble words no machine decodes as written.
-	(unless (memq *hardware-revision* '(13. 14.))
-	  (ferror nil "~D is not a hardware revision the micro-assembler knows: 13. or 14."
-		  *hardware-revision*))
-	(when (and (= *hardware-revision* 14.) (not (= *word-width* 40.)))
-	  (ferror nil "Revision 14 is assembled at 40 bits, not ~D." *word-width*))
+;	(unless (memq *hardware-revision* '(13. 14.))
+;	  (ferror nil "~D is not a hardware revision the micro-assembler knows: 13. or 14."
+;		  *hardware-revision*))
+;	(when (and (= *hardware-revision* 14.) (not (= *word-width* 40.)))
+;	  (ferror nil "Revision 14 is assembled at 40 bits, not ~D." *word-width*))
+	;; quux revision 15: the pair must name a target description (sys: sys;
+	;; uatarget): 32. bits at 13. (the cadr), or 40. bits at 13., 14. or 15.;
+	;; any other is refused before anything is assembled.
+	(assembly-target)
 	(SETQ A-MEM-CREVICE-LIST NIL)
 ;	(SETQ D-MEM-FREE-BLOCKS
 ;	      (COPYTREE (GETF INIT-STATE 'D-MEM-FREE-BLOCKS
@@ -418,13 +441,19 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	'FILE-TRUENAMES-LISTIFIED FILE-TRUENAMES-LISTIFIED
 	))
 
-(DEFUN CONS-LAP-ALLOCATE-ARRAYS NIL 
-  (SETQ I-MEM (MAKE-ARRAY SI:SIZE-OF-HARDWARE-CONTROL-MEMORY)
-	A-MEM (MAKE-ARRAY 2000)
+;; quux revision 15: each memory's size is the target description's, not the
+;; assembling world's (si:size-of-hardware-control-memory) nor the read qcom's
+;; (micro-code-symbol-area-size); every target has today's sizes.
+(DEFUN CONS-LAP-ALLOCATE-ARRAYS NIL
+;  (SETQ I-MEM (MAKE-ARRAY SI:SIZE-OF-HARDWARE-CONTROL-MEMORY)
+;	A-MEM (MAKE-ARRAY 2000)
+  (setq i-mem (make-array (target-parameter :control-store-words))
+	a-mem (make-array (target-parameter :a-memory-words))
 ;	D-MEM (MAKE-ARRAY 4000))
 	;; quux: 10000 entries at 40. bits (a1.4).
 	d-mem (make-array (d-mem-size)))
-  (SETQ MICRO-CODE-SYMBOL-IMAGE (MAKE-ARRAY MICRO-CODE-SYMBOL-AREA-SIZE)))
+;  (SETQ MICRO-CODE-SYMBOL-IMAGE (MAKE-ARRAY MICRO-CODE-SYMBOL-AREA-SIZE)))
+  (setq micro-code-symbol-image (make-array (target-parameter :symbol-area-words))))
 
 (DEFUN CONS-LAP-INIT-LOCS-FROM-STATE (INIT-STATE) 
   (PROG (TEM) 
@@ -709,11 +738,17 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	  (COND (TEM (SETQ D-MEMORY-RANGE-LIST (APPEND TEM D-MEMORY-RANGE-LIST)))))
 	;; quux revision 14: the microcode is refused, before anything is
 	;; written, unless it keeps what the hardware rests on (*hardware-revision*).
-	(when (and (eql *hardware-revision* 14.) (null cons-lap-init-state))
+;	(when (and (eql *hardware-revision* 14.) (null cons-lap-init-state))
+	;; quux revision 15: revision 15 keeps revision 14's memory side, so
+	;; the target description names the checks; revision 15's oa select
+	;; check (a15b.15) runs after them.
+	(when (and (target-parameter :revision-14-checks) (null cons-lap-init-state))
 	  (check-pinned-a-locations)
 	  (check-map-bit-tables)
 	  (check-lc-writes)
 	  (check-fiddle-windows))
+	(when (and (target-parameter :oa-select-check) (null cons-lap-init-state))
+	  (check-oa-selects))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
 
 ;; quux revision 14 (appendix a14.7): the pdl buffer redirect takes its base
@@ -903,6 +938,281 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 		       (push (list* (1+ pc) starts (append taken fall)) work)
 		     (dolist (p (append taken fall)) (push (list p starts) work)))))))))))
 
+;; quux revision 15 (appendix a15b.15): the oa select check.  on revision 15
+;; oa-reg-low and oa-reg-high (functional destinations 16 and 17) are ordinary
+;; registers, and a word reads one only through its oa select, oa-low-select
+;; <60> or oa-high-select <61>, which ors the register into its fields.  the
+;; microcode was written for imod, where a write to either register modified
+;; whatever word ran next; so the check refuses every implicit oa dependency,
+;; honouring the delay slot and n:
+;;  1. every word that writes a register is followed, on every path, only by
+;;     words that select it; a write in a return's slot is refused, since what
+;;     runs next is not known;
+;;  2. every word that selects a register is entered only right after a word
+;;     that writes it: not from any other word, not at a return point, and not
+;;     at an entry point (the misc entries and others of the symbol area, the
+;;     mc linkages, location 0, and the assembly's first word);
+;;  3. at most one select a word; no select with the pdl address field (e,
+;;     <48> of an alu or byte word); no oa-low-select with a jump's hint (h,
+;;     <48>); no oa-high-select on a dispatch; oa-low-select on a dispatch
+;;     only on a dispatch-memory write without popj.
+;; it runs over the assembled i-mem and d-mem before anything is written, and
+;; before any pass that sets the extension's other fields (appendix a15b.8),
+;; so on a transferring dispatch <61:60> can only be the source's selects.
+;; how a word runs: plain (entered by a transfer, as a return point or an
+;; entry, or falling through), or as the delay slot of the word before it,
+;; which then transfers to a pending address.  a jump with n inhibits its
+;; slot when it transfers and goes at once; without n the slot runs and then
+;; the transfer; a dispatch takes n, p and r from each entry its table can
+;; give (from d-mem); a word with the popj bit makes the next word a slot with
+;; a return pending.  a word nothing static reaches (only a computed jump, as
+;; misc1a's landing) is taken to run plain, so a write there is still held to
+;; rule 1; muir-sim's shadow check sees the computed jumps at run time.
+(defvar *oa-select-check-refuses* t
+  "T: an assembly in which the OA select check finds a breach is refused (appendix a15b.15).
+NIL: the breaches are printed and kept in ua:*oa-select-breaches*, and the files are written;
+for measuring microcode that has no selects yet, never for a build.")
+
+(defvar *oa-select-breaches* nil
+  "The OA select check's breaches in the last assembly checked: (address rule text) each.")
+
+(defun oa-word (loc)
+  "The word assembled at I-MEM LOC, or nil outside the control store or where nothing was."
+  (and (numberp loc) (>= loc 0) (< loc (array-length i-mem)) (aref i-mem loc)))
+
+(defun oa-register-written (w)
+  "0 if the word W writes OA-REG-LOW, 1 if it writes OA-REG-HIGH, nil otherwise."
+  (and (memq (ldb 5302 w) '(0 3))		;an alu or byte word
+       (zerop (ldb 3101 w))			;to a functional destination
+       (let ((reg 0))
+	 (dolist (r (target-parameter :oa-registers))
+	   (when (= (ldb 2305 w) (car r)) (return reg))
+	   (setq reg (1+ reg))))))
+
+(defun oa-selects (w)
+  "The registers the word W selects: 0 for oa-low-select, 1 for oa-high-select."
+  (let ((out nil))
+    (unless (zerop (ldb (target-extension-field :oa-high-select) w)) (push 1 out))
+    (unless (zerop (ldb (target-extension-field :oa-low-select) w)) (push 0 out))
+    out))
+
+(defun oa-jump-transfers-p (w)
+  "Whether the word W is a jump that can transfer: not a control-store write (p and r), and
+not of the condition that is never true."
+  (and (= (ldb 5302 w) 1)
+       (not (and (= (ldb 1001 w) 1) (= (ldb 1101 w) 1)))
+       (not (and (= (ldb 0006 w) 47) (= (ldb 0601 w) 1)))))
+
+(defun oa-dispatch-transfers-p (w)
+  "Whether the word W is a dispatch that transfers: not a dispatch-memory write."
+  (and (= (ldb 5302 w) 2) (not (= (ldb 1202 w) 2))))
+
+(defun oa-transfer-p (w)
+  "Whether the word W transfers, or carries the popj bit."
+  (or (not (zerop (ldb 5201 w))) (oa-jump-transfers-p w) (oa-dispatch-transfers-p w)))
+
+(defun oa-dispatch-entries (w)
+  "The dispatch memory entries the transferring dispatch W can read: its address ORed with
+every value of its byte (ir<7:5> bits) or, on map bits (ir<9:8>), with bit 0."
+  (let ((base (ldb (target-parameter :dispatch-address-field) w))
+	(count (max (expt 2 (ldb 0503 w)) (if (zerop (ldb 1002 w)) 1 2)))
+	(size (array-length d-mem))
+	(out nil))
+    (dotimes (k count)
+      (push (or (aref d-mem (\ (logior base k) size)) 0) out))
+    out))
+
+(defun oa-flow (w x)
+  "How the word W at X hands on control when it runs plain, as three values: the addresses
+(or :return) that can run next, x+1 among them when it runs as W's slot; whether x+1 can
+run plain after W; and the transfers pending (addresses or :return) when x+1 runs as W's slot."
+  (let ((next nil) (plain nil) (pending nil))
+    (cond ((oa-jump-transfers-p w)
+	   (let ((target (if (= (ldb 1101 w) 1) :return (ldb 1416 w)))
+		 (conditional (not (and (= (ldb 0006 w) 47) (zerop (ldb 0601 w))))))
+	     (cond ((= (ldb 0701 w) 1)		;n: the slot inhibited when taken
+		    (push target next)
+		    (when conditional (push (1+ x) next) (setq plain t)))
+		   (t (push (1+ x) next)
+		      (push target pending)
+		      (when conditional (setq plain t))))))
+	  ((oa-dispatch-transfers-p w)
+	   (dolist (e (oa-dispatch-entries w))
+	     (let ((dest (cond ((and (= (ldb 1701 e) 1) (= (ldb 2001 e) 1)) (+ x 2))
+			       ((= (ldb 2001 e) 1) :return)
+			       (t (ldb 0016 e)))))
+	       (cond ((= (ldb 1601 e) 1) (pushnew dest next))
+		     (t (pushnew (1+ x) next)
+			(pushnew dest pending))))))
+	  ((not (zerop (ldb 5201 w)))		;popj: the next word is its slot
+	   (push (1+ x) next)
+	   (push :return pending))
+	  (t (push (1+ x) next) (setq plain t)))
+    (values next plain pending)))
+
+(defun oa-return-points (w x)
+  "The return points the calls of the word W at X push: a jump's call, or a dispatch's
+entries that call."
+  (cond ((and (oa-jump-transfers-p w) (= (ldb 1001 w) 1))
+	 (list (if (= (ldb 0701 w) 1) (1+ x) (+ x 2))))
+	((oa-dispatch-transfers-p w)
+	 (let ((out nil))
+	   (dolist (e (oa-dispatch-entries w) out)
+	     (when (and (= (ldb 1701 e) 1) (zerop (ldb 2001 e)))
+	       (pushnew (cond ((zerop (ldb 1601 e)) (+ x 2))
+			      ((= (ldb 3101 w) 1) x)	;dispatch-push-own-address
+			      (t (1+ x)))
+			out)))))))
+
+(defun oa-label-names ()
+  "An array of the I-MEM labels by location: the first in alphabetical order where several
+name one location."
+  (let ((names (make-array (array-length i-mem))))
+    (mapatoms #'(lambda (s)
+		  ;; a user symbol's value is a list (i-mem (field ...)) for a
+		  ;; label, a number for an assigned value
+		  (let ((loc (and (consp (get s 'cons-lap-user-symbol)) (i-mem-symbol-location s))))
+		    (when (and (numberp loc) (>= loc 0) (< loc (array-length names))
+			       (or (null (aref names loc))
+				   (string-lessp (symbol-name s) (symbol-name (aref names loc)))))
+		      (setf (aref names loc) s))))
+	      (find-package "UA") nil)
+    names))
+
+(defun oa-word-name (loc names)
+  "I-MEM LOC with the nearest label at or below it, as label+offset."
+  (do ((l loc (1- l))) ((< l 0) (format nil "I-MEM ~O" loc))
+    (when (aref names l)
+      (return (if (= l loc)
+		  (format nil "I-MEM ~O (~A)" loc (aref names l))
+		(format nil "I-MEM ~O (~A+~O)" loc (aref names l) (- loc l)))))))
+
+(defun oa-next (x w plain pending)
+  "The words that can run right after the word W at X: its pending transfers when it runs as
+a slot, and where it hands on control when it runs plain.  A word that runs only as a slot
+hands on to its pending transfers alone, unless it transfers itself."
+  (let ((out (copylist (aref pending x))))
+    (when (or (aref plain x) (null (aref pending x)) (oa-transfer-p w))
+      (dolist (s (oa-flow w x)) (pushnew s out)))
+    out))
+
+(defun oa-select-breaches ()
+  "The OA select check's breaches in the assembled I-MEM and D-MEM: (address rule text) each."
+  (let* ((n (array-length i-mem))
+	 (names (oa-label-names))
+	 (entered (make-array n))		;:target, :return-point or :entry
+	 (plain (make-array n))
+	 (pending (make-array n))
+	 (preds (make-array n))
+	 (register-names '("OA-REG-LOW" "OA-REG-HIGH"))
+	 (select-names '("oa-low-select" "oa-high-select"))
+	 (breaches nil)
+	 (first nil))
+    ;; the ways in other than falling through: transfers, return points, entries
+    (dotimes (x n)
+      (let ((w (aref i-mem x)))
+	(when w
+	  (or first (setq first x))
+	  (let* ((flow (multiple-value-list (oa-flow w x)))
+		 (next (first flow)) (pend (third flow)))
+	    (dolist (s (append next pend))
+	      (when (and (numberp s) (not (= s (1+ x))) (oa-word s) (null (aref entered s)))
+		(setf (aref entered s) :target))))
+	  (dolist (r (oa-return-points w x))
+	    (when (oa-word r) (setf (aref entered r) :return-point))))))
+    (dotimes (k (array-length micro-code-symbol-image))
+      (let ((loc (aref micro-code-symbol-image k)))
+	(when (oa-word loc) (setf (aref entered loc) :entry))))
+    (dolist (e mc-linkage-alist)
+      (when (and (eq (cadr e) 'i) (oa-word (caddr e)))
+	(setf (aref entered (caddr e)) :entry)))
+    (dolist (loc (list 0 first))
+      (when (oa-word loc) (setf (aref entered loc) :entry)))
+    ;; how each word runs, in address order, from the word before it: a word
+    ;; known to run only as a slot hands on to its pending transfers alone
+    (dotimes (x n)
+      (when (aref i-mem x)
+	(when (aref entered x) (setf (aref plain x) t))
+	(when (and (> x 0) (aref i-mem (1- x))
+		   (or (aref plain (1- x)) (null (aref pending (1- x)))))
+	  (let* ((flow (multiple-value-list (oa-flow (aref i-mem (1- x)) (1- x))))
+		 (runs-plain (second flow)) (pend (third flow)))
+	    (when runs-plain (setf (aref plain x) t))
+	    (dolist (p pend) (pushnew p (aref pending x)))))))
+    ;; what can run right before each word
+    (dotimes (x n)
+      (let ((w (aref i-mem x)))
+	(when w
+	  (dolist (s (oa-next x w plain pending))
+	    (when (oa-word s) (pushnew x (aref preds s)))))))
+    (dotimes (x n)
+      (let ((w (aref i-mem x)))
+	(when w
+	  ;; rule 1
+	  (let ((reg (oa-register-written w)))
+	    (when reg
+	      (dolist (s (oa-next x w plain pending))
+		(cond ((eq s :return)
+		       (push (list x 1 (format nil "~A writes ~A in a return's slot: what runs next is not known (rule 1)"
+					       (oa-word-name x names) (nth reg register-names)))
+			     breaches))
+		      ((null (oa-word s))
+		       (push (list x 1 (format nil "~A writes ~A and runs on into I-MEM ~O, where nothing is assembled (rule 1)"
+					       (oa-word-name x names) (nth reg register-names) s))
+			     breaches))
+		      ((not (memq reg (oa-selects (aref i-mem s))))
+		       (push (list x 1 (format nil "~A writes ~A, and ~A, which can run next, has no ~A (rule 1)"
+					       (oa-word-name x names) (nth reg register-names)
+					       (oa-word-name s names) (nth reg select-names)))
+			     breaches))))))
+	  ;; rule 2
+	  (dolist (reg (oa-selects w))
+	    (when (memq (aref entered x) '(:return-point :entry))
+	      (push (list x 2 (format nil "~A has ~A and is ~:[an entry point~;a return point~] (rule 2)"
+				      (oa-word-name x names) (nth reg select-names)
+				      (eq (aref entered x) :return-point)))
+		    breaches))
+	    (dolist (p (aref preds x))
+	      (unless (eql (oa-register-written (aref i-mem p)) reg)
+		(push (list x 2 (format nil "~A has ~A and can run right after ~A, which does not write ~A (rule 2)"
+					(oa-word-name x names) (nth reg select-names)
+					(oa-word-name p names) (nth reg register-names)))
+		      breaches))))
+	  ;; rule 3
+	  (let ((selects (oa-selects w)) (class (ldb 5302 w)) (name (oa-word-name x names)))
+	    (when (cdr selects)
+	      (push (list x 3 (format nil "~A has both oa selects (rule 3)" name)) breaches))
+	    (when (and selects (memq class '(0 3))
+		       (not (zerop (ldb (target-extension-field :pdl-field-present) w))))
+	      (push (list x 3 (format nil "~A has an oa select and the PDL address field (rule 3)" name))
+		    breaches))
+	    (when (and (memq 0 selects) (= class 1)
+		       (not (zerop (ldb (target-extension-field :hint) w))))
+	      (push (list x 3 (format nil "~A has oa-low-select and the hint (rule 3)" name)) breaches))
+	    (when (and (memq 1 selects) (= class 2))
+	      (push (list x 3 (format nil "~A is a dispatch with oa-high-select (rule 3)" name)) breaches))
+	    (when (and (memq 0 selects) (= class 2)
+		       (or (not (= (ldb 1202 w) 2)) (not (zerop (ldb 5201 w)))))
+	      (push (list x 3 (format nil "~A has oa-low-select on a dispatch that is not a dispatch-memory write without popj (rule 3)"
+				      name))
+		    breaches))))))
+    (nreverse breaches)))
+
+(defun check-oa-selects ()
+  "The OA select check (appendix a15b.15) on the assembled I-MEM and D-MEM: prints each breach,
+keeps them in ua:*oa-select-breaches*, and refuses the assembly if there is one, unless
+ua:*oa-select-check-refuses* is nil."
+  (let ((breaches (oa-select-breaches)))
+    (setq *oa-select-breaches* breaches)
+    (dolist (b breaches)
+      (format t "~&OA select check: ~A~%" (caddr b)))
+    (when breaches
+      (format t "~&OA select check: ~D breach~:[~;es~]~%" (length breaches) (cdr breaches))
+      (when *oa-select-check-refuses*
+	(ferror nil "The OA select check refuses this assembly (appendix a15b.15), ~D breach~:[~;es~]; the first: ~A"
+		(length breaches) (cdr breaches) (caddr (car breaches)))))
+    breaches))
+
 (DEFUN FILE-TEST-ALWAYS (F1 F2) F1 F2 T)
 
 ;This is used in reading in the DEFMIC file.
@@ -976,6 +1286,10 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 		      (CDR INITIAL-D-MEM-FREE-BLOCKS)
 		      (CDR D-MEM-FREE-BLOCKS))))
 	  (COND (TEM (SETQ D-MEMORY-RANGE-LIST (APPEND TEM D-MEMORY-RANGE-LIST)))))
+	;; quux revision 15: the boot prom, which ua:assemble assembles through
+	;; here, is held to the oa select check (a15b.15) as the microcode is.
+	(when (and (target-parameter :oa-select-check) (null cons-lap-init-state))
+	  (check-oa-selects))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
 
 (DEFUN WRITE-ERROR-TABLE (FN)
@@ -1309,9 +1623,16 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 (defun cons-lap-symeval (sym)
   (let ((v (get sym 'cons-lap-sym)))
     (cond ((null v) (get sym 'cons-lap-user-symbol))
-	  ((and (not (eql *hardware-revision* 14.)) (get sym 'cons-lap-revision-14))
-	   (ferror nil "~S is revision 14's: this assembly is for revision ~D (ua:*hardware-revision*)."
-		   sym *hardware-revision*))
+;	  ((and (not (eql *hardware-revision* 14.)) (get sym 'cons-lap-revision-14))
+;	   (ferror nil "~S is revision 14's: this assembly is for revision ~D (ua:*hardware-revision*)."
+;		   sym *hardware-revision*))
+	  ;; quux revision 15: a name is refused below the first revision that
+	  ;; decodes it (cons-lap-revision: 14 for revision 14's, 15 for the oa
+	  ;; selects), by the target's revision, so revision 15 takes 14's.
+	  ((and (get sym 'cons-lap-revision)
+		(< (target-parameter :revision) (get sym 'cons-lap-revision)))
+	   (ferror nil "~S is revision ~D's: this assembly is for revision ~D (ua:*hardware-revision*)."
+		   sym (get sym 'cons-lap-revision) *hardware-revision*))
 	  (t v))))
 
 (DEFUN CONS-LAP-LISP-SYMEVAL (SYM)
@@ -1368,7 +1689,10 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 			   (EQ LOCALITY 'D-MEM))
 ;		      (SETQ D-MEM-LOC (LDB 1413 (CONS-LAP-ARG-EVAL WD)))
 		      ;; quux: the address is ir<22:12>, and ir<23:12> at 40. bits (a1.4).
-		      (setq d-mem-loc (ldb (if (= *word-width* 40.) 1414 1413)
+;		      (setq d-mem-loc (ldb (if (= *word-width* 40.) 1414 1413)
+;					   (cons-lap-arg-eval wd)))
+		      ;; quux revision 15: the field is the target description's.
+		      (setq d-mem-loc (ldb (target-parameter :dispatch-address-field)
 					   (cons-lap-arg-eval wd)))
 		      (SETQ DISPATCH-ARM NIL))
 		     ((NOT (EQUAL 
@@ -1725,8 +2049,11 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
        (SETQ INST 200000000000000)
        ;; quux: condition 12, ir<5:0> 52 (condition mode, m <= a unsigned), is
        ;; revision 14's; revision 13 decodes it as its ir<2:0>, condition 2.
+;       (when (and (= (logand combined-value 77) 52)
+;		  (not (eql *hardware-revision* 14.)))
+       ;; quux revision 15: revision 14 and later decode it (the target's revision).
        (when (and (= (logand combined-value 77) 52)
-		  (not (eql *hardware-revision* 14.)))
+		  (< (target-parameter :revision) 14.))
 	 (ferror nil "Condition 12 (m <= a, unsigned) is revision 14's: this assembly is for revision ~D."
 		 *hardware-revision*))
        (SETQ T1 (LOGAND 6077 COMBINED-VALUE))

@@ -506,10 +506,15 @@ ARGS-INFO = ~O~%"
 	     (CNT (CADR R) (1- CNT)))
 	    (( CNT 0))
 	  (WHEN (SETQ TEM (AREF ARRAY ADR))
-	    (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES
-			1 ADR
-			(%LOGDPB (LDB 4020 TEM) 1020 (LDB 3010 TEM))	;Assure no bignums or
-			(%LOGDPB (LDB 1020 TEM) 1020 (LDB 0010 TEM)))))));sign bit lossage
+;	    (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES
+;			1 ADR
+;			(%LOGDPB (LDB 4020 TEM) 1020 (LDB 3010 TEM))	;Assure no bignums or
+;			(%LOGDPB (LDB 1020 TEM) 1020 (LDB 0010 TEM)))))));sign bit lossage
+	    ;; quux revision 15: the word's two halves are the target
+	    ;; description's (control-store-word-halves): <47:24> and <23:0>
+	    ;; as before, <63:32> and <31:0> on revision 15 (appendix a15b.4).
+	    (multiple-value-bind (d-hi d-low) (control-store-word-halves tem)
+	      (si:%write-internal-processor-memories 1 adr d-hi d-low))))))
     (LET ((ARRAY (UCODE-IMAGE-DISPATCH-MEMORY-ARRAY IMAGE))
 	  (RANGE-LIST (GETF AS 'D-MEMORY-RANGE-LIST)))
       (DOLIST (R RANGE-LIST)
@@ -618,9 +623,13 @@ ARGS-INFO = ~O~%"
   (LET ((ARRAY (UCODE-IMAGE-CONTROL-MEMORY-ARRAY IMAGE)))
     (DOTIMES (ADR (ARRAY-LENGTH ARRAY))
       (WHEN (SETQ TEM (AREF ARRAY ADR))
-      (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 1 ADR
-		(%LOGDPB (LDB 4020 TEM) 1020 (LDB 3010 TEM))  ;Assure no bignums or
-		(%LOGDPB (LDB 1020 TEM) 1020 (LDB 0010 TEM)))))) ;sign bit lossage
+;      (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 1 ADR
+;		(%LOGDPB (LDB 4020 TEM) 1020 (LDB 3010 TEM))  ;Assure no bignums or
+;		(%LOGDPB (LDB 1020 TEM) 1020 (LDB 0010 TEM)))))) ;sign bit lossage
+	;; quux revision 15: the halves are the target description's, as in
+	;; load-module.
+	(multiple-value-bind (d-hi d-low) (control-store-word-halves tem)
+	  (si:%write-internal-processor-memories 1 adr d-hi d-low)))))
   ;doesn't load RPN bits properly
   (LET ((ARRAY (UCODE-IMAGE-DISPATCH-MEMORY-ARRAY IMAGE)))
     (DO ((ADR 0 (1+ ADR))
@@ -816,6 +825,11 @@ One element of ARRAY goes into each register."
 	(FILENAME (SEND (FS:PARSE-PATHNAME "SYS: UBIN; UCADR")
 			     ':NEW-TYPE-AND-VERSION "MCR" VERSION)))
     (SETF (UCODE-IMAGE-VERSION IMAGE) VERSION-NUMBER)
+    ;; quux revision 15: the target description's self-describing .mcr
+    ;; (appendix a15b.7) is read by read-mcr-sections; mit's sections below.
+    (when (eq (target-parameter :mcr-format) :self-describing)
+      (with-open-file (stream filename ':direction ':input ':characters nil ':byte-size 16.)
+	(return-from read-mcr-file (read-mcr-sections stream image))))
     (WITH-OPEN-FILE (STREAM FILENAME ':DIRECTION ':INPUT ':CHARACTERS NIL ':BYTE-SIZE 16.)
       (DO (HCODE LCODE HADR LADR HCOUNT LCOUNT HD LD UDSP-NBLKS UDSP-RELBLK)
 	  (())
@@ -871,6 +885,75 @@ One element of ARRAY goes into each register."
 			    (DPB (SEND STREAM ':TYI) 0020 0)))
 		 (SETF (AREF (UCODE-IMAGE-A-MEMORY-LOCATION-IN-IMAGE IMAGE) LADR) 1)
 		 (INCF LADR))))))))
+
+;; quux revision 15 (contract g3 revision 15, 7; appendix a15b.7): the
+;; self-describing .mcr read into a ucode image, every section's shape held to
+;; the target description's (sys: sys; uatarget) and the image's memories made
+;; the target's sizes, so that the control store's 64-bit words, the dispatch
+;; memory's 4096 entries and a memory's 40-bit words fit.  the file is in
+;; partition order: each 32-bit word little-endian, its low 16 bits first.
+(defun read-mcr-word (stream)
+  "One 32-bit word of a .mcr in partition order from STREAM, a stream of 16-bit bytes."
+  (let* ((low (send stream ':tyi)) (high (send stream ':tyi)))
+    (unless (and low high)
+      (ferror nil "The .mcr ends inside a word."))
+    (+ low (ash high 16.))))
+
+(defun read-mcr-sections (stream image)
+  "Reads the self-describing .mcr on STREAM (16-bit bytes) into IMAGE, refusing a format word,
+a section order, a width or a padding bit other than the target description's, and returns IMAGE."
+  (let ((sections (target-parameter :mcr-sections))
+	(rank -1))
+    (unless (= (read-mcr-word stream) (target-parameter :mcr-format-word))
+      (ferror nil "The .mcr does not start with the format word ~O." (target-parameter :mcr-format-word)))
+    (setf (ucode-image-control-memory-array image)
+	  (make-array (target-parameter :control-store-words)))
+    (setf (ucode-image-dispatch-memory-array image)
+	  (make-array (target-parameter :dispatch-memory-words)))
+    (setf (ucode-image-a-memory-array image)
+	  (make-array (target-parameter :a-memory-words)))
+    (setf (ucode-image-a-memory-location-in-image image)
+	  (make-array (target-parameter :a-memory-words) ':type 'art-1b))
+    (dotimes (k (read-mcr-word stream))
+      (let* ((type (read-mcr-word stream))
+	     (items (read-mcr-word stream))
+	     (actual (read-mcr-word stream))
+	     (storage (read-mcr-word stream))
+	     (start (read-mcr-word stream))
+	     (unused (list (read-mcr-word stream) (read-mcr-word stream) (read-mcr-word stream)))
+	     (spec (assq type sections))
+	     (r (and spec (find-position-in-list spec sections))))
+	(cond ((null spec)
+	       (ferror nil "Section ~D's type ~D is not the target's." k type))
+	      ((and (zerop k) (not (eq spec (car sections))))
+	       (ferror nil "The first section is type ~D, not ~D." type (car (car sections))))
+	      ((not (> r rank))
+	       (ferror nil "Section type ~D is out of the order ~S." type (mapcar #'car sections)))
+	      ((not (= actual (second spec)))
+	       (ferror nil "Section type ~D is ~D bits, not the target's ~D." type actual (second spec)))
+	      ((or (not (zerop (\ storage 32.))) (< storage actual))
+	       (ferror nil "Section type ~D's storage width ~D is not a multiple of 32 at least ~D."
+		       type storage actual))
+	      ((not (equal unused '(0 0 0)))
+	       (ferror nil "Section type ~D's unused header words are ~S, not zero." type unused)))
+	(setq rank r)
+	(dotimes (i items)
+	  (let ((item 0))
+	    (dotimes (j (truncate storage 32.))
+	      (setq item (+ item (ash (read-mcr-word stream) (* 32. j)))))
+	    (unless (< item (expt 2 actual))
+	      (ferror nil "Section type ~D's item ~O has a padding bit set." type (+ start i)))
+	    (selectq type
+	      (6 (unless (eql item (target-parameter :hardware-revision))
+		   (ferror nil "The .mcr is for hardware revision ~D, the target ~D."
+			   item (target-parameter :hardware-revision))))
+	      (1 (setf (aref (ucode-image-control-memory-array image) (+ start i)) item))
+	      (2 (setf (aref (ucode-image-dispatch-memory-array image) (+ start i)) (ldb 0021 item)))
+	      (3 (setf (aref (ucode-image-entry-points-array image) i)
+		       (logand item (1- (expt 2 32.)))))
+	      (4 (setf (aref (ucode-image-a-memory-array image) (+ start i)) item)
+		 (setf (aref (ucode-image-a-memory-location-in-image image) (+ start i)) 1)))))))
+    image))
 
 ;;; Following code adopted from CC.  Eventually, it would be nice for CC
 ;;;to be able to operate interchangably on either a ucode-image, ucode-state

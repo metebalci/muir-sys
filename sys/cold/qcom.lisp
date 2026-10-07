@@ -606,6 +606,11 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
   ;;   TRAP-ON-EXIT, ADI-PRESENT, MICRO-STACK-SAVED, BINDING-BLOCK-PUSHED,
   ;;   ENVIRONMENT-POINTER-POINTS-HERE, or function exit/entry metering is enabled,
   ;;   or this frame just needs to be unwound.
+  ;; this tree neither sets nor reads it: no name refers to it in sys/, no
+  ;; lisp code takes the byte 3001 of a call state, and no microcode word tests
+  ;; the call state's <24> (promh's two (byte-field 1 30) tests are of q-r in
+  ;; its self-test).  revision 15's hardware reads no call-state bit either,
+  ;; so nothing depends on it.
   %%LP-CLS-ATTENTION 3001
   ;; If set, need not compute SELF-MAPPING-TABLE
   ;;  because our caller has done so.
