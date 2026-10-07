@@ -5,10 +5,19 @@
 ; of System 2002 whose floor is the default.
 (rev14s-word #o224) => 0
 (= si:%region-floor (si:region-floor-default)) => T
-(third (setq *r* (rev14s-straddle working-storage-area :list))) => T
+; the generational collector (contract G3 step 2): WORKING-STORAGE-AREA is
+; ephemeral, its conses in eden above 2^31 and never in a region the floor
+; places, so the run straddles a dynamic list area of its own, tenured, as
+; working storage was, and the workloads cons their lists there, with young
+; collections on (lisp/rev14-straddle.lisp, REV14S-LIST-AREA)
+;(third (setq *r* (rev14s-straddle working-storage-area :list))) => T
+(third (setq *r* (rev14s-straddle (rev14s-list-area) :list))) => T
 (= si:%region-floor (si:region-floor-default)) => T
-(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) working-storage-area :list 256.)) *rev14s-two31*) => T
-(let ((l (make-list 1000))) (list (= (%region-number l) (first *r*)) (si:%pointer-lessp (%pointer (nthcdr 999 l)) *rev14s-two31*))) => (T NIL)
+;(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) working-storage-area :list 256.)) *rev14s-two31*) => T
+;(let ((l (make-list 1000))) (list (= (%region-number l) (first *r*)) (si:%pointer-lessp (%pointer (nthcdr 999 l)) *rev14s-two31*))) => (T NIL)
+(si:%pointer-lessp (si:%make-pointer-unsigned (rev14s-fill-below (first *r*) (rev14s-list-area) :list 256.)) *rev14s-two31*) => T
+(let ((l (let ((default-cons-area (rev14s-list-area))) (make-list 1000)))) (list (= (%region-number l) (first *r*)) (si:%pointer-lessp (%pointer (nthcdr 999 l)) *rev14s-two31*))) => (T NIL)
 (rev14s-compile-workloads) => T
-(rev14s-workloads) => NIL
+;(rev14s-workloads) => NIL
+(let ((default-cons-area (rev14s-list-area))) (rev14s-workloads)) => NIL
 (rev14s-word #o224) => 0

@@ -63,6 +63,18 @@ when it is less.  Returns (the region, its origin unsigned, across-p)."
     (let ((r (rev14s-region-of x)))
       (list r (si:%pointer-unsigned (si:region-origin r)) (rev14s-across-p r)))))
 
+;; the generational collector (contract g3 step 2, 3.3): working-storage-area
+;; is ephemeral, so its conses go to eden, in ephemeral space above 2^31, and
+;; never to a region the floor places: its next list region cannot be made to
+;; lie across 2^31.  the list straddle run uses a dynamic list area of its own
+;; instead, tenured, as working storage was before step 2, and conses the
+;; workloads' lists there, with young collections on for the rest.
+(defvar *rev14s-list-area* nil)
+(defun rev14s-list-area ()
+  (or *rev14s-list-area*
+      (setq *rev14s-list-area*
+	    (make-area :name 'rev14s-list :gc :dynamic :representation :list))))
+
 (defun rev14s-free-address (region)
   (%pointer-plus (si:region-origin region) (si:region-free-pointer region)))
 

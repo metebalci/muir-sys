@@ -51,7 +51,11 @@ that every region it takes from then on lies in ephemeral space."
       (bitblt tv:alu-seta 480 200 b 0 8 b 0 0) (bitblt tv:alu-xor 480 200 b 0 0 b 5 8))))
 
 ;;; the stores the setter is for: old objects made to point to young ones
-(defvar *rev14e-old* (make-array 2000 :area working-storage-area))
+;(defvar *rev14e-old* (make-array 2000 :area working-storage-area))
+;; the old array is made in a dynamic area of its own: under the generational
+;; collector working-storage-area is ephemeral, and an array made there is
+;; young, which the control case finds (contract g3 step 2, 3.3)
+(defvar *rev14e-old* (make-array 2000 :area (make-area :name 'rev14e-old :gc :dynamic)))
 (defun rev14e-old-to-young (n)
   "N stores of young objects into an old array, and into an old symbol's value."
   (dotimes (i n)

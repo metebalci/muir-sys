@@ -895,3 +895,16 @@ objects young) changed the save, the band's formats and the boot.
   `INTEGER-DECODE-FLOAT`, whose `ABS` of a subnormal signalled it too; on
   such a builder a single's bits are now its own field. Neither changes a
   normal single's bits.
+- **Revision 14's ephemeral and list straddle checks run under the
+  generational collector** (`tools/system-check/`): `rev14-ephemeral` read
+  the setter's enable (word 221) as 0, revision 14's boot, which step 2's
+  microcode turns on at every start, and made its old array in
+  `WORKING-STORAGE-AREA`, now ephemeral, so the array was young; it now
+  expects 1 and makes the array in a dynamic area of its own
+  (`cases/rev14-ephemeral.cases`, `lisp/rev14-ephemeral.lisp:54`).
+  `rev14-straddle-working-storage` placed `WORKING-STORAGE-AREA`'s next list
+  region across 2^31, but an ephemeral area's conses go to eden, above 2^31,
+  never to a region the floor places: it straddles a dynamic list area of its
+  own instead and conses the workloads' lists there (`REV14S-LIST-AREA`,
+  `lisp/rev14-straddle.lisp`). Before, 2 failures each on step 2's band; after,
+  35 of 35 and 9 of 9.

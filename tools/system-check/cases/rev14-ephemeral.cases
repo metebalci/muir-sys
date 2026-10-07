@@ -4,7 +4,11 @@
 ; 14 and a band of System 2002.  Its last case prints the pages whose entry has
 ; <19>, for the comparison with a replay of the run's stores (README.md).
 (rev14e-word #o224) => 0
-(rev14e-word #o221) => 0
+; the setter's enable (word 221): 0 at revision 14's boot, which this run
+; turned on itself; the generational collector's microcode turns it on at
+; every start (contract G3 step 2, 8.3.5)
+;(rev14e-word #o221) => 0
+(rev14e-word #o221) => 1
 (rev14e-bad-regions) => NIL
 ; the default cons area and the bignums' (si:number-cons-area) the ephemeral area
 (progn (rev14e-ephemeral-area) (setq *rev14e-nca* si:number-cons-area default-cons-area *rev14e-area* si:number-cons-area *rev14e-area*) (rev14e-enable t)) => 1
