@@ -946,3 +946,8 @@ loader's; the microcode's selects and the boot PROM's new reader follow.
   fixnum is narrower than a half. `READ-MCR-FILE` reads revision 15's
   `.mcr` (`:830`, `read-mcr-sections`, `:902`), holding its format word, its
   sections' order and widths and its padding to the target's.
+- **`%%LP-CLS-ATTENTION` is documented as unused** (`sys/cold/qcom.lisp:609`):
+  nothing in this tree sets or reads the call state's attention bit, `<24>`
+  (no name refers to it, no Lisp code takes the byte `3001` of a call state,
+  and no microcode word tests that bit; the PROM's two `(byte-field 1 30)`
+  tests are of Q-R in its self-test), and revision 15 reads no call-state bit.
