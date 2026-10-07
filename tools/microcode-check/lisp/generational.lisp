@@ -110,6 +110,37 @@
   (gc-reclaim-oldspace)
   t)
 
+;;; item 5: a structure-forwarded husk in a tenured region.  an array with a
+;;; leader, tenured, grown by copying (adjust-array-size): its new copy is made
+;;; in eden, and the husk's leader words, body-forwards, come before its
+;;; header's header-forward to the copy.  the copy, held only by a local, is
+;;; transported by the flip (the pdl buffer is a root), so its old words are
+;;; gc-forwards when the walk scans the husk's page: following a leader
+;;; word's body-forward through the header without transporting it halted the
+;;; machine in illop (scav-walk-words; a compile of the system on step 2's
+;;; first band), and the case gets no answer.
+(defvar *gen-husk* nil)
+(defun gen-husk-leader ()
+  "(the array's generation once tenured, its copy's after growing, the leader's sum after
+two young collections)"
+  (let ((a (make-array 3000 :type 'art-16b :leader-length 8 :area (gen-eph-area)))
+	(pad (make-array 10 :type 'art-16b :area (gen-eph-area))))
+    (dotimes (i 8) (setf (array-leader a i) (gen-list (1+ i) (gen-eph-area))))
+    ;; one list holds the array and a pad, so that each collection transports
+    ;; the pad right after the array: tenured, the array is then not at the
+    ;; end of its region, and adjust-array-size copies it (at the end it
+    ;; grows in place and makes no husk)
+    (setq *gen-husk* (list a pad))
+    (setq a nil pad nil)
+    (dotimes (k 4) (gen-collect))
+    (let* ((gen (gen-generation (car *gen-husk*)))
+	   (c (adjust-array-size (car *gen-husk*) 4000))
+	   (copy-gen (gen-generation c)))
+      (setq *gen-husk* nil)
+      (gen-collect)
+      (gen-collect)
+      (list gen copy-gen (loop for i below 8 sum (gen-sum (array-leader c i)))))))
+
 ;;; item 7: the A-memory fixnums
 (defun gen-a-memory ()
   "Whether A 143 and 144 hold fixnums, and A 145's fixnum, the pretenuring threshold."

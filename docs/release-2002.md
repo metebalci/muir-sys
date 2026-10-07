@@ -525,6 +525,27 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
   first: after a scanned page the region loop runs again if the transporter
   has consed; when the walk is done the region loop runs once more, and only
   then is `%GC-FLIP-READY` set (`SCAV3`, `SCAV5`).
+- **The marked-page walk passes over a husk's body-forwards**
+  (`sys/ucadr/uc-storage-allocation.lisp:860-889`, `SCAV-WALK-WORDS`).
+  ADJUST-ARRAY-SIZE grows an array that is not at the end of its region by
+  copying it, and STRUCTURE-FORWARD leaves a husk: a header-forward to the
+  new copy in its header, a body-forward to that header in every other
+  word, the leader's before the header. In a young collection the new copy
+  of a tenured array, made in eden, is in oldspace. The walk dispatched every
+  word through `TRANSPORT-SCAV`, so it met a leader word's body-forward
+  before the header-forward and followed it through the header-forward to
+  the new copy without transporting it first; when the flip had already
+  transported that copy (held by a local: the PDL buffer is a root), the
+  word there was a GC-forward and the machine halted in ILLOP at
+  `SCAV-WALK-WORDS` (native5's compile of the system, the cross build's
+  route on step 2's first band). A body-forward points into its own tenured
+  husk, never at a young object, so the walk now passes over it; the husk's
+  header-forward is dispatched as any word. Microcode 2002's files changed
+  again: `ucadr.mcr`
+  `826c766ca53ca5d4aa5c282c52dfe6b24cd50c5f7d878f03dc362063df9dfc90`,
+  `.tbl` `25c8d252cf6c9a6b062c9c6edfaa356ed8ed65cc7ccc40b7337c1d988173c552`,
+  `.locs` `f1a24e3e905959d764f586133d6a841e54ea64bf430e2b9ebaced399e83651c0`;
+  `promh.mcr` is unchanged.
 - **The setter's enable at every start** (8.3.5; item 6): INITIAL-MAP writes
   register-page word 221 = 1 after the pointer-type register
   (`uc-cold-disk.lisp`).
@@ -556,7 +577,9 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
 - **Checks**: `tools/microcode-check` gains `generational` (items 1-7: the
   three A-memory fixnums, the setter's enable, allocation by generation and
   pretenuring, the first-object table, the young flip, ages by the promotion
-  table, and C1-C5, C7, C8 and C18's microcode parts), `generational-save`
+  table, C1-C5, C7, C8 and C18's microcode parts, and a husk's leader met by
+  the walk, `gen-husk-leader`, which gets no answer on the walk without the
+  change above), `generational-save`
   (item 8: a session, a save and a boot), `generational-static` (item 7 in the
   symbol table, and against a qcom that names them) and
   `generational-mutants` (a partial fix of each item planted and assembled),

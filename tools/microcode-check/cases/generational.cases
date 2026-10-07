@@ -74,6 +74,11 @@
 ; item 3: an extra-PDL bignum stored during a collection goes to its area's
 ; allocation generation, eden, and survives (C18)
 (si:gen-c18) => (1 T)
+; item 5: a tenured array with a leader, grown by copying, its copy in eden
+; held only by a local: the walk meets the husk's leader words, body-forwards,
+; before its header-forward, and must not follow them into the copy's
+; oldspace words (it halted in illop, at scav-walk-words, with no answer)
+(si:gen-husk-leader) => (0 1 84)
 ; register-page word 224, the guarded write-backs refused, is 0
 (si:gen-register #o224) => 0
 ; item 2: an object as big as its area's regions fits a new region, table

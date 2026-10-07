@@ -857,12 +857,25 @@ scav-walk-page-clear				;no young pointer left: <19> 0
 ;; left in the page (md, or read again if the transporter followed a
 ;; forwarding pointer, vma moved) is tested, and a young pointer sets
 ;; a-scav-walk-young.  m-e is reduced by the words.  clobbers tems, vma, md.
+;; a body-forward is not dispatched: it is a word of a structure-forwarded
+;; husk (adjust-array-size growing a tenured array by copying it), and
+;; trans-bfwd would follow it through the husk's header-forward to the word
+;; in the new copy without transporting the header-forward first.  in a young
+;; collection the new copy is young, in oldspace, and an array's leader words
+;; come before its header: so the walk met a leader word's body-forward before
+;; the header-forward, the new copy, transported by the flip, held
+;; gc-forwards, and the machine halted here in illop (a compile of the system
+;; on step 2's first band).  the husk's header-forward is dispatched as any
+;; word, which copies or snaps the new copy; a body-forward points into its
+;; own tenured husk, so it is never a young pointer.
 scav-walk-words
 	((m-tem) a-scav-walk-ptr)
 	(popj-greater-or-equal-unsigned m-tem a-scav-walk-to)
 	((vma-start-read) a-scav-walk-ptr)
 	(check-page-read)
 	((m-e) sub m-e (a-constant 1))
+	((m-tem) q-data-type read-memory-data)
+	(jump-equal m-tem (a-constant (eval dtp-body-forward)) scav-walk-words-2)
 	(dispatch transport-scav read-memory-data)
 	((m-tem) q-pointer vma)
 	(jump-equal m-tem a-scav-walk-ptr scav-walk-words-1)
@@ -871,6 +884,7 @@ scav-walk-words
 scav-walk-words-1
 	((m-tem) address-space-nibble md)
 	(call-equal m-tem (a-constant ephemeral-space-nibble) scav-walk-young-type)
+scav-walk-words-2
 	((m-tem) a-scav-walk-ptr)
 	(jump-xct-next scav-walk-words)
        ((a-scav-walk-ptr) add m-tem (a-constant 1))
