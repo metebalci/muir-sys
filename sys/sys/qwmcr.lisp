@@ -172,7 +172,16 @@
   (LET ((ARRAY MICRO-CODE-SYMBOL-IMAGE))
     (DO ((I 0 (1+ I))
 	 (N (ARRAY-LENGTH ARRAY))
-	 (FIXNUM-DATA-TYPE (DPB DTP-FIX %%Q-DATA-TYPE 0)))
+;	 (FIXNUM-DATA-TYPE (DPB DTP-FIX %%Q-DATA-TYPE 0)))
+	 ;; quux (40-bit words): each entry is written as its value alone.  the
+	 ;; tag added here was the assembling world's: a 32-bit world puts
+	 ;; dtp-fix in <29:25>, which on the 40-bit machine are the pointer's
+	 ;; bits, so every entry read as its address plus 1200000000 (ma-info
+	 ;; printed "ucode adr 1200006130" for 6130), and a 40-bit world puts it
+	 ;; above the file's 32 bits; the same sources so gave two files.  the
+	 ;; disk read puts tag 005 above <31:0> itself.  a 32-bit target keeps
+	 ;; the tag in its word, as before.
+	 (fixnum-data-type (if (= *word-width* 40.) 0 (dpb dtp-fix %%q-data-type 0))))
 	((NOT (< I N)))
       (OUT32 FILE (+ FIXNUM-DATA-TYPE (OR (AREF ARRAY I) 0))))))
 

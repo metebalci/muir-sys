@@ -13,6 +13,31 @@ file carries a comment in that file saying why.
   2026-10-04). As for 2000 and 2001, the version is not in the sources but
   given to the assembler (`ua:version-number` and the output's version for
   `UCADR`, the version asked for `PROMH`), so no source changed for it.
+- **The microcode symbol area holds plain addresses**
+  (`sys/sys/qwmcr.lisp:175-184`, WRITE-MICRO-CODE-SYMBOL-AREA-PART-2). The
+  `.mcr` writer added the assembling world's fixnum tag to each entry of its
+  main-memory section: a 32-bit world, System 2000's, puts it in `<29:25>`,
+  pointer bits on the 40-bit machine, so on Systems 2001 and 2002 every entry
+  read as its address plus `1200000000` (`MA-INFO` printed "ucode adr
+  1200006130" for 6130); a 40-bit world puts it above the file's 32 bits.
+  The microcode uses only `<13:0>` of an entry, so it was unaffected, but the
+  same sources gave two files by the band that assembled them. For a 40-bit
+  target each entry is now written as its value alone (the disk read puts
+  tag 005 above it); a 32-bit target keeps the tag. Assembled on System
+  2000's band and on System 2002's revision-14 band the files are now byte
+  for byte the same; microcode and PROM 2002, unreleased and keeping their
+  numbers, have new checksums: `ucadr.mcr`
+  `9492d0d95427d38d3c89571eaf5025870b93e52fe5c0443a7c48bd4e92e1499d`
+  (`.tbl` `92829944434d58658d25bd2c86336131a90b57cba1b336c0d76cced07ea1f56a`,
+  `.locs` `1c9f78c7d59b7d4d8041b95cec6722727d2828b9a9cc95421dbf4efd15468c8f`,
+  unchanged) and `promh.mcr`
+  `6a09939858e470fa356112694b6088596b32f1453a43e935c2bbb55c0dc7b8fb`
+  (`.tbl` `7d09233755ea154053980d261d62f308cdc442a616ff95fe9c707c84de45b0d6`,
+  `.locs` `97eef746efccb8c508116e73242d2de6105979da48fb0d9f632cdc8500e03e5d`,
+  unchanged); before, `ucadr.mcr`
+  `225aee9bc7a1c62369f58e3b5b59b8f1525ecc1ca5b2829b71f62947a9f2af58` and
+  `promh.mcr` `c053248cdab09ac3c23b2263433fddd63a12b3fc39627e5f7b24078039614e73`
+  from System 2000's band.
 - **FORMAT forgets the clause strings it gives back**
   (`sys/io/format.lisp:1315`, FORMAT-RECLAIM-CLAUSES). The clause buffer,
   FORMAT-CLAUSES-ARRAY, kept for the next call, still held each `~[`, `~<`
