@@ -413,7 +413,14 @@
 	   (or (zerop fraction) (ferror nil "~O is a nan" bits))
 	   (* sign (scale-float 1.0 200.)))
 	  ((zerop exponent)
-	   (* sign (scale-float (float fraction) -149.)))
+;	   (* sign (scale-float (float fraction) -149.)))
+	   ;; a subnormal.  in a world whose float is the ieee single (systems
+	   ;; 2001 and 2002), arithmetic makes no subnormal: scale-float
+	   ;; signalled floating-exponent-underflow on one.  there the float is
+	   ;; the bits themselves, which such a world reads as their value.
+	   (if (and (not (zerop fraction)) (= (%pointer 1.0) #x3f800000))
+	       (%make-pointer dtp-small-flonum bits)
+	     (* sign (scale-float (float fraction) -149.))))
 	  (t (* sign (scale-float (float (+ fraction (ash 1 23.))) (- exponent 150.)))))))
 
 ;;; a file compiled for a 40-bit word has no such group: its floats are singles

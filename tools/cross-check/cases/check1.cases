@@ -14,8 +14,17 @@
 (compiler:float-to-binary32 -1e50) => 4286578688
 (compiler:float-to-binary32 3.4028234e38) => 2139095039
 (compiler:float-to-binary32 1.1754943508e-38) => 8388608
-(compiler:float-to-binary32 1e-40) => 71362
-(compiler:float-to-binary32 1e-46) => 0
+; a subnormal and an underflow to zero, from literals.  On a builder whose
+; floats are wider than a single (System 2000's) the literals are numbers the
+; encoder rounds.  On a builder of IEEE singles (Systems 2001 and 2002) a
+; literal below the smallest normal single signals FLOATING-EXPONENT-UNDERFLOW
+; when it is read, as arithmetic does (no subnormal is made; system-check's
+; float-reading), and stopped the check there: so the subnormal is its own
+; bits there, and the underflow 0.0, ZUNDERFLOW's
+;(compiler:float-to-binary32 1e-40) => 71362
+;(compiler:float-to-binary32 1e-46) => 0
+(compiler:float-to-binary32 (condition-case () (read-from-string "1e-40") (sys:floating-exponent-underflow (cold:binary32-to-float 71362)))) => 71362
+(compiler:float-to-binary32 (let ((zunderflow t)) (read-from-string "1e-46"))) => 0
 (compiler:float-to-binary32 (cold:binary32-to-float 2139095040)) => 2139095040
 (compiler:float-to-binary32 (cold:binary32-to-float 4286578688)) => 4286578688
 (compiler:float-to-binary32 (cold:binary32-to-float 71362)) => 71362

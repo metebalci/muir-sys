@@ -858,3 +858,18 @@ objects young) changed the save, the band's formats and the boot.
     the search found none and (b) went unchecked; now a young symbol names
     an area, and `AREA-NAME`'s word for it, on a page wired for the restore,
     holds the only reference.
+- **Cross-check check 1 runs on a builder of IEEE singles**
+  (`tools/cross-check/cases/check1.cases:24`): reading the literal `1e-40`
+  signals `FLOATING-EXPONENT-UNDERFLOW` on Systems 2001 and 2002, as their
+  arithmetic does below the smallest normal single (no subnormal is made;
+  `float-reading`), and stopped the check. The subnormal case reads the
+  literal where the builder's floats are wider and takes the subnormal's own
+  bits where it signals; the underflow case reads `1e-46` under
+  `ZUNDERFLOW`. The decoder of a target's single, `COLD:BINARY32-TO-FLOAT`
+  (`sys/cold/coldld.lisp:417`), made a subnormal by `SCALE-FLOAT`, which
+  signalled the same on such a builder (check 1's round trips of 71362 and
+  1); there it now takes the subnormal's bits as the float. The encoder,
+  `COMPILER:FLOAT-TO-BINARY32` (`sys/sys/qcfasd.lisp:349`), went through
+  `INTEGER-DECODE-FLOAT`, whose `ABS` of a subnormal signalled it too; on
+  such a builder a single's bits are now its own field. Neither changes a
+  normal single's bits.

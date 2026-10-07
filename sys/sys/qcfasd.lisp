@@ -342,6 +342,14 @@ past the largest single an infinity, below the smallest normal one a subnormal
 or zero, as ieee 754 rounds."
   (if (zerop x)
       0
+    ;; in a world whose float is the ieee single (systems 2001 and 2002) a
+    ;; single's bits are its own field.  integer-decode-float's arithmetic on
+    ;; a subnormal signalled floating-exponent-underflow there (abs: such a
+    ;; world makes no subnormal), so check 1's subnormal round trips stopped.
+    ;; (the field as an unsigned number: ldb of 32 bits is no fixnum's byte)
+    (if (and (small-floatp x) (= (%pointer 1.0) #x3f800000))
+	(let ((field (%pointer x)))
+	  (if (minusp field) (+ field (ash 1 32.)) field))
 ;    (multiple-value-bind (m e) (integer-decode-float x)	;|x| = m * 2^e
     (multiple-value-bind (m e) (if (= (ldb #o0006 %%q-pointer) 25.)	;|x| = m * 2^e
 				   (host-integer-decode-float x)
@@ -367,7 +375,7 @@ or zero, as ieee 754 rounds."
 	       (logior sign q))
 	      (( (+ lsb 150.) 255.)		;past the largest: infinity
 	       (logior sign (ash 255. 23.)))
-	      (t (logior sign (ash (+ lsb 150.) 23.) (- q (ash 1 23.)))))))))
+	      (t (logior sign (ash (+ lsb 150.) 23.) (- q (ash 1 23.))))))))))
 
 (DEFUN FASD-RATIONAL (RAT)
   (FASD-START-GROUP NIL 0 FASL-OP-RATIONAL)
