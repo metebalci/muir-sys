@@ -1,0 +1,71 @@
+; A subnormal single is read as its value in either operand of +, *, -, //,
+; the comparisons, MAX and MIN called as functions (interpreted, APPLY,
+; FUNCALL), with results that are normal singles (docs/release-2001.md, the
+; floats).  PLUS and TIMES (sys/sys/qfctns.lisp) started their sum from 0 and
+; their product from 1, so a subnormal first argument went alone through
+; (+ 0 x) or (* 1 x), whose result, a subnormal, trapped
+; FLOATING-EXPONENT-UNDERFLOW when packed (no subnormal is made); MAX compared
+; its first argument with itself, with the same trap.  The same operands
+; swapped gave the right value, and so did compiled code, where (* a b) is one
+; instruction: the microcode reads a subnormal operand in either position.
+; Then the results below the smallest normal single, which underflow by design,
+; in both orders, and 0.0 under ZUNDERFLOW.  Bits are compared as the field's
+; integer (%POINTER).  The subnormals: #x00400000 is 2^-127, 71362 about
+; 1.0e-40, 1 is 2^-149.  Run it with --compile --files sys/sys/qfctns.lisp.
+; The cases marked "control" pass without the change; the revision 14
+; hand-over's band without it fails the others (measured).
+;
+; control: compiled, the microcode alone, the subnormal first
+(progn (defun soo-mul (a b) (* a b)) (defun soo-add (a b) (+ a b)) (compile 'soo-mul) (compile 'soo-add) (list (%pointer (soo-mul (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 40))) (%pointer (soo-add (%make-pointer dtp-small-flonum 71362) 1.0)))) => (335544320 1065353216)
+(%pointer (* (scale-float 1.0 40) (%make-pointer dtp-small-flonum #x00400000))) => 335544320
+(%pointer (* (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 40))) => 335544320
+(%pointer (* (scale-float 1.0 40) (%make-pointer dtp-small-flonum 71362))) => 285958400
+(%pointer (* (%make-pointer dtp-small-flonum 71362) (scale-float 1.0 40))) => 285958400
+(%pointer (* (scale-float 1.0 30) (%make-pointer dtp-small-flonum 1))) => 67108864
+(%pointer (* (%make-pointer dtp-small-flonum 1) (scale-float 1.0 30))) => 67108864
+(%pointer (* 1e10 (%make-pointer dtp-small-flonum 71362))) => 228737575
+(%pointer (* (%make-pointer dtp-small-flonum 71362) 1e10)) => 228737575
+(%pointer (* (- (scale-float 1.0 40)) (%make-pointer dtp-small-flonum #x00400000))) => -1811939328
+(%pointer (* (%make-pointer dtp-small-flonum #x00400000) (- (scale-float 1.0 40)))) => -1811939328
+(%pointer (* (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 40) (scale-float 1.0 40))) => 671088640
+(%pointer (+ (scale-float 1.0 -120) (%make-pointer dtp-small-flonum #x00400000))) => 58785792
+(%pointer (+ (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 -120))) => 58785792
+(%pointer (+ 1.0 (%make-pointer dtp-small-flonum 71362))) => 1065353216
+(%pointer (+ (%make-pointer dtp-small-flonum 71362) 1.0)) => 1065353216
+(%pointer (+ (%make-pointer dtp-small-flonum 71362) 1.0 1.0)) => 1073741824
+(%pointer (apply #'* (list (%make-pointer dtp-small-flonum 71362) (scale-float 1.0 40)))) => 285958400
+(%pointer (funcall #'+ (%make-pointer dtp-small-flonum 71362) 1.0)) => 1065353216
+(let ((zunderflow t)) (%pointer (* (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 40)))) => 335544320
+; one argument is itself; none, and integers and characters, as before (controls but the first)
+(list (%pointer (+ (%make-pointer dtp-small-flonum 71362))) (%pointer (* (%make-pointer dtp-small-flonum 71362)))) => (71362 71362)
+(list (+) (*) (+ 1 2 3) (* 2 3 4) (+ 5) (* 5) (%pointer (+ 1.5)) (+ 2147483647 1)) => (0 1 6 24 5 5 1069547520 2147483648)
+(list (+ #/a) (* #/a) (+ #/a 1)) => (97 97 98)
+(+ 'foo) =>! FOO
+(* 'foo 2) =>! FOO
+(* 'foo) =>! FOO
+; controls: - and // start from the first argument, the comparisons go pairwise
+(%pointer (- (scale-float 1.0 -120) (%make-pointer dtp-small-flonum #x00400000))) => 58589184
+(%pointer (- (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 -120))) => -2088894464
+(%pointer (// (%make-pointer dtp-small-flonum #x00400000) (scale-float 1.0 -40))) => 335544320
+(%pointer (// (scale-float 1.0 -40) (%make-pointer dtp-small-flonum #x00400000))) => 1795162112
+(%pointer (// (%make-pointer dtp-small-flonum 71362) 1e-10)) => 228737575
+(list (< (%make-pointer dtp-small-flonum #x00400000) 1.0) (< 1.0 (%make-pointer dtp-small-flonum #x00400000))) => (T NIL)
+(list (> (%make-pointer dtp-small-flonum #x00400000) 0.0) (> 0.0 (%make-pointer dtp-small-flonum #x00400000))) => (T NIL)
+(list (< (%make-pointer dtp-small-flonum 71362) (%make-pointer dtp-small-flonum #x00400000)) (< (%make-pointer dtp-small-flonum #x00400000) (%make-pointer dtp-small-flonum 71362))) => (T NIL)
+(list (= (%make-pointer dtp-small-flonum 71362) (%make-pointer dtp-small-flonum 71362)) (= (%make-pointer dtp-small-flonum 71362) (%make-pointer dtp-small-flonum #x00400000))) => (T NIL)
+(list (= (%make-pointer dtp-small-flonum 71362) 0.0) (= 0.0 (%make-pointer dtp-small-flonum 71362))) => (NIL NIL)
+; MAX and MIN, the subnormal first and second
+(list (%pointer (max (%make-pointer dtp-small-flonum 71362) 1.0)) (%pointer (max 1.0 (%make-pointer dtp-small-flonum 71362)))) => (1065353216 1065353216)
+(list (%pointer (min (%make-pointer dtp-small-flonum 71362) -1.0)) (%pointer (min -1.0 (%make-pointer dtp-small-flonum 71362)))) => (-1082130432 -1082130432)
+(list (max 3 1 2) (min 3 1 2) (max 2.5 1) (min 2.5 1)) => (3 1 2.5 1.0)
+(max 'foo 1) =>! FOO
+; results below the smallest normal single: an underflow in either order (controls)
+(* (%make-pointer dtp-small-flonum 71362) 4.0) =>! too small
+(* 4.0 (%make-pointer dtp-small-flonum 71362)) =>! too small
+(* (%make-pointer dtp-small-flonum 1) 2.0) =>! too small
+(* 2.0 (%make-pointer dtp-small-flonum 1)) =>! too small
+(+ (%make-pointer dtp-small-flonum 71362) 0.0) =>! too small
+(+ 0.0 (%make-pointer dtp-small-flonum 71362)) =>! too small
+(// (%make-pointer dtp-small-flonum #x00400000) 2.0) =>! too small
+(* (scale-float 1.0 -100) (scale-float 1.0 -100)) =>! too small
+(let ((zunderflow t)) (list (%pointer (* (%make-pointer dtp-small-flonum 71362) 4.0)) (%pointer (* 4.0 (%make-pointer dtp-small-flonum 71362))))) => (0 0)

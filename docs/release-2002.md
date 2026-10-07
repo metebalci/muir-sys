@@ -97,6 +97,28 @@ file carries a comment in that file saying why.
   that one definition from the file: without the change the special names
   the string consed next, `(T T T)` where `(NIL NIL NIL)` is expected; with
   it both cases pass. The CADR's line has the same change.
+- **`+`, `*` and `MAX` called as functions take a subnormal single first**
+  (`sys/sys/qfctns.lisp:1585-1590`, PLUS; `:1620-1625`, TIMES;
+  `:1499-1502`, MAX). PLUS started its sum from 0 and TIMES its product from
+  1, so a subnormal first argument went alone through `(+ 0 x)` or
+  `(* 1 x)`, whose result, a subnormal, trapped
+  `FLOATING-EXPONENT-UNDERFLOW` when packed, since no subnormal is made
+  (`SFLPACK-P`); MAX compared its first argument with itself, with the same
+  trap. So, interpreted or through `APPLY` and `FUNCALL`,
+  `(* x (scale-float 1.0 40))` and `(+ x 1.0)` trapped where the operands
+  swapped gave the normal result, and under `ZUNDERFLOW` the product was 0.0;
+  compiled code, where `(* a b)` is one instruction, was right, as are `-`,
+  `//`, `MIN` and the comparisons, which start from their first argument.
+  The microcode reads a subnormal operand in either position. A float first
+  argument now starts the sum, the product and MAX's comparisons; any other
+  starts from 0 or 1 as before, so a character still becomes its code and a
+  non-number signals as before. System 2001 has the fault, against its notes
+  (`docs/release-2001.md:1224`); it is not patched. `tools/system-check`
+  gains `subnormal-operand-order`: the revision 14 hand-over's band fails
+  14 of its 49 cases without the change (13 traps and the 0.0 under
+  `ZUNDERFLOW`), and passes all 49 with it. The CADR's line has no
+  subnormal floats, and there `(+ 0 x)` and `(* 1 x)` of a float are
+  exact, so it is not affected.
 
 ## Revision 14
 

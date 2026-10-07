@@ -1495,7 +1495,11 @@ or a locative or cons cell whose cdr is the property list."
   "Return the largest of the arguments."
   (LET ((ARG0 (CAR NUMBERS)))
     (CHECK-TYPE ARG0 NON-COMPLEX-NUMBER)
-    (DO ((REST NUMBERS (CDR REST)))
+;    (DO ((REST NUMBERS (CDR REST)))
+    ;; the first argument is not compared with itself, as min does: (max x x)
+    ;; of a subnormal single x is packed and traps floating-exponent-underflow
+    ;; (no subnormal is made), so (max x 1.0) trapped where (max 1.0 x) gave 1.0
+    (do ((rest (cdr numbers) (cdr rest)))
 	((NULL REST) ARG0)
       (SETQ ARG0 (MAX ARG0 (CAR REST))))))
 
@@ -1565,12 +1569,25 @@ or a locative or cons cell whose cdr is the property list."
 
 ;;;; Arithmetic functions.
 
-(DEFUN PLUS (&REST NUMBERS)
+;(DEFUN PLUS (&REST NUMBERS)
+;  "Return the sum of the arguments."
+;    (DO ((NUMBERS NUMBERS (CDR NUMBERS))
+;	 (ANS 0))
+;	((NULL NUMBERS) ANS)
+;      (SETQ ANS (+ ANS (CAR NUMBERS)))))
+;; the sum starts from the first argument when it is a float, not from 0.  a
+;; subnormal single first was added to 0 alone, and that partial sum, a
+;; subnormal, trapped floating-exponent-underflow when it was packed (no
+;; subnormal is made: sflpack-p, uc-arith.lisp), so (+ x 1.0) trapped where
+;; (+ 1.0 x) gave 1.0.  compiled code was not affected: (+ a b) compiles to
+;; one instruction.  any other first argument is still added to 0, so that a
+;; character becomes its code and a non-number signals as before.
+(defun plus (&rest numbers)
   "Return the sum of the arguments."
-    (DO ((NUMBERS NUMBERS (CDR NUMBERS))
-	 (ANS 0))
-	((NULL NUMBERS) ANS)
-      (SETQ ANS (+ ANS (CAR NUMBERS)))))
+  (do ((rest (if (floatp (car numbers)) (cdr numbers) numbers) (cdr rest))
+       (ans (if (floatp (car numbers)) (car numbers) 0)))
+      ((null rest) ans)
+    (setq ans (+ ans (car rest)))))
 (DEFF + #'PLUS)
 (DEFF +$ #'PLUS)
 
@@ -1590,12 +1607,22 @@ or a locative or cons cell whose cdr is the property list."
 	   (SETQ ANS (- ANS (CAR NUMBERS)))))))
 (DEFF -$ #'-)
 
-(DEFUN TIMES (&REST NUMBERS)
+;(DEFUN TIMES (&REST NUMBERS)
+;  "Return the product of the arguments."
+;    (DO ((NUMBERS NUMBERS (CDR NUMBERS))
+;	 (ANS 1))
+;	((NULL NUMBERS) ANS)
+;      (SETQ ANS (* ANS (CAR NUMBERS)))))
+;; the product starts from the first argument when it is a float, not from 1,
+;; as plus's sum does (above): (* x 1.0e30) with a subnormal x trapped
+;; floating-exponent-underflow on the partial product (* 1 x), where
+;; (* 1.0e30 x) gave the normal product.
+(defun times (&rest numbers)
   "Return the product of the arguments."
-    (DO ((NUMBERS NUMBERS (CDR NUMBERS))
-	 (ANS 1))
-	((NULL NUMBERS) ANS)
-      (SETQ ANS (* ANS (CAR NUMBERS)))))
+  (do ((rest (if (floatp (car numbers)) (cdr numbers) numbers) (cdr rest))
+       (ans (if (floatp (car numbers)) (car numbers) 1)))
+      ((null rest) ans)
+    (setq ans (* ans (car rest)))))
 (DEFF * #'TIMES)
 (DEFF *$ #'TIMES)
 
