@@ -818,3 +818,17 @@ objects young) changed the save, the band's formats and the boot.
   before the save, since `DISK-SAVE`'s own young collection moves them on
   from survivor space 1 (`tools/microcode-check/generational-save:184`,
   `lisp/generational-save.lisp`).
+- **A simple process that would wait no longer stops the scheduler**
+  (`sys/sys2/proces.lisp:811`; MIT's, so System 2001 has it too). A simple
+  process's function runs in the scheduler, which cannot wait, and
+  `PROCESS-WAIT` there throws to `PROCESS-WAIT-IN-SCHEDULER`, whose catch was
+  only around the wait functions: the throw found none, the scheduler stopped
+  in the cold load stream's debugger, and every process and the network with
+  it. The dormant file connection GC, a simple process run every minute,
+  did so when it sent a host `:SEND-IF-HANDLES` while the TELNET server held
+  that flavor's method table, rehashing it after a flip: `FULL-GC` typed
+  right after `GC-IMMEDIATELY` sometimes got no answer, and the connection
+  was given up after 180 s. The scheduler now catches the throw around a
+  simple process's function, and the process runs it again from its start a
+  tick later (`SIMPLE-PROCESS-RETRY-P`, `:712`). Checked by `tools/system-check`'s
+  `scheduler-simple-wait`.

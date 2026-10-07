@@ -1,0 +1,20 @@
+; A simple process whose function would wait does not stop the scheduler
+; (sys/sys2/proces.lisp, PROCESS-SCHEDULER-FOR-CADR; lisp/scheduler-simple-
+; wait.lisp).  On a band built before the change, compile proces.lisp first
+; and start the scheduler afresh (the first case); a band with it needs
+; neither.  Without the change the scheduler stops in the cold load stream's
+; debugger at the second case and nothing answers again.
+(ssw-restart-scheduler) => T
+
+; a simple process meets a lock held by another process: its run is given
+; up and it runs again a tick later, until the holder lets the lock go after
+; 5 s; it then gets the lock once
+(ssw-start 5) => (T 0)
+(progn (process-sleep (* 60 6)) (list *ssw-runs* *ssw-lock*)) => (1 NIL)
+(ssw-end) => T
+
+; the case met: the dormant file connection GC, a simple process run every
+; minute, sends the first pathname host :SEND-IF-HANDLES while its flavor's
+; method table is held by another process for 70 s
+(ssw-hold-host-method-table 70) => T
+(progn (process-sleep (* 60 75)) (list (si:process-whostate fs:dormant-host-gc-process) (null (si:hash-table-lock (si:flavor-method-hash-table (si:instance-flavor (car fs:*pathname-host-list*))))))) => ("Sleep" T)
