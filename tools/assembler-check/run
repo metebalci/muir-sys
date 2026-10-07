@@ -65,7 +65,22 @@ CHECKS = {
     'lc-mm': dict(rev=14, plant='lc-mm', refused='arithmetic function'),
     'map-constant': dict(rev=14, plant='map-constant', refused='POINTER-TYPE-REGISTER-0-31'),
     'fiddle': dict(rev=14, plant='fiddle', refused='fiddle'),
+    # revision 15 (contract G3 revision 15, 7; appendix A15b.7, A15b.15): the
+    # tree's microcode and PROM written in the self-describing .mcr, with the
+    # OA select check reporting the words that need a select; the same
+    # microcode refused by the check; and the check's rules on a fixture
+    'rev15': dict(rev=15, plant=None, refused=None),
+    'oa-refused': dict(rev=15, plant=None, refused='OA select check refuses'),
+    'oa-select': dict(rev=15, plant=None, refused=None),
 }
+
+# The OA select fixture's variants (lisp/oasel.lisp) and the rules of the
+# breaches the check must find in each, in address order: control none, each
+# other variant its own.
+OA_VARIANTS = [('dropped', [1]), ('no-write', [2, 2]), ('return-point', [2]),
+               ('misc-entry', [2]), ('n-jump', [2]), ('n-call', [2]), ('n-dispatch', [2]),
+               ('return-slot', [1]), ('two-selects', [2, 3]), ('dispatch-select', [3]),
+               ('dispatch-write-popj', [3]), ('control', [])]
 
 # Appendix A14.5's 19 types, the pointer-type register's set in microcode 2001
 # (contract G3 revision 14, 5.3): the bits words 222 and 223 must hold.
@@ -153,6 +168,23 @@ def copy_tree(dest):
     os.makedirs(os.path.join(dest, 'sys', 'assembler-check'))
     shutil.copy2(os.path.join(HERE, 'lisp', 'y1bits.lisp'),
                  os.path.join(dest, 'sys', 'assembler-check', 'y1bits.lisp'))
+    for name, text in oasel_files().items():
+        with open(os.path.join(dest, 'sys', 'assembler-check', name + '.lisp'), 'w') as f:
+            f.write(text)
+
+
+def oasel_files():
+    """lisp/oasel.lisp's variants, each a file oa-VARIANT.lisp for the
+    micro-assembler's fast reader: (setq oa-VARIANT '(common variant))."""
+    text = open(os.path.join(HERE, 'lisp', 'oasel.lisp')).read()
+    parts = re.split(r'^;;; (common|variant \S+)\n', text, flags=re.M)
+    head, sections = parts[0], dict(zip(parts[1::2], parts[2::2]))
+    files = {}
+    for key, body in sections.items():
+        if key.startswith('variant '):
+            name = 'oa-' + key.split()[1]
+            files[name] = '%s(setq %s \'(\n\n%s\n%s))\n' % (head, name, sections['common'], body)
+    return files
 
 
 # ---------------------------------------------------------------- the cases
@@ -173,8 +205,101 @@ def bits_form():
             '(ua:assemble "SYS: ASSEMBLER-CHECK; Y1BITS LISP") t) (fset \'y-or-n-p old)))')
 
 
+def prom_form(version):
+    return ('(let ((*standard-input* (make-string-input-stream "T %d.")) (old'
+            " (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p"
+            " #'(lambda (&rest ignore) t)) (ua:assemble \"SYS: UCADR; PROMH TEXT\") t)"
+            " (fset 'y-or-n-p old)))" % version)
+
+
+def oasel_form(variant):
+    return ('(let ((*standard-input* '
+            '(make-string-input-stream "1.")) (old (symbol-function \'y-or-n-p))) '
+            "(unwind-protect (progn (fset 'y-or-n-p #'(lambda (&rest ignore) t)) "
+            '(ua:assemble "SYS: ASSEMBLER-CHECK; OA-%s LISP") t) (fset \'y-or-n-p old)))'
+            % variant.upper())
+
+
+# the breaches the OA select check kept, by rule, and the words that rule 1
+# refuses (each a word that writes an OA register), octal
+BREACHES_FORM = ('(let ((rules (list 0 0 0)) (words nil)) (dolist (b ua:*oa-select-breaches*)'
+                 ' (incf (nth (1- (cadr b)) rules)) (when (= (cadr b) 1) (pushnew (car b) words)))'
+                 ' (format nil "oa-breaches ~{~D~^ ~}; rule-1 words ~D: ~{~O~^ ~}" rules'
+                 " (length words) (sort words #'<)))")
+
+
+def plant_bit_form(label, bit):
+    """The rules of the check's breaches with bit BIT added to the control
+    fixture's word at LABEL, the word restored after."""
+    return ("(let* ((loc (ua:i-mem-symbol-location 'ua:%s)) (old (aref ua:i-mem loc)))"
+            " (setf (aref ua:i-mem loc) (+ old (expt 2 %d.))) (prog1 (mapcar #'cadr"
+            " (ua:oa-select-breaches)) (setf (aref ua:i-mem loc) old)))" % (label, bit))
+
+
+def oa_select_cases():
+    lines = ["(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+             '(setq ua:*word-width* 40.) => 40',
+             # the selects are revision 15's names: refused at 14
+             '(setq ua:*hardware-revision* 14.) => 14',
+             oasel_form('control') + ' =>! revision 15',
+             # revision 14's halves, <47:24> and <23:0>, are the loader's as before
+             "(let ((w #o7654321012345670)) (equal (multiple-value-list"
+             " (ua:control-store-word-halves w)) (list (%logdpb (ldb #o4020 w) #o1020"
+             " (ldb #o3010 w)) (%logdpb (ldb #o1020 w) #o1020 (ldb #o0010 w))))) => T",
+             '(setq ua:*hardware-revision* 15.) => 15',
+             # a breach refuses the assembly
+             oasel_form('dropped') + ' =>! OA select check refuses',
+             '(setq ua:*oa-select-check-refuses* nil) => NIL']
+    for variant, rules in OA_VARIANTS:
+        lines.append('(progn %s (mapcar #\'cadr ua:*oa-select-breaches*)) => %s'
+                     % (oasel_form(variant), '(%s)' % ' '.join(map(str, rules)) if rules else 'NIL'))
+    # the extension's other fields, planted in the control's image (no source
+    # names them; the profile pass will set them): a hint with
+    # oa-high-select passes, a hint with oa-low-select and the PDL address
+    # field with a select are refused
+    lines += [plant_bit_form('oa-xh', 48) + ' => NIL',
+              plant_bit_form('oa-xl', 48) + ' => (3)',
+              plant_bit_form('oa-c1', 48) + ' => (3)',
+              # the control's breaches with nothing planted: none
+              "(mapcar #'cadr (ua:oa-select-breaches)) => NIL",
+              # the loader's reader (sys/sys2/usymld.lisp, read-mcr-sections)
+              # reads the control's .mcr back into an image equal to what was
+              # assembled, memory by memory: the words that differ
+              READ_BACK_FORM + ' => (0 0 0 0)',
+              # the loader's control store halves (control-store-word-halves):
+              # revision 15's <63:32> and <31:0>, a fixnum each where the
+              # world's fixnum holds 32 bits, refused where it does not
+              HALVES_FORM + ' => T']
+    return '\n'.join(lines) + '\n'
+
+
+READ_BACK_FORM = (
+    "(let ((image (ua:make-ucode-image)) (differ (list 0 0 0 0)))"
+    " (with-open-file (s \"SYS: ASSEMBLER-CHECK; OA-CONTROL MCR\" :direction :input :characters nil"
+    " :byte-size 16.) (ua:read-mcr-sections s image))"
+    " (dotimes (i (array-length ua:i-mem)) (unless (eql (or (aref ua:i-mem i) 0)"
+    " (or (aref (ua:ucode-image-control-memory-array image) i) 0)) (incf (first differ))))"
+    " (dotimes (i (array-length ua:d-mem)) (unless (eql (or (aref ua:d-mem i) 0)"
+    " (or (aref (ua:ucode-image-dispatch-memory-array image) i) 0)) (incf (second differ))))"
+    " (dotimes (i (array-length ua:a-mem)) (unless (eql (or (aref ua:a-mem i) 0)"
+    " (or (aref (ua:ucode-image-a-memory-array image) i) 0)) (incf (third differ))))"
+    " (dotimes (i (array-length ua:micro-code-symbol-image)) (unless (eql"
+    " (or (aref ua:micro-code-symbol-image i) 0)"
+    " (or (aref (ua:ucode-image-entry-points-array image) i) 0)) (incf (fourth differ))))"
+    " differ)")
+
+HALVES_FORM = (
+    "(let ((w (+ (expt 2 63.) (expt 2 48.) 5)))"
+    " (if (< (haulong most-positive-fixnum) 31.)"
+    " (condition-case () (progn (ua:control-store-word-halves w) nil) (error t))"
+    " (equal (multiple-value-list (ua:control-store-word-halves w))"
+    " (list (%logdpb 1 #o3701 #o200000) 5))))")
+
+
 def cases(check):
     c = CHECKS[check]
+    if check == 'oa-select':
+        return oa_select_cases()
     lines = ['; tools/assembler-check: %s' % check,
              "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
              '(setq ua:*word-width* 40.) => 40']
@@ -191,9 +316,16 @@ def cases(check):
         lines.append("(progn (putprop 'ua:pointer-type-register-0-31 1 'ua:cons-lap-sym) t) => T")
     if check == 'map-set':
         lines.append("(length (setq ua:*pointer-types* (remove 'dtp-null ua:*pointer-types*))) => 18")
-    lines.append('(setq ua:version-number 2001.) => 2001')
-    lines.append(assemble_form(2001) + (' => T' if c['refused'] is None
-                                        else ' =>! %s' % c['refused']))
+    if check == 'rev15':
+        # the breaches are reported and the files written: the tree's
+        # microcode has no selects yet
+        lines.append('(setq ua:*oa-select-check-refuses* nil) => NIL')
+    version = 2002 if c['rev'] == 15 else 2001
+    lines.append('(setq ua:version-number %d.) => %d' % (version, version))
+    lines.append(assemble_form(version) + (' => T' if c['refused'] is None
+                                           else ' =>! %s' % c['refused']))
+    if check == 'rev15':
+        lines += [BREACHES_FORM, prom_form(version) + ' => T', BREACHES_FORM]
     return '\n'.join(lines) + '\n'
 
 
@@ -281,8 +413,60 @@ def compare_outputs(out, ref, files):
     return ok, lines
 
 
+# The 32-bit world's fixnum tag, DTP-FIX (5) in <29:25>, which release
+# 2001's microcode symbol area carries in every word: it was assembled on
+# System 2000's 32-bit band, and the .mcr writer then added that world's tag.
+# The writer now puts out the value alone for a 40-bit target (main df77f1e,
+# sys/sys/qwmcr.lisp), so the symbol area is compared with the release's by
+# value, the tag stripped; every other part of the file byte for byte.
+TAG_32 = 5 << 25
+
+
+def symbol_area_values(data):
+    """The symbol area's words, little-endian 32-bit, each with the 32-bit
+    world's fixnum tag stripped where it carries it."""
+    words = struct.unpack('<%dI' % (len(data) // 4), data[:len(data) // 4 * 4])
+    return [w - TAG_32 if w & (0o37 << 25) == TAG_32 else w for w in words]
+
+
+def same_symbol_area(mine, theirs):
+    """Whether two .mcr files' symbol areas hold the same values: the tag
+    stripped, as many words and each equal; and the words that differ."""
+    a, b = symbol_area_values(mine), symbol_area_values(theirs)
+    differ = [k for k in range(min(len(a), len(b))) if a[k] != b[k]]
+    return len(a) == len(b) and not differ, differ
+
+
+def symbol_area_control(path, ref_tail):
+    """The comparison's planted control: one of PATH's symbol area values
+    (the first non-zero word, its value, not its tag) changed by one must
+    make the symbol areas differ.  Returns (caught, line)."""
+    tail = bytearray(mcr_symbol_area(path))
+    words = struct.unpack('<%dI' % (len(tail) // 4), bytes(tail[:len(tail) // 4 * 4]))
+    k = next(i for i, w in enumerate(words) if w)
+    struct.pack_into('<I', tail, 4 * k, words[k] ^ 1)
+    same, _ = same_symbol_area(bytes(tail), ref_tail)
+    return not same, ('the control, word %o of the symbol area planted from %o to %o: %s' % (
+        k, words[k], words[k] ^ 1, 'caught' if not same else 'NOT CAUGHT'))
+
+
 def check_rev13(out, ref):
-    return compare_outputs(out, ref, OUTPUTS)
+#    return compare_outputs(out, ref, OUTPUTS)
+    # ucadr.mcr: up to its symbol area byte for byte, the symbol area by value
+    lines = []
+    path, rpath = os.path.join(out, 'ucadr.mcr'), os.path.join(ref, 'ucadr.mcr')
+    mine, theirs = open(path, 'rb').read(), open(rpath, 'rb').read()
+    tail, rtail = mcr_symbol_area(path), mcr_symbol_area(rpath)
+    head_same = mine[:len(mine) - len(tail)] == theirs[:len(theirs) - len(rtail)]
+    lines.append('ucadr.mcr up to its symbol area %s the release byte for byte' % (
+        'equals' if head_same else 'DIFFERS FROM'))
+    area_same, differ = same_symbol_area(tail, rtail)
+    lines.append('the symbol area %s the release\'s by value, the tag stripped (%d words differ)' % (
+        'equals' if area_same else 'DIFFERS FROM', len(differ)))
+    caught, line = symbol_area_control(path, rtail)
+    lines.append(line)
+    good, more = compare_outputs(out, ref, OUTPUTS[1:])
+    return head_same and area_same and caught and good, lines + more
 
 
 def check_rev14(out, ref):
@@ -315,10 +499,17 @@ def check_rev14(out, ref):
     mcr = open(os.path.join(out, 'ucadr.mcr'), 'rb').read()
     tail = mcr_symbol_area(os.path.join(out, 'ucadr.mcr'))
     pad = mcr[end:len(mcr) - len(tail)]
-    same = tail == mcr_symbol_area(os.path.join(ref, 'ucadr.mcr')) and not pad.strip(b'\0')
-    lines.append('the symbol area %s the release\'s, the padding before it %d zero bytes' % (
-        'equals' if same else 'DIFFERS FROM', len(pad)))
+#    same = tail == mcr_symbol_area(os.path.join(ref, 'ucadr.mcr')) and not pad.strip(b'\0')
+    # by value, the tag stripped (TAG_32), with its planted control
+    rtail = mcr_symbol_area(os.path.join(ref, 'ucadr.mcr'))
+    area_same, differ = same_symbol_area(tail, rtail)
+    same = area_same and not pad.strip(b'\0')
+    lines.append('the symbol area %s the release\'s by value, the tag stripped (%d words differ), the padding before it %d zero bytes' % (
+        'equals' if same else 'DIFFERS FROM', len(differ), len(pad)))
     ok &= same
+    caught, line = symbol_area_control(os.path.join(out, 'ucadr.mcr'), rtail)
+    lines.append(line)
+    ok &= caught
     good, more = compare_outputs(out, ref, OUTPUTS[1:])
     return ok and good, lines + more
 
@@ -371,6 +562,185 @@ def check_bits(out):
         good = got == exp
         lines.append('%-11s %016o %s' % (name, w, 'ok' if good else 'WRONG: %s, want %s' % (got, exp)))
         ok &= good
+    return ok, lines
+
+
+# ---------------------------------------------------------------- revision 15
+
+# Appendix A15b.7: the format word, MACHINE-ID's signature over format 1; the
+# sections in their order, each with the machine's actual width; the
+# memories' sizes.
+FORMAT_WORD = 0x51550001
+SECTIONS_15 = [(6, 32), (1, 64), (2, 18), (3, 40), (4, 40)]
+PROM_BASE, PROM_WORDS, DMEM_WORDS, AMEM_WORDS = 0o36000, 0o2000, 0o10000, 0o2000
+
+
+def parse_15(b, prom=False):
+    """The sections of a revision-15 .mcr (appendix A15b.7), {type: (start,
+    items)}, or ValueError naming the first thing a loader refuses: a length
+    not a whole number of blocks, a format word other than FORMAT_WORD, a
+    first section not type 6 or its item not 15, an unknown type, a type twice
+    or out of order, an actual width not the machine's, a storage width not a
+    multiple of 32 at least the actual width, a non-zero unused header word or
+    padding bit, a section past its memory (the microcode's control store at
+    or past the PROM, the PROM's own not from its base within its words), a
+    section past the file's end, or a non-zero word after the last section."""
+    if not b or len(b) % 1024:
+        raise ValueError('%d bytes, not a whole number of 1024-byte blocks' % len(b))
+    w = struct.unpack('<%dI' % (len(b) // 4), b)
+    if w[0] != FORMAT_WORD:
+        raise ValueError('format word %08x' % w[0])
+    at, rank, out = 2, -1, {}
+    for k in range(w[1]):
+        if at + 8 > len(w):
+            raise ValueError("section %d's header runs past the file's end" % k)
+        kind, items, actual, storage, start = w[at:at + 5]
+        types = [t for t, _ in SECTIONS_15]
+        if kind not in types:
+            raise ValueError('section %d: unknown type %d' % (k, kind))
+        if k == 0 and kind != 6:
+            raise ValueError('the first section is type %d, not 6' % kind)
+        r = types.index(kind)
+        if r <= rank:
+            raise ValueError('type %d twice or out of order' % kind)
+        rank = r
+        if actual != SECTIONS_15[r][1]:
+            raise ValueError('type %d: actual width %d, not %d' % (kind, actual, SECTIONS_15[r][1]))
+        if storage == 0 or storage % 32 or storage < actual:
+            raise ValueError('type %d: storage width %d' % (kind, storage))
+        if any(w[at + 5:at + 8]):
+            raise ValueError('type %d: a non-zero unused header word' % kind)
+        end = start + items
+        if kind == 6 and (start != 0 or items != 1):
+            raise ValueError('type 6 at %o for %o items' % (start, items))
+        if kind == 1 and not prom and end > PROM_BASE:
+            raise ValueError('the control store runs past the PROM, to %o' % end)
+        if kind == 1 and prom and (start != PROM_BASE or end > PROM_BASE + PROM_WORDS):
+            raise ValueError("the PROM's control store from %o to %o" % (start, end))
+        if (kind, end > DMEM_WORDS) == (2, True) or (kind, end > AMEM_WORDS) == (4, True):
+            raise ValueError('type %d runs past its memory, to %o' % (kind, end))
+        at += 8
+        per = storage // 32
+        if at + per * items > len(w):
+            raise ValueError("type %d's items run past the file's end" % kind)
+        vals = []
+        for n in range(items):
+            v = sum(x << 32 * i for i, x in enumerate(w[at:at + per]))
+            at += per
+            if v >> actual:
+                raise ValueError("type %d's item %o: a padding bit set" % (kind, n))
+            vals.append(v)
+        out[kind] = (start, vals)
+    if any(w[at:]):
+        raise ValueError('a non-zero word after the last section')
+    if 6 not in out or out[6][1] != [15]:
+        raise ValueError('hardware revision %s, not 15' % (out.get(6, (0, None))[1],))
+    return out
+
+
+def malformed_15(b):
+    """Planted variants of the good revision-15 .mcr B, one for each refusal
+    of appendix A15b.7: (name, bytes)."""
+    w = list(struct.unpack('<%dI' % (len(b) // 4), b))
+    heads, at = [], 2
+    for _ in range(w[1]):
+        heads.append(at)
+        at += 8 + (w[at + 3] // 32) * w[at + 1]
+    h = dict((w[x], x) for x in heads)
+    out = []
+
+    def variant(name, edit):
+        v = list(w)
+        edit(v)
+        out.append((name, struct.pack('<%dI' % len(v), *v)))
+
+    variant('format-word', lambda v: v.__setitem__(0, 0x51550002))
+    variant('first-not-6', lambda v: v.__setitem__(h[6], 1))
+    variant('revision-14', lambda v: v.__setitem__(h[6] + 8, 14))
+    variant('unknown-type-5', lambda v: v.__setitem__(h[2], 5))
+    variant('unknown-type-7', lambda v: v.__setitem__(h[2], 7))
+    variant('type-twice', lambda v: v.__setitem__(h[2], 1))
+    variant('order-broken', lambda v: v.__setitem__(h[3], 2))
+    variant('actual-width', lambda v: v.__setitem__(h[1] + 2, 48))
+    variant('storage-not-32s', lambda v: v.__setitem__(h[2] + 3, 48))
+    variant('storage-below-actual', lambda v: v.__setitem__(h[1] + 3, 32))
+    variant('padding-bit', lambda v: v.__setitem__(h[4] + 8 + 1, 1 << 8))
+    variant('unused-header-word', lambda v: v.__setitem__(h[1] + 6, 1))
+    variant('past-memory', lambda v: v.__setitem__(h[2] + 4, 1))
+    variant('control-store-into-prom', lambda v: v.__setitem__(h[1] + 4, PROM_BASE - 1))
+    variant('word-after-sections', lambda v: v.__setitem__(len(v) - 1, 1))
+    out.append(('not-whole-blocks', b[:-4]))
+    return out
+
+
+def check_rev15(out):
+    """The tree's microcode and PROM at revision 15: each .mcr parses, every
+    malformed variant of it is refused, the extension is zero (no selects
+    yet), and the words rule 1 of the OA select check reported are exactly
+    the words that write OA-REG-LOW or OA-REG-HIGH (functional destinations
+    16 and 17), decoded here from the file."""
+    lines, ok = [], True
+    text = open(os.path.join(out, 'lispm-check.out')).read()
+    reports = re.findall(r'oa-breaches (\d+) (\d+) (\d+); rule-1 words (\d+): ([0-7 ]*)', text)
+    for name, prom, report in (('ucadr.mcr', False, reports[0] if reports else None),
+                               ('promh.mcr', True, reports[1] if len(reports) > 1 else None)):
+        b = open(os.path.join(out, name), 'rb').read()
+        try:
+            secs = parse_15(b, prom)
+        except ValueError as e:
+            lines.append('%s REFUSED: %s' % (name, e))
+            ok = False
+            continue
+        start, words = secs[1]
+        lines.append('%s parses: sections %s, control store %o-%o, %d bytes' % (
+            name, sorted(secs), start, start + len(words), len(b)))
+        for vname, vb in malformed_15(b):
+            try:
+                parse_15(vb, prom)
+                lines.append('  planted %s NOT refused' % vname)
+                ok = False
+            except ValueError as e:
+                lines.append('  planted %s refused: %s' % (vname, e))
+        ext = [start + i for i, x in enumerate(words) if x >> 48]
+        lines.append('  words with an extension: %d' % len(ext))
+        ok &= not ext
+        writers = sorted(start + i for i, x in enumerate(words)
+                         if ir(x, 43, 2) in (0, 3) and ir(x, 25, 1) == 0 and ir(x, 19, 5) in (0o16, 0o17))
+        if report is None:
+            lines.append('  no OA select report')
+            ok = False
+            continue
+        rules = [int(x) for x in report[:3]]
+        reported = sorted(int(x, 8) for x in report[4].split())
+        same = reported == writers and rules[1] == rules[2] == 0
+        lines.append('  OA select check: breaches by rule %s; rule 1 refuses %d words, the file has '
+                     '%d words writing OA-REG-LOW or -HIGH: %s' % (rules, len(reported), len(writers),
+                                                                  'the same' if same else 'DIFFERENT'))
+        ok &= same
+    return ok, lines
+
+
+def check_oa_select(out):
+    """The control fixture's .mcr: it parses, and its selects are the
+    extension's <60> and <61> on the words that name them, every other
+    extension bit zero."""
+    lines, ok = [], True
+    try:
+        secs = parse_15(open(os.path.join(out, 'oa-control.mcr'), 'rb').read())
+    except ValueError as e:
+        return False, ['oa-control.mcr REFUSED: %s' % e]
+    start, words = secs[1]
+    syms = sym_table(os.path.join(out, 'oa-control.sym'))
+    want = {'OA-XL': 1 << 60, 'OA-XH': 1 << 61, 'OA-C1': 1 << 61, 'OA-DT-0': 1 << 60,
+            'OA-SUB-2': 1 << 60}
+    for name, bits in sorted(want.items()):
+        x = words[syms[name][1] - start] >> 48 << 48
+        good = x == bits
+        lines.append('%-9s extension %022o %s' % (name, x, 'ok' if good else 'WRONG, want %o' % bits))
+        ok &= good
+    sel = sum(1 for x in words if x >> 48)
+    lines.append('words with an extension: %d (the control has 8 selects)' % sel)
+    ok &= sel == 8
     return ok, lines
 
 
@@ -442,6 +812,20 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
                 shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
             good, more = {'rev13': check_rev13, 'rev14': check_rev14,
                           'tree': check_tree}[check](out, ref)
+            ok &= good
+            lines += more
+        elif ok and check == 'rev15':
+            for f in ('ucadr.mcr', 'ucadr.sym'):
+                shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
+            for f in ('promh.mcr', 'promh.sym'):
+                shutil.copy2(os.path.join(served, 'ucadr', f), os.path.join(out, f))
+            good, more = check_rev15(out)
+            ok &= good
+            lines += more
+        elif ok and check == 'oa-select':
+            for f in ('oa-control.mcr', 'oa-control.sym'):
+                shutil.copy2(os.path.join(served, 'assembler-check', f), os.path.join(out, f))
+            good, more = check_oa_select(out)
             ok &= good
             lines += more
         elif ok and check == 'bits':

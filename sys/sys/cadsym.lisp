@@ -513,6 +513,15 @@
 (defprop pointer-type-register-0-31 (eval (pointer-type-register-word 0)) cons-lap-sym)
 (defprop pointer-type-register-32-63 (eval (pointer-type-register-word 32.)) cons-lap-sym)
 
+;; quux revision 15 (appendix a15b.2, a15b.15): the oa selects, written on the
+;; word that reads oa-reg-low or oa-reg-high, which revision 15 no longer ors
+;; into whatever word runs next.  oa-low-select is the extension's <60>,
+;; oa-high-select its <61>, as the target description places them (sys: sys;
+;; uatarget); only a revision-15 assembly may name them (cadrlp), and the oa
+;; select check holds every write and every select to each other.
+(defprop oa-low-select (eval (target-extension-bit :oa-low-select)) cons-lap-sym)
+(defprop oa-high-select (eval (target-extension-bit :oa-high-select)) cons-lap-sym)
+
 ;10 C-PDL-BUFFER-POINTER
 
 (DEFPROP C-PDL-BUFFER-POINTER-PUSH 

@@ -569,10 +569,24 @@ class Run:
                      " (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p"
                      " #'(lambda (&rest ignore) t)) (ua:assemble \"SYS: UCADR; PROMH TEXT\") t)"
                      " (fset 'y-or-n-p old))) => T" % MICROCODE)
+        # the target the microcode is assembled for: revision 14's unless
+        # --asm-target says another (contract G3 revision 15, 7: revision 15's
+        # two-host check); --oa-select-check report writes a revision-15
+        # assembly that the OA select check would refuse, for measuring
+        # microcode that has no selects yet, and records its breaches
+        target = self.a.asm_target or REVISION
         head = ["(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
                 '(setq ua:*word-width* 40.) => 40',
-                '(setq ua:*hardware-revision* %d.) => %d' % (REVISION, REVISION),
+                '(setq ua:*hardware-revision* %d.) => %d' % (target, target),
                 '(setq ua:version-number %d.) => %d' % (MICROCODE, MICROCODE)]
+        if self.a.oa_select_check == 'report':
+            head.append('(setq ua:*oa-select-check-refuses* nil) => NIL')
+        # the breaches by rule, and the words rule 1 refuses (each a word
+        # that writes an OA register), octal, in the case's value
+        breaches = ('(let ((rules (list 0 0 0)) (words nil)) (dolist (b ua:*oa-select-breaches*)'
+                    ' (incf (nth (1- (cadr b)) rules)) (when (= (cadr b) 1) (pushnew (car b) words)))'
+                    ' (format nil "oa-breaches ~{~D~^ ~}; rule-1 words ~D: ~{~O~^ ~}" rules'
+                    ' (length words) (sort words #\'<)))')
         results = {}
 
         def one(name, last, keep):
@@ -584,7 +598,8 @@ class Run:
                 shutil.copytree(os.path.join(self.src, d), os.path.join(tree, d), symlinks=True)
             # the assembling band's PROM: --asm-prom, or the builder's when the
             # builder assembles (a revision-14 band needs PROM 2002)
-            rc, text = self.lispm_check(where, '\n'.join(head + [last]) + '\n', self.a.asm_band,
+            tail = [breaches] if self.a.oa_select_check == 'report' else []
+            rc, text = self.lispm_check(where, '\n'.join(head + [last] + tail) + '\n', self.a.asm_band,
                                         self.a.asm_ubin, self.wrapper(self.a.asm_revision,
                                                                       self.a.asm_prom,
                                                                       self.a.asm_quux),
@@ -1020,6 +1035,12 @@ def main():
     p.add_argument('--asm-revision', type=int, default=int(env('asm-revision', '13')),
                    help="--asm-band's revision; 0, --asm-quux's default")
     p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
+    p.add_argument('--asm-target', type=int, default=int(env('asm-target', '0')),
+                   help='the hardware revision the microcode and PROM are assembled for'
+                        ' (default %d)' % REVISION)
+    p.add_argument('--oa-select-check', choices=('refuse', 'report'),
+                   default=env('oa-select-check', 'refuse'),
+                   help="revision 15's OA select check: refuse (a build) or report (a measurement)")
     p.add_argument('--asm-prom', default=env('asm-prom'),
                    help="--asm-band's PROM (default the builder's when the builder assembles)")
     # contract G3 revision 14's guards (A14.13) boot revision 13's pieces beside

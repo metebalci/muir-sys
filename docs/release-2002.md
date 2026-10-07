@@ -858,3 +858,91 @@ objects young) changed the save, the band's formats and the boot.
     the search found none and (b) went unchecked; now a young symbol names
     an area, and `AREA-NAME`'s word for it, on a page wired for the restore,
     holds the only reference.
+
+## Revision 15
+
+QUUX's revision 15 (contract G3 revision 15, and its appendix A15b): the
+pipelined micro-engine, its 64-bit microinstruction, and the OA registers read
+only through the OA selects. This part is the micro-assembler's and the
+loader's; the microcode's selects and the boot PROM's new reader follow.
+
+### The micro-assembler
+
+- **One target description** (`sys/sys/uatarget.lisp:61`,
+  `*assembly-targets*`; loaded before the assembler, `sys/sys/sysdcl.lisp:394`):
+  every parameter of the machine an assembly is for, the word's width and
+  fields, the data type and fixnum tag, each memory's size, the
+  microinstruction's width, the `.mcr`'s format and sections, the extension's
+  fields, the OA registers and the fields their selects reach.
+  `ua:*word-width*` and `ua:*hardware-revision*` name it (`assembly-target`,
+  `:150`; 32 bits at 13 the CADR, 40 bits at 13, 14 or 15 QUUX's), and an
+  unknown pair is refused before assembly (`sys/sys/cadrlp.lisp:375`). The
+  assembler takes the dispatch memory's size and address field, the memories'
+  sizes (`CONS-LAP-ALLOCATE-ARRAYS`, `:447`, in place of the assembling
+  world's `SI:SIZE-OF-HARDWARE-CONTROL-MEMORY`), the revision a name needs
+  (`cons-lap-symeval`, `:1623`) and the checks that apply (`:751`) from it;
+  the `.mcr` writer takes its section 6, A memory's section and the symbol
+  area's tag from it (`write-mcr-file`, `sys/sys/qwmcr.lisp:58`, `:203`), the
+  tag now the target's own rather than the world's compiled-in `DTP-FIX` and
+  `%%Q-DATA-TYPE`. Revisions 13 and 14 and the CADR write what they wrote:
+  microcode and PROM 2002 for revision 14, assembled on System 2000's 32-bit
+  band and on System 2002's 40-bit one, are byte for byte today's.
+- **Revision 15's `.mcr` is self-describing** (appendix A15b.7;
+  `write-mcr-sections`, `sys/sys/qwmcr.lisp:221`): the format word
+  `0x51550001` and the number of sections, then each section's 8-word header
+  (type, items, actual and storage widths, start, three zero words) and its
+  items, least significant word first: 6 the hardware revision, 1 the control
+  store at 64 bits (the PROM's own from 36000), 2 the dispatch memory with odd
+  parity in `<17>` (`d-mem-odd-parity`, `:294`), 3 the symbol area at 40 bits,
+  each word tag 005 over its value, 4 A memory at 40 bits; zeros to the
+  block's end. An item wider than its width, a control store section where
+  the loaders refuse it (`check-control-store-section`, `:301`), or a base
+  version is refused rather than written. The same sources at revision 15
+  give the same `ucadr.mcr` and `promh.mcr` on a 32-bit band and a 40-bit one.
+- **The OA selects** `oa-low-select` and `oa-high-select`, the extension's
+  `<60>` and `<61>` (`sys/sys/cadsym.lisp:522`), are revision 15's names,
+  refused below it (`sys/sys/cadrlp.lisp:305`); revision 14's names are
+  marked with their revision, 14, and so are taken at 15 (`:300`).
+- **The OA select check** (appendix A15b.15; `check-oa-selects`,
+  `sys/sys/cadrlp.lisp:1201`, `oa-select-breaches`, `:1099`) runs over the
+  assembled I-MEM and D-MEM of every revision-15 assembly, the microcode's
+  (`:751`) and the PROM's (`:1292`), and refuses: a word that writes
+  `OA-REG-LOW` or `OA-REG-HIGH` unless every word that can run next selects
+  it (a write in a return's slot is refused); a selecting word that can be
+  entered other than right after such a write, at a return point or at an
+  entry point; and two selects on a word, a select with the PDL address
+  field, `oa-low-select` with the hint, `oa-high-select` on a dispatch, and
+  `oa-low-select` on a dispatch other than a dispatch-memory write without
+  POPJ. It follows the delay slot and N: after a jump with N its slot runs only
+  when the jump is not taken, and a dispatch's slot follows each entry's N.
+  Each breach is printed with the word and the rule. The sources' microcode,
+  with no selects yet, is refused at revision 15 at each of its 147 writes
+  and the PROM at its 8; `ua:*oa-select-check-refuses*` nil (`:971`) writes
+  the files all the same, for measuring only.
+- **`tools/assembler-check`** gains `rev15`, `oa-refused` and `oa-select`
+  (its README), with the fixture `lisp/oasel.lisp`; **`tools/cross-build`**
+  gains `--asm-target` and `--oa-select-check` for the assembly step (its
+  README). `docs/building.md`, "Assembling the microcode", says how.
+- **`tools/assembler-check`'s `rev13` and `rev14` compare the microcode
+  symbol area with release 2001's by value** (`symbol_area_values`,
+  `same_symbol_area`, `tools/assembler-check/run:422`): release 2001's
+  `sys/ubin/` stays their reference, but its symbol area carries the 32-bit
+  world's fixnum tag in `<29:25>`, which the writer no longer adds ("The
+  microcode symbol area holds plain addresses", above), so both checks failed
+  since that fix. The tag is stripped from each word before the comparison;
+  every other part of the files is still compared byte for byte, and each run
+  shows that a planted change in a symbol area value is caught
+  (`symbol_area_control`).
+
+### The Lisp side
+
+- **The microcode loader takes the control store's layout from the target
+  description** (`sys/sys2/usymld.lisp`): `LOAD-MODULE` and
+  `BLAST-WITH-IMAGE` (`:516`, `:631`) pass each control store word to
+  `%WRITE-INTERNAL-PROCESSOR-MEMORIES` as the target's two halves
+  (`control-store-word-halves`, `sys/sys/uatarget.lisp:181`): `<47:24>` and
+  `<23:0>` as before, `<63:32>` and `<31:0>` at revision 15 (appendix
+  A15b.4), each a fixnum through `%LOGDPB`, and refused in a world whose
+  fixnum is narrower than a half. `READ-MCR-FILE` reads revision 15's
+  `.mcr` (`:830`, `read-mcr-sections`, `:902`), holding its format word, its
+  sections' order and widths and its padding to the target's.
