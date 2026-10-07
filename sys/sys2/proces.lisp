@@ -694,6 +694,11 @@ LOCK-VALUE defaults to the current process."
 ;;; they are run and the entry is deactivated.
 (DEFVAR TEMPORARILY-NO-IDLE-SCAVENGING T)
 
+;; the wait of a simple process whose function tried to wait (the scheduler,
+;; below): it runs again once the clock has moved past START, a tick later.
+(defun simple-process-retry-p (start)
+  (plusp (time-difference (time) start)))
+
 ;;; PROCESS-SCHEDULER-FOR-LAMBDA, this function's twin for the Lambda, is deleted.
 (DEFUN PROCESS-SCHEDULER-FOR-CADR ()
   (WITHOUT-INTERRUPTS				;No seq breaks in the scheduler
@@ -779,7 +784,19 @@ LOCK-VALUE defaults to the current process."
 		(FIXNUM-READ-METER-FOR-SCHEDULER %COUNT-DISK-PAGE-READ-OPERATIONS)))
 	  (IF (TYPEP SG 'STACK-GROUP)
 	      (STACK-GROUP-RESUME SG NIL)
-	    (APPLY SG (CDR (PROCESS-INITIAL-FORM CURRENT-PROCESS))))
+;	    (APPLY SG (CDR (PROCESS-INITIAL-FORM CURRENT-PROCESS))))
+	    ;; a simple process's function runs here, in the scheduler, which
+	    ;; cannot wait: PROCESS-WAIT called in it (a lock held by another
+	    ;; process, as the method table's that the dormant file connection
+	    ;; GC's :SEND-IF-HANDLES met while the TELNET server held it after a
+	    ;; flip) throws to PROCESS-WAIT-IN-SCHEDULER, which had no catch here:
+	    ;; the scheduler stopped in the cold load stream's debugger, and every
+	    ;; process and the network with it.  the run is given up instead, and
+	    ;; the process runs its function again from the start a tick later.
+	    (unless (catch 'process-wait-in-scheduler
+		      (apply sg (cdr (process-initial-form current-process)))
+		      t)
+	      (set-process-wait current-process #'simple-process-retry-p (list (time)))))
 	  (SETF (RUN-LIGHT-FOR-CADR) NIL)
 	  (LET ((P CURRENT-PROCESS)
 		(END-TIME (FIXNUM-MICROSECOND-TIME-FOR-SCHEDULER-FOR-CADR))

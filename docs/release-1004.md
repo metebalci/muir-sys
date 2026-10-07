@@ -179,3 +179,21 @@ Every change to a source file carries a comment in that file saying why.
   that one definition from the file: without the change the special names
   the string consed next, `(T T T)` where `(NIL NIL NIL)` is expected; with
   it both cases pass. Fixed on `main` in the same way.
+- **A simple process that would wait no longer stops the scheduler**
+  (`sys/sys2/proces.lisp:787-799`, `PROCESS-SCHEDULER-FOR-CADR`; MIT's).
+  A simple process's function runs in the scheduler, which cannot wait, and
+  `PROCESS-WAIT` there throws to `PROCESS-WAIT-IN-SCHEDULER`, whose catch was
+  only around the wait functions: the throw found none, the scheduler stopped
+  in the cold load stream's debugger ("Error in the scheduler"), and every
+  process and the network with it. The dormant file connection GC, a simple
+  process run every minute, did so on `main` when it sent a host
+  `:SEND-IF-HANDLES` while the TELNET server held that flavor's method
+  table, rehashing it after a flip. The scheduler now catches the throw
+  around a simple process's function, and the process runs it again from its
+  start a tick later (`SIMPLE-PROCESS-RETRY-P`, `:699-700`). Fixed on `main`
+  in the same way, where it was found. `tools/system-check` gains
+  `scheduler-simple-wait`: on System 1003's band without the change the
+  scheduler stops at its second case, a simple process's `PROCESS-LOCK`
+  (TRAP 1203, `THROW-TRAP`: no pending catch for
+  `SI::PROCESS-WAIT-IN-SCHEDULER`), and the TELNET connection closes; with
+  it all six cases pass.
