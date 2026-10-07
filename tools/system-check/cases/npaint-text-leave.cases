@@ -1,0 +1,13 @@
+; The demo's PAINT-COM-TEXT-LEAVE forgets the string it gives back
+; (sys/demo/npaint.lisp; lisp/npaint-text-leave.lisp).  It returned the
+; special PAINT-TEXT-HOLDING-STRING's string with RETURN-ARRAY and left the
+; special naming it: a pointer the collector scans to storage given back,
+; which names the next string consed there.  SI::NTL-RUN reads the
+; definition from the file, as the file itself does not load, and is (the
+; special still names a string, it lies in storage given back, it is the
+; string consed after).  Run with
+;   --files tools/system-check/lisp/npaint-text-leave.lisp
+; on any band.  The second case is the control; System 2002 (the revision 14
+; hand-over's band) without the change fails the first, (T T T) (measured).
+(si:ntl-run) => (NIL NIL NIL)
+(fboundp 'user::paint-com-text-leave) => T
