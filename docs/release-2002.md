@@ -27,6 +27,26 @@ file carries a comment in that file saying why.
   slots are now cleared as they are given back. `tools/system-check` gains
   `format-clauses` and `format-clauses-gc` (`cases-2mw/`, at 2 M words; its
   `run` now takes `cases-2mw/` as `tools/microcode-check`'s does).
+- **After `SET-MAR`, every write into the range traps, not only the first**
+  (`restore-mar-mode-from-foothold`, `sys/eh/eh.lisp:320-336`, called by
+  `fh-applier`, `fh-applier-no-restart`, `fh-evaler` and
+  `fh-stream-binding-evaler` when a throw leaves them, `:887`, `:900`,
+  `:930`, `:976`). The error handler signals the MAR's break in the erring
+  stack group through `run-sg`, which turns that stack group's MAR off while
+  the handlers run (`:407`, MIT's line, marked "why??"); only
+  `sg-restore-state`, on the return to the error handler, turned it back on.
+  A break proceeded (the debugger's Resume, a handler returning
+  `:no-action`) kept the MAR on, but one left by a throw (`condition-case`,
+  an abort) left it off for good: the next write into the range did not
+  trap, `mar-mode` said `NIL`, and `%MAR-LOW`, `%MAR-HIGH` and the pages'
+  trap status stayed set. The FH- functions now put back the MAR mode saved
+  in their foothold as they are thrown through, so the MAR stays armed until
+  `CLEAR-MAR`, as after proceeding. The CADR's line has the same fix
+  (System 1004). `tools/system-check`'s check `mar-range` has three new
+  cases: System 2002's revision-14 band gives `(T NIL NIL)` for two writes
+  left by throws and `mar-mode`, where `(T T :WRITE)` is expected, and
+  `(T T NIL)` for a proceeded break then two left by throws; the control,
+  two proceeded breaks, passes on both.
 
 ## Revision 14
 

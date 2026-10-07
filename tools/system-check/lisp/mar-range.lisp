@@ -19,6 +19,16 @@ a condition, not an error)."
       (progn (setf (aref *mar-array* index) 1) nil)
     (eh::mar-break t)))
 
+;;; A break proceeded rather than left by a throw: the condition-bind handler
+;;; returns the proceed type :no-action, and the error handler does the write.
+(defun mar-proceed-p (index)
+  "T if writing element INDEX of *MAR-ARRAY* signals the MAR's trap, proceeded
+with :no-action by a condition-bind handler, so that the write is done."
+  (let ((hit nil))
+    (condition-bind ((eh::mar-break #'(lambda (condition) condition (setq hit t) :no-action)))
+      (setf (aref *mar-array* index) 1))
+    hit))
+
 (defun mar-set (from n-words)
   "Set the MAR, for writes, over the N-WORDS elements of *MAR-ARRAY* from FROM, its pages in core."
   (fill *mar-array* 0)

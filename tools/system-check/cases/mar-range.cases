@@ -8,10 +8,25 @@
 ; to 50 words past it, so the old loop visited only the first page, and a
 ; write of the last word did not trap while the page was in core.  Run with
 ;   --compile --files sys/sys2/lmmac.lisp,sys/sys/qmisc.lisp,tools/system-check/lisp/mar-range.lisp
-; on any band.  The first two cases and the last are controls: a write of the
-; first word traps, a write outside the range does not, and none once the MAR
-; is cleared.  System 2001 without the change fails the third (measured).
+; on any band.  The first, second and fourth cases are controls: a write of
+; the first word traps, a write outside the range does not, and none once the
+; MAR is cleared.  System 2001 without the change fails the third (measured).
 (progn (mar-set 100. 20.) (mar-trap-p 100.)) => T
 (prog1 (mar-trap-p 130.) (si:clear-mar)) => NIL
 (let ((low (- (mar-index (mar-page-after 100.)) 28.))) (mar-set low 79.) (prog1 (mar-trap-p (+ low 78.)) (si:clear-mar))) => T
 (let ((low (- (mar-index (mar-page-after 100.)) 28.))) (mar-set low 79.) (si:clear-mar) (or (mar-trap-p low) (mar-trap-p (+ low 78.)))) => NIL
+; Two writes in one SET-MAR (sys/eh/eh.lisp, RESTORE-MAR-MODE-FROM-FOOTHOLD):
+; the error handler signals the break in the erring stack group by RUN-SG,
+; which turns the stack group's MAR off while the handlers run, and only the
+; return to the error handler restored it.  A handler that leaves by a throw,
+; as condition-case's does in mar-trap-p, left the MAR off: the next write
+; did not trap, (si:mar-mode) said NIL, and %MAR-LOW, %MAR-HIGH and the
+; pages' trap status stayed set.  Check that change with
+;   --compile --files sys/eh/eh.lisp,tools/system-check/lisp/mar-range.lisp
+; The second of these is a control: a break proceeded with :no-action keeps
+; the MAR on and does the write.  System 2002's revision-14 band without the
+; change fails the first and the third (measured), and its second case above
+; passes only because the MAR is off by then.
+(progn (mar-set 100. 20.) (prog1 (list (mar-trap-p 100.) (mar-trap-p 101.) (si:mar-mode)) (si:clear-mar))) => (T T :WRITE)
+(progn (mar-set 100. 20.) (prog1 (list (mar-proceed-p 100.) (mar-proceed-p 101.) (aref *mar-array* 101.) (si:mar-mode)) (si:clear-mar))) => (T T 1 :WRITE)
+(progn (mar-set 100. 20.) (prog1 (list (mar-proceed-p 100.) (mar-trap-p 101.) (mar-trap-p 102.)) (si:clear-mar))) => (T T T)
