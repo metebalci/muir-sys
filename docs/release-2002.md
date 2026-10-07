@@ -908,3 +908,8 @@ objects young) changed the save, the band's formats and the boot.
   own instead and conses the workloads' lists there (`REV14S-LIST-AREA`,
   `lisp/rev14-straddle.lisp`). Before, 2 failures each on step 2's band; after,
   35 of 35 and 9 of 9.
+- **`tools/cross-build/run` gives its lispm-check runs the run's engine**
+  (`tools/cross-build/run:216`): a run on rtl booted its sessions on rtl but
+  ran every lispm-check, a saved band's boot among them, on micro,
+  lispm-check's default; so did `tools/microcode-check/generational-save`,
+  which uses it.

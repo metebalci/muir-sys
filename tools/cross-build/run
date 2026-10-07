@@ -208,8 +208,12 @@ class Run:
         open(cf, 'w').write(cases)
         env = dict(os.environ, LISPM_CHECK_PORTS=self.lc_ports,
                    XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
+        # the run's engine, as its sessions and boots have it: without it every
+        # lispm-check of a run on rtl (a saved band's boot, the save checks')
+        # ran on micro, lispm-check's default
         cmd = [sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--band', band,
                '--ubin', ubin, '--quux', quux, '--ozd', self.a.ozd, '--tree', tree,
+               '--engine', self.a.engine,
                '--timeout', str(timeout), '--keep'] + list(extra) + [cf]
         log = os.path.join(where, 'lispm-check.out')
         with open(log, 'w') as f:
