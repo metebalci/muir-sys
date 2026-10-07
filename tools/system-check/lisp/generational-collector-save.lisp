@@ -70,7 +70,26 @@ first page."
 ;;;     1000000.
 ;;; Each property list gains a young cons at its front, whose value is a young
 ;;; list; the symbol's own page holds the only reference to them.
-(defvar *gcsave-c25b-symbol* nil "The symbol of (b), or NIL when the layout has none.")
+;;; (b), made: the layout has no symbol between the wired size and 1000000
+;;; (measured on E3's bands: the wired size is 400000, and only the fixed
+;;; areas' regions lie up to 1000000, the region and area tables, the support
+;;; vector, the constants, the extra pdl and the micro-code entry areas), so
+;;; the search below found none and (b) went unchecked.  Of those regions
+;;; AREA-NAME, at 404000, is scavenged and holds pointers, the areas' names;
+;;; AREA-LIST is that array as a list.  The setup makes an area named by a
+;;; young symbol, whose property list holds the young list, so that the
+;;; area's word of AREA-NAME, on a page wired for the restore, holds the only
+;;; reference.
+;(defvar *gcsave-c25b-symbol* nil "The symbol of (b), or NIL when the layout has none.")
+(defvar *gcsave-c25b-area* nil "The area of (b), named by a young symbol.")
+
+(defun gcsave-c25b-symbol ()
+  "The young symbol naming (b)'s area."
+  (and *gcsave-c25b-area* (si:area-name *gcsave-c25b-area*)))
+
+(defun gcsave-c25b-referrer ()
+  "A locative to (b)'s referrer, the area's word of AREA-NAME."
+  (and *gcsave-c25b-area* (aloc #'si:area-name *gcsave-c25b-area*)))
 
 (defun gcsave-wired-words ()
   "The band's wired size in words."
@@ -87,18 +106,25 @@ that is not free; NIL if there is none."
 	(return s)))))
 
 (defun gcsave-c25-setup ()
-  "Returns (A B C): for each kind, the page's address (unsigned), or NIL for (b) when the
-layout has no symbol there; and the lists are young."
+  "Returns (A B C), each T when its kind is set up: the lists young, and each referrer's
+page of its kind (for (b), the young symbol too)."
   (setplist nil (list* 'gcsave-c25 (gencol-list *gcsave-n*) (plist nil)))
-  (setq *gcsave-c25b-symbol* (gcsave-symbol-between (gcsave-wired-words) #o1000000))
-  (when *gcsave-c25b-symbol*
-    (setplist *gcsave-c25b-symbol*
-	      (list* 'gcsave-c25 (gencol-list *gcsave-n*) (plist *gcsave-c25b-symbol*))))
+;  (setq *gcsave-c25b-symbol* (gcsave-symbol-between (gcsave-wired-words) #o1000000))
+;  (when *gcsave-c25b-symbol*
+;    (setplist *gcsave-c25b-symbol*
+;	      (list* 'gcsave-c25 (gencol-list *gcsave-n*) (plist *gcsave-c25b-symbol*))))
+  (let ((name (make-symbol "GCSAVE-C25B")))
+    (setplist name (list 'gcsave-c25 (gencol-list *gcsave-n*)))
+    (setq *gcsave-c25b-area* (make-area :name name :gc :static)))
   (list (and (gencol-young-p (get nil 'gcsave-c25))
 	     (< (si:%pointer-unsigned (%pointer nil)) (gcsave-wired-words)))
-	(and *gcsave-c25b-symbol*
-	     (gencol-young-p (get *gcsave-c25b-symbol* 'gcsave-c25))
-	     (si:%pointer-unsigned (%pointer *gcsave-c25b-symbol*)))
+;	(and *gcsave-c25b-symbol*
+;	     (gencol-young-p (get *gcsave-c25b-symbol* 'gcsave-c25))
+;	     (si:%pointer-unsigned (%pointer *gcsave-c25b-symbol*)))
+	(let ((a (si:%pointer-unsigned (%pointer (gcsave-c25b-referrer)))))
+	  (and (gencol-young-p (gcsave-c25b-symbol))
+	       (gencol-young-p (get (gcsave-c25b-symbol) 'gcsave-c25))
+	       (<= (gcsave-wired-words) a) (< a #o1000000)))
 	(>= (si:%pointer-unsigned (%pointer (aloc *gcsave-holder* gcsave-c14-slot))) #o1000000)))
 
 (defun gcsave-lists ()
@@ -106,7 +132,8 @@ layout has no symbol there; and the lists are young."
   (list (aref *gcsave-holder* gcsave-c14-slot)
 	(aref *gcsave-holder* gcsave-c14d-slot)
 	(get nil 'gcsave-c25)
-	(and *gcsave-c25b-symbol* (get *gcsave-c25b-symbol* 'gcsave-c25))))
+;	(and *gcsave-c25b-symbol* (get *gcsave-c25b-symbol* 'gcsave-c25))))
+	(and *gcsave-c25b-area* (get (gcsave-c25b-symbol) 'gcsave-c25))))
 
 (defun gcsave-sums ()
   "The sums of the lists of C14, C14 (d), C25 (a) and C25 (b): 49995000 each, NIL for an
@@ -115,11 +142,12 @@ absent (b)."
 
 (defun gcsave-referrer-marks ()
   "<19> of the page of each list's referrer: C14's slot, C14 (d)'s, NIL's plist cell,
-(b)'s symbol (NIL if none)."
+(b)'s word of AREA-NAME."
   (list (gcsave-page-mark (aloc *gcsave-holder* gcsave-c14-slot))
 	(gcsave-page-mark (aloc *gcsave-holder* gcsave-c14d-slot))
 	(gcsave-page-mark (%pointer nil))
-	(and *gcsave-c25b-symbol* (gcsave-page-mark (%pointer *gcsave-c25b-symbol*)))))
+;	(and *gcsave-c25b-symbol* (gcsave-page-mark (%pointer *gcsave-c25b-symbol*)))))
+	(and *gcsave-c25b-area* (gcsave-page-mark (gcsave-c25b-referrer)))))
 
 (defun gcsave-generations ()
   "The generation of each list's first cons: 2 (survivor space 1) for those consed before
@@ -249,7 +277,9 @@ before any young object is stored (C26's second part, the restore applying no bi
 (defun gcsave-clean-up ()
   (delete-initialization "gcsave-c14d" '(:before-cold))
   (remprop nil 'gcsave-c25)
-  (when *gcsave-c25b-symbol* (remprop *gcsave-c25b-symbol* 'gcsave-c25))
+;  (when *gcsave-c25b-symbol* (remprop *gcsave-c25b-symbol* 'gcsave-c25))
+  ;; (b)'s area stays, an empty static area: an area is never deleted
+  (when *gcsave-c25b-area* (remprop (gcsave-c25b-symbol) 'gcsave-c25))
   t)
 
 (defun gcsave-reclaim-checker-off ()

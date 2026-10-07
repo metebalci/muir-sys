@@ -832,3 +832,29 @@ objects young) changed the save, the band's formats and the boot.
   simple process's function, and the process runs it again from its start a
   tick later (`SIMPLE-PROCESS-RETRY-P`, `:712`). Checked by `tools/system-check`'s
   `scheduler-simple-wait`.
+- **The generational collector's checks, after their first runs on step 2's
+  band** (`tools/system-check/`):
+  - the table checker (`lisp/generational-collector.lisp:181`) leaves out
+    old regions, which `GC-RECLAIM-OLDSPACE-AREA` keeps when old as their
+    area's only region (`sys/sys2/gc.lisp:752`): after a tenured collection
+    four were left, one holding forwarded objects, and its walk's
+    `%STRUCTURE-TOTAL-SIZE` met a `DTP-GC-FORWARD` word and halted the
+    machine (`XFSHS1`, after the reclaim checker's case, whose case itself
+    passed with the connection alive);
+  - C6 (b) (`:263`) grows an array of the long format: 10 elements is the
+    short one, and growing past 1,023 is a copy, never in place. C6 (b)
+    and (c) (`:286`) first leave stale entries above the free pointer, by
+    arrays given back, since a fresh table's entries are valid starts and a
+    missing writer went unseen; the planted writers now fail them, (T 3)
+    and 1. C6 (a) gains two give-backs in a row (`GENCOL-C6A2`, `:230`),
+    which E1's `uncons-keeps-cache` microcode fails and the first C6 (a)
+    case passes (clarification 13);
+  - C17's case at 32 MW is commented out: `PAGE-OUT-WORDS` only offers a page
+    to be swapped out (`sys/io/disk.lisp:2291`), so the page stayed in core.
+    C17 is `tools/microcode-check`'s `generational-2mw`;
+  - C25 (b) (`lisp/generational-collector-save.lisp:84`, `:108`;
+    `save/before.cases`) makes its referrer: the layout has no symbol
+    between the wired size and `1000000`, only the fixed areas' regions, so
+    the search found none and (b) went unchecked; now a young symbol names
+    an area, and `AREA-NAME`'s word for it, on a page wired for the restore,
+    holds the only reference.

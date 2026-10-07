@@ -18,12 +18,14 @@
 (gcsave-c14-setup) => (T T)
 
 ; C25: a young list held only by NIL's property list (a wired page), by the
-; property list of a symbol between the band's wired size and 1000000 (a page
-; wired for the restore), and C14's array above 1000000 (a paged page).  If
-; (b) is NIL the layout has no symbol there: E4 picks another object or
-; records that it has none (contract C25 (b))
+; property list of a young symbol naming an area, whose word of AREA-NAME
+; lies between the band's wired size and 1000000 (a page wired for the
+; restore; the layout has no symbol there, so the check makes this one), and
+; C14's array above 1000000 (a paged page).  The second case records (b)'s
+; referrer's address
 (gcsave-c25-setup) => (T T T)
-(and *gcsave-c25b-symbol* (si:%pointer-unsigned (%pointer *gcsave-c25b-symbol*)))
+;(and *gcsave-c25b-symbol* (si:%pointer-unsigned (%pointer *gcsave-c25b-symbol*)))
+(si:%pointer-unsigned (%pointer (gcsave-c25b-referrer)))
 
 ; the sums before the save; C14 (d)'s list is made by the save
 (gcsave-sums) => (49995000 NIL 49995000 49995000)

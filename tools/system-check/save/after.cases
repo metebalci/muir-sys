@@ -32,7 +32,8 @@
 ; C14 (b), C14 (d), C25: before any collection, the page of each list's
 ; only referrer is marked: C14's static array (a paged page, C25 (c)), C14
 ; (d)'s slot (marked just before %DISK-SAVE), NIL's property list (a wired
-; page, C25 (a)), the symbol of C25 (b).  Fails without the save's bitmap,
+; page, C25 (a)), C25 (b)'s word of AREA-NAME (a page wired for the restore,
+; made by before.cases).  Fails without the save's bitmap,
 ; without its restore, with the restore reaching fewer than its three paths
 ; (C25), or with C14 (d)'s mark left in the TLB only
 (gcsave-referrer-marks) => (1 1 1 1)

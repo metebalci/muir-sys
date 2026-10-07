@@ -183,7 +183,14 @@ NIL if the page is not in core."
 failures, NIL if none."
   (let ((failures nil))
     (dotimes (region si:size-of-area-arrays)
+      ;; an old region is left out: its objects are forwarded, and
+      ;; %structure-total-size on a gc-forward word halts the machine
+      ;; (xfshs1, ILLOP).  GC-RECLAIM-OLDSPACE-AREA keeps an area's only
+      ;; region when it is old (sys/sys2/gc.lisp), so after a tenured
+      ;; collection a few are left, gencol-c6b's area's among them; the walk
+      ;; reads tables in new, copy and static regions only (scav-walk-1)
       (when (and (si:region-has-first-object-table-p region)
+		 (not (= (ldb si:%%region-space-type (si:region-bits region)) si:%region-space-old))
 		 (or (null area) (= (%area-number (si:region-origin region)) area)))
 	(setq failures (nconc failures (gencol-check-region-table region)))))
     (setq *gencol-table-failures* failures)
@@ -201,18 +208,84 @@ failures, NIL if none."
 	(make-array (random 30))))
     (gencol-check-tables area)))
 
+;;; C6 (a), two give-backs in a row (clarification 13: UN-CONS clears the
+;;; structure cons cache of a region with a table, since two give-backs could
+;;; otherwise leave an entry inside a later object).  A bignum division whose
+;;; quotient is a fixnum gives back storage twice, its temporary and then the
+;;; quotient (BIDIV, BCLEANUP; uc-arith.lisp), with the region's free pointer
+;;; placed at each of 64 offsets below a page boundary, and small arrays are
+;;; made after each: a cache left after the give-backs serves them across the
+;;; boundary on the fast path, without CONSF, and leaves the page's entry
+;;; inside one of them.  The value is the checker's failures in the region
+;;; after all 64: 0, and under E1's uncons-keeps-cache microcode not 0
+;;; (measured), under which gencol-c6a above, products and small arrays,
+;;; passes (measured: 0).
+(defun gencol-c6a2 ()
+  (let* ((area (make-area :name 'gencol-c6a2-area :gc :dynamic :representation :structure
+			  :region-size #o400000))
+	 (region (si:area-region-list area))
+	 (x (expt 3 300))
+	 (y (* (expt 3 200) (expt 7 50))))
+    (loop for off from 2 to 65
+	  do (let* ((fp (si:region-free-pointer region))
+		    (gap (- (* si:page-size (ceiling (+ fp off 2) si:page-size)) fp off)))
+	       (make-array (- gap 1) :area area)	;the free pointer OFF words below a boundary
+	       (let ((si:number-cons-area area))
+		 (truncate x y))
+	       (dotimes (i 5) (make-array (+ 3 (* 7 i)) :area area))))
+    (length (gencol-check-region-table region))))
+
 ;;; C6 (b): ADJUST-ARRAY-SIZE growing in place across three pages
+;(defun gencol-c6b ()
+;  (let* ((area (make-area :name 'gencol-c6b-area :gc :dynamic :representation :structure))
+;	 (a (make-array 10 :area area))
+;	 (b (adjust-array-size a 3500)))
+;    (list (eq a b) (gencol-check-tables area))))
+;;; the array is of the long format from the start: one of 10 elements is
+;;; short, and growing it past %array-max-short-index-length (1023) changes
+;;; the format, which ADJUST-ARRAY-SIZE does by a copy, never in place
+;;; (sys/sys/qrand.lisp), so (eq a b) was NIL whatever the table.  1,100
+;;; elements after the region's table hold page 1's first word; grown to
+;;; 4,600 they hold pages 2, 3 and 4's, whose entries GC-RESET-FREE-POINTER
+;;; writes.  A fresh table's entries are 0, the table's own start, which the
+;;; checker takes (a walk from there reaches any page), so those entries are
+;;; first made stale: three arrays after A hold pages 2, 3 and 4's first
+;;; words, and are given back (RETURN-STORAGE moves the free pointer down and
+;;; leaves their entries); without the write the entries are their starts,
+;;; inside the grown array, and the checker fails 3.
 (defun gencol-c6b ()
   (let* ((area (make-area :name 'gencol-c6b-area :gc :dynamic :representation :structure))
-	 (a (make-array 10 :area area))
-	 (b (adjust-array-size a 3500)))
-    (list (eq a b) (gencol-check-tables area))))
+	 (a (make-array 1100 :area area)))
+    (let* ((x1 (make-array 1000 :area area))
+	   (x2 (make-array 1000 :area area))
+	   (x3 (make-array 1000 :area area)))
+      (return-storage (prog1 x3 (setq x3 nil)))
+      (return-storage (prog1 x2 (setq x2 nil)))
+      (return-storage (prog1 x1 (setq x1 nil))))
+    (let ((b (adjust-array-size a 4600)))
+      (list (eq a b) (gencol-check-tables area)))))
 
 ;;; C6 (c): MAKE-AREA-REGIONS-STATIC on a part-filled region
+;(defun gencol-c6c ()
+;  (let ((area (make-area :name 'gencol-c6c-area :gc :dynamic :representation :structure
+;			 :region-size #o400000)))
+;    (dotimes (i 300) (make-array 100 :area area))
+;    (si:make-area-regions-static area)
+;    (gencol-check-tables area)))
+;;; as C6 (b), the entries of the pages above the free pointer are first made
+;;; stale, by three arrays given back: FILL-UP-REGION must write each filler
+;;; page's start; without it two of them are the given-back arrays' starts,
+;;; inside a filler (the first array's start is the first filler's too)
 (defun gencol-c6c ()
   (let ((area (make-area :name 'gencol-c6c-area :gc :dynamic :representation :structure
 			 :region-size #o400000)))
     (dotimes (i 300) (make-array 100 :area area))
+    (let* ((x1 (make-array 1000 :area area))
+	   (x2 (make-array 1000 :area area))
+	   (x3 (make-array 1000 :area area)))
+      (return-storage (prog1 x3 (setq x3 nil)))
+      (return-storage (prog1 x2 (setq x2 nil)))
+      (return-storage (prog1 x1 (setq x1 nil))))
     (si:make-area-regions-static area)
     (gencol-check-tables area)))
 

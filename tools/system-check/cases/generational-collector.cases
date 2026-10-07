@@ -71,12 +71,15 @@
 ; Fails without the first-object table or with a stale entry
 (gencol-c5) => (T 4950)
 
-; C6, the table checker: planted (a) UN-CONS across page boundaries, (b)
-; ADJUST-ARRAY-SIZE growing in place across three pages, (c)
-; MAKE-AREA-REGIONS-STATIC on a part-filled region; then every region.  Fails
-; with any writer left out (planted: GC-RESET-FREE-POINTER's for b,
-; FILL-UP-REGION's for c; UN-CONS and CONSF are E1's)
+; C6, the table checker: planted (a) UN-CONS across page boundaries, and two
+; give-backs in a row (clarification 13), (b) ADJUST-ARRAY-SIZE growing in
+; place across three pages, (c) MAKE-AREA-REGIONS-STATIC on a part-filled
+; region; then every region.  Fails with any writer left out (planted:
+; GC-RESET-FREE-POINTER's for b, (T 3), FILL-UP-REGION's for c, 1; the
+; second (a) under E1's uncons-keeps-cache microcode, which the first passes;
+; CONSF is E1's)
 (gencol-c6a) => 0
+(gencol-c6a2) => 0
 (gencol-c6b) => (T 0)
 (gencol-c6c) => 0
 (gencol-check-tables) => 0
@@ -124,7 +127,11 @@
 ; C17, a marked page swapped out before the flip (meant for 2 MW; at 32 MW it
 ; holds if PAGE-OUT-WORDS evicts the page, its first value).  Fails if the
 ; walk skips entries not in core
-(gencol-c17) => (T 499500)
+;(gencol-c17) => (T 499500)
+; not here: PAGE-OUT-WORDS only offers the page to be swapped out
+; (sys/io/disk.lisp), so at 32 MW the page stays in core and the first value
+; is NIL.  C17 is tools/microcode-check's generational-2mw (GEN-C17), at 2 MW,
+; where two arrays of 1.5 M words force the page out
 
 ; C18, the extra PDL: a bignum stored into a tenured object during a young
 ; collection survives two more
