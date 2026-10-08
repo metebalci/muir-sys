@@ -429,9 +429,9 @@ Returns T."
 	  (mapc #'eval gc-after-flip-list))
 ;	(initializations 'after-flip-initialization-list t))
 	;; the after-flip initializations cons with scavenging inhibited, so that
-	;; their conses add their work to the scavenger's debt, paid by later
-	;; conses at the usual rate (contract 4.5), instead of scavenging it here,
-	;; inside the flip's without-interrupts.  eh's assure-free-space conses
+	;; their conses add their work to the scavenger's backlog (proposed term),
+	;; paid by later conses at the usual rate (contract 4.5), instead of
+	;; scavenging it here, inside the flip's without-interrupts.  eh's assure-free-space conses
 	;; 4,096 words twice, each scavenging 16 k words of work at once: young
 	;; flips took 59-115 ms with it, 7-12 ms without (contract g3 step 2,
 	;; t1, clarification 18).
@@ -612,6 +612,15 @@ The second value is the part which is not certain (u.b. minus l.b.)."
 
 ;So, we can compute two different values of committed free space (C),
 ;depending on whether you plan to reclaim immediately or incrementally.
+;;; the generational collector (contract g3 step 2, 4.5, amendment 8): the
+;;; backlog limit (proposed), in units of scavenger work, the microcode's
+;;; constant at scav0 (uc-storage-allocation), 4000000 there: below it one cons
+;;; scavenges at most a page's units, so a collection may take up to this many
+;;; units over k more consing than mit's rule counts, which
+;;; gc-get-committed-free-space commits besides.  keep the two equal.
+(defconst gc-backlog-limit 1048576.
+  "The microcode's backlog limit in units of scavenger work (SCAV0).")
+
 (DEFUN GC-GET-COMMITTED-FREE-SPACE (&OPTIONAL (RECLAIM-IMMEDIATELY GC-RECLAIM-IMMEDIATELY)
 				    (K 4)	;K is the magic constant
 				    STATIC-REGIONS-OF-DYNAMIC-AREAS-ARE-DYNAMIC)
@@ -630,7 +639,13 @@ The second value is the part which is not certain (u.b. minus l.b.)."
 		   #| (// (+ (* (+ K 2) (+ DYNAMIC-SIZE FREE-SIZE)) STATIC-SIZE)
 		          (+ (* 2 K) 1)) |#
 		   ))
-      (VALUES (FLOOR CONSING) FREE-SIZE))))
+;      (VALUES (FLOOR CONSING) FREE-SIZE))))
+      ;; the generational collector (contract g3 step 2, 4.5, amendment 8): and
+      ;; the consing the bound on one cons's scavenging may add to a
+      ;; collection, the backlog limit over k (262,144 words).  full-gc passes
+      ;; k nil (it reclaims immediately, which reads no k): the microcode's k,
+      ;; 4, then.
+      (values (+ (floor consing) (floor gc-backlog-limit (or k 4))) free-size))))
 
 ;;; Print various statistics
 (DEFUN GC-STATUS (&OPTIONAL (STREAM *STANDARD-OUTPUT*))

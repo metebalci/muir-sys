@@ -653,6 +653,26 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
   constants now end at 1551, below the mouse arrays at 1600. Checked by
   `tools/system-check/cases/generational-tuning.cases`: a planted partial fix,
   `FREE-REGION` without the forget, fails two cases.
+- **One cons scavenges at most a page's units** (contract G3 step 2, 4.5,
+  amendment 8; `uc-storage-allocation.lisp`, `SCAV0`, `SCAV0-BOUNDED`): a
+  cons of n words still counts its 4n units in `A-CONS-WORK-DONE`, but
+  scavenges at most `PAGE-SIZE`, 1,024, of them while the **backlog
+  (proposed term)**, `A-CONS-WORK-DONE` less `A-SCAV-WORK-DONE` with this
+  cons's 4n counted, is at most the **backlog limit (proposed term)**,
+  1,048,576 units, K times a working-storage region; above the limit it
+  scavenges its whole 4n, as MIT's did. Later conses, each scavenging its
+  own share while the scavenger is behind, and idle time do the rest. One
+  cons scavenged up to all of a collection's remaining work at once: the
+  error handler's `ASSURE-FREE-SPACE` (`sys/eh/eh.lisp:100`, called outside
+  any flip) took 188.9 ms at 2 M words, a planted 200 K-word array 211-239
+  ms; at a young flip with a live block in eden a 4,098-word cons took up to
+  87.9 ms, 19.4 ms with a bound of 4,096 units and 3.6-4.3 ms with the page
+  (T1, M-a). The limit keeps MIT's free-space rule (`gc.lisp`,
+  `GC-GET-COMMITTED-FREE-SPACE`): through a tenured collection, a stream of
+  64 K-word arrays finished it after 1,114,112 words consed unbounded,
+  1,441,792 with the page and the limit, and not after 19,660,800 (300
+  arrays) with the page alone (M-b). Above the limit a large cons pays
+  MIT's burst (up to 1.1 s in M-b, as unbounded).
 
 ### The Lisp side
 
@@ -988,6 +1008,24 @@ objects young) changed the save, the band's formats and the boot.
   one is made again for a new area (fails with the planted `FREE-REGION`);
   the priority and the clock after GC-ON, and both after GC-OFF (fails with
   GC-ON as it was, or with either setting alone).
+
+- **The committed free space counts the backlog limit** (contract G3 step 2,
+  4.5, amendment 8; `sys/sys2/gc.lisp`, `GC-BACKLOG-LIMIT`,
+  `GC-GET-COMMITTED-FREE-SPACE`): the bound on one cons's scavenging may
+  add up to the backlog limit (proposed term) over K, 262,144 words, to the
+  consing a collection needs beyond MIT's rule, and
+  `GC-GET-COMMITTED-FREE-SPACE` commits it besides. `GC-BACKLOG-LIMIT`
+  mirrors the microcode's constant at `SCAV0`. Checked by
+  `generational-tuning`'s C31 (a)-(c): a 200,000-word cons right after a
+  young flip leaves the collection running (fails if a cons scavenges its
+  whole 4n), a 300,000-word one, over the limit, finishes it (fails without
+  the limit), and the committed free space is MIT's figure plus 262,144
+  words for fixed space sizes (fails without the term).
+- **Which pauses §13 gates** (contract G3 step 2, clarification 17):
+  automatic collection's in the workloads; a batch a program asks for
+  (FULL-GC, GC-IMMEDIATELY, GC-RECLAIM-OLDSPACE, GC-FLIP-NOW over a running
+  collection, DISK-SAVE's collections, the build route's) is reported, not
+  gated. No code change.
 
 ## Revision 15
 

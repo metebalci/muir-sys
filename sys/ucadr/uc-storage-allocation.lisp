@@ -545,6 +545,23 @@ SCAV0	;(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCAVT) ;If in transporter, don't invoke
 	((A-CONS-WORK-DONE Q-R) ADD M-E A-CONS-WORK-DONE)
 	(JUMP-LESS-THAN-XCT-NEXT Q-R A-SCAV-WORK-DONE SCAV0X)	;Return if not yet
        ((A-CONS-NEW-FREE-POINTER) M-3)				; time to scavenge
+	;; the generational collector (contract g3 step 2, 4.5, amendment 8):
+	;; one cons scavenges at most a page's units, 1,024, while the backlog
+	;; (proposed), a-cons-work-done less a-scav-work-done with this cons's 4n
+	;; counted, is at most the backlog limit (proposed), 4000000 (1,048,576)
+	;; units, k times a working-storage region; above it the cons scavenges
+	;; its whole 4n, as mit's did.  the 4n stays counted above; later conses,
+	;; each scavenging its own share while the scavenger is behind, and idle
+	;; time do the rest.  one cons scavenged up to all of a collection's
+	;; remaining work at once: the error handler's assure-free-space, 4,098
+	;; words, 188.9 ms at 2 mw (t1).  the limit keeps mit's free-space rule
+	;; to within the limit over k, 262,144 words, which
+	;; gc-get-committed-free-space (gc.lisp) commits besides.
+	((m-tem) sub q-r a-scav-work-done)	;the backlog, this cons's 4n in it
+	(jump-greater-than m-tem (a-constant 4000000) scav0-bounded)	;over the limit: all 4n
+	(jump-less-or-equal m-e (a-constant (eval page-size)) scav0-bounded)
+	((m-e) (a-constant (eval page-size)))
+scav0-bounded
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-INHIBIT-SCAVENGING-FLAG)
 	(CALL-EQUAL-XCT-NEXT M-TEM A-V-NIL SCAV2)	;Check if scavenger inhibited by user
 SCAV0X ((A-CONS-NEW-FP-REGION) ADD M-K A-V-REGION-FREE-POINTER)

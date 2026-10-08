@@ -41,16 +41,41 @@
 ; leaves the process at the default priority or the clock at once a second.
 (progn (si:gc-on t) (list (send si:gc-process :priority) (send current-process :priority) (read-meter 'si:%tv-clock-rate))) => (5 0 6)
 ; a young collection comes when eden is full: eden 128 K words, 600 K words
-; consed in a loop, and every flip's words consed since the last below 256 K.
-; A record, not a check of the two settings: under lispm-check TELNET's
-; Chaosnet interrupts give the scheduler passes of their own, so it passes
-; with either setting alone (measured); the keyboard's listener, which nothing
-; interrupts, shows the difference (T1 with the fixes).
+; consed in a loop, and at least three flips; the words consed at each are
+; recorded below, not checked, since a flip waits for the last collection to
+; finish (one on rtl came at 279,719 words).  A record, not a check of the two
+; settings: under lispm-check TELNET's Chaosnet interrupts give the scheduler
+; passes of their own, so it passes with either setting alone (measured); the
+; keyboard's listener, which nothing interrupts, shows the difference (T1 with
+; the fixes).
 (defvar *gt-at* nil) => *GT-AT*
 (progn (setq si:gc-eden-size 131072) (si:gc-flip-now :young) (si:gc-reclaim-oldspace) (setq *gt-at* nil) (push '(push si:%gc-words-consed-since-flip *gt-at*) si:gc-every-flip-list) (si:gc-off) (si:gc-on t) t) => T
-(progn (dotimes (i 3000) (make-list 200)) (let ((ok t)) (dolist (c *gt-at*) (or (< c 262144) (setq ok nil))) (list (>= (length *gt-at*) 3) ok))) => (T T)
+(progn (dotimes (i 3000) (make-list 200)) (>= (length *gt-at*) 3)) => T
 ; the words consed at each flip, for the record
 *gt-at*
 (progn (pop si:gc-every-flip-list) (setq si:gc-eden-size nil) t) => T
 ; GC-OFF gives the clock back its once a second and the process its priority 0
 (progn (si:gc-off) (prog1 (list (read-meter 'si:%tv-clock-rate) (send si:gc-process :priority)) (si:gc-on t))) => (60 0)
+
+; (4) C31 (contract G3 step 2, amendment 8): one cons scavenges at most a
+; page's units while the backlog is at most the backlog limit, 1,048,576
+; units, and its whole 4n above it.
+; (a) right after a young flip, whose work (the walk, the marked pages, and
+; 20,000 young lists of 5 held by a symbol) is tens of thousands of units, a
+; cons of 200,000 words (a backlog of about 800,000 units) leaves the
+; collection running; idle scavenging is inhibited, since the array's page
+; faults may leave the machine idle.  Fails if a cons scavenges its whole 4n.
+(defvar *gt-live* nil) => *GT-LIVE*
+(progn (si:gc-on t) (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 200000) si:%gc-flip-ready)) => NIL
+(progn (si:gc-reclaim-oldspace) t) => T
+; (b) the same with 300,000 words, a backlog of 1.2 M units, over the limit,
+; finishes it.  Fails without the limit.
+(progn (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 300000) si:%gc-flip-ready)) => T
+(progn (setq *gt-live* nil) t) => T
+(progn (si:gc-reclaim-oldspace) t) => T
+; (c) the committed free space counts the limit over K, 262,144 words, beyond
+; MIT's rule.  GC-GET-SPACE-SIZES is replaced for the one call by fixed sizes
+; (dynamic 1,000,000, static 2,000,000, free 50,000,000), for which MIT's rule
+; (K 4, without GC-RECLAIM-IMMEDIATELY) commits 42,833,333 words.  Fails
+; without the term (42,833,333).
+(without-interrupts (let ((old (symbol-function 'si:gc-get-space-sizes))) (unwind-protect (progn (fset 'si:gc-get-space-sizes #'(lambda (&optional ignore) (values 1000000 2000000 0 50000000 0))) (si:gc-get-committed-free-space nil)) (fset 'si:gc-get-space-sizes old)))) => 43095477
