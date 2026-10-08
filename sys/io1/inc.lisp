@@ -679,18 +679,43 @@ pages not currently in use, and pages which have no data in the disk partition."
 				(lsh i (1+ page-size-bits))  ;(* i page-size 2)
 				compare-page-indirect-array 0
 				(lsh page-size 1))
-		 (page-tags-equal (%make-pointer-offset dtp-locative data (lsh i page-size-bits))
-				  (%make-pointer dtp-locative (lsh (+ i page-number) page-size-bits))))
+;		 (page-tags-equal (%make-pointer-offset dtp-locative data (lsh i page-size-bits))
+;				  (%make-pointer dtp-locative (lsh (+ i page-number) page-size-bits))))
+		 ;; the two pages by fixnum addresses, not locatives: a locative to a
+		 ;; page of the extra pdl, held on the stack when a sequence break
+		 ;; switches stack groups, is caught by the pdl buffer's dump as a
+		 ;; pointer into the extra pdl, and extra-pdl-trap copies the word
+		 ;; there as an object's header; the page's data is none, and the
+		 ;; machine halted at illop (generational-rqb, at sinf-flo).  a fixnum
+		 ;; is no pointer to the dump's write test.
+		 (page-tags-equal (%pointer-plus data (lsh i page-size-bits))
+				  (lsh (+ i page-number) page-size-bits)))
 ;	    (setf (aref mask (+ i page-number)) 1))))))
 	    (setf (aref mask (+ mask-index (- (+ i page-number) page))) 1))))))
 
+;(defun page-tags-equal (a b)
+;  "T if the page of words at A and the one at B have the same tags, <39:32>, word for word.
+;Neither word is looked at as an object (%p-ldb, not %p-ldb-offset, which reads
+;the word at its pointer as a header and transports it)."
+;  (dotimes (w page-size t)
+;    (unless (= (%p-ldb #o4010 (%make-pointer-offset dtp-locative a w))
+;	       (%p-ldb #o4010 (%make-pointer-offset dtp-locative b w)))
+;      (return nil))))
+;; a and b are fixnum addresses, and each word is read through a fixnum
+;; address too, so that no typed pointer into memory, the extra pdl among it,
+;; lies on the stack across a stack-group switch: the pdl buffer's dump traps
+;; a locative into the extra pdl and copies the word it names as an object
+;; (compare-range above).  %p-ldb reads the word at its argument's pointer
+;; field whatever the argument's data type, and transports nothing
+;; (uc-fctns.lisp, xpldb: vma-start-read of the typed pointer, check-page-read).
 (defun page-tags-equal (a b)
-  "T if the page of words at A and the one at B have the same tags, <39:32>, word for word.
-Neither word is looked at as an object (%p-ldb, not %p-ldb-offset, which reads
-the word at its pointer as a header and transports it)."
+  "T if the page of words at address A and the one at address B, fixnums, have
+the same tags, <39:32>, word for word.  Neither word is looked at as an object
+(%p-ldb, not %p-ldb-offset, which reads the word at its pointer as a header and
+transports it), and neither address is held as a pointer."
   (dotimes (w page-size t)
-    (unless (= (%p-ldb #o4010 (%make-pointer-offset dtp-locative a w))
-	       (%p-ldb #o4010 (%make-pointer-offset dtp-locative b w)))
+    (unless (= (%p-ldb #o4010 (%pointer-plus a w))
+	       (%p-ldb #o4010 (%pointer-plus b w)))
       (return nil))))
 
 (defun count-changed-pages (mask &optional pages)

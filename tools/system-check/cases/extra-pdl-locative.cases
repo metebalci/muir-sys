@@ -1,0 +1,18 @@
+; lisp: extra-pdl-locative.lisp
+; No pointer into EXTRA-PDL-AREA is held by the incremental save's compare
+; across a stack-group switch (sys/io1/inc.lisp, COMPARE-RANGE and
+; PAGE-TAGS-EQUAL; lisp/extra-pdl-locative.lisp).  The switch dumps the pdl
+; buffer, the dump's write test traps a pointer into the extra pdl, and
+; EXTRA-PDL-TRAP copies the word it names as an object's header: a word that is
+; none halts the machine at ILLOP.  The compare now reads pages by fixnum
+; addresses.  Run with
+;   --compile --files sys/io1/inc.lisp,tools/system-check/lisp/extra-pdl-locative.lisp
+; on any band of revision 14.  The first case checks that %P-LDB through a
+; fixnum address reads the word itself and transports nothing; the second
+; holds two fixnum addresses of an extra pdl page across a switch and compares
+; the page with itself.  lisp/extra-pdl-locative-plant.lisp, given after the
+; check's own file, holds a locative instead: the machine halts in the second
+; case and answers no more.
+(si::epl-p-ldb) => (10 2)
+(si::epl-hold) => (T T)
+(si:page-tags-equal (si::epl-page) (si::epl-page)) => T

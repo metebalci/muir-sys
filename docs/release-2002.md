@@ -119,6 +119,22 @@ file carries a comment in that file saying why.
   `ZUNDERFLOW`), and passes all 49 with it. The CADR's line has no
   subnormal floats, and there `(+ 0 x)` and `(* 1 x)` of a float are
   exact, so it is not affected.
+- **The incremental save's compare reads pages by fixnum addresses**
+  (`COMPARE-RANGE` and `PAGE-TAGS-EQUAL`, `sys/io1/inc.lisp:667`, `:711`).
+  It walked every page of memory by locatives, the extra pdl's pages among
+  them; a sequence break in that window switched stack groups, the pdl
+  buffer's dump took the locative for a pointer into the extra pdl, and
+  `EXTRA-PDL-TRAP` (`sys/ucadr/uc-transporter.lisp`) copied the word it named
+  as an object's header, so the machine halted at ILLOP from `SINFSH`'s
+  dispatch, in `tools/microcode-check`'s `generational-rqb` at `SINF-FLO` (on
+  micro at 4, 5 and 6 ticks and on rtl at 5 and 6, measured). The two pages'
+  addresses are now fixnums and each word is read through `%POINTER-PLUS` and
+  `%P-LDB`, which reads the word at its argument's pointer field and
+  transports nothing (`XPLDB`, `sys/ucadr/uc-fctns.lisp:1225`); the tags,
+  `<39:32>`, are compared word for word as before. `tools/system-check`'s
+  new check `extra-pdl-locative` holds the compare's fixnum addresses of an
+  extra pdl page across a forced stack-group switch, and its plant file a
+  locative, which halts the machine.
 
 ## Revision 14
 
