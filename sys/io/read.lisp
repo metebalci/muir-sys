@@ -1151,10 +1151,65 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
 					       STRING-LENGTH
 					       10.))))
 ;  (LET ((NUM (IF SFL-P (SMALL-FLOAT (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))
-  ;; xr-small-float: the least positive short float printed reads back (below)
-  (let ((num (if sfl-p (xr-small-float (xr-flonum-cons high-part low-part power-10))
-	       (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))))
-    (IF POSITIVE NUM (- NUM))))
+;  ;; xr-small-float: the least positive short float printed reads back (below)
+;  (let ((num (if sfl-p (xr-small-float (xr-flonum-cons high-part low-part power-10))
+;	       (XR-FLONUM-CONS HIGH-PART LOW-PART POWER-10))))
+;    (IF POSITIVE NUM (- NUM))))
+  ;; the float nearest the text (xr-flonum-nearest, below); zero, and a text
+  ;; out of the format's range, as before
+  (or (xr-flonum-nearest high-part low-part power-10 sfl-p positive)
+      (let ((num (if sfl-p (small-float (xr-flonum-cons high-part low-part power-10))
+		   (xr-flonum-cons high-part low-part power-10))))
+	(if positive num (- num)))))
+
+;;; The float nearest the number the text stands for, the digits HIGH * 2^24 +
+;;; LOW (as XR-ACCUMULATE-DIGITS gathers them, at most 12) divided by
+;;; 10^POWER-10, negative unless POSITIVE, short when SFL-P; ties go to an even
+;;; mantissa.  NIL for zero and for a number out of the format's range.
+;;; XR-FLONUM-CONS multiplies or divides by a float power of ten, rounding
+;;; twice, a short float was read as a single float and rounded again, and
+;;; the magnitude was read and then negated: texts the printer gave for
+;;; floats it printed exactly did not read back as those floats, and the most
+;;; negative float of each format, -2^127 short and -2^1023 single, whose
+;;; magnitude is no float, signalled "* produced a result too large" or
+;;; "SMALL-FLOAT produced a result too large".  Here the rounding is exact, in
+;;; integers, to the format's P bits of mantissa: Q * 2^E, Q in [2^(P-1),
+;;; 2^P), is made by SCALE-FLOAT of Q floated, both exact.  A float with that
+;;; exponent field is in range (sys/sys2/numdef.lisp): Q / 2^P times 2^(E + P)
+;;; has the field E + P + #o200 short and E + P + #o2000 single; a negative of
+;;; Q = 2^(P-1) is a mantissa of -1, one field lower.  The negative text
+;;; nearest the least positive float gives the least negative float, the
+;;; negative float nearest it, as that float has no negative.
+(defun xr-flonum-nearest (high low power-10 sfl-p positive)
+  (let* ((n (+ (ash high 24.) low))
+	 (p (if sfl-p 17. 31.))
+	 (offset (+ p (if sfl-p #o200 #o2000)))
+	 num den e q r field)
+    ;; a power of ten so large that the float would be out of range anyway is
+    ;; left to XR-FLONUM-CONS, which refuses it
+    (when (and (plusp n) (< -330. power-10 350.))
+      (setq num (if (minusp power-10) (* n (^ 10. (- power-10))) n)
+	    den (if (plusp power-10) (^ 10. power-10) 1)
+	    e (- (haulong num) (haulong den) p))
+      ;; q = num / (den * 2^e) truncated, r the remainder, with q of p bits
+      (do-forever
+	(multiple-value-setq (q r)
+	  (if (minusp e) (truncate (ash num (- e)) den) (truncate num (ash den e))))
+	(cond ((< q (ash 1 (1- p))) (setq e (1- e)))
+	      ((>= q (ash 1 p)) (setq e (1+ e)))
+	      (t (return nil))))
+      (let ((d (if (minusp e) den (ash den e))))
+	(when (or (> (* 2 r) d) (and (= (* 2 r) d) (oddp q)))
+	  (setq q (1+ q))
+	  (when (= q (ash 1 p))
+	    (setq q (ash q -1) e (1+ e)))))
+      (setq field (+ e offset (if (and (not positive) (= q (ash 1 (1- p)))) -1 0)))
+      (cond ((< 0 field (if sfl-p #o400 #o4000))
+	     (scale-float (if sfl-p (small-float (if positive q (- q))) (float (if positive q (- q))))
+			  e))
+	    ((and (not positive) (zerop field) (= q (ash 1 (1- p))))
+	     ;; -(least positive): the least negative, -(2^(p-1) + 1) * 2^e
+	     (scale-float (if sfl-p (small-float (- (1+ q))) (float (- (1+ q)))) e))))))
 
 ;;; SMALL-FLOAT of a float F, not negative, except that an F below the least
 ;;; positive short float, 2^-128, by at most half a short float's last place
@@ -1164,12 +1219,13 @@ RECURSIVE-P should be supplied non-NIL when this is called from a reader macro."
 ;;; short float, and SMALL-FLOAT of 2.93872e-39 signalled "SMALL-FLOAT produced
 ;;; a result too small".  The constant is built here, since this file is in
 ;;; the cold load and LEAST-POSITIVE-SHORT-FLOAT (sys/sys2/numer.lisp) is not.
-(defun xr-small-float (f)
-  (let ((least (%make-pointer dtp-small-flonum #o600000)))
-    (if (and (< f least)
-	     (>= f (- least (// least (float #o400000)))))	;least - least * 2^-17
-	least
-      (small-float f))))
+;;; No longer used: XR-FLONUM-NEAREST rounds such a text to that float.
+;(defun xr-small-float (f)
+;  (let ((least (%make-pointer dtp-small-flonum #o600000)))
+;    (if (and (< f least)
+;	     (>= f (- least (// least (float #o400000)))))	;least - least * 2^-17
+;	least
+;      (small-float f))))
 
 (DEFUN XR-ACCUMULATE-DIGITS (STRING POST-DECIMAL &AUX CHAR)
   (DECLARE (SPECIAL HIGH-PART LOW-PART NDIGITS INDEX COUNT POWER-10))

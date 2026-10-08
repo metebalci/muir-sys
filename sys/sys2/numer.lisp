@@ -518,7 +518,12 @@ if that is specified; else SIGN-FLONUM."
 
 (%p-dpb 1 (xbyte 11. 8) least-negative-single-float)
 (%p-dpb 1 (xbyte 1 7) least-negative-single-float)
-(%p-dpb #o777 (xbyte 5 0) least-negative-single-float)
+;(%p-dpb #o777 (xbyte 5 0) least-negative-single-float)
+;; the six bits below the sign and the 1/2 bit: the mantissa nearest zero
+;; is -(1/2 + 2^-31), sign 1, 1/2 bit 0 and all the rest 1, and the value
+;; -(2^-1024 + 2^-1054).  Five bits left the 2^-2 bit 0, a mantissa of
+;; -(3/4 + 2^-31) and the value -(3/2 * 2^-1024 + 2^-1054).
+(%p-dpb #o777 (xbyte 6 0) least-negative-single-float)
 (%p-store-contents-offset -1 least-negative-single-float 1)
 
 (defconst most-positive-long-float most-positive-single-float)
@@ -537,7 +542,14 @@ if that is specified; else SIGN-FLONUM."
 	     (small-float (scale-float 1.0s0 -33.)))
   "Smallest positive short float which can be added to 1.0s0 and make a difference.")
 
-(defconst single-float-epsilon (+ (scale-float 1.0 -37) (scale-float 1.0 -75))
+;(defconst single-float-epsilon (+ (scale-float 1.0 -37) (scale-float 1.0 -75))
+;  "Smallest positive float which can be added to 1.0 and make a difference.")
+;; 2^-31 + 2^-61: a single float has 31 bits of mantissa, so 1.0's last place
+;; is 2^-30, and a sum rounds to the nearest float, a tie to an even
+;; mantissa: 1.0 + 2^-31 is 1.0 and 1.0 + (2^-31 + 2^-61), the next float
+;; up, is not.  2^-37 + 2^-75, which is 2^-37 as a float, made no difference
+;; to 1.0 (measured, tools/system-check float-constants).
+(defconst single-float-epsilon (+ (scale-float 1.0 -31.) (scale-float 1.0 -61.))
   "Smallest positive float which can be added to 1.0 and make a difference.")
 
 (defconst long-float-epsilon single-float-epsilon)

@@ -1,0 +1,36 @@
+; lisp: float-round-trip.lisp
+; The float constants have the values their definitions state
+; (sys/sys2/numer.lisp; lisp/float-round-trip.lisp).  SI:FRT-DECODE gives a
+; float's exact value from its bits as (M E), M * 2^E with M odd.  A short
+; float has 17 bits of mantissa and its exponent field, of 8 bits, 1 to 255,
+; scales a mantissa in [1/2, 1) or [-1, -1/2) by 2^(field - 128); a single
+; float has 31 bits and 11, 1 to 2047, and 2^(field - 1024)
+; (sys/sys2/numdef.lisp).  Most positive: (2^17 - 1) * 2^110 and
+; (2^31 - 1) * 2^992.  Least positive: 2^-128 and 2^-1024.  Most negative:
+; -2^127 and -2^1023.  Least negative, the negative mantissa nearest zero,
+; -(1/2 + 2^-17) and -(1/2 + 2^-31), at the smallest exponent:
+; -(2^16 + 1) * 2^-144 and -(2^30 + 1) * 2^-1054.  The single float's was
+; -(3/4 + 2^-31) * 2^-1023, -(2^-1024 * 3/2 + 2^-1054): (xbyte 5 0) set five
+; bits of the mantissa's top byte where six make it nearest zero.  The long
+; and double float constants are the single float's.  An epsilon is the
+; smallest positive float that makes a difference when added to (subtracted
+; from, for a negative epsilon) one, SI:FRT-EPSILON T; single-float-epsilon
+; was 2^-37, and 1.0 + 2^-37 is 1.0, as is 1.0 + 2^-31, the half place
+; rounding to even: it is 2^-31 + 2^-61.
+; Run with --compile --files tools/system-check/lisp/float-round-trip.lisp
+; on any band, with sys/sys2/numer.lisp too to check a change to it.
+(si:frt-decode most-positive-short-float) => (131071 110)
+(si:frt-decode least-positive-short-float) => (1 -128)
+(si:frt-decode most-negative-short-float) => (-1 127)
+(si:frt-decode least-negative-short-float) => (-65537 -144)
+(si:frt-decode most-positive-single-float) => (2147483647 992)
+(si:frt-decode least-positive-single-float) => (1 -1024)
+(si:frt-decode most-negative-single-float) => (-1 1023)
+(si:frt-decode least-negative-single-float) => (-1073741825 -1054)
+(list (eq most-positive-long-float most-positive-single-float) (eq most-negative-long-float most-negative-single-float) (eq least-positive-long-float least-positive-single-float) (eq least-negative-long-float least-negative-single-float) (eq most-positive-double-float most-positive-single-float) (eq most-negative-double-float most-negative-single-float) (eq least-positive-double-float least-positive-single-float) (eq least-negative-double-float least-negative-single-float)) => (T T T T T T T T)
+(si:frt-epsilon short-float-epsilon #'+) => T
+(si:frt-epsilon short-float-negative-epsilon #'-) => T
+(si:frt-epsilon single-float-epsilon #'+) => T
+(si:frt-epsilon single-float-negative-epsilon #'-) => T
+(si:frt-decode single-float-epsilon) => (1073741825 -61)
+(list (eq long-float-epsilon single-float-epsilon) (eq double-float-epsilon single-float-epsilon) (eq long-float-negative-epsilon single-float-negative-epsilon) (eq double-float-negative-epsilon single-float-negative-epsilon)) => (T T T T)

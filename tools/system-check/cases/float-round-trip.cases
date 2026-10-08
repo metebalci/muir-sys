@@ -1,0 +1,36 @@
+; lisp: float-round-trip.lisp
+; Every float prints, and its printed text reads back as the same float, bit
+; for bit (sys/io/print.lisp, PRINT-FLONUM; sys/io/read.lisp,
+; XR-FLONUM-CONS; lisp/float-round-trip.lisp).  SI:FRT-RUN round trips a
+; sample of floats of one format, short or single, and gives the number that
+; did not come back, the number tried, and up to three of them: the text, the
+; float's exact value as (M E), M * 2^E, and what the text read back as or
+; the error.  The samples are built from bits and exact integers, not by the
+; reader: the extremes of both signs, the constants as the system has them,
+; and the floats the faults were found with (6.02e23, 2^-20 and 2^-127
+; short, the float just above 2^-1024, 1e-307); for short floats, 2^k of
+; both signs for every k in range and the floats on each side of it for
+; every eighth k and the ends, the floats nearest 10^k of both signs for
+; every k, and 1000 pseudo-random floats of every exponent and sign from a
+; seeded LCG; for single floats, whose digits take longer, 2^k for every
+; sixteenth k, the floats beside it for every thirty-second k and the ends,
+; the floats nearest 10^k for every fourth k, and 300 pseudo-random floats.
+; cases-full/float-round-trip-full.cases takes the whole of each sample and
+; runs only when named: about 8 minutes on micro, this one about 1.
+; The printer scaled a float outside [1e-3, 1e7) to [1, 10) by floating
+; multiplication, losing bits, and printed the scaled float's digits; the
+; reader multiplied or divided by a floating power of ten, losing bits
+; again, read a short float as a single one and rounded that, and negated
+; the magnitude it read, so that -2^1023 and -2^127, whose magnitudes are no
+; floats, overflowed.
+; Run with --compile --files sys/io/print.lisp,sys/io/read.lisp,
+; tools/system-check/lisp/float-round-trip.lisp on a band built before the
+; change.
+(si:frt-run :short :extremes) => (0 17)
+(si:frt-run :short :powers-of-2) => (0 682)
+(si:frt-run :short :powers-of-10) => (0 154)
+(si:frt-run :short :random 0 1000) => (0 1000)
+(si:frt-run :single :extremes) => (0 15)
+(si:frt-run :single '(:powers-of-2 16 32)) => (0 578)
+(si:frt-run :single '(:powers-of-10 4)) => (0 308)
+(si:frt-run :single :random 0 300) => (0 300)

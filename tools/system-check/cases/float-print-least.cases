@@ -18,8 +18,11 @@
 (si:fpl-round-trip least-negative-short-float) => T
 (si:fpl-round-trip (- (* 3 least-positive-short-float))) => T
 (si:fpl-round-trip (si:fpl-next-short least-positive-short-float)) => T
-(prin1-to-string least-positive-short-float) => "2.93872s-39"
-(prin1-to-string least-positive-single-float) => "5.562684648e-309"
+; The texts are the fewest digits that read back as the float, 2^-128 being
+; 2.9387359e-39 and 2^-1024 5.5626846463e-309; before the exact E format
+; (float-round-trip) they were "2.93872s-39" and "5.562684648e-309".
+(prin1-to-string least-positive-short-float) => "2.93874s-39"
+(prin1-to-string least-positive-single-float) => "5.562684646e-309"
 (si:fpl-round-trip least-positive-short-float) => T
 (si:fpl-round-trip least-positive-single-float) => T
 (si:fpl-round-trip least-negative-single-float) => T

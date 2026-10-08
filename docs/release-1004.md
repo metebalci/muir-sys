@@ -198,9 +198,9 @@ Every change to a source file carries a comment in that file saying why.
   `SI::PROCESS-WAIT-IN-SCHEDULER`), and the TELNET connection closes; with
   it all six cases pass.
 - **The least positive floats print, and read back** (`print-flonum`,
-  `sys/io/print.lisp:643-653`, `:673`; `scale-flonum`, `:693-711`;
-  `scale-flonum-up`, `:718-722`; `xr-small-float`, `sys/io/read.lisp:1155`,
-  `:1167-1171`; `xr-flonum-cons`, `:1207-1209`; MIT's). The printer made a
+  `sys/io/print.lisp:649-656`, `:692`; `scale-flonum`, `:712-730`;
+  `scale-flonum-up`, `:737-741`; `xr-small-float`, `sys/io/read.lisp:1214-1228`,
+  now unused; `xr-flonum-cons`, `:1263-1265`; MIT's). The printer made a
   positive float negative before scaling it, but a negative mantissa is
   normalized to [-1, -1/2), so the least positive float of each format, a
   mantissa of 1/2 at the smallest exponent (2^-128 short, 2^-1024 single),
@@ -212,13 +212,57 @@ Every change to a source file carries a comment in that file saying why.
   "The subscript 308 ... was out of range"; it is now scaled by 10^307 and
   then by the rest, and the reader divides the same way where it refused
   ("318 is larger than the maximum allowed exponent" for
-  `5.562684648e-309`). The least positive short float prints as
+  `5.562684648e-309`). The least positive short float printed as
   `2.93872s-39`, below it by less than half its last place, and the reader
-  now gives it for such a text, the short float nearest, where
-  `SMALL-FLOAT` signalled. Every other float prints as before (5370 floats
-  of both formats and signs, identical text). FORMAT's `~E`, which passes
+  gave it for such a text, the short float nearest, where `SMALL-FLOAT`
+  signalled. (With the exact printer and reader of the next item, the two
+  least positive floats print as `2.93874s-39` and `5.562684646e-309`, and
+  `float-print-least` expects those texts.) FORMAT's `~E`, which passes
   `scale-flonum` a positive float, signalled "The subscript 308" for every
   float and now prints (`(format nil "~,3E" 1.5)` is `"1.500e+0"`).
   `tools/system-check` gains `float-print-least`: without the change the
   cadr line's band and System 1001's fail eight of its 14 cases; with it all
   pass.
+- **Every float prints as the fewest digits that read back as it, and
+  every float's text reads back as it** (`print-flonum`,
+  `sys/io/print.lisp:649-656`, `:663-678`; `flonum-digits`, `:743-828`;
+  `xr-read-flonum`, `sys/io/read.lisp:1153-1163`; `xr-flonum-nearest`,
+  `:1165-1212`; MIT's). The printer scaled a float outside [1e-3, 1e7) to
+  [1, 10) by floating multiplication or division, which loses bits, and
+  printed the scaled float's digits: 6.02e23 printed as `6.019999996e23`,
+  2^-20 short as `9.5367s-7` and 1e-307 as `9.99999999e-308`, none of which
+  read back as the float printed; they print as `6.02e23`, `9.5368s-7` and
+  `1.0e-307`. `flonum-digits` gives the
+  E format's digits exactly, in integers (Steele and White's free-format
+  method, as Burger and Dybvig give it), from the float's bits, so the most
+  negative float, whose magnitude is no float, needs no negation. The
+  reader multiplied or divided the digits by a float power of ten, rounding
+  twice, read a short float as a single one and rounded that again, and
+  negated the magnitude it read: `5.56268465e-309`, the float just above
+  2^-1024 printed, read back as 2^-1024, and `-8.988465674e307`, the most
+  negative single float, overflowed ("* produced a result too large"), as
+  did the most negative short float. `xr-flonum-nearest` rounds the text's exact
+  value to the nearest float of its format, ties to an even mantissa, with
+  its sign; zero and a text out of range are read as before. Floats in
+  [1e-3, 1e7) print as before; FORMAT's `~E` and `~G` still take their
+  digits from `scale-flonum`. `tools/system-check` gains
+  `float-round-trip`, both signs, the extremes, powers of two and ten across
+  the exponent range and pseudo-random floats of each format, 1853 short
+  and 1201 single floats in about a minute on micro, and
+  `float-round-trip-full` (`cases-full/`, run only when named), 3853 short
+  and 9409 single floats in about 8. The cadr line's band with the previous
+  item's printer and reader fails 7 of the first's 8 cases (346 short and
+  491 single floats not coming back) and 24 of the second's 25 (738 and
+  3708); with the change all pass.
+- **`LEAST-NEGATIVE-SINGLE-FLOAT` and `SINGLE-FLOAT-EPSILON` have the values
+  their definitions state** (`sys/sys2/numer.lisp:521-526`, `:545-552`;
+  MIT's). `LEAST-NEGATIVE-SINGLE-FLOAT`, the negative float nearest zero,
+  was -(3/2 * 2^-1024 + 2^-1054): `(xbyte 5 0)` set five bits of the
+  mantissa's top byte where six make the mantissa -(1/2 + 2^-31); it is
+  -(2^-1024 + 2^-1054). `SINGLE-FLOAT-EPSILON`, the smallest float that
+  makes a difference when added to 1.0, was 2^-37 + 2^-75, which is 2^-37
+  as a float, and 1.0 + 2^-37 is 1.0; a sum rounds to the nearest float,
+  ties to even, so 1.0 + 2^-31 is 1.0 too, and the epsilon is 2^-31 +
+  2^-61. The long and double float constants are the single float's.
+  `tools/system-check` gains `float-constants`: the cadr line's band fails
+  three of its 15 cases; with the change all pass.

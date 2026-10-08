@@ -631,32 +631,51 @@ Pathnames, editor buffers, host objects, and many other hairy things
 ;	 (IF (PLUSP X)
 ;	       (SETQ X (- X))
 ;	     (SEND STREAM :TYO (PTTBL-MINUS-SIGN *READTABLE*)))
-	   ;; x is made negative, as before, except the least positive float of
-	   ;; each format, 2^-128 short and 2^-1024 single: a mantissa of exactly
-	   ;; 1/2 at the smallest exponent has no negative of the same magnitude,
-	   ;; as a negative mantissa is normalized to [-1, -1/2) and -1/2 becomes -1
-	   ;; at the exponent below, so (- x) signalled "MINUS produced a result too
-	   ;; small" and LEAST-POSITIVE-SHORT-FLOAT and LEAST-POSITIVE-SINGLE-FLOAT
-	   ;; did not print.  That x stays positive; SCALE-FLONUM takes either sign.
-	   ;; -127 and -1023 are FLOAT-EXPONENT's smallest values, an exponent field
-	   ;; of 1 less the offsets #o200 and #o2000 (sys/sys2/numdef.lisp).
-	   (cond ((minusp x)
-		  (send stream :tyo (pttbl-minus-sign *readtable*)))
-		 ((not (and (= (float-exponent x) (if (typep x 'short-float) -127. -1023.))
-			     (= (float-fraction x) 0.5)))
-		  (setq x (- x))))
-	   ;; x is now negative, or the least positive float
+;	   ;; x is made negative, as before, except the least positive float of
+;	   ;; each format, 2^-128 short and 2^-1024 single: a mantissa of exactly
+;	   ;; 1/2 at the smallest exponent has no negative of the same magnitude,
+;	   ;; as a negative mantissa is normalized to [-1, -1/2) and -1/2 becomes -1
+;	   ;; at the exponent below, so (- x) signalled "MINUS produced a result too
+;	   ;; small" and LEAST-POSITIVE-SHORT-FLOAT and LEAST-POSITIVE-SINGLE-FLOAT
+;	   ;; did not print.  That x stays positive; SCALE-FLONUM takes either sign.
+;	   ;; -127 and -1023 are FLOAT-EXPONENT's smallest values, an exponent field
+;	   ;; of 1 less the offsets #o200 and #o2000 (sys/sys2/numdef.lisp).
+;	   (cond ((minusp x)
+;		  (send stream :tyo (pttbl-minus-sign *readtable*)))
+;		 ((not (and (= (float-exponent x) (if (typep x 'short-float) -127. -1023.))
+;			     (= (float-fraction x) 0.5)))
+;		  (setq x (- x))))
+;	   ;; x is now negative, or the least positive float
+	   ;; x keeps its sign: the E format takes its digits from its bits
+	   ;; (flonum-digits, below), and a float in the range below has an
+	   ;; absolute value.  Negating every positive x lost the least positive
+	   ;; float of each format, 2^-128 short and 2^-1024 single, which has no
+	   ;; negative, a negative mantissa being normalized to [-1, -1/2): (- x)
+	   ;; signalled "MINUS produced a result too small".
+	   (if (minusp x)
+	       (send stream :tyo (pttbl-minus-sign *readtable*)))
 ;	   (COND ((OR (> X -1.0s-3) ( X -1.0s7) FORCE-E-FORMAT)
 	   (cond ((or (if (plusp x)
 			  (or (< x 1.0s-3) (>= x 1.0s7))
 			(or (> x -1.0s-3) (<= x -1.0s7)))
 		      force-e-format)
 		  ;; Must go to E format.
-		  (MULTIPLE-VALUE-SETQ (X EXPT) (SCALE-FLONUM X))
-		  ;; X is now positive
-		  (LET ((PLACE-MOVED (PRINT-FLONUM-INTERNAL X SMALL STREAM MAX-DIGITS
-							    T)))
-		    (WHEN PLACE-MOVED (INCF EXPT)))
+;		  (MULTIPLE-VALUE-SETQ (X EXPT) (SCALE-FLONUM X))
+;		  ;; X is now positive
+;		  (LET ((PLACE-MOVED (PRINT-FLONUM-INTERNAL X SMALL STREAM MAX-DIGITS
+;							    T)))
+;		    (WHEN PLACE-MOVED (INCF EXPT)))
+		  ;; The digits, d.ddd, from flonum-digits, exact: scaling x to
+		  ;; [1, 10) by floating multiplication lost bits, and the scaled
+		  ;; float's digits did not always read back as x.
+		  (multiple-value-bind (digits k) (flonum-digits x max-digits)
+		    (send stream :tyo (aref digits 0))
+		    (send stream :tyo (pttbl-decimal-point *readtable*))
+		    (if (= (length digits) 1)
+			(send stream :tyo #/0)
+		      (send stream :string-out digits 1))
+		    (setq expt (1- k))
+		    (return-array digits))
 		  (SEND STREAM :TYO
 			(IF (NEQ (NULL SMALL)
 				 (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
@@ -720,6 +739,93 @@ Pathnames, editor buffers, host objects, and many other hairy things
       (* x (aref powers-of-10f0-table n))
     (* (* x (aref powers-of-10f0-table (1- powers-of-10f0-table-length)))
        (aref powers-of-10f0-table (- n (1- powers-of-10f0-table-length))))))
+
+;;; The digits of the float X, not zero, of either sign, for the E format:
+;;; a string of the fewest decimal digits that read back as X, the first not
+;;; 0, and the power of ten K that places them, |X| about 0.DIGITS * 10^K.
+;;; With MAX-DIGITS, at most that many, the last rounded (half up), as
+;;; FLONUM-TO-STRING does.  PRINT-FLONUM scaled X to [1, 10) by floating
+;;; multiplication or division, which loses bits, and printed the digits of
+;;; the scaled float: 6.02e23 printed as "6.019999996e23", 2^-20 short as
+;;; "9.5367s-7", and neither read back as itself.  This is exact, in integers:
+;;; Steele and White's free-format method as Burger and Dybvig give it
+;;; ("Printing floating-point numbers quickly and accurately", 1996).  R/S is
+;;; |X|, and M+/S and M-/S half the gaps to the floats above and below it,
+;;; the one below half as far when the mantissa is 1/2 (a power of 2).  The
+;;; magnitude comes from the mantissa's bits, as the most negative float of
+;;; each format has no positive (ABS signals).
+(defun flonum-digits (x &optional max-digits)
+  (declare (values digits k))
+  (let* ((short (typep x 'short-float))
+	 (p (if short 17. 31.))			;bits of mantissa
+	 (f (flonum-mantissa x))
+	 (e (flonum-exponent x))
+	 (k 0) (digits (make-string 16. :fill-pointer 0))
+	 r s m+ m- u)
+    ;; FLONUM-MANTISSA gives a negative mantissa as its two's complement
+    ;; field, 32 bits for a single float and 17 for a short one, whose sign
+    ;; bit is implied (sys/sys2/numdef.lisp); |X| is then F * 2^E, and a
+    ;; mantissa of -1 makes F 2^P, normalized here to 2^(P-1)
+    (when (minusp x)
+      (setq f (- (ash 1 (if short 17. 32.)) f)))
+    (when (= f (ash 1 p))
+      (setq f (ash f -1) e (1+ e)))
+    (if (>= e 0)
+	(if (= f (ash 1 (1- p)))
+	    (setq r (ash f (+ e 2)) s 4 m+ (ash 1 (1+ e)) m- (ash 1 e))
+	  (setq r (ash f (1+ e)) s 2 m+ (ash 1 e) m- (ash 1 e)))
+      (if (= f (ash 1 (1- p)))
+	  (setq r (ash f 2) s (ash 1 (- 2 e)) m+ 2 m- 1)
+	(setq r (ash f 1) s (ash 1 (- 1 e)) m+ 1 m- 1)))
+    ;; K, the least with R + M+ <= S * 10^K: estimated from the binary
+    ;; exponent, log10 2 being about 77/256, then corrected
+    (setq k (floor (* (+ e p -1) 77.) 256.))
+    (if (minusp k)
+	(let ((scale (^ 10. (- k))))
+	  (setq r (* r scale) m+ (* m+ scale) m- (* m- scale)))
+      (setq s (* s (^ 10. k))))
+    (do () ((<= (+ r m+) s))
+      (setq s (* s 10.) k (1+ k)))
+    (do () ((> (* (+ r m+) 10.) s))
+      (setq r (* r 10.) m+ (* m+ 10.) m- (* m- 10.) k (1- k)))
+    ;; Each digit; the last is the one at which the digits so far, or with the
+    ;; last one more, are within half a gap of |X|, the nearer of the two.
+    ;; A digit is found by subtracting 8, 4, 2 and 1 times S, rather than by
+    ;; dividing by S: a float near 2^-1024 makes S and R of over 1000 bits, and
+    ;; the bignum division took some 40 ms a digit on micro.
+    (do ((s2 (* s 2)) (s4 (* s 4)) (s8 (* s 8.)))
+	(nil)
+      (setq r (* r 10.) m+ (* m+ 10.) m- (* m- 10.) u 0)
+      (when (>= r s8) (setq r (- r s8) u 8.))
+      (when (>= r s4) (setq r (- r s4) u (+ u 4)))
+      (when (>= r s2) (setq r (- r s2) u (+ u 2)))
+      (when (>= r s) (setq r (- r s) u (+ u 1)))
+      (let ((low (< r m-))
+	    (high (> (+ r m+) s)))
+	(cond ((or low high (and max-digits (>= (1+ (fill-pointer digits)) max-digits)))
+	       (if (cond ((and low high) (>= (* 2 r) s))
+			 (low nil)
+			 (high t)
+			 (t (>= (* 2 r) s)))	;MAX-DIGITS reached
+		   (incf u))
+	       (return nil))
+	      (t (vector-push-extend (+ #/0 u) digits)))))
+    (cond ((< u 10.)
+	   (vector-push-extend (+ #/0 u) digits))
+	  (t
+	   ;; MAX-DIGITS rounded a 9 up: carry back through the nines
+	   (do () ((or (zerop (fill-pointer digits))
+		       (not (= (aref digits (1- (fill-pointer digits))) #/9))))
+	     (decf (fill-pointer digits)))
+	   (cond ((zerop (fill-pointer digits))
+		  (vector-push-extend #/1 digits)
+		  (incf k))
+		 (t (incf (aref digits (1- (fill-pointer digits))))))))
+    ;; no trailing zeros, as FLONUM-TO-STRING prints none
+    (do () ((or (= (fill-pointer digits) 1)
+		(not (= (aref digits (1- (fill-pointer digits))) #/0))))
+      (decf (fill-pointer digits)))
+    (values digits k)))
 
 ;;; Print the mantissa.
 ;;; X is a positive non-zero flonum, SMALL is T if it's a small-flonum.
