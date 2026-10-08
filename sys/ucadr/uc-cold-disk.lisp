@@ -2827,6 +2827,8 @@ BEG0000	((M-FLAGS) (A-CONSTANT (PLUS		;RE-INITIALIZE ALL FLAGS
 	;; any region oldspace a collection is running, and the marked-page walk,
 	;; whose place a memory held, starts again (uc-storage-allocation)
 	(call scav-walk-arm-if-oldspace)
+	;; region-to-area's table (uc-page-fault): this band's regions, not yet known
+	(call region-area-map-clear)
 	;; quux revision 14 (contract g3 revision 14, 10.11): the region floor, as
 	;; the band was saved with it (disk-save), or the first unfixed area's
 	;; address, the default, if it holds none or one out of range.

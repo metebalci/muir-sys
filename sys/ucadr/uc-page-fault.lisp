@@ -2472,13 +2472,84 @@ XARN (MISC-INST-ENTRY %AREA-NUMBER)
 	(CALL XRGN)			;GET REGION NUMBER FROM ARG ON PDL
 	(POPJ-EQUAL M-T A-V-NIL)	;NONE
 ;GIVEN A REGION NUMBER IN M-T, FIND THE AREA-NUMBER (IN M-T WITH DATA-TYPE)
-REGION-TO-AREA 
-	((VMA-START-READ) ADD M-T A-V-REGION-LIST-THREAD)
-	(CHECK-PAGE-READ)
-	(JUMP-IF-BIT-CLEAR-XCT-NEXT BOXED-SIGN-BIT READ-MEMORY-DATA REGION-TO-AREA)
-       ((M-T) BOXED-NUM-EXCEPT-SIGN-BIT READ-MEMORY-DATA	;GET NEXT IN LIST
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
-	(POPJ)				;END OF LIST, M-T HAS AREA NUMBER
+;REGION-TO-AREA 
+;	((VMA-START-READ) ADD M-T A-V-REGION-LIST-THREAD)
+;	(CHECK-PAGE-READ)
+;	(JUMP-IF-BIT-CLEAR-XCT-NEXT BOXED-SIGN-BIT READ-MEMORY-DATA REGION-TO-AREA)
+;       ((M-T) BOXED-NUM-EXCEPT-SIGN-BIT READ-MEMORY-DATA	;GET NEXT IN LIST
+;		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+;	(POPJ)				;END OF LIST, M-T HAS AREA NUMBER
+;; the region's area from a-region-area-map (uc-parameters), its byte for the
+;; region; only a region whose byte is 377 (not yet known) walks its list
+;; thread, as mit's region-to-area did for every call, and keeps the area in
+;; its byte.  the transporter calls it for every object it copies, and the
+;; walk, a read a region of the area's list, was 23% of the scavenger's time
+;; in a young collection (contract g3 step 2, t1, clarification 18).  m-t
+;; the region number on entry, the area number, a fixnum, on return.
+;; clobbers m-tem, m-a, a-tem1..3, and on a walk vma and md (its callers,
+;; xarn and trans-old-copy, let xrgn clobber m-a).
+region-to-area
+	((m-tem) (byte-field 6 2) m-t)		;the table's word, r/4
+	((m-tem) add m-tem (a-constant (a-mem-loc a-region-area-map)))
+	((oa-reg-high) dpb m-tem oah-a-src a-zero)
+	((m-tem) a-garbage)
+	((a-tem1) dpb m-t (byte-field 2 3) a-zero)	;its byte's position, 8(r mod 4)
+	;; an ldb at the position: its rotate is 50 less it (trans-old-copy)
+	((oa-reg-low) sub (m-constant 50) a-tem1)
+	((m-tem) (byte-field 10 0) m-tem)
+	(jump-equal m-tem (a-constant 377) region-to-area-walk)
+	((m-t) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
+	(popj)
+region-to-area-walk				;not yet known: mit's walk, then kept
+	((a-tem1) m-t)
+region-to-area-walk-1
+	((vma-start-read) add m-t a-v-region-list-thread)
+	(check-page-read)
+	(jump-if-bit-clear-xct-next boxed-sign-bit read-memory-data region-to-area-walk-1)
+       ((m-t) boxed-num-except-sign-bit read-memory-data	;get next in list
+		(a-constant (byte-value q-data-type dtp-fix)))
+	((m-a) a-tem1)				;end of list, m-t has area number:
+	((a-tem2) dpb m-a (byte-field 2 3) a-zero)	; into the region's byte
+	((m-a) (byte-field 6 2) m-a)
+	((m-a) add m-a (a-constant (a-mem-loc a-region-area-map)))
+	((oa-reg-high) dpb m-a oah-a-src a-zero)
+	((m-tem) a-garbage)
+	((a-tem3) m-tem)
+	;; a dpb at the position: its rotate is the position
+	((oa-reg-low) a-tem2)
+	((m-tem) dpb m-t (byte-field 10 0) a-tem3)
+	((oa-reg-low) dpb m-a oal-a-dest a-zero)
+	((a-garbage) m-tem)
+	(popj)
+
+;; region-area-map-forget: region m-k's byte in a-region-area-map is 377 (not
+;; known), for free-region: a region number freed may next be made for another
+;; area.  m-k a pure number.  clobbers m-t, m-tem, a-tem1, a-tem2.
+region-area-map-forget
+	((a-tem1) dpb m-k (byte-field 2 3) a-zero)
+	((m-t) (byte-field 6 2) m-k)
+	((m-t) add m-t (a-constant (a-mem-loc a-region-area-map)))
+	((oa-reg-high) dpb m-t oah-a-src a-zero)
+	((m-tem) a-garbage)
+	((a-tem2) m-tem)
+	((m-tem) (a-constant 377))
+	((oa-reg-low) a-tem1)
+	((m-tem) dpb m-tem (byte-field 10 0) a-tem2)
+	((oa-reg-low) dpb m-t oal-a-dest a-zero)
+	((a-garbage) m-tem)
+	(popj)
+
+;; region-area-map-clear: every byte of a-region-area-map 377 (not known), at
+;; every boot (beg0000): a restored band's regions are not the last world's.
+;; clobbers m-tem.
+region-area-map-clear
+	((m-tem) (a-constant (a-mem-loc a-region-area-map)))
+region-area-map-clear-1
+	((oa-reg-low) dpb m-tem oal-a-dest a-zero)
+	((a-garbage) m-minus-one)
+	((m-tem) add m-tem (a-constant 1))
+	(jump-less-than m-tem (a-constant (plus (a-mem-loc a-region-area-map) 100)) region-area-map-clear-1)
+	(popj)
 
 ;GIVEN AN ADDRESS FIND WHAT REGION IT IS IN.  RETURNS THE REGION NUMBER OR NIL
 ;IF NOT IN ANY REGION, IN M-T.  RETURNS (OR TAKES AT XRGN1) THE POINTER IN M-A.

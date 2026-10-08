@@ -126,6 +126,17 @@ tenured rather than copied to survivor space 2.  NIL: eden's size.")
 tenured collection at which the GC process starts another; :DEFAULT, 1//4 of main memory;
 NIL, MIT's free-space rule alone.")
 
+(defvar gc-process-priority 5
+  "The GC process's priority, which GC-ON gives it.  Above a user's processes (0), so that
+it starts a young collection at the next scheduling pass once eden is full, rather than
+when the running process's quantum (one second) ends; below the system's processes.")
+
+(defvar gc-sequence-break-ticks 6
+  "While automatic collection is on, the clock's sequence break every this many 60ths of a
+second (GC-ON; GC-OFF gives back the microcode's 60, once a second).  The scheduler runs
+only at a sequence break or when the running process waits, so at once a second the GC
+process, whatever its priority, waited up to a second after eden filled.")
+
 (defvar gc-pretenure-threshold 32768.
   "A cons of more words than this in an ephemeral area is made in the tenured generation
 at once, never copied by young collections.")
@@ -416,7 +427,16 @@ Returns T."
 	  (gc-report
 	    "GC: something is using SI::GC-AFTER-FLIP-LIST; please send a bug report.")
 	  (mapc #'eval gc-after-flip-list))
-	(initializations 'after-flip-initialization-list t))
+;	(initializations 'after-flip-initialization-list t))
+	;; the after-flip initializations cons with scavenging inhibited, so that
+	;; their conses add their work to the scavenger's debt, paid by later
+	;; conses at the usual rate (contract 4.5), instead of scavenging it here,
+	;; inside the flip's without-interrupts.  eh's assure-free-space conses
+	;; 4,096 words twice, each scavenging 16 k words of work at once: young
+	;; flips took 59-115 ms with it, 7-12 ms without (contract g3 step 2,
+	;; t1, clarification 18).
+	(let ((inhibit-scavenging-flag t))
+	  (initializations 'after-flip-initialization-list t)))
       (if tenured
 	  (incf gc-tenured-collection-count)
 	(incf gc-young-collection-count))
@@ -1033,6 +1053,18 @@ is possible only if there is a lot of garbage; but it has a better chance.")
       (setq gc-tenured-words-at-last-tenured-collection
 	    (gc-generation-words %region-generation-tenured)))
     (PROCESS-PRESET GC-PROCESS 'GC-PROCESS)
+    ;; the generational collector: a priority above the user's processes, so
+    ;; that a young collection starts when eden is full; at the default
+    ;; priority it waited for the listener's quantum, one second, and
+    ;; collections came 2-4.5 m words consed apart at eden 1-4 m (contract
+    ;; g3 step 2, t1, clarification 18)
+    (send gc-process :set-priority gc-process-priority)
+    ;; and the scheduler runs often enough for the priority to matter: the
+    ;; clock's sequence break, once a second by default (uc-parameters,
+    ;; a-tv-clock-rate), every gc-sequence-break-ticks 60ths.  with the
+    ;; priority alone the young flips still came 4 m words consed apart at eden
+    ;; 2 m (contract g3 step 2, t1, clarification 18)
+    (write-meter '%tv-clock-rate gc-sequence-break-ticks)
     (SETQ GC-ON T)
     (PROCESS-ENABLE GC-PROCESS)			;Start flipper process
     (SETQ INHIBIT-SCAVENGING-FLAG NIL)		;Enable scavenging during cons
@@ -1054,6 +1086,12 @@ is possible only if there is a lot of garbage; but it has a better chance.")
     (IF (EQ (CAR GC-FLIP-LOCK) GC-PROCESS)	;Unlock the lock so user can SI:FULL-GC.
 	(SETQ GC-FLIP-LOCK NIL))
     (SETQ INHIBIT-SCAVENGING-FLAG T)		;Disable scavenging during cons
+    ;; the generational collector: the clock's sequence break once a second
+    ;; again, the microcode's default (uc-parameters, a-tv-clock-rate), and
+    ;; the gc process's priority the default, 0, both of which gc-on raised
+    ;; (contract g3 step 2, clarification 18)
+    (write-meter '%tv-clock-rate 60.)
+    (send gc-process :set-priority 0)
     (SETQ GC-ON NIL)))
 
 ;;; the generational collector (contract g3 step 2, 8.3, 17 q-gca): at every

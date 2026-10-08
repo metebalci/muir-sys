@@ -637,6 +637,23 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
   collector's microcode; `REV14P-YOUNG-FILL` raises the threshold past it
   while it is made, when A 143-145 hold fixnums (`lisp/rev14-paging.lisp`).
 
+- **REGION-TO-AREA by a table** (contract G3 step 2, clarification 18;
+  `uc-page-fault.lisp`, `REGION-TO-AREA`):
+  A memory's `A-REGION-AREA-MAP` (`uc-parameters.lisp`, 64 words after the
+  mark bitmap's variables, outside the Q part) holds each region's area
+  number, a byte a region, four a word; 377 says not known, and then the
+  region's list thread is walked once, as MIT's REGION-TO-AREA did for every
+  call, and the area kept in its byte. `FREE-REGION` sets a freed region's
+  byte to 377 (`REGION-AREA-MAP-FORGET`, `uc-storage-allocation.lisp`), since
+  the number may next be made for another area, and every boot all of them
+  (`REGION-AREA-MAP-CLEAR`, from `BEG0000`, `uc-cold-disk.lisp`). The
+  transporter calls it for every object it copies, and the walk was 18-23% of
+  the scavenger's time in a young collection; with the table 2%, and the
+  scavenging 3.6-3.8 µs a word copied against 4.7-5.0 (T1). A memory's
+  constants now end at 1551, below the mouse arrays at 1600. Checked by
+  `tools/system-check/cases/generational-tuning.cases`: a planted partial fix,
+  `FREE-REGION` without the forget, fails two cases.
+
 ### The Lisp side
 
 Written before the microcode and the cold load that it needs; compiled on
@@ -944,6 +961,33 @@ objects young) changed the save, the band's formats and the boot.
   (`GS-NO-FLIP-SINCE-SAVE`, `tools/microcode-check/lisp/generational-save.lisp:82`;
   `generational-save:190`), since the boot's checks run with collections on
   and a later flip's walk may clear a mark legitimately.
+- **The flip's after-flip initializations scavenge nothing** (contract G3
+  step 2, clarification 18; `sys/sys2/gc.lisp`, `GC-FLIP-NOW`): they run with
+  `INHIBIT-SCAVENGING-FLAG` bound to T, so that their conses add their work
+  to the scavenger's debt, paid by later conses at K=4 (contract 4.5), rather
+  than scavenging it inside the flip's WITHOUT-INTERRUPTS. `EH`'s
+  `ASSURE-FREE-SPACE` conses 4,096 words twice, each scavenging 16 K words of
+  work at once: young flips took 59-115 ms with it, 9.5-12.6 ms now (T1).
+- **The GC process's priority and the scheduler's clock**
+  (contract G3 step 2, clarification 18; `sys/sys2/gc.lisp`, `GC-ON`,
+  `GC-OFF`; `GC-PROCESS-PRIORITY`, 5, and `GC-SEQUENCE-BREAK-TICKS`, 6):
+  GC-ON gives the GC process a priority above the user's processes and the
+  clock's sequence break every 6 60ths of a second; GC-OFF gives back the
+  microcode's once a second and the priority 0. The scheduler runs
+  only at a sequence break or when the running process waits, so at the
+  default priority a young collection waited for the listener's quantum, one
+  second, and at once a second the priority alone still let eden overshoot by
+  up to a second's consing: young flips came 4.0 M words consed apart at eden
+  2 M, now 2.10-2.18 M (T1). The faster clock costs 1.47% of S4's time with
+  the collector off; every 20 60ths, 0.44%.
+- **`tools/system-check/cases/generational-tuning.cases`** checks the three:
+  the after-flip initializations see scavenging inhibited and the flag is the
+  collector's again after the flip (fails with GC-FLIP-NOW as it was);
+  `%AREA-NUMBER` of every region in use against its list thread, before and
+  after the table fills, and after a young collection's regions are freed and
+  one is made again for a new area (fails with the planted `FREE-REGION`);
+  the priority and the clock after GC-ON, and both after GC-OFF (fails with
+  GC-ON as it was, or with either setting alone).
 
 ## Revision 15
 

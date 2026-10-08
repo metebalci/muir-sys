@@ -1,0 +1,56 @@
+; The generational collector's three fixes from T1 (contract G3 step 2,
+; clarification 18): the flip's after-flip initializations scavenge nothing
+; inside its without-interrupts;
+; REGION-TO-AREA by A memory's table (uc-page-fault), kept right as regions are
+; freed and made again; the GC process's priority, so that a young collection
+; starts when eden is full.  Needs the microcode with the table and sys2/gc.lisp
+; (--files sys/sys2/gc.lisp --compile), at 32 MW.  Each case says the partial
+; fix it fails on.  Its cases run in USER, so the system's internal names are
+; written SI:.
+
+; (1) the after-flip initializations run with scavenging inhibited, and the
+; flag is the collector's again after the flip.  Fails if GC-FLIP-NOW runs
+; them without the binding (the probe sees NIL).
+(defvar *gt-flag* :unset) => *GT-FLAG*
+(progn (add-initialization "gt-probe" '(setq *gt-flag* si:inhibit-scavenging-flag) nil 'si:after-flip-initialization-list) t) => T
+(progn (si:gc-on t) (si:gc-flip-now :young) (si:gc-reclaim-oldspace) (list *gt-flag* si:inhibit-scavenging-flag)) => (T NIL)
+(progn (delete-initialization "gt-probe" nil 'si:after-flip-initialization-list) t) => T
+
+; (2) REGION-TO-AREA: %AREA-NUMBER (XARN, which ends in it) of every region in
+; use against the area its list thread ends at, twice: the first fills the
+; table, the second reads it.  Fails if the table's byte is read at the wrong
+; place (a wrong area for some region).
+(defun gt-walk (r) (do ((x (si:region-list-thread r) (si:region-list-thread x))) ((minusp x) (logand x 255))))
+(defun gt-check () (let ((n 0) (bad nil)) (dotimes (r si:size-of-area-arrays) (unless (or (= (ldb si:%%region-space-type (si:region-bits r)) si:%region-space-free) (zerop (si:region-length r))) (incf n) (unless (eql (%area-number (si:region-origin r)) (gt-walk r)) (push r bad)))) (list (> n 50) bad)))
+(gt-check) => (T NIL)
+(gt-check) => (T NIL)
+; a region freed and made again for another area: a young flip's oldspace
+; regions looked up (their bytes say working storage), reclaimed (freed), and a
+; new area's first region taken from the head of the free list, one of them.
+; Fails if FREE-REGION does not forget the region's area (the new area's
+; object is said to be in working storage).
+(defvar *gt-area* nil) => *GT-AREA*
+(defvar *gt-obj* nil) => *GT-OBJ*
+(progn (si:gc-flip-now :young) (gt-check)) => (T NIL)
+(progn (si:gc-reclaim-oldspace) t) => T
+(progn (setq *gt-area* (make-area :name 'gt-area)) (setq *gt-obj* (make-list 10 :area *gt-area*)) (eql (%area-number *gt-obj*) *gt-area*)) => T
+(gt-check) => (T NIL)
+
+; (3) after GC-ON the GC process's priority is above the listener's, and the
+; clock's sequence break comes every 6 60ths of a second.  Fails if GC-ON
+; leaves the process at the default priority or the clock at once a second.
+(progn (si:gc-on t) (list (send si:gc-process :priority) (send current-process :priority) (read-meter 'si:%tv-clock-rate))) => (5 0 6)
+; a young collection comes when eden is full: eden 128 K words, 600 K words
+; consed in a loop, and every flip's words consed since the last below 256 K.
+; A record, not a check of the two settings: under lispm-check TELNET's
+; Chaosnet interrupts give the scheduler passes of their own, so it passes
+; with either setting alone (measured); the keyboard's listener, which nothing
+; interrupts, shows the difference (T1 with the fixes).
+(defvar *gt-at* nil) => *GT-AT*
+(progn (setq si:gc-eden-size 131072) (si:gc-flip-now :young) (si:gc-reclaim-oldspace) (setq *gt-at* nil) (push '(push si:%gc-words-consed-since-flip *gt-at*) si:gc-every-flip-list) (si:gc-off) (si:gc-on t) t) => T
+(progn (dotimes (i 3000) (make-list 200)) (let ((ok t)) (dolist (c *gt-at*) (or (< c 262144) (setq ok nil))) (list (>= (length *gt-at*) 3) ok))) => (T T)
+; the words consed at each flip, for the record
+*gt-at*
+(progn (pop si:gc-every-flip-list) (setq si:gc-eden-size nil) t) => T
+; GC-OFF gives the clock back its once a second and the process its priority 0
+(progn (si:gc-off) (prog1 (list (read-meter 'si:%tv-clock-rate) (send si:gc-process :priority)) (si:gc-on t))) => (60 0)

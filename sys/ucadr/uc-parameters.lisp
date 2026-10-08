@@ -1683,6 +1683,19 @@ a-mark-loaded
 	(0)
 a-mark-buffer
 	(0)
+;; region-to-area's table (uc-page-fault): each region's area number, a byte a
+;; region, four regions a word, region r in bits <8(r mod 4)+7:8(r mod 4)> of
+;; word r/4; 377 says not yet known, and region-to-area then walks the region's
+;; list thread to its end once and keeps what it finds.  a region keeps its area
+;; while it lives; free-region sets its byte to 377 and every boot (beg0000) all
+;; of them, since a restored band's regions are another world's.  it replaces
+;; a walk of the list thread for every object the transporter copies, which
+;; took 23% of the scavenger's time in a young collection (contract g3 step
+;; 2, t1, clarification 18).
+;; outside the q part of a memory, so neither the flip nor the extra pdl's
+;; purge reads it as pointers.
+a-region-area-map
+	(repeat 100 (-1))
 
 ;Arrays at fixed locations in A memory, used for the mouse
 (ASSIGN MOUSE-CURSOR-PATTERN-AMEM-LOC 1600)	;32x32 BIT ARRAY

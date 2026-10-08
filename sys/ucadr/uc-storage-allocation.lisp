@@ -1503,6 +1503,9 @@ ADDRESS-SPACE-MAP-STORE
 XFREE-REGION (MISC-INST-ENTRY %GC-FREE-REGION)
 	((M-K) Q-POINTER C-PDL-BUFFER-POINTER-POP)
 FREE-REGION
+	;; region-to-area's table (uc-page-fault): the number freed may be made
+	;; next for another area, so its byte says not known
+	(call region-area-map-forget)
 	((WRITE-MEMORY-DATA) (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	((VMA-START-WRITE) ADD M-K A-V-REGION-BITS)	;Clear the REGION-BITS, = free status
 	(CHECK-PAGE-WRITE)
