@@ -749,6 +749,17 @@ while running me, do so as a batch process/"."
 ;;; Note that if an area has only one oldspace region, we have a problem with
 ;;; losing the REGION-BITS.  For now just keep around one region.  This only
 ;;; happens when an area is completely disused.
+;;; the generational collector (contract g3 step 2, clarification 16): the
+;;; note above is MIT's; area-region-bits holds the area's bits.  an area's
+;;; only region, when old, is now freed like any other, and the area is given
+;;; a new empty region in the same step, made as make-area makes an area's
+;;; first region (sys/sys/qfctns.lisp): from the area's bits with
+;;; %%region-ephemeral cleared and the generation tenured, so below ephemeral
+;;; space, at area-region-size.  kept old, the region made every boot find
+;;; oldspace and arm the marked-page walk, and gc-oldspace-p said a collection
+;;; was running when none was; the area cannot be left with no region at all,
+;;; since rcons reads the first element of its region list as a region before
+;;; testing for the end marker (sys/ucadr/uc-storage-allocation.lisp).
 (DEFUN GC-RECLAIM-OLDSPACE-AREA (AREA)
   (CHECK-ARG AREA (AND (NUMBERP AREA) ( 0 AREA SIZE-OF-AREA-ARRAYS)) "an area number")
   (WITHOUT-INTERRUPTS
@@ -771,7 +782,22 @@ while running me, do so as a batch process/"."
 		  (IF PREV-REGION (STORE (REGION-LIST-THREAD PREV-REGION) REGION)
 				  (STORE (AREA-REGION-LIST AREA) REGION))
 		  (%GC-FREE-REGION REGION-TO-FREE)
-		  (GO NEXTLOOP))))
+		  (GO NEXTLOOP))
+		 ;; the area's only region (clarification 16, above): free it and
+		 ;; make the area a new empty tenured region.  the end marker is read
+		 ;; first, since %gc-free-region writes the region's thread; nothing
+		 ;; conses between the free and the make, inside without-interrupts
+		 (t
+		  (let ((end (region-list-thread region)))
+		    (store (area-region-list area) end)
+		    (%gc-free-region region)
+		    (let ((new (%make-region (%logdpb %region-generation-tenured %%region-generation
+						      (%logdpb 0 %%region-ephemeral
+							       (area-region-bits area)))
+					     (area-region-size area))))
+		      (store (region-list-thread new) end)
+		      (store (area-region-list area) new)))
+		  (return nil))))
       (AND (= (LDB %%REGION-SPACE-TYPE (REGION-BITS REGION)) %REGION-SPACE-COPY)
            ;;; Change this region to NEW space so that it can be used for normal
            ;;; consing

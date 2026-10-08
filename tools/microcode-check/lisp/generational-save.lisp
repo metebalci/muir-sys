@@ -11,12 +11,17 @@
 
 (defvar *gs-holder* nil "A static array: slot 1500, not on its first page, holds a young list.")
 (defvar *gs-late* nil "A static array: slot 5 gets a young list in a BEFORE-COLD initialization.")
+(defvar *gs-saved-generation* nil
+  "%GC-GENERATION-NUMBER when the BEFORE-COLD initialization ran, after the save's own young
+collection: the saved band's.")
 
 (defun gs-before-cold ()
   "Run by DISK-SAVE's BEFORE-COLD initializations, just before %DISK-SAVE: a young list
 stored into a tenured page then is marked only just before the save (C14 (d))."
   (when *gs-late*
-    (setf (aref *gs-late* 5) (gen-list 100 (gen-eph-area)))))
+    (setf (aref *gs-late* 5) (gen-list 100 (gen-eph-area)))
+    ;; the flip guard (clarification 16; gs-no-flip-since-save)
+    (setq *gs-saved-generation* %gc-generation-number)))
 
 (defun gs-setup ()
   "The young lists and their tenured holders; the holders' pages' marks."
@@ -69,6 +74,15 @@ not marked now, and the first five of those."
       (let ((address (%make-pointer-unsigned (parse-number line))))
 	(incf n)
 	(unless (eql (gen-mark address) 1) (push (parse-number line) unmarked))))))
+
+;; clarification 16: the boot's checks run with collections on, and a young
+;; flip's walk may clear a mark legitimately, so a mark the bitmap case finds
+;; cleared counts as lost only if no young flip ran between the save and the
+;; check.  T if none ran, else (SAVED NOW).
+(defun gs-no-flip-since-save ()
+  "T if %GC-GENERATION-NUMBER is still the saved band's: no flip since the save."
+  (or (eql *gs-saved-generation* %gc-generation-number)
+      (list *gs-saved-generation* %gc-generation-number)))
 
 (defun gs-sums ()
   (list (gen-sum (aref *gs-holder* 1500)) (gen-sum (cadr (plist nil))) (gen-sum (aref *gs-late* 5))))

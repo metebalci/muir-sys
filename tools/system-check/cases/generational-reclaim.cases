@@ -1,0 +1,41 @@
+; lisp: generational-collector.lisp
+; C30 (contract G3 step 2, clarification 16; lisp/generational-collector.lisp):
+; a reclaim leaves no region old and no area without a region.  When every
+; object of an area dies, GC-RECLAIM-OLDSPACE-AREA frees its last region too
+; and makes the area a new empty region, tenured, bit 13 (%%REGION-EPHEMERAL)
+; clear, below ephemeral space, its free pointer at its first-object table's
+; end, as MAKE-AREA makes an area's first region.  MIT's rule kept that region
+; old, so every boot found oldspace and armed the marked-page walk.  It needs
+; step 2's microcode and a band of System 2002, at 32 MW; it turns automatic
+; collection off and makes its collections itself.  Three planted partial
+; fixes, each given after lisp/generational-collector.lisp: -plant-keep-old
+; (MIT's rule) fails (a), (b), (c) and the oldspace cases; -plant-free-only
+; (the region freed, none made) fails (a), (b), (c) and (d); -plant-new-keeps-bit-13
+; (the new region left in ephemeral space) fails (b) and (c).
+(gencol-off) => T
+; (d) before anything: every area has a region
+(gencol-areas-without-region) => 0
+(gencol-c30-setup) => T
+; one tenured collection; (d) right after it, before any cons: every area has
+; a region, and none is old (no collection runs)
+(progn (gencol-tenured-collection) (gencol-areas-without-region)) => 0
+(si:gc-oldspace-p) => NIL
+; (a) a dynamic area whose objects all died: one new empty tenured region,
+; the table checker passing on it, and a cons lands in it
+(gencol-c30-after :a) => (((:NEW 0 0 T T)) 0)
+(gencol-c30-cons :a) => (T NIL)
+; (b) an ephemeral area whose objects all died: the same, the region below
+; ephemeral space; a cons there is young, in a new eden region
+(gencol-c30-after :b) => (((:NEW 0 0 T T)) 0)
+(gencol-c30-cons :b) => (NIL T)
+; (c) an ephemeral area with tenured garbage and one young survivor: the
+; tenured collection leaves the survivor's region alone (survivor space 1,
+; generation 2), since the tenured regions it followed were freed
+(gencol-c30-regions :c) => ((:NEW 2 1 NIL NIL))
+; then the survivor is dropped and one young collection runs: the area's last
+; region dies with it, and the area has one new empty tenured region
+(progn (setq *gencol-c30c-survivor* nil) (gencol-young-collection) (gencol-areas-without-region)) => 0
+(si:gc-oldspace-p) => NIL
+(gencol-c30-after :c) => (((:NEW 0 0 T T)) 0)
+; every region with a first-object table passes the table checker
+(gencol-check-tables) => 0

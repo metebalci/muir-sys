@@ -28,7 +28,7 @@ work:
 3. the band, booted (lispm-check, which boots it cold for its checkpoint, so
    the restore applies the bitmap), must have the holders' pages marked and
    the lists young before any collection, every page whose bit is 1 marked in
-   its entry, and the lists' sums right after one, two and three young
+   its entry with no young flip since the save, and the lists' sums right after one, two and three young
    collections.
 
 With --incremental the save is incremental, (si:disk-save "LODn" t t), a band
@@ -183,7 +183,11 @@ def main():
     # revision 14's Lisp, whose save ran none and left 2
     cases = ('(si:gs-after) => (1 1 1 3 3 1)\n'
              + ('' if x.incremental else
-                '(si:gs-bitmap-marked "HOST: //home//lispm//gs-bits.lisp") => (%d 0 NIL)\n' % len(bits))
+                '(si:gs-bitmap-marked "HOST: //home//lispm//gs-bits.lisp") => (%d 0 NIL)\n' % len(bits)
+                # clarification 16: no young flip ran between the save and the
+                # bitmap case, so a mark it found cleared was lost, not
+                # cleared by a later flip's walk
+                + '(si:gs-no-flip-since-save) => T\n')
              + '(si:gs-sums) => (49995000 499500 4950)\n'
              '(si:gs-collect-sums) => ((49995000 499500 4950) (49995000 499500 4950)'
              ' (49995000 499500 4950))\n'

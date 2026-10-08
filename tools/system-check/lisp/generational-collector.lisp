@@ -185,10 +185,13 @@ failures, NIL if none."
     (dotimes (region si:size-of-area-arrays)
       ;; an old region is left out: its objects are forwarded, and
       ;; %structure-total-size on a gc-forward word halts the machine
-      ;; (xfshs1, ILLOP).  GC-RECLAIM-OLDSPACE-AREA keeps an area's only
-      ;; region when it is old (sys/sys2/gc.lisp), so after a tenured
-      ;; collection a few are left, gencol-c6b's area's among them; the walk
-      ;; reads tables in new, copy and static regions only (scav-walk-1)
+      ;; (xfshs1, ILLOP).  old regions exist only while a collection runs
+      ;; (clarification 16, C30), when this checker may also be called; the
+      ;; walk reads tables in new, copy and static regions only
+      ;; (scav-walk-1).  before clarification 16, GC-RECLAIM-OLDSPACE-AREA
+      ;; kept an area's only region when it was old (sys/sys2/gc.lisp), so
+      ;; after a tenured collection a few were left, gencol-c6b's area's
+      ;; among them
       (when (and (si:region-has-first-object-table-p region)
 		 (not (= (ldb si:%%region-space-type (si:region-bits region)) si:%region-space-old))
 		 (or (null area) (= (%area-number (si:region-origin region)) area)))
@@ -576,3 +579,86 @@ flip leaves it current."
 	      (when (and entry (= 1 (ldb si:%%page-entry-ephemeral-reference entry)))
 		(push (list region offset) marked)))))))
     marked))
+
+;;; C30 (contract G3 step 2, clarification 16; cases/generational-reclaim.cases):
+;;; a reclaim leaves no region old and no area without a region.  An area
+;;; whose objects all die in a collection has only old regions at its
+;;; reclaim; GC-RECLAIM-OLDSPACE-AREA frees the last of them too and makes the
+;;; area a new empty region, tenured and below ephemeral space, as MAKE-AREA
+;;; makes an area's first region.  Three scratch areas: (a) a dynamic one,
+;;; (b) an ephemeral one, (c) an ephemeral one with tenured garbage (a
+;;; pretenured array) and one young survivor through a tenured collection,
+;;; then dropped before a young one.  The lists are walked only after the
+;;; count of areas without a region, which reads and conses nothing, says
+;;; there is a region to walk: a cons in an area with an empty region list
+;;; would run RCONS on it.
+(defvar *gencol-c30-areas* nil "The scratch areas of C30 (a), (b) and (c).")
+(defvar *gencol-c30c-survivor* nil "C30 (c)'s young array, the only reference to it.")
+
+(defun gencol-areas-without-region ()
+  "The number of areas in AREA-LIST whose region list holds only its end marker."
+  (let ((n 0))
+    (dolist (name si:area-list)
+      (when (minusp (si:area-region-list (symbol-value name)))
+	(setq n (1+ n))))
+    n))
+
+(defun gencol-c30-setup ()
+  "C30's areas and objects, all dropped but (c)'s young array."
+  (let ((a (make-area :name 'gencol-c30a-area :gc :dynamic :representation :structure))
+	(b (make-area :name 'gencol-c30b-area :gc :ephemeral :representation :structure))
+	(c (make-area :name 'gencol-c30c-area :gc :ephemeral :representation :structure)))
+    (setq *gencol-c30-areas* (list a b c))
+    ;; (a), (b): objects over several pages, none kept
+    (dotimes (i 10) (make-array 1000 :area a) (make-array 1000 :area b))
+    ;; (c): a pretenured array, dropped, and a young one, kept
+    (make-array (* 2 si:gc-pretenure-threshold) :area c)
+    (setq *gencol-c30c-survivor* (make-array 100 :area c))
+    t))
+
+(defun gencol-c30-area (letter)
+  (nth (position letter '(:a :b :c)) *gencol-c30-areas*))
+
+(defun gencol-c30-region-list (area)
+  (loop for r = (si:area-region-list area) then (si:region-list-thread r)
+	until (minusp r) collect r))
+
+(defun gencol-c30-space (region)
+  (let ((space (%logldb si:%%region-space-type (si:region-bits region))))
+    (cond ((= space si:%region-space-new) :new)
+	  ((= space si:%region-space-old) :old)
+	  ((= space si:%region-space-copy) :copy)
+	  (t space))))
+
+(defun gencol-c30-regions (letter)
+  "Each region of C30's area LETTER as (SPACE GENERATION BIT-13 BELOW-EPHEMERAL-SPACE
+FREE-POINTER-AT-TABLE-END), first to last, or :NO-REGION."
+  (let ((area (gencol-c30-area letter)))
+    (if (minusp (si:area-region-list area))
+	:no-region
+      (loop for r in (gencol-c30-region-list area)
+	    collect (list (gencol-c30-space r)
+			  (si:region-generation r)
+			  (%logldb si:%%region-ephemeral (si:region-bits r))
+			  (si:%pointer-lessp (si:region-origin r)
+					     si:ephemeral-space-virtual-address)
+			  (= (si:region-free-pointer r) (si:region-first-object-table-end r)))))))
+
+(defun gencol-c30-after (letter)
+  "C30's area LETTER after its reclaim: its regions, and the table checker's failures in
+it.  Expected ((:NEW 0 0 T T)) 0: one new empty region, tenured, bit 13 clear, below
+ephemeral space."
+  (let ((regions (gencol-c30-regions letter)))
+    (list regions
+	  (if (eq regions :no-region) :no-region
+	    (gencol-check-tables (gencol-c30-area letter))))))
+
+(defun gencol-c30-cons (letter)
+  "An array made in C30's area LETTER: (IN-THE-AREA'S-ONLY-REGION YOUNG), or :NO-REGION
+without consing when the area has none."
+  (let ((area (gencol-c30-area letter)))
+    (if (minusp (si:area-region-list area))
+	:no-region
+      (let* ((first (si:area-region-list area))
+	     (x (make-array 10 :area area)))
+	(list (= (%region-number x) first) (gencol-young-p x))))))

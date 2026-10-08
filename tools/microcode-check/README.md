@@ -41,7 +41,9 @@ through a `BEFORE-COLD` initialization, by a slot stored just before the save,
 and saves the band; the script reads the band's mark bitmap from the
 partition, checks its size and the holders' bits, and maps every 1 bit to its
 page by the band's own region tables; the band, booted, must have every such
-page marked, the lists young, and their sums right after three young
+page marked, with no young flip since the save (`GS-NO-FLIP-SINCE-SAVE`: a
+later flip's walk may clear a mark legitimately, so only then is a cleared
+mark a lost one), the lists young, and their sums right after three young
 collections; its head gives the arguments. With `--incremental` the save is
 incremental (format 2021 over LOD1), and the checks that read the band's region
 tables are left out.

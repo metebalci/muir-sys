@@ -862,7 +862,9 @@ objects young) changed the save, the band's formats and the boot.
     four were left, one holding forwarded objects, and its walk's
     `%STRUCTURE-TOTAL-SIZE` met a `DTP-GC-FORWARD` word and halted the
     machine (`XFSHS1`, after the reclaim checker's case, whose case itself
-    passed with the connection alive);
+    passed with the connection alive). Since clarification 16 (below) a
+    reclaim keeps no region old; the checker still leaves old regions out,
+    since they exist while a collection runs and it may be called then;
   - C6 (b) (`:263`) grows an array of the long format: 10 elements is the
     short one, and growing past 1,023 is a copy, never in place. C6 (b)
     and (c) (`:286`) first leave stale entries above the free pointer, by
@@ -913,6 +915,35 @@ objects young) changed the save, the band's formats and the boot.
   ran every lispm-check, a saved band's boot among them, on micro,
   lispm-check's default; so did `tools/microcode-check/generational-save`,
   which uses it.
+- **A reclaim leaves no area holding an old region** (contract G3 step 2,
+  clarification 16; `sys/sys2/gc.lisp:763`, `:786`): `GC-RECLAIM-OLDSPACE-AREA`
+  kept an area's only region when it was old, MIT's rule, whose own comment
+  marks its reason ("no place to remember its bits") no longer true. After a
+  collection in which every object of some area died, such regions stayed
+  (three on the high band after its `FULL-GC`: `TV:SCROLL-LIST-AREA`,
+  `SI:FLAVOR-DATA-AREA` and `FASL-TABLE-AREA`; four on native6 after one
+  tenured collection), so `SI:GC-OLDSPACE-P` said a collection was running
+  when none was, a saved band's boot found oldspace and armed the
+  marked-page walk (`generational-save`'s bitmap case found 77 of 274 pages
+  unmarked on the high band, and `save/after.cases`' first case gave
+  `(NIL T)`), and regions of forwarded objects stayed for object walkers to
+  meet. The last old region is now freed with `%GC-FREE-REGION`, like every
+  other, and the area is given a new empty region in the same step, inside
+  the reclaim's `WITHOUT-INTERRUPTS`: `%MAKE-REGION` from `AREA-REGION-BITS`
+  with `%%REGION-EPHEMERAL` cleared and the generation tenured, at
+  `AREA-REGION-SIZE`, as `MAKE-AREA` makes an area's first region
+  (`sys/sys/qfctns.lisp:3038`), so below ephemeral space. The area is never
+  left without a region: RCONS reads the first element of an area's region
+  list as a region before it tests for the end marker. No microcode
+  changes. Checked by `tools/system-check`'s new `generational-reclaim`, C30
+  (`cases/generational-reclaim.cases`, `lisp/generational-collector.lisp:583`),
+  with three planted partial fixes (`lisp/generational-collector-plant-keep-old.lisp`,
+  `-plant-free-only.lisp`, `-plant-new-keeps-bit-13.lisp`).
+  `tools/microcode-check/generational-save` gains a case after its bitmap
+  case: no young flip ran between the save and the check
+  (`GS-NO-FLIP-SINCE-SAVE`, `tools/microcode-check/lisp/generational-save.lisp:82`;
+  `generational-save:190`), since the boot's checks run with collections on
+  and a later flip's walk may clear a mark legitimately.
 
 ## Revision 15
 
