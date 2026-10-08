@@ -1,0 +1,33 @@
+; lisp: float-round-trip.lisp
+; Every float prints, and its printed text reads back as the same float, bit
+; for bit (sys/io/print.lisp, PRINT-FLONUM and FLONUM-DIGITS;
+; sys/io/read.lisp, XR-FLOAT-BITS; lisp/float-round-trip.lisp).  SI:FRT-RUN
+; round trips a sample and gives the number of floats that did not come
+; back, the number tried, and up to three of them: the text, the float's
+; exact value as (M E), M * 2^E, and what the text read back as or the
+; error.  The samples are built from bits and exact integers: the extremes
+; and the constants of both signs, the infinities, 2^-20, the singles nearest
+; 6.02e23 and 1e-37, and the one above the least normal; 2^k of both signs
+; for every k in range and the singles on each side of it; the singles
+; nearest 10^k of both signs; 3000 pseudo-random normal singles of every
+; exponent and sign from a seeded LCG; and 208 subnormals of both signs, 200
+; of them pseudo-random.  The printer scaled a float outside
+; [1e-3, 1e7) to [1, 10) by floating multiplication, losing bits, and
+; printed the scaled float's digits: the most positive single printed as
+; "3.4028237e38", which reads as infinity, and the least positive normal one
+; as "1.1754943e-38", below it, which underflows; and it negated a positive
+; float, which for a subnormal signalled "MINUS produced a result too small",
+; as arithmetic makes no subnormal.  The reader underflows below the least
+; normal single, as arithmetic does, so a subnormal prints as
+; #.(SI:SINGLE-FLOAT-FROM-BITS #x...), as an infinity prints as its constant.
+; Run with --compile --files sys/io/print.lisp,
+; tools/system-check/lisp/float-round-trip.lisp on a band built before the
+; change.
+(si:frt-run :extremes) => (0 18)
+(si:frt-run :powers-of-2) => (0 1522)
+(si:frt-run :powers-of-10) => (0 152)
+(si:frt-run :random 0 1500) => (0 1500)
+(si:frt-run :random 1500 3000) => (0 1500)
+(si:frt-run :subnormal) => (0 208)
+(prin1-to-string (si:frt-from-bits 1)) => "#.(SI:SINGLE-FLOAT-FROM-BITS #x1)"
+(prin1-to-string (si:frt-from-bits #x807FFFFF)) => "#.(SI:SINGLE-FLOAT-FROM-BITS #x807FFFFF)"

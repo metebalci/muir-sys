@@ -642,23 +642,61 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	 (send stream :string-out (if (minusp x)
 				      "#.SI:SINGLE-FLOAT-NEGATIVE-INFINITY"
 				    "#.SI:SINGLE-FLOAT-POSITIVE-INFINITY")))
+	((and (= (%data-type x) dtp-small-flonum)
+	      (= (ldb #o2710 (%pointer x)) 0)
+	      (not (= (ldb #o0027 (%pointer x)) 0)))
+	 ;; a subnormal single: the reader underflows below the smallest normal
+	 ;; single, as arithmetic does, so its digits would not read back; it
+	 ;; prints as the form that makes it from its bits, as an infinity
+	 ;; prints as its constant.  Printing it signalled "MINUS produced a
+	 ;; result too small", as arithmetic makes no subnormal.
+	 (send stream :string-out "#.(SI:SINGLE-FLOAT-FROM-BITS #x")
+	 (let ((bits (+ (ldb #o0037 (%pointer x))	;the 32 bits, unsigned
+			(if (= (ldb #o3701 (%pointer x)) 1) (ash 1 31.) 0)))
+	       (*print-base* 16.) (*print-radix* nil))
+	   (if (fixnump bits)
+	       (print-fixnum bits stream)
+	     (print-bignum bits stream nil)))
+	 (send stream :tyo #/)))
 	((ZEROP X)
 	 (SEND STREAM :STRING-OUT "0.0")
 	 (IF (NEQ (NULL SMALL)
 		  (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
 	     (SEND STREAM :STRING-OUT
 		   (IF SMALL "s0" "f0"))))
-	(T (IF (PLUSP X)
-	       (SETQ X (- X))
-	     (SEND STREAM :TYO (PTTBL-MINUS-SIGN *READTABLE*)))
-	   ;; X is now negative
-	   (COND ((OR (> X -1.0s-3) ( X -1.0s7) FORCE-E-FORMAT)
+	(t
+;	 (IF (PLUSP X)
+;	       (SETQ X (- X))
+;	     (SEND STREAM :TYO (PTTBL-MINUS-SIGN *READTABLE*)))
+	   ;; x keeps its sign: the E format takes its digits from its bits
+	   ;; (flonum-digits, below), and a float in the range below has an
+	   ;; absolute value.  Negating x signalled "MINUS produced a result too
+	   ;; small" for a subnormal single, as arithmetic makes no subnormal.
+	   (if (minusp x)
+	       (send stream :tyo (pttbl-minus-sign *readtable*)))
+;	   ;; X is now negative
+;	   (COND ((OR (> X -1.0s-3) ( X -1.0s7) FORCE-E-FORMAT)
+	   (cond ((or (if (plusp x)
+			  (or (< x 1.0s-3) (>= x 1.0s7))
+			(or (> x -1.0s-3) (<= x -1.0s7)))
+		      force-e-format)
 		  ;; Must go to E format.
-		  (MULTIPLE-VALUE-SETQ (X EXPT) (SCALE-FLONUM X))
-		  ;; X is now positive
-		  (LET ((PLACE-MOVED (PRINT-FLONUM-INTERNAL X SMALL STREAM MAX-DIGITS
-							    T)))
-		    (WHEN PLACE-MOVED (INCF EXPT)))
+;		  (MULTIPLE-VALUE-SETQ (X EXPT) (SCALE-FLONUM X))
+;		  ;; X is now positive
+;		  (LET ((PLACE-MOVED (PRINT-FLONUM-INTERNAL X SMALL STREAM MAX-DIGITS
+;							    T)))
+;		    (WHEN PLACE-MOVED (INCF EXPT)))
+		  ;; The digits, d.ddd, from flonum-digits, exact: scaling x to
+		  ;; [1, 10) by floating multiplication lost bits, and the scaled
+		  ;; float's digits did not always read back as x.
+		  (multiple-value-bind (digits k) (flonum-digits x max-digits)
+		    (send stream :tyo (aref digits 0))
+		    (send stream :tyo (pttbl-decimal-point *readtable*))
+		    (if (= (length digits) 1)
+			(send stream :tyo #/0)
+		      (send stream :string-out digits 1))
+		    (setq expt (1- k))
+		    (return-array digits))
 		  (SEND STREAM :TYO
 			(IF (NEQ (NULL SMALL)
 				 (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
@@ -670,7 +708,9 @@ Pathnames, editor buffers, host objects, and many other hairy things
 		  (PRINT-FIXNUM-1 EXPT 10. STREAM))
 		 (T
 		  ;; It is in range, don't use E-format.
-		  (PRINT-FLONUM-INTERNAL (- X) SMALL STREAM MAX-DIGITS)
+;		  (PRINT-FLONUM-INTERNAL (- X) SMALL STREAM MAX-DIGITS)
+		  ;; abs, as x keeps its sign (above)
+		  (print-flonum-internal (abs x) small stream max-digits)
 		  (IF (NEQ (NULL SMALL)
 			   (NEQ *READ-DEFAULT-FLOAT-FORMAT* 'SHORT-FLOAT))
 		      (SEND STREAM :STRING-OUT
@@ -701,6 +741,89 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	       ((> tem -1s0)  (decf expt) (setq wastoobig t) (go again))
 	       (t (return-from scale-flonum (values (- (if short (float tem 0s0) tem))
 						    expt))))))
+
+;;; The digits of the float X, a finite single, not zero, of either sign,
+;;; for the E format: a string of the fewest decimal digits that read back as
+;;; X, the first not 0, and the power of ten K that places them, |X| about
+;;; 0.DIGITS * 10^K.  With MAX-DIGITS, at most that many, the last rounded
+;;; (half up), as FLONUM-TO-STRING does.  PRINT-FLONUM scaled X to [1, 10) by
+;;; floating multiplication or division, which loses bits, and printed the
+;;; digits of the scaled float: the most positive single printed as
+;;; "3.4028237e38", which reads as infinity, the least positive normal one as
+;;; "1.1754943e-38", below it, and 6.02e23 as "6.0200005e23".  This is exact,
+;;; in integers: Steele and White's free-format method as Burger and Dybvig
+;;; give it ("Printing floating-point numbers quickly and accurately",
+;;; 1996).  R/S is |X|, F * 2^E from FLONUM-MANTISSA and FLONUM-EXPONENT (the
+;;; magnitude, the hidden bit included), and M+/S and M-/S half the gaps to
+;;; the floats above and below it, the one below half as far at a power of 2
+;;; other than the least normal single, whose neighbour below, the largest
+;;; subnormal, is as far as the one above.  PRINT-FLONUM gives it no
+;;; subnormal (it prints one from its bits), but a subnormal's digits come
+;;; out right too.
+(defun flonum-digits (x &optional max-digits)
+  (declare (values digits k))
+  (let* ((p 24.)					;bits of significand
+	 (f (flonum-mantissa x))
+	 (e (flonum-exponent x))
+	 (k 0) (digits (make-string 16. :fill-pointer 0))
+	 r s m+ m- u)
+    (if (>= e 0)
+	(if (and (= f (ash 1 (1- p))) (> e -149.))
+	    (setq r (ash f (+ e 2)) s 4 m+ (ash 1 (1+ e)) m- (ash 1 e))
+	  (setq r (ash f (1+ e)) s 2 m+ (ash 1 e) m- (ash 1 e)))
+      (if (and (= f (ash 1 (1- p))) (> e -149.))
+	  (setq r (ash f 2) s (ash 1 (- 2 e)) m+ 2 m- 1)
+	(setq r (ash f 1) s (ash 1 (- 1 e)) m+ 1 m- 1)))
+    ;; K, the least with R + M+ <= S * 10^K: estimated from the binary
+    ;; exponent and F's length (a subnormal's is shorter), log10 2 being
+    ;; about 77/256, then corrected
+    (setq k (floor (* (+ e (haulong f) -1) 77.) 256.))
+    (if (minusp k)
+	(let ((scale (^ 10. (- k))))
+	  (setq r (* r scale) m+ (* m+ scale) m- (* m- scale)))
+      (setq s (* s (^ 10. k))))
+    (do () ((<= (+ r m+) s))
+      (setq s (* s 10.) k (1+ k)))
+    (do () ((> (* (+ r m+) 10.) s))
+      (setq r (* r 10.) m+ (* m+ 10.) m- (* m- 10.) k (1- k)))
+    ;; Each digit; the last is the one at which the digits so far, or with the
+    ;; last one more, are within half a gap of |X|, the nearer of the two.
+    ;; A digit is found by subtracting 8, 4, 2 and 1 times S, rather than by
+    ;; dividing by S: a float near 2^-1024 makes S and R of over 1000 bits, and
+    ;; the bignum division took some 40 ms a digit on micro.
+    (do ((s2 (* s 2)) (s4 (* s 4)) (s8 (* s 8.)))
+	(nil)
+      (setq r (* r 10.) m+ (* m+ 10.) m- (* m- 10.) u 0)
+      (when (>= r s8) (setq r (- r s8) u 8.))
+      (when (>= r s4) (setq r (- r s4) u (+ u 4)))
+      (when (>= r s2) (setq r (- r s2) u (+ u 2)))
+      (when (>= r s) (setq r (- r s) u (+ u 1)))
+      (let ((low (< r m-))
+	    (high (> (+ r m+) s)))
+	(cond ((or low high (and max-digits (>= (1+ (fill-pointer digits)) max-digits)))
+	       (if (cond ((and low high) (>= (* 2 r) s))
+			 (low nil)
+			 (high t)
+			 (t (>= (* 2 r) s)))	;MAX-DIGITS reached
+		   (incf u))
+	       (return nil))
+	      (t (vector-push-extend (+ #/0 u) digits)))))
+    (cond ((< u 10.)
+	   (vector-push-extend (+ #/0 u) digits))
+	  (t
+	   ;; MAX-DIGITS rounded a 9 up: carry back through the nines
+	   (do () ((or (zerop (fill-pointer digits))
+		       (not (= (aref digits (1- (fill-pointer digits))) #/9))))
+	     (decf (fill-pointer digits)))
+	   (cond ((zerop (fill-pointer digits))
+		  (vector-push-extend #/1 digits)
+		  (incf k))
+		 (t (incf (aref digits (1- (fill-pointer digits))))))))
+    ;; no trailing zeros, as FLONUM-TO-STRING prints none
+    (do () ((or (= (fill-pointer digits) 1)
+		(not (= (aref digits (1- (fill-pointer digits))) #/0))))
+      (decf (fill-pointer digits)))
+    (values digits k)))
 
 ;;; Print the mantissa.
 ;;; X is a positive non-zero flonum, SMALL is T if it's a small-flonum.

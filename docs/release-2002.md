@@ -135,6 +135,31 @@ file carries a comment in that file saying why.
   new check `extra-pdl-locative` holds the compare's fixnum addresses of an
   extra pdl page across a forced stack-group switch, and its plant file a
   locative, which halts the machine.
+- **Every single prints as text that reads back as it** (`print-flonum`,
+  `sys/io/print.lisp:645-660`, `:671-676`, `:686-699`, `:712-713`;
+  `flonum-digits`, `:745-826`; MIT's). The printer scaled a float outside
+  [1e-3, 1e7) to [1, 10) by floating multiplication or division, which
+  loses bits, and printed the scaled float's digits: the most positive
+  single printed as `3.4028237e38`, which reads as an infinity, the least
+  positive normal one as `1.1754943e-38`, below it, which underflows, and
+  6.02e23 as `6.0200005e23`. `flonum-digits` gives the E format's digits
+  exactly, in integers, from the float's bits: the fewest that read back as
+  the float (Steele and White's free-format method, as Burger and Dybvig
+  give it). The printer negated a positive float first, and for a subnormal
+  that signalled "MINUS produced a result too small", as arithmetic makes no
+  subnormal. Since the reader underflows below the least normal single, as
+  arithmetic does, a subnormal now prints as
+  `#.(SI:SINGLE-FLOAT-FROM-BITS #x...)`, its bits in hexadecimal, as an
+  infinity prints as its constant (`SINGLE-FLOAT-FROM-BITS`,
+  `sys/sys2/numer.lisp:582`). Floats in [1e-3, 1e7) print as before.
+  `tools/system-check` gains `float-round-trip`: 18 extremes and constants
+  of both signs, 1522 powers of two and the singles beside them, 152 singles
+  nearest powers of ten, 3000 pseudo-random normal singles and 208
+  subnormals. The System 2001 hand-over band of 81b3973, whose float code
+  is this tree's, fails 6 of its 8 cases and errs in one: 12, 338, 0, 802
+  and 208 singles do not come back; with the change all 8 pass. The
+  CADR's line has the same printer fault, and a reader fault besides, both
+  fixed there in System 1004.
 
 ## Revision 14
 
