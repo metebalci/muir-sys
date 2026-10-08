@@ -160,6 +160,13 @@ file carries a comment in that file saying why.
   and 208 singles do not come back; with the change all 8 pass. The
   CADR's line has the same printer fault, and a reader fault besides, both
   fixed there in System 1004.
+- A new check, `tools/system-check/cases/pointer-unsigned.cases` (row in
+  `tools/system-check/README.md`): `SI:%POINTER-UNSIGNED`
+  (`sys/sys/qrand.lisp:21`) and `SI:PRINT-POINTER-FIELD`
+  (`sys/io/print.lisp:574`) on 32-bit fields with <31> set and clear. System
+  2001 printed `#x807FFFFF` as `-17F800001`, its `%POINTER-UNSIGNED` (MIT's,
+  from `sys/sys/qmisc.lisp`) adding the shifted sign bit instead of
+  subtracting it; System 2002's already subtracts it.
 
 ## Revision 14
 

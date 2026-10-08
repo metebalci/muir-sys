@@ -1,0 +1,39 @@
+; SI:%POINTER-UNSIGNED reads a fixnum's 32-bit pointer field as an unsigned
+; number (sys/sys/qrand.lisp), and SI:PRINT-POINTER-FIELD prints an object's
+; pointer field that way (sys/io/print.lisp): a fixnum with <31> set, the
+; sign bit, is N + 2^32.  MIT's %POINTER-UNSIGNED (sys/sys/qmisc.lisp, still
+; in System 2001) added the shifted sign bit, whose value is negative
+; (-2^31, so the term is -2^32), which made such an N more negative,
+; N - 2^32: #x807FFFFF gave -#x17F800001 and printed as "-17F800001".
+; Every field is built by SI:%MAKE-POINTER-UNSIGNED from its unsigned value,
+; on fixnums, a locative that is never referenced, and the floats 1.0 and
+; -1.0, whose fields are their IEEE bits, so that the check runs on any band.
+; Check a change to sys/io/print.lisp with --compile --files sys/io/print.lisp;
+; one to %POINTER-UNSIGNED by loading its new definition alone.
+; The 7 cases with <31> clear are controls.  The other 11 fail on System
+; 2001 with this tree's print.lisp compiled into it (it has no
+; PRINT-POINTER-FIELD of its own); MIT's %POINTER-UNSIGNED alone fails the
+; same 11, and a PRINT-POINTER-FIELD that prints the field signed fails 5.
+
+; %POINTER-UNSIGNED: <31> clear (controls: 0, 5, #x7FFFFFFF), then set
+(si:%pointer-unsigned 0) => 0
+(si:%pointer-unsigned 5) => 5
+(si:%pointer-unsigned (si:%make-pointer-unsigned #x7FFFFFFF)) => 2147483647
+(si:%pointer-unsigned (si:%make-pointer-unsigned #x80000000)) => 2147483648
+(si:%pointer-unsigned (si:%make-pointer-unsigned #x807FFFFF)) => 2155872255
+(si:%pointer-unsigned (si:%make-pointer-unsigned #xD0000000)) => 3489660928
+(si:%pointer-unsigned (si:%make-pointer-unsigned #xFFFFFFFF)) => 4294967295
+(si:%pointer-unsigned (%pointer -1.0)) => 3212836864
+
+; PRINT-POINTER-FIELD in base 16: <31> clear (controls), then set
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field 0 s))) => "0"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (%make-pointer dtp-locative #x1234) s))) => "1234"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (si:%make-pointer-unsigned #x7FFFFFFF) s))) => "7FFFFFFF"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field 1.0 s))) => "3F800000"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (si:%make-pointer-unsigned #x80000000) s))) => "80000000"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (si:%make-pointer-unsigned #x807FFFFF) s))) => "807FFFFF"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (%make-pointer dtp-locative (si:%make-pointer-unsigned #x807FFFFF)) s))) => "807FFFFF"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field (si:%make-pointer-unsigned #xFFFFFFFF) s))) => "FFFFFFFF"
+(let ((*print-base* 16.) (*print-radix* nil)) (with-output-to-string (s) (si:print-pointer-field -1.0 s))) => "BF800000"
+; and through FORMAT, as the callers that print an object's address do
+(format nil "~X" (si:%pointer-unsigned (%pointer (%make-pointer dtp-locative (si:%make-pointer-unsigned #x807FFFFF))))) => "807FFFFF"
