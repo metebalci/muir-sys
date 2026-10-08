@@ -115,7 +115,7 @@ by GC-TENURED-GROWTH-LIMIT.  NIL: tenured collections only by explicit calls
 ;;; at the next flip.
 (defvar gc-eden-size nil
   "Eden's size in words: the GC process starts a young collection when the words consed
-since the last flip reach it.  NIL: 1//16 of main memory (GC-EDEN-WORDS).")
+since the last flip reach it.  NIL: 1//4 of main memory (GC-EDEN-WORDS).")
 
 (defvar gc-survivor-cap nil
   "Survivor space 1's soft cap in words: when it holds more at a flip, its objects are
@@ -145,9 +145,16 @@ at once, never copied by young collections.")
   "Main memory's size in words."
   (system-communication-area %sys-com-memory-size))
 
+;;; the generational collector: eden's default is a quarter of main memory,
+;;; in words, not a sixteenth (contract g3 step 2, 10): the only size
+;;; measured that keeps the long session's collector time near 5% at 2, 8 and
+;;; 32 m words while every pause stays within its limit, and at which data
+;;; that lives a few flips dies in the survivor spaces instead of being
+;;; tenured.  gc-eden-size stays a word count, nil computed when used.
 (defun gc-eden-words ()
-  "Eden's size in words: GC-EDEN-SIZE, or 1//16 of main memory."
-  (or gc-eden-size (floor (gc-main-memory-words) 16.)))
+  "Eden's size in words: GC-EDEN-SIZE, or 1//4 of main memory."
+;  (or gc-eden-size (floor (gc-main-memory-words) 16.)))
+  (or gc-eden-size (floor (gc-main-memory-words) 4)))
 
 (defun gc-survivor-cap-words ()
   "Survivor space 1's soft cap in words: GC-SURVIVOR-CAP, or eden's size."

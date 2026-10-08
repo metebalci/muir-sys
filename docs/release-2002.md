@@ -701,8 +701,8 @@ objects young) changed the save, the band's formats and the boot.
   `:916`); young collections report nothing (`GC-RECLAIM-OLDSPACE`, `:700`).
   `GC-STATUS` prints the generations and the collections by kind (`:616`;
   `GC-GET-GENERATION-SIZES`, `:195`).
-- **The settings** (`:98`-`:129`): `GC-EDEN-SIZE` (NIL, 1/16 of main
-  memory), `GC-SURVIVOR-CAP` (NIL, eden's size), `GC-TENURED-GROWTH-LIMIT`
+- **The settings** (`:98`-`:129`): `GC-EDEN-SIZE` (NIL, 1/4 of main
+  memory; 1/16 before, below), `GC-SURVIVOR-CAP` (NIL, eden's size), `GC-TENURED-GROWTH-LIMIT`
   (`:DEFAULT`, 1/4 of main memory) and `GC-PRETENURE-THRESHOLD` (32 K words),
   each read at the next flip; and the answers to two of the contract's
   questions, one variable each, both T: `GC-ON-AT-BOOT` (Q-GCa: `GC-BOOT`,
@@ -1021,6 +1021,18 @@ objects young) changed the save, the band's formats and the boot.
   whole 4n), a 300,000-word one, over the limit, finishes it (fails without
   the limit), and the committed free space is MIT's figure plus 262,144
   words for fixed space sizes (fails without the term).
+- **Eden's default is a quarter of main memory** (contract G3 step 2,
+  section 10; `sys/sys2/gc.lisp`, `GC-EDEN-WORDS`): `GC-EDEN-SIZE` NIL now means
+  1/4 of main memory in words, 524,288 at 2 M words and 8,388,608 at 32 M,
+  not 1/16; it stays a word count with no page alignment, since eden is full
+  when the words consed since the flip reach it. With the fixes above, T1
+  measured 1/4 as the only size that keeps the long session's collector time
+  near the 5% gate (+2.6% at 2 M words, −18.3% against a collector-off
+  baseline that pages at 8 M, +5.4% at 32 M) with every pause within its limit
+  (young flip 10.3-18.2 ms), and at which data living a few flips dies in the
+  survivor spaces (28 K words tenured against 2.98 M at 1/16). Checked by
+  `generational-collector`'s defaults case and the new `eden-default` (32 M
+  words) and `eden-default-2mw` (2 M words), which fail at 1/16.
 - **Which pauses §13 gates** (contract G3 step 2, clarification 17):
   automatic collection's in the workloads; a batch a program asks for
   (FULL-GC, GC-IMMEDIATELY, GC-RECLAIM-OLDSPACE, GC-FLIP-NOW over a running

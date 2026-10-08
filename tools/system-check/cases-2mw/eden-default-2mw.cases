@@ -1,0 +1,5 @@
+; Eden's default at 2 M words (contract G3 step 2, section 10;
+; sys/sys2/gc.lisp, GC-EDEN-WORDS): with GC-EDEN-SIZE NIL, a quarter of main
+; memory, 524,288 words.  Fails at 1/16 (131,072).  Needs a machine of 2 M
+; words of main memory.
+(list (si:gc-main-memory-words) si:gc-eden-size (si:gc-eden-words)) => (2097152 NIL 524288)
