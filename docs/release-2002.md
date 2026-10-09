@@ -1091,8 +1091,9 @@ objects young) changed the save, the band's formats and the boot.
 
 QUUX's revision 15 (contract G3 revision 15, and its appendix A15b): the
 pipelined micro-engine, its 64-bit microinstruction, and the OA registers read
-only through the OA selects. This part is the micro-assembler's and the
-loader's; the microcode's selects and the boot PROM's new reader follow.
+only through the OA selects: the micro-assembler, the microcode with its
+selects, the boot PROM's new reader and the loaders. Until release-2002 the
+tree assembles for revision 14 too, which the boards run until then.
 
 ### The micro-assembler
 
@@ -1128,13 +1129,15 @@ loader's; the microcode's selects and the boot PROM's new reader follow.
   version is refused rather than written. The same sources at revision 15
   give the same `ucadr.mcr` and `promh.mcr` on a 32-bit band and a 40-bit one.
 - **The OA selects** `oa-low-select` and `oa-high-select`, the extension's
-  `<60>` and `<61>` (`sys/sys/cadsym.lisp:522`), are revision 15's names,
-  refused below it (`sys/sys/cadrlp.lisp:305`); revision 14's names are
-  marked with their revision, 14, and so are taken at 15 (`:300`).
+  `<60>` and `<61>` (`sys/sys/cadsym.lisp:524`), assemble as nothing below
+  revision 15, where IMOD ors the register into the next word as the select
+  does, so one source means the same at 14 and 15 (`sys/sys/cadrlp.lisp:304`);
+  revision 14's names are marked with their revision, 14, and so are taken
+  at 15 (`:300`).
 - **The OA select check** (appendix A15b.15; `check-oa-selects`,
-  `sys/sys/cadrlp.lisp:1201`, `oa-select-breaches`, `:1099`) runs over the
+  `sys/sys/cadrlp.lisp:1312`, `oa-select-breaches`, `:1244`) runs over the
   assembled I-MEM and D-MEM of every revision-15 assembly, the microcode's
-  (`:751`) and the PROM's (`:1292`), and refuses: a word that writes
+  (`:760`) and the PROM's (`:1523`), and refuses: a word that writes
   `OA-REG-LOW` or `OA-REG-HIGH` unless every word that can run next selects
   it (a write in a return's slot is refused); a selecting word that can be
   entered other than right after such a write, at a return point or at an
@@ -1143,12 +1146,13 @@ loader's; the microcode's selects and the boot PROM's new reader follow.
   `oa-low-select` on a dispatch other than a dispatch-memory write without
   POPJ. It follows the delay slot and N: after a jump with N its slot runs only
   when the jump is not taken, and a dispatch's slot follows each entry's N.
-  Each breach is printed with the word and the rule. The sources' microcode,
-  with no selects yet, is refused at revision 15 at each of its 147 writes
-  and the PROM at its 8; `ua:*oa-select-check-refuses*` nil (`:971`) writes
-  the files all the same, for measuring only.
-- **`tools/assembler-check`** gains `rev15`, `oa-refused` and `oa-select`
-  (its README), with the fixture `lisp/oasel.lisp`; **`tools/cross-build`**
+  Each breach is printed with the word and the rule. The sources' microcode
+  and PROM carry their selects ("The microcode and the boot PROM", below)
+  and pass; `ua:*oa-select-check-refuses*` nil (`:1057`) prints the breaches
+  and writes the files all the same, for measuring only.
+- **`tools/assembler-check`** gains `rev15`, `oa-select` and the checks
+  under "The checks" below (its README), with the fixture `lisp/oasel.lisp`;
+  **`tools/cross-build`**
   gains `--asm-target` and `--oa-select-check` for the assembly step (its
   README). `docs/building.md`, "Assembling the microcode", says how.
 - **`tools/assembler-check`'s `rev13` and `rev14` compare the microcode
@@ -1161,6 +1165,152 @@ loader's; the microcode's selects and the boot PROM's new reader follow.
   every other part of the files is still compared byte for byte, and each run
   shows that a planted change in a symbol area value is caught
   (`symbol_area_control`).
+
+### The microcode and the boot PROM
+
+- **Both revisions until release-2002.** The tree's microcode and boot PROM
+  assemble for revisions 14 and 15, so fixes made on this line still reach
+  the boards, which run revision 14 until then.
+  - The OA selects assemble as nothing below 15 (above).
+  - `promh.text` is both revisions' PROM, chosen by `*hardware-revision*` at
+    assembly (`(if ...)` blocks, `sys/ucadr/promh.text:33` on): revision
+    14's as it was, and revision 15's. PROM 2002 for revision 14 assembles to
+    the file it was, byte for byte.
+  - `tools/cross-build` still assembles for revision 14 by default.
+  - The revision-14 and revision-15 assemblies of the microcode have the
+    same `<47:0>`, word for word, and the same dispatch memory, A memory and
+    symbol area: revision 15 adds only the selects in `<63:48>`
+    (`tools/assembler-check`'s `dual`). The PROM's two differ by design.
+- **The OA selects** (appendix A15b.15; amendment 1, 1.7): every word that
+  reads `OA-REG-LOW` or `OA-REG-HIGH`, which revision 15 no longer ors into
+  whatever word runs next, names the register by its OA select, and carries
+  the comment `;reads oa-reg-low (rev 15)` or `;reads oa-reg-high (rev 15)`.
+  **167 in all:** the microcode has 159, 129 `oa-low-select` and 30
+  `oa-high-select`. These are amendment 1's 149 sites, `XWIPM-I`'s second
+  write (below), and the 9 of `REGION-TO-AREA`, `REGION-AREA-MAP-FORGET` and
+  `REGION-AREA-MAP-CLEAR` (6 low, 3 high; `sys/ucadr/uc-page-fault.lisp:2492`,
+  `:2529`, `:2546`). `MISC1A`'s four landing words `MISC1A+4`,
+  `MISC-TO-STACK`, `MISC-TO-RETURN` and `MISC-TO-LAST` are among them
+  (`sys/ucadr/uc-macrocode.lisp`, `sys/ucadr/uc-call-return.lisp`). The boot
+  PROM has 8, all `oa-low-select`: `CLEAR-M-MEMORY`, `CLEAR-A-MEMORY`,
+  `CLEAR-I-MEMORY`, `CLEAR-D-MEMORY`, the control store's and the dispatch
+  memory's loops, `FILL-M-LOOP` and `FILL-A-LOOP` (`sys/ucadr/promh.text`).
+- **`TRANS-DROP-THROUGH` no longer modifies the dispatch it returns to**
+  (`sys/ucadr/uc-transporter.lisp:179`). It ored all ones into the dispatch's
+  address through `OA-REG-LOW` in a return's slot, so that the dispatch ran
+  again at entry 7777, a drop-through; on revision 15 no word changes
+  another. It pops the dispatch's own address, adds one, writes it to
+  `OA-REG-LOW` at `OAL-JUMP` and jumps there through `oa-low-select`: the
+  dispatch's slot and then the word after it, as the drop-through did, one
+  word more. `P-B-MR0-HACK` (`:631`), pushed as a return address, goes on at
+  its jump to `P-B-MR0` as before.
+- **A transport or write test that also returned** (`(popj-after-next
+  dispatch transport ...)`, `(popj-after-next gc-write-test)`, 41 words) is a
+  dispatch through a copy of its table whose drop-throughs return,
+  `D-TRANSPORT-RETURN` and `D-GC-WRITE-TEST-RETURN`
+  (`sys/ucadr/uc-parameters.lisp:2376`, `:2656`; `TRANSPORT-RETURN`,
+  `TRANSPORT-IVC-RETURN`, `TRANSPORT-WRITE-RETURN`, `GC-WRITE-TEST-RETURN`,
+  `:474`), with a `(popj)` after its slot. A drop-through there ran the slot
+  and then returned through the dispatch's own popj, which the new
+  `TRANS-DROP-THROUGH` cannot run again: it went on at the word after the
+  slot, the next function's first word (`XEVC+3`, reached 8 times in a boot,
+  ran on into `XVCL`), and the boot halted at `TRAP`. Each table entry is the
+  original's but for its drop-throughs, `(p-bit r-bit)` by the table's
+  constant, which are `(r-bit)`, a return after the slot, so a dispatch costs
+  what it did; the `(popj)` runs only after `TRANS-DROP-THROUGH`'s jump. The
+  micro-assembler refuses, on revision 15, a dispatch that pushes its own
+  address and carries POPJ (`check-returning-dispatches`,
+  `sys/sys/cadrlp.lisp:771`), and MIT's comments that invited one
+  (`sys/ucadr/uc-parameters.lisp:399`, `:462`) say so; the map-bit check
+  reads the two copies too, where a microcode defines them.
+  `tools/assembler-check` holds each copy equal to its original, entry for
+  entry, a drop-through made a return.
+- **The WRITE-I-MEM check** (`check-write-i-mem`, `sys/sys/cadrlp.lisp:810`):
+  on revision 15 the micro-assembler refuses a WRITE-I-MEM in any form but
+  MIT's (`IR<9:0>` = 1647, no POPJ) or in a delay slot (after a jump or call
+  with N clear, a POPJ word or a dispatch).
+- **The map-after-start check** (`check-map-after-start`,
+  `sys/sys/cadrlp.lisp:1433`, `start-breaches`, `:1381`): on revision 15 the
+  micro-assembler refuses a word that reads the map (`MAP`, functional
+  source 11, or a dispatch on map bits) where it can run in the microcycle
+  right after a memory start (VMA or MD with START-READ or START-WRITE) or
+  the instruction fetch's (a dispatch with `IR<24>`), and a start in a
+  return's slot, whose next word is not known. Port B's lookup then never
+  needs WB's walk fill, write-back or translation of the same clock. MIT's
+  microcode already put a page-fault check between every start and the map
+  read after it. The one start in a return's slot,
+  `ADDRESS-SPACE-MAP-STORE`'s write (`sys/ucadr/uc-storage-allocation.lisp:1515`),
+  now carries the `POPJ-AFTER-NEXT` itself, with a no-op as its slot: one
+  word more, and a clock more each time a region is made or freed.
+- **The MD-after-start check** (in the map-after-start check's pass): on
+  revision 15 the micro-assembler refuses a word that writes `MD` where it
+  can run right after a memory start, read, write or the instruction
+  fetch's. After a read the word reads `MD` as the start found it, and an
+  `MD` it writes gives way to the read's word; a write carries `MD` as its
+  start's own microcycle leaves it. Either way the word would not do what it
+  says. `QMLP` to `QMLP+3`, where a return that asks for the fetch lands,
+  are held to both rules by name. MIT's microcode and PROM have no such word.
+- **The checks' successor relation** (`oa-run-tables`,
+  `sys/sys/cadrlp.lisp:1185`, shared by the OA select, map-after-start and
+  MD-after-start checks) follows a transfer with a slot of its own that
+  itself runs in another transfer's slot: its transfers are pending on each
+  of that transfer's targets, to a fixed point. The successor sets of 31
+  words grow; it hid no breach.
+- **A memory's head-room** (`check-a-memory-head-room`,
+  `sys/sys/cadrlp.lisp:825`, every revision): the assembly is refused unless
+  A memory's variables and constants end at or below the mouse's arrays,
+  which sit at fixed locations from 1600 (`MOUSE-CURSOR-PATTERN-AMEM-LOC`,
+  `sys/ucadr/uc-parameters.lisp:1721`) and are written at run time. Only
+  variables running into the constants were refused before, so constants
+  running into the arrays would have assembled without a word, and the
+  region-area map's 100 words brought them close. Microcode 2002's
+  variables end at 1036 and its constants at 1550: 23 words remain below
+  1600.
+- **`QMDTBD` has sixteen entries** (`sys/ucadr/uc-parameters.lisp:1759`): its
+  users at `QIMOVE-EXIT` and `QARYR5+10` dispatch on `%%LP-CLS-DESTINATION`,
+  four bits, and entries 10-17 lay in `D-MISC-DEST`, whose landing words now
+  select, so the OA select check held them entered from there. Entries 5-17
+  are `ILLOP`; no destination above 4 is stored. **`QBROP1` and `QBOPT4`**
+  have the same shape, `%%FEF-INIT-OPTION`, four bits, into the 8-entry
+  `QBOPNP` and `QBOPTT`, and stay as MIT has them: the option holds 0-7, so
+  the overrun is unreachable, and the check does not refuse it. Their words
+  change only because the tables they would overrun into moved.
+- **`%WRITE-INTERNAL-PROCESSOR-MEMORIES`'s control store code** (`XWIPM`,
+  `sys/ucadr/uc-cadr.lisp:249`, `XWIPM-I`, `:295`) takes the halves of the
+  machine's revision, MACHINE-ID's `<15:4>` read at run time: on 15, `D-HI`
+  and `D-LOW` whole to `WRITE-I-MEM`, which takes the word's `<63:32>` from
+  `A<31:0>` and `<31:0>` from `M<31:0>` (appendix A15b.4); below 15, `<47:24>`
+  and `<23:0>` as before (`xwipm-i-14`, `:300`). The A memory and dispatch
+  memory codes keep their halves.
+- **Microcode 2002 for revision 14 against the generational collector's**
+  (`a537ba9`), label for label (each word keyed by the nearest preceding
+  label and its offset, a jump's target through its key, a dispatch by the
+  entries it can read, an A source by the constant it reads): equal but at
+  `XWIPM` and `XWIPM-I` (one word more, the revision's test and its two
+  writes; A15b.4), `TRANS-DROP-THROUGH` and the 41 returning dispatches with
+  their `(popj)`s, the dispatches whose four-bit field reads past an 8-entry
+  table (`QIMOVE-EXIT`, `QARYR5+10`, `QBROP1`, `QBOPT4`),
+  `ADDRESS-SPACE-MAP-STORE`'s last two words and its no-op, and alignment
+  padding after `XHALT`. Revision 15's differs from revision 14's only in
+  the selects.
+- **Boot PROM 2002 for revision 15** reads the self-describing `.mcr`
+  (appendix A15b.7; `process-section`, `sys/ucadr/promh.text:1056`): the
+  format word 0x51550001, the number of sections, section 6 first holding 15,
+  then sections 1-4 at most once each and in order, each header's widths,
+  start and unused words checked, the padding of every item zero. Its halts:
+  `ERROR-NOT-REVISION-15` (`GO`, `:278`, now 15 or more), `ERROR-MCR-FORMAT`,
+  `ERROR-MICROCODE-NOT-REVISION-15`, `ERROR-SECTION-ORDER`, `ERROR-BAD-WIDTH`,
+  `ERROR-NONZERO-PADDING` (`:1466` on), and, kept, `ERROR-BAD-SECTION-TYPE`,
+  `ERROR-BAD-ADDRESS`, `ERROR-MICROCODE-TOO-BIG` and `ERROR-BUFFER-NOT-LOADED`
+  (a symbol area other than 6000 for 2000 items, or none). The control
+  store's items are written whole, word 0 to `M`, word 1 to `A`. **The
+  microcode symbol area** (section 3, 6000-7777) is staged in the PDL buffer
+  at 4000-5777 as A memory is at 0-1777, and copied into place at
+  `DONE-LOADING` (`copy-sym-loop`, `:1261`), so the PROM's buffer stays
+  physical page 3, the symbol area's page, which the PROM loads afresh: a
+  warm boot keeps main memory and the PROM saves nothing (Q8), and a buffer
+  on any other page would overwrite a page of the running world. The PROM's
+  words run from 36000 to 37016, 527 of its 1,024.
 
 ### The Lisp side
 
@@ -1179,3 +1329,73 @@ loader's; the microcode's selects and the boot PROM's new reader follow.
   (no name refers to it, no Lisp code takes the byte `3001` of a call state,
   and no microcode word tests that bit; the PROM's two `(byte-field 1 30)`
   tests are of Q-R in its self-test), and revision 15 reads no call-state bit.
+- **The micro-LAP loader's control store write** (`MA-LOAD-C-MEM`,
+  `sys/sys/mlap.lisp:516`) passes `<63:32>` and `<31:0>` on a QUUX of
+  revision 15 or later, MACHINE-ID's revision read from the feature page,
+  and `<47:24>` and `<23:0>` as before elsewhere.
+
+### The control store's writers and readers (appendix A15b.4)
+
+| Writer or reader | What it does on revision 15 |
+|---|---|
+| The boot PROM, `CLEAR-I-MEMORY` and `PROCESS-I-MEM-SECTION` (`promh.text`) | `WRITE-I-MEM` of a 64-bit word: `CLEAR-I-MEMORY` writes zeros to 0-35777; the reader writes each item, `<31:0>` from M, `<63:32>` from A, the address through `oa-low-select` |
+| The boot PROM, `CLEAR-D-MEMORY` and `PROCESS-D-MEM-SECTION` | the dispatch memory, 17 bits an entry, as before, the address through `oa-low-select` |
+| `XWIPM`, `%WRITE-INTERNAL-PROCESSOR-MEMORIES` (`uc-cadr.lisp`) | code 1: the machine's revision's halves, on 15 `D-HI` and `D-LOW` whole; codes 2 and 4 as before; each write's address through `oa-low-select` |
+| `LOAD-MODULE`, `BLAST-WITH-IMAGE` (`sys2/usymld.lisp`, the microcode loader) | the halves of the target named by `ua:*word-width*` and `ua:*hardware-revision*` (`control-store-word-halves`): set 15 to load a revision-15 machine |
+| `MA-LOAD-C-MEM` (`sys/mlap.lisp`, micro-LAP; no caller loads microcompiled code on QUUX) | the halves by the machine's revision (above) |
+| `READ-MCR-FILE`, `read-mcr-sections` (`usymld`) | reads revision 15's `.mcr` into an image, 64-bit control store words |
+| The micro-assembler's image (`cadrlp`, `qwmcr`) | assembles and writes 64-bit words |
+| `cc/` (the CADR's debugger over the debug cable: `CC-READ-C-MEM`, `CC-WRITE-C-MEM`, `lcadrd`, `cadld`, `diags`) and `memd`, `praid` | the CADR's; QUUX has no debug cable, unchanged |
+| The microcode | no word reads the control store; `XWIPM-I` is the only microcode writer besides the PROM |
+| The simulator's checkpoint, the console's readout, the fabric's | not Lisp or microcode: the simulator's and the fabric's own |
+
+### The checks
+
+- **`tools/assembler-check`**: `rev15` assembles the microcode and the PROM
+  with their selects under the OA select check as it refuses, finds no
+  breach, the extension holding the selects alone (129 and 30; 8 and 0), and
+  each -RETURN table equal to its original but at the drop-throughs; `dual`
+  assembles the tree at 14 and at 15 and holds their `<47:0>`, dispatch
+  memory, A memory and symbol area equal, a change planted in one word
+  caught, and its revision-14 assemblies pass the WRITE-I-MEM,
+  map-after-start and MD-after-start checks too. The plants `oa-drop-low`,
+  `oa-drop-high`, `oa-drop-entry`, `oa-drop-prom`, `oa-old-drop-through`,
+  `oa-no-writer` and `popj-dispatch` are each refused naming the word and
+  rule, and `return-table-drift`'s one drifted entry is found; `rev15` is
+  their control. `write-i-mem` finds each breach of the WRITE-I-MEM check
+  planted in the microcode's image, and `write-i-mem-slot` is refused.
+  `map-after-start` finds each of four planted breaches, a map read reached
+  through a slot's slot among them, and not their controls;
+  `map-after-start-return-slot`, `ADDRESS-SPACE-MAP-STORE` as MIT wrote it,
+  is refused. `md-after-start` finds each of seven planted `MD` writes, after
+  reads, writes and the fetch, and not their controls.
+  `a-memory-head-room` is refused; `tree` is its control. The other checks
+  assemble the tree at 14, as before.
+- **The boot and the warm boot.** On muir-sim's `micro` engine at revision
+  15, the PROM loads microcode 2002 and System 2002 reaches its listener. A
+  value set before a warm boot (Control-Meta-Return) reads back after it, on
+  both revisions, and MA-INFO prints each microcode entry's address as the
+  symbol file has it (`car`: `XCAR`), with no high bits (both measured
+  before the generational collector's merge).
+- **Revision 14's suites.** System 2002's band with microcode 2002 for
+  revision 14 passes the microcode check and the system check on `micro` and
+  `rtl`, the generational collector's checks among them
+  (`generational-collector`, `-reclaim`, `-tuning`, `-rqb` at 4, 5 and 6
+  ticks).
+- **The PROM's clearing.** With A, M, the dispatch memory and the control
+  store below 36000 filled with patterns, the PROM stopped after
+  `CLEAR-D-MEMORY` leaves the control store below 36000 and the dispatch
+  memory all zero, and A and M zero but at the PROM's own variables and
+  constants, on both engines.
+- **Coverage** (measured before the generational collector's merge). The
+  microcode check and the system check, with cases for the rarer sites, the
+  mouse moved and clicked, a warm boot and a disk save, run 145 of amendment
+  1's 147 microcode OA sites on revision 15 (each PROM site too); the two left, `MC-DOSX+2` and `MC-SOP+3`, serve microcompiled code,
+  which QUUX does not run. `TRANS-DROP-THROUGH` returned to plain transport
+  and write-test dispatches (13 sites) and to the -RETURN ones (`XEVC+3`,
+  `MVRB2+3`, `QRAR4+5`, `AREFI-INSTANCE-NEW+12`); `P-B-MR0-HACK` ran 1,616
+  times but was always returned to plainly. Reaching it through
+  `TRANS-DROP-THROUGH` takes an extra-PDL trap in the PDL buffer's dump that
+  ends in `TRANS-DROP-THROUGH`, and the dump stores the pointer below the PDL
+  buffer's new address, so the trap always copies the object and returns
+  plainly (inferred from the code, not measured).
