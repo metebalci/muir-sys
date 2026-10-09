@@ -1018,9 +1018,13 @@ is followed, before its invalidation, by a second memory start, a MAP(MD)
 read, a dispatch, a call other than to a halt, a return or another write-map
 (`check-fiddle-windows`, revision 14's fiddle rule) (`sys/sys/cadrlp.lisp`).
 At 13 every output is what it was. `tools/assembler-check` checks all of it
-(its README). The sources' microcode assembles only at 14: its paging is
-revision 14's two-level page table, and the boot PROM's `promh.text`, also
-assembled at 14, refuses a machine and a microcode of another revision.
+(its README). The sources' microcode assembles at 14 and 15: its paging is
+revision 14's two-level page table, and its OA selects, below, assemble as
+nothing at 14, where IMOD ors the register into the next word. The boot
+PROM's `promh.text` is both revisions' PROM, chosen by `ua:*hardware-revision*`
+at assembly: revision 14's as it was, and revision 15's (below). Each refuses
+a machine and a microcode of another revision. Both revisions are kept until
+release-2002 (contract G3 revision 15).
 
 **Revision 15.** `(setq ua:*hardware-revision* 15.)` assembles for QUUX's
 revision 15 (contract G3 revision 15, appendix A15b). `ua:*word-width*` and
@@ -1030,8 +1034,8 @@ machine an assembly is for, in one place (`sys/sys/uatarget.lisp`): 32 bits at
 the `.mcr` writer read its parameters and nothing of the world they run in,
 so a 32-bit band and a 40-bit band write the same files. At 15 the
 microinstruction is 64 bits, the extension in `<63:48>`; the OA selects
-`oa-low-select` and `oa-high-select` (`<60>`, `<61>`) are names only
-revision 15 takes; the `.mcr` is the self-describing format (A15b.7: the
+`oa-low-select` and `oa-high-select` (`<60>`, `<61>`) assemble as nothing
+below revision 15; the `.mcr` is the self-describing format (A15b.7: the
 format word `0x51550001`, the number of sections, then each section's 8-word
 header and its items: 6 the hardware revision, 1 the control store at 64 bits,
 2 the dispatch memory, 3 the symbol area at 40 bits with the fixnum tag, 4 A
@@ -1040,10 +1044,27 @@ every assembly, `PROMH`'s too, is held to the OA select check (A15b.15,
 `check-oa-selects`), which refuses a word that writes `OA-REG-LOW` or
 `OA-REG-HIGH` unless every word that can run next selects it, a selecting
 word entered other than right after such a write, and the selects' bit rules.
-The sources' microcode has no selects yet, so it is refused at 15; with
+The sources' microcode and PROM carry their selects (`docs/release-2002.md`,
+"Revision 15") and pass the check; with
 `(setq ua:*oa-select-check-refuses* nil)` the breaches are printed, kept in
 `ua:*oa-select-breaches*`, and the files written, for measuring only.
-`tools/assembler-check`'s `rev15`, `oa-refused` and `oa-select` check this.
+At 15 the micro-assembler also refuses a dispatch that pushes its own
+address and carries POPJ (`check-returning-dispatches`), a WRITE-I-MEM in a
+form other than MIT's or in a delay slot (the WRITE-I-MEM check,
+`check-write-i-mem`), and a word that reads the map (`MAP`, or a dispatch on
+map bits) where it can run right after a memory start or the instruction
+fetch's, or a start in a return's slot (the map-after-start check,
+`check-map-after-start`); and, in the same pass, a word that writes `MD`
+where it can run right after a memory start or the fetch's (the MD-after-start
+check), with `QMLP` to `QMLP+3`, where a return that asks for the fetch
+lands, held to both by name.
+`tools/assembler-check`'s `rev15`, `oa-select`, `dual`, `write-i-mem`,
+`map-after-start`, `md-after-start` and the plants (`oa-drop-low`, `popj-dispatch`,
+`return-table-drift`, `write-i-mem-slot`, `map-after-start-return-slot` and
+the others) check this; `dual` holds the revision-14
+and revision-15 assemblies of the tree's microcode to the same `<47:0>`, word
+for word. Boot PROM 2002 for revision 15 reads only revision 15's `.mcr` and
+halts at `ERROR-NOT-REVISION-15` on an earlier machine.
 
 **Reboot before assembling again.** A second `ua:assemble-system` in the
 same band reuses the source it read the first time, even when the files have

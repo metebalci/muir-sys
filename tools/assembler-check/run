@@ -66,12 +66,86 @@ CHECKS = {
     'map-constant': dict(rev=14, plant='map-constant', refused='POINTER-TYPE-REGISTER-0-31'),
     'fiddle': dict(rev=14, plant='fiddle', refused='fiddle'),
     # revision 15 (contract G3 revision 15, 7; appendix A15b.7, A15b.15): the
-    # tree's microcode and PROM written in the self-describing .mcr, with the
-    # OA select check reporting the words that need a select; the same
-    # microcode refused by the check; and the check's rules on a fixture
+    # tree's microcode and PROM, with their selects, written in the
+    # self-describing .mcr under the OA select check; and the check's rules
+    # on a fixture
     'rev15': dict(rev=15, plant=None, refused=None),
-    'oa-refused': dict(rev=15, plant=None, refused='OA select check refuses'),
     'oa-select': dict(rev=15, plant=None, refused=None),
+    # the OA select check refusing the tree's microcode or PROM with one
+    # select dropped (an oa-reg-low byte word, an oa-reg-high jump, a misc
+    # instruction's landing word, the PROM's last fill loop, in a slot that
+    # n inhibits), with trans-drop-through as it was, and with a select on a
+    # word entered from a word that writes nothing; rev15 is the control
+    'oa-drop-low': dict(rev=15, plant='oa-drop-low',
+                        refused='(XLDB3+3), which can run next, has no oa-low-select (rule 1)'),
+    'oa-drop-high': dict(rev=15, plant='oa-drop-high',
+                         refused='(XRGN2+1), which can run next, has no oa-high-select (rule 1)'),
+    'oa-drop-entry': dict(rev=15, plant='oa-drop-entry',
+                          refused='(MISC-TO-RETURN), which can run next, has no oa-low-select (rule 1)'),
+    'oa-drop-prom': dict(rev=15, plant='oa-drop-prom',
+                         refused='(FILL-A-LOOP+1), which can run next, has no oa-low-select (rule 1)'),
+    'oa-old-drop-through': dict(rev=15, plant='oa-old-drop-through',
+                                refused="writes OA-REG-LOW in a return's slot"),
+    'oa-no-writer': dict(rev=15, plant='oa-no-writer',
+                         refused='(XLDB3+1) has oa-low-select and can run right after'),
+    # a dispatch that pushes its own address and carries popj, refused on
+    # revision 15 (trans-drop-through; XEVC+3 in mit's form)
+    'popj-dispatch': dict(rev=15, plant='popj-dispatch',
+                          refused='(XEVC+3) is a dispatch that pushes its own address and carries popj'),
+    # the -RETURN tables held to their originals (return_tables): D-TRANSPORT's
+    # entry for SYMBOL, map bit 1, made a call to TRANS-OLD, its copy left
+    'return-table-drift': dict(rev=15, plant='return-table-drift', refused=None),
+    # the tree's microcode at revisions 14 and 15, their <47:0> equal word for
+    # word, the dispatch, A memory and symbol area equal (until release-2002)
+    'dual': dict(rev=15, plant=None, refused=None),
+    # the WRITE-I-MEM check (appendix A15b.2): the tree's microcode and PROM
+    # pass it, and each form or place it refuses, planted in the microcode's
+    # image beside XWIPM-I's second write, is found, with controls; and the
+    # assembly refuses a write planted in a return's slot
+    'write-i-mem': dict(rev=15, plant=None, refused=None),
+    'write-i-mem-slot': dict(rev=15, plant='write-i-mem-slot',
+                             refused='WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :AFTER-POPJ'),
+    # the map-after-start check (no word that reads the map runs right after
+    # a memory start): the tree's microcode and PROM pass it, and three
+    # breaches planted in the microcode's image are found, each with a
+    # control; and the assembly refuses ADDRESS-SPACE-MAP-STORE as MIT wrote
+    # it, a start in a POPJ's slot
+    'map-after-start': dict(rev=15, plant=None, refused=None),
+    # the MD-after-start check, in the same pass (no word that writes MD runs
+    # right after a memory start or the fetch's, and QMLP to QMLP+3 neither
+    # write MD nor read the map): the tree's microcode and PROM pass it, and
+    # seven breaches planted in the image are found, each with a control
+    'md-after-start': dict(rev=15, plant=None, refused=None),
+    'map-after-start-return-slot': dict(rev=15, plant='map-after-start-return-slot',
+                                        refused="(ADDRESS-SPACE-MAP-STORE+5) starts a memory cycle in a return's slot"),
+}
+
+# the planted OA select breaches: (file under sys/ucadr/, after, old, new)
+OA_PLANTS = {
+    'oa-drop-low': ('uc-fctns.lisp', b'\nXLDB3\t', b' oa-low-select)', b')'),
+    'oa-drop-high': ('uc-page-fault.lisp', b'\nXRGN2\t', b'xrgn2 oa-high-select)', b'xrgn2)'),
+    'oa-drop-entry': ('uc-call-return.lisp', b'\nMISC-TO-RETURN', b'(CALL 0 oa-low-select)', b'(CALL 0)'),
+    'oa-drop-prom': ('promh.text', b'\nFILL-A-LOOP\n',
+                     b'((A-GARBAGE) C-PDL-BUFFER-INDEX oa-low-select)', b'((A-GARBAGE) C-PDL-BUFFER-INDEX)'),
+    'oa-old-drop-through': ('uc-transporter.lisp', b'\nTRANS-DROP-THROUGH',
+                            b"\t((m-tem) add micro-stack-pntr-and-data-pop (a-constant 1))\t;the word after the dispatch\n"
+                            b"\t((oa-reg-low) dpb m-tem oal-jump a-zero)\n"
+                            b"\t(jump 0 oa-low-select)\t\t\t;reads oa-reg-low (rev 15)\n",
+                            b"\t(POPJ-AFTER-NEXT NO-OP)\n"
+                            b"\t((OA-REG-LOW) DPB (M-CONSTANT -1) OAL-DISP A-ZERO)\t;FORCE DISP TO LOC 3777\n"),
+    'oa-no-writer': ('uc-fctns.lisp', b'\nXLDB3\t', b'((a-tem2) sub (m-constant 50) a-e)',
+                     b'((a-tem2) sub (m-constant 50) a-e oa-low-select)'),
+    'popj-dispatch': ('uc-fctns.lisp', b'\nXEVC\t', b'\t(dispatch transport-ivc-return MD) ;GC\n',
+                      b'\t(POPJ-AFTER-NEXT DISPATCH TRANSPORT-IVC MD) ;GC\n'),
+    'return-table-drift': ('uc-parameters.lisp', b'\nD-TRANSPORT\n', b'(R-BIT)\t\t\t\t\t;1 SYMBOL\n',
+                           b'(INHIBIT-XCT-NEXT-BIT TRANS-OLD)\t;1 SYMBOL\n'),
+    'write-i-mem-slot': ('uc-cadr.lisp', b'\nxwipm-i-14\n', b'\t((oa-reg-low) dpb m-a oal-jump a-zero)\n',
+                         b'\t(popj-after-next (oa-reg-low) dpb m-a oal-jump a-zero)\n'),
+    'map-after-start-return-slot': ('uc-storage-allocation.lisp', b'\nADDRESS-SPACE-MAP-STORE\n',
+                       b'\t((OA-REG-LOW) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)\n'
+                       b'\t(POPJ-AFTER-NEXT (WRITE-MEMORY-DATA-START-WRITE) DPB M-K\n',
+                       b'\t(POPJ-AFTER-NEXT (OA-REG-LOW) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)\n'
+                       b'\t((WRITE-MEMORY-DATA-START-WRITE) DPB M-K\n'),
 }
 
 # The OA select fixture's variants (lisp/oasel.lisp) and the rules of the
@@ -153,6 +227,9 @@ def plant(kind, copy):
                      b'\t((VMA) A-PGF-VMA)\t\t;Restore original VMA\n\t((MD-START-WRITE) A-PGF-WMD)',
                      b'\t(dispatch transport md)\t;planted-y2\n\t((VMA) A-PGF-VMA)\t\t;Restore original VMA\n\t((MD-START-WRITE) A-PGF-WMD)',
                      after=b'\nFORCE-WR-RDONLY\n\t(CALL PGF-SAVE)\n\t((m-tem) map-entry')
+    elif kind in OA_PLANTS:
+        name, after, old, new = OA_PLANTS[kind]
+        replace_once(os.path.join(uc, name), old, new, after=after)
     elif kind in ('map-set', 'map-constant'):
         pass                                # planted in the cases, not in the tree
 
@@ -239,9 +316,9 @@ def plant_bit_form(label, bit):
 def oa_select_cases():
     lines = ["(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
              '(setq ua:*word-width* 40.) => 40',
-             # the selects are revision 15's names: refused at 14
+             # the selects assemble as nothing at 14 (until release-2002)
              '(setq ua:*hardware-revision* 14.) => 14',
-             oasel_form('control') + ' =>! revision 15',
+             oasel_form('control') + ' => T',
              # revision 14's halves, <47:24> and <23:0>, are the loader's as before
              "(let ((w #o7654321012345670)) (equal (multiple-value-list"
              " (ua:control-store-word-halves w)) (list (%logdpb (ldb #o4020 w) #o1020"
@@ -296,6 +373,135 @@ HALVES_FORM = (
     " (list (%logdpb 1 #o3701 #o200000) 5))))")
 
 
+def wim_plant_form(offset, expr):
+    """The WRITE-I-MEM check's breaches, by reason, with the word OFFSET from
+    XWIPM-I-14 (0 its BYTE word, 1 its WRITE-I-MEM) made EXPR of OLD, the word
+    restored after."""
+    return ("(let* ((loc (+ (ua:i-mem-symbol-location 'ua:xwipm-i-14) %d.)) (old (aref ua:i-mem loc)))"
+            " (setf (aref ua:i-mem loc) %s) (prog1 (mapcar #'cadr (ua:write-i-mem-breaches))"
+            " (setf (aref ua:i-mem loc) old)))" % (offset, expr))
+
+
+# The WRITE-I-MEM check's plants (wim_plant_form) and what it must find in
+# each: MIT's form with N cleared, inverted, conditional (IR<5>, the
+# unconditional test, cleared), with POPJ; after it a jump and a call with N
+# clear (in their delay slots), a POPJ word (a return's slot), a dispatch;
+# and the controls, a jump with N set before it and nothing planted.
+WIM_PLANTS = [(1, '(- old (expt 2 7.))', '(:FORM)'),
+              (1, '(+ old (expt 2 6.))', '(:FORM)'),
+              (1, '(- old (expt 2 5.))', '(:FORM)'),
+              (1, '(+ old (expt 2 42.))', '(:POPJ)'),
+              (0, '(+ (expt 2 43.) #o47)', '(:AFTER-N-CLEAR)'),
+              (0, '(+ (expt 2 43.) (expt 2 8.) #o47)', '(:AFTER-N-CLEAR)'),
+              (0, '(+ old (expt 2 42.))', '(:AFTER-POPJ)'),
+              (0, '(expt 2 44.)', '(:AFTER-DISPATCH)'),
+              (0, '(+ (expt 2 43.) (expt 2 7.) #o47)', 'NIL')]
+
+
+def mas_plant_form(plants, want):
+    """Whether the map-after-start check's breaches, with PLANTS put in the microcode's
+    image ((label offset word-expression) each, the words restored after), are
+    at the words WANT ((label offset) each)."""
+    loc = lambda l, o: "(+ (ua:i-mem-symbol-location 'ua:%s) %d.)" % (l, o)
+    sets = ' '.join("(setf (aref ua:i-mem %s) %s)" % (loc(l, o), e) for l, o, e in plants)
+    saves = ' '.join("(aref ua:i-mem %s)" % loc(l, o) for l, o, e in plants)
+    restores = ' '.join("(setf (aref ua:i-mem %s) (nth %d. old))" % (loc(l, o), k) for k, (l, o, e) in enumerate(plants))
+    return ("(let ((old (list %s))) old (unwind-protect (progn %s (equal (mapcar #'car (ua:map-after-start-breaches))"
+            " (list %s))) %s))" % (saves, sets, ' '.join(loc(l, o) for l, o in want), restores))
+
+
+# The map-after-start check's plants (mas_plant_form) and their controls, in the
+# microcode's image:
+#  - XSTACQ+5, the page-fault check after XSTACQ+4's start, made XSTACQ+6's
+#    map-bit dispatch; control: none planted;
+#  - XWIPM-I-14 made a jump to XSTACQ+6 (N clear, always) and its slot
+#    XSTACQ+4's start; control: the same jump with N;
+#  - QBRLZ1+3, the slot of QBRLZ1+2's dispatch with IR<24> (the instruction
+#    fetch), made an ALU word whose M source is MAP; control: M source MD.
+MAS_JUMP = "(+ (expt 2 43.) (* (+ (ua:i-mem-symbol-location 'ua:xstacq) 6) (expt 2 12.)) #o47)"
+MAS_JUMP4 = "(+ (expt 2 43.) (* (+ (ua:i-mem-symbol-location 'ua:xstacq) 4) (expt 2 12.)) #o47)"
+MAS_MAP = "(+ (expt 2 31.) (* #o11 (expt 2 26.)))"
+MAS_MD = "(+ (expt 2 31.) (* #o12 (expt 2 26.)))"
+MAS_PLANTS = [([], [], 'T'),
+             ([('xstacq', 5, "(aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:xstacq) 6))")], [('xstacq', 4)], 'T'),
+             ([('xwipm-i-14', 0, MAS_JUMP),
+               ('xwipm-i-14', 1, "(aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:xstacq) 4))")],
+              [('xwipm-i-14', 1)], 'T'),
+             ([('xwipm-i-14', 0, '(+ %s (expt 2 7.))' % MAS_JUMP),
+               ('xwipm-i-14', 1, "(aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:xstacq) 4))")], [], 'T'),
+             ([('qbrlz1', 3, MAS_MAP)], [('qbrlz1', 2)], 'T'),
+             ([('qbrlz1', 3, MAS_MD)], [], 'T'),
+             # the successor relation through a slot's slot: XWIPM-I-14 a
+             # JUMP-XCT-NEXT to XSTACQ+4's start, with a JUMP-XCT-NEXT to
+             # XSTACQ+6's map-bit dispatch in its slot, so that XSTACQ+6 runs
+             # right after the start; control: the outer jump with N
+             ([('xwipm-i-14', 0, MAS_JUMP4), ('xwipm-i-14', 1, MAS_JUMP)], [('xstacq', 4)], 'T'),
+             ([('xwipm-i-14', 0, '(+ %s (expt 2 7.))' % MAS_JUMP4), ('xwipm-i-14', 1, MAS_JUMP)], [], 'T')]
+
+
+def mds_plant_form(plants, want):
+    """As mas_plant_form, for the MD-after-start check's breaches."""
+    return mas_plant_form(plants, want).replace('ua:map-after-start-breaches', 'ua:md-after-start-breaches')
+
+
+# The MD-after-start check's plants (mds_plant_form) and their controls, in
+# the microcode's image (the two rulings' tests):
+#  - CONSF+17, the word after CONSF+16's VMA-START-READ, made a write of MD;
+#    control: a write of VMA;
+#  - CONSF1, the target of the jump at CONSF2+4 in whose slot CONSF2+5 starts
+#    a read, made an MD-START-WRITE; control: a write of VMA;
+#  - QBRLZ1+3, the slot of QBRLZ1+2's dispatch with IR<24> (the fetch), made
+#    a write of MD; control: a write of VMA;
+#  - QMLP+2, where a return that asks for the fetch lands, made a write of MD;
+#    control: a write of VMA;
+#  - PGF-W-1+6, the word after PGF-W-1+5's VMA-START-WRITE, made a write of
+#    MD, then an MD-START-READ; control: a write of VMA;
+#  - XWIPM-I-14 made a jump (N clear) to CONSF1, made a write of MD, with
+#    PGF-W-1+5's write start in its slot (CONSF2+5's read start is found
+#    too); control: the jump with N, where CONSF2+5's alone is found.
+MDS_MD = '(* #o30 (expt 2 19.))'
+MDS_MD_START_READ = '(* #o31 (expt 2 19.))'
+MDS_MD_START_WRITE = '(* #o32 (expt 2 19.))'
+MDS_VMA = '(* #o20 (expt 2 19.))'
+MDS_JUMP_CONSF1 = "(+ (expt 2 43.) (* (ua:i-mem-symbol-location 'ua:consf1) (expt 2 12.)) #o47)"
+MDS_WRITE_START = "(aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:pgf-w-1) 5.))"
+MDS_PLANTS = [([], [], 'T'),
+              ([('consf', 15, MDS_MD)], [('consf', 14)], 'T'),
+              ([('consf', 15, MDS_VMA)], [], 'T'),
+              ([('consf1', 0, MDS_MD_START_WRITE)], [('consf2', 5)], 'T'),
+              ([('consf1', 0, MDS_VMA)], [], 'T'),
+              ([('qbrlz1', 3, MDS_MD)], [('qbrlz1', 2)], 'T'),
+              ([('qbrlz1', 3, MDS_VMA)], [], 'T'),
+              ([('qmlp', 2, MDS_MD)], [('qmlp', 2)], 'T'),
+              ([('qmlp', 2, MDS_VMA)], [], 'T'),
+              ([('pgf-w-1', 6, MDS_MD)], [('pgf-w-1', 5)], 'T'),
+              ([('pgf-w-1', 6, MDS_MD_START_READ)], [('pgf-w-1', 5)], 'T'),
+              ([('pgf-w-1', 6, MDS_VMA)], [], 'T'),
+              ([('xwipm-i-14', 0, MDS_JUMP_CONSF1), ('xwipm-i-14', 1, MDS_WRITE_START), ('consf1', 0, MDS_MD)],
+               [('xwipm-i-14', 1), ('consf2', 5)], 'T'),
+              ([('xwipm-i-14', 0, '(+ %s (expt 2 7.))' % MDS_JUMP_CONSF1), ('xwipm-i-14', 1, MDS_WRITE_START),
+                ('consf1', 0, MDS_MD)], [('consf2', 5)], 'T')]
+
+
+def dual_cases(rev):
+    """The tree's microcode assembled at REV (check dual)."""
+    return '\n'.join(['; tools/assembler-check: dual, revision %d' % rev,
+                      "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
+                      '(setq ua:*word-width* 40.) => 40',
+                      '(setq ua:*hardware-revision* %d.) => %d' % (rev, rev),
+                      '(setq ua:version-number 2002.) => 2002',
+                      assemble_form(2002) + ' => T']
+                     # revision 14's assemblies pass the revision-15 checks
+                     # too, which only revision 15 runs as it assembles
+                     + (["(mapcar #'car (ua:map-after-start-breaches)) => NIL",
+                         "(mapcar #'car (ua:md-after-start-breaches)) => NIL",
+                         "(mapcar #'car (ua:write-i-mem-breaches)) => NIL",
+                         prom_form(2002) + ' => T',
+                         "(mapcar #'car (ua:map-after-start-breaches)) => NIL",
+                         "(mapcar #'car (ua:md-after-start-breaches)) => NIL",
+                         "(mapcar #'car (ua:write-i-mem-breaches)) => NIL"] if rev == 14 else [])) + '\n'
+
+
 def cases(check):
     c = CHECKS[check]
     if check == 'oa-select':
@@ -316,16 +522,50 @@ def cases(check):
         lines.append("(progn (putprop 'ua:pointer-type-register-0-31 1 'ua:cons-lap-sym) t) => T")
     if check == 'map-set':
         lines.append("(length (setq ua:*pointer-types* (remove 'dtp-null ua:*pointer-types*))) => 18")
-    if check == 'rev15':
-        # the breaches are reported and the files written: the tree's
-        # microcode has no selects yet
-        lines.append('(setq ua:*oa-select-check-refuses* nil) => NIL')
+#    if check == 'rev15':
+#        # the breaches are reported and the files written: the tree's
+#        # microcode has no selects yet
+#        lines.append('(setq ua:*oa-select-check-refuses* nil) => NIL')
+    # the microcode carries its selects: rev15 assembles it under the OA
+    # select check as it refuses, and reports the breaches, none
     version = 2002 if c['rev'] == 15 else 2001
     lines.append('(setq ua:version-number %d.) => %d' % (version, version))
+    if check == 'oa-drop-prom':
+        # the PROM alone
+        lines.append(prom_form(version) + ' =>! %s' % c['refused'])
+        return '\n'.join(lines) + '\n'
     lines.append(assemble_form(version) + (' => T' if c['refused'] is None
                                            else ' =>! %s' % c['refused']))
+    if check == 'map-after-start':
+        lines += [mas_plant_form(p, w) + ' => ' + want for p, w, want in MAS_PLANTS]
+        # the check refuses what it finds
+        lines += ["(let* ((loc (+ (ua:i-mem-symbol-location 'ua:xstacq) 5)) (old (aref ua:i-mem loc)))"
+                  " (setf (aref ua:i-mem loc) (aref ua:i-mem (1+ loc))) (unwind-protect (ua:check-map-after-start)"
+                  " (setf (aref ua:i-mem loc) old))) =>! (XSTACQ+4) starts a memory cycle, and",
+                  prom_form(version) + ' => T',
+                  "(mapcar #'car (ua:map-after-start-breaches)) => NIL"]
+    if check == 'md-after-start':
+        lines += [mds_plant_form(p, w) + ' => ' + want for p, w, want in MDS_PLANTS]
+        # the check refuses what it finds
+        lines += ["(let* ((loc (+ (ua:i-mem-symbol-location 'ua:consf) 15.)) (old (aref ua:i-mem loc)))"
+                  " (setf (aref ua:i-mem loc) %s) (unwind-protect (ua:check-map-after-start)"
+                  " (setf (aref ua:i-mem loc) old))) =>! (CONSF+16) starts a memory cycle, and" % MDS_MD,
+                  prom_form(version) + ' => T',
+                  "(mapcar #'car (ua:md-after-start-breaches)) => NIL"]
+    if check == 'write-i-mem':
+        lines += ["(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL"]
+        lines += [wim_plant_form(o, e) + ' => ' + want for o, e, want in WIM_PLANTS]
+        # the check refuses what it finds
+        lines += ["(let* ((loc (1+ (ua:i-mem-symbol-location 'ua:xwipm-i-14))) (old (aref ua:i-mem loc)))"
+                  " (setf (aref ua:i-mem loc) (- old (expt 2 7.))) (unwind-protect (ua:check-write-i-mem)"
+                  " (setf (aref ua:i-mem loc) old))) =>! WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :FORM",
+                  "(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL",
+                  prom_form(version) + ' => T',
+                  "(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL"]
     if check == 'rev15':
-        lines += [BREACHES_FORM, prom_form(version) + ' => T', BREACHES_FORM]
+        lines += [BREACHES_FORM + ' => "oa-breaches 0 0 0; rule-1 words 0: "',
+                  prom_form(version) + ' => T',
+                  BREACHES_FORM + ' => "oa-breaches 0 0 0; rule-1 words 0: "']
     return '\n'.join(lines) + '\n'
 
 
@@ -673,12 +913,20 @@ def malformed_15(b):
     return out
 
 
+# the OA selects the tree's microcode and PROM carry (appendix A15b.15,
+# amendment 1's 1.7): oa-low-select's and oa-high-select's
+SELECTS_15 = {'ucadr.mcr': (123, 27), 'promh.mcr': (8, 0)}
+
+
 def check_rev15(out):
     """The tree's microcode and PROM at revision 15: each .mcr parses, every
-    malformed variant of it is refused, the extension is zero (no selects
-    yet), and the words rule 1 of the OA select check reported are exactly
-    the words that write OA-REG-LOW or OA-REG-HIGH (functional destinations
-    16 and 17), decoded here from the file."""
+    malformed variant of it is refused, the OA select check found no breach
+    (the cases), and the extension holds the selects alone: SELECTS_15's
+    counts of <60> and <61>, no other bit, and every word that selects
+    preceded in address order by a word that writes its register
+    (functional destinations 16 and 17), decoded here from the file, or else
+    entered by a transfer (misc1a's landing words, trans-drop-through's
+    jump), which the check itself holds."""
     lines, ok = [], True
     text = open(os.path.join(out, 'lispm-check.out')).read()
     reports = re.findall(r'oa-breaches (\d+) (\d+) (\d+); rule-1 words (\d+): ([0-7 ]*)', text)
@@ -701,23 +949,113 @@ def check_rev15(out):
                 ok = False
             except ValueError as e:
                 lines.append('  planted %s refused: %s' % (vname, e))
-        ext = [start + i for i, x in enumerate(words) if x >> 48]
-        lines.append('  words with an extension: %d' % len(ext))
-        ok &= not ext
-        writers = sorted(start + i for i, x in enumerate(words)
-                         if ir(x, 43, 2) in (0, 3) and ir(x, 25, 1) == 0 and ir(x, 19, 5) in (0o16, 0o17))
+#        ext = [start + i for i, x in enumerate(words) if x >> 48]
+#        lines.append('  words with an extension: %d' % len(ext))
+#        ok &= not ext
+        low = [i for i, x in enumerate(words) if x >> 48 == 1 << 12]
+        high = [i for i, x in enumerate(words) if x >> 48 == 1 << 13]
+        other = [start + i for i, x in enumerate(words) if x >> 48 and x >> 48 not in (1 << 12, 1 << 13)]
+        want = SELECTS_15[name]
+        good = (len(low), len(high)) == want and not other
+        lines.append('  oa-low-select on %d words, oa-high-select on %d (want %d and %d); other extension bits on %d words: %s'
+                     % (len(low), len(high), want[0], want[1], len(other), 'ok' if good else 'WRONG'))
+        ok &= good
+        def writes(x):
+            return ir(x, 43, 2) in (0, 3) and ir(x, 25, 1) == 0 and ir(x, 19, 5) in (0o16, 0o17)
+        after = sum(1 for i in low if i > 0 and writes(words[i - 1]) and ir(words[i - 1], 19, 5) == 0o16) + \
+            sum(1 for i in high if i > 0 and writes(words[i - 1]) and ir(words[i - 1], 19, 5) == 0o17)
+        lines.append('  selecting words right after a write of their register in address order: %d of %d'
+                     ' (the rest entered by a transfer)' % (after, len(low) + len(high)))
         if report is None:
             lines.append('  no OA select report')
             ok = False
             continue
         rules = [int(x) for x in report[:3]]
-        reported = sorted(int(x, 8) for x in report[4].split())
-        same = reported == writers and rules[1] == rules[2] == 0
-        lines.append('  OA select check: breaches by rule %s; rule 1 refuses %d words, the file has '
-                     '%d words writing OA-REG-LOW or -HIGH: %s' % (rules, len(reported), len(writers),
-                                                                  'the same' if same else 'DIFFERENT'))
+        same = rules == [0, 0, 0]
+        lines.append('  OA select check: breaches by rule %s: %s' % (rules, 'none' if same else 'BREACHES'))
         ok &= same
     return ok, lines
+
+
+def return_tables(out):
+    """Each -RETURN table against its original in the assembled dispatch
+    memory (appendix A15b.15): entry for entry equal, but that each
+    drop-through, P and R, is R alone.  The mismatches, (table, index, the
+    original's entry, the copy's), and the lines saying so."""
+    secs = parse_15(open(os.path.join(out, 'ucadr.mcr'), 'rb').read())
+    dmem = [e & 0o377777 for e in secs[2][1]]
+    syms = sym_table(os.path.join(out, 'ucadr.sym'))
+    bad, lines = [], []
+    for orig in ('D-TRANSPORT', 'D-GC-WRITE-TEST'):
+        a, b = syms[orig][1], syms[orig + '-RETURN'][1]
+        n = 0
+        for i in range(128):
+            o, c = dmem[a + i], dmem[b + i]
+            want = o & ~(1 << 15) if (o >> 15) & 1 and (o >> 16) & 1 else o
+            if c != want:
+                bad.append((orig, i, o, c))
+            n += (o >> 15) & 1 and (o >> 16) & 1
+        lines.append('%s-RETURN at %o against %s at %o: 128 entries, %d drop-throughs made returns, %d differ otherwise'
+                     % (orig, b, orig, a, n, sum(1 for x in bad if x[0] == orig)))
+    for orig, i, o, c in bad:
+        lines.append('  %s entry %o: %06o, its copy %06o' % (orig, i, o, c))
+    return bad, lines
+
+
+def dual_images(out14, out15):
+    """The memories of the revision-14 and revision-15 assemblies of one source."""
+    secs, _ = mcr_sections(os.path.join(out14, 'ucadr.mcr'))
+    s14 = {code: (start, data) for code, start, count, data in secs}
+    i14 = s14[1][1]
+    d14 = [e & 0o377777 for e in s14[2][1]]
+    a14 = s14[5][1]
+    sa14 = symbol_area_values(mcr_symbol_area(os.path.join(out14, 'ucadr.mcr')))
+    n15 = parse_15(open(os.path.join(out15, 'ucadr.mcr'), 'rb').read())
+    st, i15 = n15[1]
+    i15 = [0] * st + list(i15)
+    d15 = [e & 0o377777 for e in n15[2][1]]
+    a15 = n15[4][1]
+    sa15 = [v & 0xffffffff for v in n15[3][1]]
+    return (i14, d14, a14, sa14), (i15, d15, a15, sa15)
+
+
+def dual_differences(one, other):
+    """Where the revision-15 assembly differs from the revision-14 one other
+    than in <63:48>, and where its <63:48> holds anything but one select."""
+    (i14, d14, a14, sa14), (i15, d15, a15, sa15) = one, other
+    out = []
+    for k in range(max(len(i14), len(i15))):
+        w14 = i14[k] if k < len(i14) else 0
+        w15 = i15[k] if k < len(i15) else 0
+        if w15 & ((1 << 48) - 1) != w14:
+            out.append('I-MEM %o: %016o and %016o' % (k, w14, w15 & ((1 << 48) - 1)))
+        if w15 >> 48 not in (0, 1 << 12, 1 << 13):
+            out.append('I-MEM %o: extension %06o' % (k, w15 >> 48))
+    out += ['D-MEM %o' % k for k, (x, y) in enumerate(zip(d14, d15)) if x != y]
+    out += ['A-MEM %o' % k for k, (x, y) in enumerate(zip(a14, a15)) if x != y]
+    out += ['the symbol area\'s word %o' % k for k, (x, y) in enumerate(zip(sa14, sa15[:len(sa14)])) if x != y]
+    if len(d14) != len(d15) or len(a14) != len(a15):
+        out.append('memory sizes %d %d %d %d' % (len(d14), len(d15), len(a14), len(a15)))
+    return out
+
+
+def check_dual(out):
+    """The tree's microcode at revisions 14 and 15 (until release-2002, the
+    review of MP3b, D4): their <47:0> equal word for word, the dispatch
+    memory, A memory and the symbol area equal, revision 15's extension one
+    select or none; and a planted difference in one word's <47:0> caught."""
+    one, other = dual_images(os.path.join(out, 'rev14'), os.path.join(out, 'rev15'))
+    diff = dual_differences(one, other)
+    sel = sum(1 for w in other[0] if w >> 48)
+    lines = ['revision 14: %d control store words; revision 15: %d, %d of them with a select'
+             % (sum(1 for w in one[0] if w), sum(1 for w in other[0] if w), sel),
+             'differences other than the selects: %d' % len(diff)] + ['  ' + d for d in diff[:20]]
+    # the control: one bit of <47:0> changed in revision 15's image
+    k = max(i for i, w in enumerate(other[0]) if w)
+    planted = list(other[0]); planted[k] ^= 1 << 20
+    caught = dual_differences(one, (planted,) + tuple(other[1:]))
+    lines.append('a planted change in I-MEM %o\'s <20>: %s' % (k, 'caught' if caught else 'NOT CAUGHT'))
+    return not diff and bool(caught), lines
 
 
 def check_oa_select(out):
@@ -792,11 +1130,41 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
         for f in REF_FILES:
             shutil.copy2(os.path.join(ucadr_ref, f), os.path.join(copy, f))
     plant(CHECKS[check]['plant'], copy)
-    cf = os.path.join(out, 'cases.cases')
-    open(cf, 'w').write(cases(check))
     env = environment()
     env['LISPM_CHECK_PORTS'] = '%d-%d' % (port, port + 15)
     env['XDG_CACHE_HOME'] = os.path.join(out, 'xdg')
+    if check == 'dual':
+        # two sessions, since a band reuses the sources it read once: the
+        # tree's microcode at 14, then at 15, each output kept apart
+        good, lines = True, []
+        for rev in (14, 15):
+            sub = os.path.join(out, 'rev%d' % rev)
+            os.makedirs(sub)
+            cf = os.path.join(sub, 'cases.cases')
+            open(cf, 'w').write(dual_cases(rev))
+            cmd = [sys.executable, TOOL, '--tree', copy, '--timeout', '3000', '--keep'] + extra + [cf]
+            with open(os.path.join(sub, 'lispm-check.out'), 'w') as f:
+                rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+            text = open(os.path.join(sub, 'lispm-check.out')).read()
+            lines.append('revision %d: lispm-check exit %d' % (rev, rc))
+            m = re.search(r'run files kept in (\S+)', text)
+            good &= rc == 0 and bool(m)
+            if good:
+                for f in ('ucadr.mcr', 'ucadr.sym'):
+                    shutil.copy2(os.path.join(m.group(1), 'served', 'sys', 'ubin', f), os.path.join(sub, f))
+        if good:
+            try:
+                ok, more = check_dual(out)
+            except (OSError, ValueError, KeyError, IndexError) as e:
+                ok, more = False, ['analysis failed: %r' % (e,)]
+            good &= ok
+            lines += more
+        lines.append('%s %s' % (check.upper(), 'PASS' if good else 'FAIL'))
+        open(os.path.join(out, 'result.txt'), 'w').write('\n'.join(lines) + '\n')
+        results[check] = good
+        return
+    cf = os.path.join(out, 'cases.cases')
+    open(cf, 'w').write(cases(check))
     cmd = [sys.executable, TOOL, '--tree', copy, '--timeout', '3000', '--keep'] + extra + [cf]
     with open(os.path.join(out, 'lispm-check.out'), 'w') as f:
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
@@ -821,6 +1189,16 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
                 shutil.copy2(os.path.join(served, 'ucadr', f), os.path.join(out, f))
             good, more = check_rev15(out)
             ok &= good
+            lines += more
+            bad, more = return_tables(out)
+            ok &= not bad
+            lines += more
+        elif ok and check == 'return-table-drift':
+            for f in ('ucadr.mcr', 'ucadr.sym'):
+                shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
+            bad, more = return_tables(out)
+            # the plant: D-TRANSPORT's entry 7, SYMBOL (type 3) with map bit 1, alone
+            ok &= [(t, i) for t, i, o, c in bad] == [('D-TRANSPORT', 7)]
             lines += more
         elif ok and check == 'oa-select':
             for f in ('oa-control.mcr', 'oa-control.sym'):
