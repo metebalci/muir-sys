@@ -59,6 +59,9 @@ CHECKS = {
     'tree': dict(rev=14, plant=None, refused=None),
     'bits': dict(rev=14, plant=None, refused=None),
     'pinned': dict(rev=14, plant='pinned', refused='A-PDL-BUFFER-VIRTUAL-ADDRESS'),
+    # 200 words of A memory variables planted after the region-area map, which
+    # run the constants into the mouse's arrays at 1600
+    'a-memory-head-room': dict(rev=14, plant='a-memory-head-room', refused="past the mouse's arrays at 1600"),
     'map-table': dict(rev=14, plant='map-table', refused='FIX'),
     'map-set': dict(rev=14, plant='map-set', refused='NULL'),
     'lc-shift': dict(rev=14, plant='lc-shift', refused='right shift'),
@@ -208,6 +211,9 @@ def plant(kind, copy):
         # to 431 and A-PDL-BUFFER-HEAD to 432
         replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'A-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)',
                      b'a-planted-y1\t(0)\nA-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)')
+    elif kind == 'a-memory-head-room':
+        replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'a-region-area-map\n\t(repeat 100 (-1))\n',
+                     b'a-region-area-map\n\t(repeat 100 (-1))\na-planted-y3\n\t(repeat 200 (0))\n')
     elif kind == 'map-table':
         # D-TRANSPORT's entry for FIX (type 5, not a pointer type) with map bit 1
         # made unlike its entry with map bit 0

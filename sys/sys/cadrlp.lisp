@@ -738,6 +738,10 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 		      (CDR INITIAL-D-MEM-FREE-BLOCKS)
 		      (CDR D-MEM-FREE-BLOCKS))))
 	  (COND (TEM (SETQ D-MEMORY-RANGE-LIST (APPEND TEM D-MEMORY-RANGE-LIST)))))
+	;; the variables and constants of a memory end below the mouse's arrays
+	;; at fixed locations (check-a-memory-head-room)
+	(when (null cons-lap-init-state)
+	  (check-a-memory-head-room))
 	;; quux revision 14: the microcode is refused, before anything is
 	;; written, unless it keeps what the hardware rests on (*hardware-revision*).
 ;	(when (and (eql *hardware-revision* 14.) (null cons-lap-init-state))
@@ -809,6 +813,22 @@ slot), :after-popj (in a return's slot), :after-dispatch.  In address order."
     (when b
       (ferror nil "WRITE-I-MEM check: ~A breaks ~S: write-i-mem only in mit's form (ir<9:0> 1647, no popj), and never after a jump with n clear, a popj or a dispatch (appendix a15b.2)."
 	      (oa-word-name (caar b) (oa-label-names)) (cadar b)))))
+
+;; a memory's variables grow up from 0 and its constants follow them
+;; (cons-lap-store-constant-list), while the mouse's arrays sit at fixed
+;; locations from mouse-cursor-pattern-amem-loc (1600, uc-parameters) and are
+;; written at run time.  the assembler refused only variables running into
+;; the constants, so constants running into the arrays would have assembled
+;; without a word and been overwritten by the mouse; the region-area map (100
+;; words) and later constants close on them.  so the assembly is refused
+;; unless both end at or below the arrays' first location.
+(defun check-a-memory-head-room ()
+  "Refuses a microcode whose A memory variables or constants reach the mouse's arrays."
+  (let ((arrays (get 'mouse-cursor-pattern-amem-loc 'cons-lap-user-symbol))
+	(end (max a-mem-loc a-constant-loc)))
+    (when (and (numberp arrays) (> end arrays))
+      (ferror nil "A memory's variables and constants end at ~O, past the mouse's arrays at ~O (mouse-cursor-pattern-amem-loc): ~D words too many."
+	      end arrays (- end arrays)))))
 
 ;; quux revision 14 (appendix a14.7): the pdl buffer redirect takes its base
 ;; and head by snooping a memory's write pulse at two fixed locations, so a

@@ -1017,6 +1017,8 @@ and M-1, or when a TLB direct write outside the PDL buffer's dump and refill
 is followed, before its invalidation, by a second memory start, a MAP(MD)
 read, a dispatch, a call other than to a halt, a return or another write-map
 (`check-fiddle-windows`, revision 14's fiddle rule) (`sys/sys/cadrlp.lisp`).
+At every revision a microcode is refused when A memory's variables and
+constants run past the mouse's arrays at 1600 (`check-a-memory-head-room`).
 At 13 every output is what it was. `tools/assembler-check` checks all of it
 (its README). The sources' microcode assembles at 14 and 15: its paging is
 revision 14's two-level page table, and its OA selects, below, assemble as
