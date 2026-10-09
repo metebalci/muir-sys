@@ -2493,11 +2493,11 @@ region-to-area
 	((m-tem) (byte-field 6 2) m-t)		;the table's word, r/4
 	((m-tem) add m-tem (a-constant (a-mem-loc a-region-area-map)))
 	((oa-reg-high) dpb m-tem oah-a-src a-zero)
-	((m-tem) a-garbage)
+	((m-tem) a-garbage oa-high-select)	;reads oa-reg-high (rev 15)
 	((a-tem1) dpb m-t (byte-field 2 3) a-zero)	;its byte's position, 8(r mod 4)
 	;; an ldb at the position: its rotate is 50 less it (trans-old-copy)
 	((oa-reg-low) sub (m-constant 50) a-tem1)
-	((m-tem) (byte-field 10 0) m-tem)
+	((m-tem) (byte-field 10 0) m-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(jump-equal m-tem (a-constant 377) region-to-area-walk)
 	((m-t) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	(popj)
@@ -2514,13 +2514,13 @@ region-to-area-walk-1
 	((m-a) (byte-field 6 2) m-a)
 	((m-a) add m-a (a-constant (a-mem-loc a-region-area-map)))
 	((oa-reg-high) dpb m-a oah-a-src a-zero)
-	((m-tem) a-garbage)
+	((m-tem) a-garbage oa-high-select)	;reads oa-reg-high (rev 15)
 	((a-tem3) m-tem)
 	;; a dpb at the position: its rotate is the position
 	((oa-reg-low) a-tem2)
-	((m-tem) dpb m-t (byte-field 10 0) a-tem3)
+	((m-tem) dpb m-t (byte-field 10 0) a-tem3 oa-low-select)	;reads oa-reg-low (rev 15)
 	((oa-reg-low) dpb m-a oal-a-dest a-zero)
-	((a-garbage) m-tem)
+	((a-garbage) m-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(popj)
 
 ;; region-area-map-forget: region m-k's byte in a-region-area-map is 377 (not
@@ -2531,13 +2531,13 @@ region-area-map-forget
 	((m-t) (byte-field 6 2) m-k)
 	((m-t) add m-t (a-constant (a-mem-loc a-region-area-map)))
 	((oa-reg-high) dpb m-t oah-a-src a-zero)
-	((m-tem) a-garbage)
+	((m-tem) a-garbage oa-high-select)	;reads oa-reg-high (rev 15)
 	((a-tem2) m-tem)
 	((m-tem) (a-constant 377))
 	((oa-reg-low) a-tem1)
-	((m-tem) dpb m-tem (byte-field 10 0) a-tem2)
+	((m-tem) dpb m-tem (byte-field 10 0) a-tem2 oa-low-select)	;reads oa-reg-low (rev 15)
 	((oa-reg-low) dpb m-t oal-a-dest a-zero)
-	((a-garbage) m-tem)
+	((a-garbage) m-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(popj)
 
 ;; region-area-map-clear: every byte of a-region-area-map 377 (not known), at
@@ -2547,7 +2547,7 @@ region-area-map-clear
 	((m-tem) (a-constant (a-mem-loc a-region-area-map)))
 region-area-map-clear-1
 	((oa-reg-low) dpb m-tem oal-a-dest a-zero)
-	((a-garbage) m-minus-one)
+	((a-garbage) m-minus-one oa-low-select)	;reads oa-reg-low (rev 15)
 	((m-tem) add m-tem (a-constant 1))
 	(jump-less-than m-tem (a-constant (plus (a-mem-loc a-region-area-map) 100)) region-area-map-clear-1)
 	(popj)

@@ -915,7 +915,7 @@ def malformed_15(b):
 
 # the OA selects the tree's microcode and PROM carry (appendix A15b.15,
 # amendment 1's 1.7): oa-low-select's and oa-high-select's
-SELECTS_15 = {'ucadr.mcr': (123, 27), 'promh.mcr': (8, 0)}
+SELECTS_15 = {'ucadr.mcr': (129, 30), 'promh.mcr': (8, 0)}
 
 
 def check_rev15(out):
