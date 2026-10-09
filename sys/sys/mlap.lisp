@@ -514,9 +514,22 @@
 								      0))))))
 
 (DEFUN MA-LOAD-C-MEM (ADR I)
-  (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 1 ADR
-    (%LOGDPB (LDB 4020 I) 1020 (LDB 3010 I))  ;ASSURE NO BIGNUMS
-    (%LOGDPB (LDB 1020 I) 1020 (LDB 0010 I))))
+;  (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 1 ADR
+;    (%LOGDPB (LDB 4020 I) 1020 (LDB 3010 I))  ;ASSURE NO BIGNUMS
+;    (%LOGDPB (LDB 1020 I) 1020 (LDB 0010 I))))
+  ;; quux revision 15 (appendix a15b.4): %write-internal-processor-memories
+  ;; takes a control store word as its halves <63:32> and <31:0>, which xwipm
+  ;; gives write-i-mem whole; the cadr and quux's revisions 13 and 14 take
+  ;; <47:24> and <23:0>.  the revision is machine-id's <15:4>, feature word 0.
+  ;; each half's top bit goes in by %logdpb, so that a 32-bit half is a fixnum.
+  (if (and (= (si:machine-type-code) si:quux-type-code)
+	   (>= (si:feature-page-field 0 0414) 15.))
+      (si:%write-internal-processor-memories 1 adr
+	(%logdpb (ldb 7701 i) 3701 (ldb 4037 i))
+	(%logdpb (ldb 3701 i) 3701 (ldb 0037 i)))
+    (si:%write-internal-processor-memories 1 adr
+      (%logdpb (ldb 4020 i) 1020 (ldb 3010 i))	;assure no bignums
+      (%logdpb (ldb 1020 i) 1020 (ldb 0010 i)))))
 
 (DEFUN MA-LOAD-A-MEM (ADR A)
   (SI:%WRITE-INTERNAL-PROCESSOR-MEMORIES 4 ADR    ;A/M
