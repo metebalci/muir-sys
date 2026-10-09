@@ -436,7 +436,7 @@ Returns T."
 	  (mapc #'eval gc-after-flip-list))
 ;	(initializations 'after-flip-initialization-list t))
 	;; the after-flip initializations cons with scavenging inhibited, so that
-	;; their conses add their work to the scavenger's backlog (proposed term),
+	;; their conses add their work to the scavenger's backlog,
 	;; paid by later conses at the usual rate (contract 4.5), instead of
 	;; scavenging it here, inside the flip's without-interrupts.  eh's assure-free-space conses
 	;; 4,096 words twice, each scavenging 16 k words of work at once: young
@@ -620,7 +620,7 @@ The second value is the part which is not certain (u.b. minus l.b.)."
 ;So, we can compute two different values of committed free space (C),
 ;depending on whether you plan to reclaim immediately or incrementally.
 ;;; the generational collector (contract g3 step 2, 4.5, amendment 8): the
-;;; backlog limit (proposed), in units of scavenger work, the microcode's
+;;; backlog limit, in units of scavenger work, the microcode's
 ;;; constant at scav0 (uc-storage-allocation), 4000000 there: below it one cons
 ;;; scavenges at most a page's units, so a collection may take up to this many
 ;;; units over k more consing than mit's rule counts, which

@@ -550,9 +550,9 @@ SCAV0	;(JUMP-IF-BIT-SET M-TRANSPORT-FLAG SCAVT) ;If in transporter, don't invoke
 	(JUMP-LESS-THAN-XCT-NEXT Q-R A-SCAV-WORK-DONE SCAV0X)	;Return if not yet
        ((A-CONS-NEW-FREE-POINTER) M-3)				; time to scavenge
 	;; the generational collector (contract g3 step 2, 4.5, amendment 8):
-	;; one cons scavenges at most a page's units, 1,024, while the backlog
-	;; (proposed), a-cons-work-done less a-scav-work-done with this cons's 4n
-	;; counted, is at most the backlog limit (proposed), 4000000 (1,048,576)
+	;; one cons scavenges at most a page's units, 1,024, while the backlog,
+	;; a-cons-work-done less a-scav-work-done with this cons's 4n counted, is
+	;; at most the backlog limit, 4000000 (1,048,576)
 	;; units, k times a working-storage region; above it the cons scavenges
 	;; its whole 4n, as mit's did.  the 4n stays counted above; later conses,
 	;; each scavenging its own share while the scavenger is behind, and idle

@@ -704,9 +704,9 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
 - **One cons scavenges at most a page's units** (contract G3 step 2, 4.5,
   amendment 8; `uc-storage-allocation.lisp`, `SCAV0`, `SCAV0-BOUNDED`): a
   cons of n words still counts its 4n units in `A-CONS-WORK-DONE`, but
-  scavenges at most `PAGE-SIZE`, 1,024, of them while the **backlog
-  (proposed term)**, `A-CONS-WORK-DONE` less `A-SCAV-WORK-DONE` with this
-  cons's 4n counted, is at most the **backlog limit (proposed term)**,
+  scavenges at most `PAGE-SIZE`, 1,024, of them while the **backlog**,
+  `A-CONS-WORK-DONE` less `A-SCAV-WORK-DONE` with this cons's 4n counted, is
+  at most the **backlog limit**,
   1,048,576 units, K times a working-storage region; above the limit it
   scavenges its whole 4n, as MIT's did. Later conses, each scavenging its
   own share while the scavenger is behind, and idle time do the rest. One
@@ -1060,7 +1060,7 @@ objects young) changed the save, the band's formats and the boot.
 - **The committed free space counts the backlog limit** (contract G3 step 2,
   4.5, amendment 8; `sys/sys2/gc.lisp`, `GC-BACKLOG-LIMIT`,
   `GC-GET-COMMITTED-FREE-SPACE`): the bound on one cons's scavenging may
-  add up to the backlog limit (proposed term) over K, 262,144 words, to the
+  add up to the backlog limit over K, 262,144 words, to the
   consing a collection needs beyond MIT's rule, and
   `GC-GET-COMMITTED-FREE-SPACE` commits it besides. `GC-BACKLOG-LIMIT`
   mirrors the microcode's constant at `SCAV0`. Checked by
