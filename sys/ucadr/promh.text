@@ -27,6 +27,12 @@ M-TEMP-1	(0)
 M-TEMP-2	(0)
 
 M-MICR-OFFSET	(0)
+;; quux revision 15 (appendix a15b.7): an item's high word, or the word to
+;; write, kept across the reading of its padding (skip-padding); revision 15's
+;; alone, so that revision 14's prom keeps its layout (below)
+(if (< *hardware-revision* 15.) (comment)
+m-e		(0)
+)
 
 (LOCALITY A-MEM)
 
@@ -44,6 +50,9 @@ A-TEMP-1	(0)
 A-TEMP-2	(0)
 
 A-MICR-OFFSET	(0)
+(if (< *hardware-revision* 15.) (comment)
+a-e		(0)	;quux revision 15: m-e's a memory location
+)
 
 (LOC 40)
 
@@ -115,6 +124,28 @@ a-sys-com-window (0)	;36000002000
 a-register-page	(0)	;35777777400
 a-6		(0)	;005 over 6
 a-14		(0)	;005 over 14
+;; quux revision 15 (appendix a15b.7): the self-describing .mcr.  fixnums, 005
+;; over the value, as the words a 4-byte transfer reads: the format word
+;; 0x51550001, the hardware revision 15, the widths 32, 64, 18 and 40 bits,
+;; and the symbol area's start, 6000, and its number of items, 2000.  then
+;; the reader's state, each 0 after clear-a-memory.  last, so that no earlier
+;; location moves.
+(if (< *hardware-revision* 15.) (comment)
+a-format-word	(0)	;005 over 12125200001
+a-15		(0)	;005 over 17
+a-fix-32	(0)	;005 over 40
+a-fix-64	(0)	;005 over 100
+a-fix-18	(0)	;005 over 22
+a-fix-40	(0)	;005 over 50
+a-fix-6000	(0)	;005 over 6000
+a-fix-2000	(0)	;005 over 2000
+a-sections-left	(0)	;the sections not yet read, a fixnum
+a-last-type	(0)	;the last section's type: 0, then 1-4 rising
+a-section-actual (0)	;the section's actual width, a fixnum
+a-section-storage (0)	;its storage width, a fixnum
+a-pad-words	(0)	;the words of padding after each item
+a-sym-loaded	(0)	;not 0 once the symbol area is staged
+)
 
 (LOCALITY I-MEM)
 
@@ -252,9 +283,24 @@ GO	(jump-if-bit-set (byte-field 1 8.) machine-id go-revision-ok)
 	(jump-if-bit-set (byte-field 1 13.) machine-id go-revision-ok)
 	(jump-if-bit-set (byte-field 1 14.) machine-id go-revision-ok)
 	(jump-if-bit-set (byte-field 1 15.) machine-id go-revision-ok)
+;; until release-2002 this source is the prom for revisions 14 and 15 (the
+;; review of mp3b, d4): revision 14's prom, as it was, and revision 15's, by
+;; ua:*hardware-revision* at assembly.
+(if (>= *hardware-revision* 15.) (comment)
 	(jump-if-bit-clear (byte-field 1 7) machine-id error-not-revision-14)
 	(jump-if-bit-clear (byte-field 1 6) machine-id error-not-revision-14)
 	(jump-if-bit-clear (byte-field 1 5) machine-id error-not-revision-14)
+)
+;; quux revision 15 (appendix a15b.1): 15 or more, so below 16 <7:4> must be
+;; all set, or halt at error-not-revision-15: this prom reads only the
+;; self-describing .mcr, and its words carry oa selects, which a revision 14
+;; ignores.
+(if (< *hardware-revision* 15.) (comment)
+	(jump-if-bit-clear (byte-field 1 7) machine-id error-not-revision-15)
+	(jump-if-bit-clear (byte-field 1 6) machine-id error-not-revision-15)
+	(jump-if-bit-clear (byte-field 1 5) machine-id error-not-revision-15)
+	(jump-if-bit-clear (byte-field 1 4) machine-id error-not-revision-15)
+)
 go-revision-ok
 	((M-ZERO Q-R) SETZ)		;Make all zeros.  Result to Q-R, not to depend on M mem
 
@@ -359,13 +405,13 @@ go-revision-ok
 CLEAR-M-MEMORY
 	((M-HUNOZ) ADD M-HUNOZ A-ONES)	;Note that M-HUNOZ is used, to get good par in it
 	((OA-REG-LOW) DPB M-HUNOZ (BYTE-FIELD 5 14.) A-ZERO)	;M destination
-	((M-GARBAGE) M-ZERO)
+	((M-GARBAGE) M-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL MD A-HUNOZ CLEAR-M-MEMORY)
 
 	((M-HUNOZ) DPB M-ONES (BYTE-FIELD 1 5) A-ZERO)	;40, size of M memory
 CLEAR-A-MEMORY
 	((OA-REG-LOW) DPB M-HUNOZ (BYTE-FIELD 10. 14.) A-ZERO)	;A destination
-	((A-GARBAGE) M-ZERO)
+	((A-GARBAGE) M-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-HUNOZ) M+A+1 M-HUNOZ A-ZERO)
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 10.) M-HUNOZ CLEAR-A-MEMORY)
 
@@ -404,6 +450,26 @@ MAKE-CONSTANTS
 	((a-register-page) dpb m-ones (byte-field 3 29.) a-register-page)	;35777777400
 	((a-6) dpb m-ones (byte-field 2 1) a-fixnum-zero)
 	((a-14) dpb m-ones (byte-field 3 1) a-fixnum-zero)
+(if (< *hardware-revision* 15.) (comment)
+	;; quux revision 15: the self-describing .mcr's constants (see a-format-word)
+	((a-format-word) dpb m-ones (byte-field 1 0) a-fixnum-zero)		;0x51550001:
+	((a-format-word) dpb m-ones (byte-field 1 16.) a-format-word)	; bits 0, 16,
+	((a-format-word) dpb m-ones (byte-field 1 18.) a-format-word)	; 18, 20, 22,
+	((a-format-word) dpb m-ones (byte-field 1 20.) a-format-word)	; 24, 28, 30
+	((a-format-word) dpb m-ones (byte-field 1 22.) a-format-word)
+	((a-format-word) dpb m-ones (byte-field 1 24.) a-format-word)
+	((a-format-word) dpb m-ones (byte-field 1 28.) a-format-word)
+	((a-format-word) dpb m-ones (byte-field 1 30.) a-format-word)
+	((a-15) dpb m-ones (byte-field 4 0) a-fixnum-zero)		;15
+	((a-fix-32) dpb m-ones (byte-field 1 5) a-fixnum-zero)		;32
+	((a-fix-64) dpb m-ones (byte-field 1 6) a-fixnum-zero)		;64
+	((a-fix-18) dpb m-ones (byte-field 1 4) a-fixnum-zero)		;16
+	((a-fix-18) dpb m-ones (byte-field 1 1) a-fix-18)		;18
+	((a-fix-40) dpb m-ones (byte-field 1 5) a-fixnum-zero)		;32
+	((a-fix-40) dpb m-ones (byte-field 1 3) a-fix-40)		;40
+	((a-fix-6000) dpb m-ones (byte-field 2 10.) a-fixnum-zero)	;6000
+	((a-fix-2000) dpb m-ones (byte-field 1 10.) a-fixnum-zero)	;2000
+)
 	;;; A-DISK-ERROR/ 4421000
 	;; quux: block-disk's error bits: <9> no pack, <13> stopped by error,
 	;; <17> past the end of the pack, <20> nxm.  the cadr's 47777360 held
@@ -483,7 +549,7 @@ CLEAR-SPC-MEMORY
         ((M-B) DPB M-ONES (BYTE-FIELD 1 13.) A-B))
 CLEAR-I-MEMORY
 	((OA-REG-LOW) DPB MD (BYTE-FIELD 14. 12.) A-ZERO)
-	(WRITE-I-MEM M-A A-A)
+	(WRITE-I-MEM M-A A-A oa-low-select)	;reads oa-reg-low (rev 15)
 	((MD) ADD MD A-1)
 ;; quux: the prom clears 0-35777, the microcode's part of the control store,
 ;; not its own 36000-37777.
@@ -499,7 +565,8 @@ CLEAR-D-MEMORY
 ;	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 11.) MD CLEAR-D-MEMORY)
 ;; quux revision 13 (appendix a1.4): 4096 entries, a 12-bit address ir<23:12>
 	((oa-reg-low) dpb md (byte-field 12. 12.) a-zero)
-	(DISPATCH WRITE-DISPATCH-RAM (BYTE-FIELD 0 0) (I-ARG (A-MEM-LOC A-A)))
+	(DISPATCH WRITE-DISPATCH-RAM (BYTE-FIELD 0 0) (I-ARG (A-MEM-LOC A-A)) oa-low-select)
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((MD) ADD MD A-1)
 	(jump-if-bit-clear (byte-field 1 12.) md clear-d-memory)
 
@@ -826,6 +893,8 @@ FOUND-PARTITION
 ;	((M-MICR-OFFSET) A-400)	;So will read in a new page first off
 ;; quux revision 13: a page, four blocks, 2000 words a read
 	((m-micr-offset) a-2000)	;so will read in a new page first off
+;; revision 14's reader, as it was (see go):
+(if (>= *hardware-revision* 15.) (comment)
 ;; quux revision 14 (appendix a14.13): the partition's first section must be
 ;; section 6, start 0, one word, the hardware revision 14; a microcode without
 ;; it (revision 13's) or for another revision halts at
@@ -942,6 +1011,201 @@ A-MEM-LOOP
        ((m-b) m-a)					;<31:0>
 	(jump-xct-next a-mem-loop)
        ((c-pdl-buffer-pointer-push) dpb m-a (byte-field 8 32.) a-b)
+)
+
+(if (< *hardware-revision* 15.) (comment)
+;; quux revision 15 (contract g3 revision 15, 7; appendix a15b.7): the
+;; self-describing .mcr, which revision 14's reader above would take for
+;; sections.  the file: the format word 0x51550001 and the number of sections;
+;; then each section an 8-word header (0 the type, 1 the number of items, 2 the
+;; actual width in bits, 3 the storage width in bits, a multiple of 32 and at
+;; least the actual, 4 the start address, 5-7 zero) and its items, each the
+;; storage width's words, least significant first, the bits from the actual
+;; width up zero.  section 6, the hardware revision, one item at 0 holding 15,
+;; comes first; then 1 the control store (64 bits), 2 the dispatch memory (18),
+;; 3 the microcode symbol area (40) and 4 a memory (40), each at most once and
+;; in that order, 4 last.  every word the disk reads is a fixnum, 005 over its
+;; <31:0> (appendix a1.11), so the header's numbers compare with fixnums.  the
+;; halts: error-mcr-format (the format word), error-microcode-not-revision-15
+;; (section 6 not first, or not 15), error-bad-section-type (a type other than
+;; 1-4 and 6), error-section-order (a type twice, or out of order),
+;; error-bad-width (an actual width not the machine's, or a storage width not a
+;; multiple of 32 or below it), error-nonzero-padding (a padding bit, or an
+;; unused header word, not zero), error-bad-address (an item past its memory),
+;; error-microcode-too-big (the control store at or past 36000) and
+;; error-buffer-not-loaded (no symbol area, or one other than 6000-7777).
+	(call get-next-word)
+	(jump-not-equal m-a a-format-word error-mcr-format)
+	(call get-next-word)
+	((a-sections-left) m-a)			;the number of sections
+	(call get-section-header)		;section 6, the hardware revision
+	(jump-not-equal m-b a-6 error-microcode-not-revision-15)
+	(jump-not-equal m-c a-fixnum-zero error-microcode-not-revision-15)	;at 0
+	(jump-not-equal m-d a-1 error-microcode-not-revision-15)		;one item
+	((m-temp-1) a-section-actual)
+	(jump-not-equal m-temp-1 a-fix-32 error-bad-width)
+	(call get-next-word)
+	(call-xct-next skip-padding)
+       ((m-b) m-a)				;the revision
+	(jump-not-equal m-b a-15 error-microcode-not-revision-15)
+	((m-temp-1) a-sections-left)
+	((a-sections-left) sub m-temp-1 a-1)
+
+;;; Process one section: its header's type, start and number of items into
+;;; m-b, m-c and m-d, then the type "dispatched" on.
+process-section
+	((m-temp-1) a-sections-left)
+	(jump-equal m-temp-1 a-fixnum-zero done-loading)
+	((a-sections-left) sub m-temp-1 a-1)
+	(call get-section-header)
+	(jump-equal m-b a-6 error-section-order)		;section 6 again
+	(jump-less-than m-b a-1 error-bad-section-type)
+	(jump-greater-than m-b a-4 error-bad-section-type)	;5, or past 6
+	(jump-less-or-equal m-b a-last-type error-section-order)	;a type twice, or out of order
+	((a-last-type) m-b)
+	(jump-equal m-b a-1 process-i-mem-section)
+	(jump-equal m-b a-2 process-d-mem-section)
+	(jump-equal m-b a-3 process-sym-section)
+	(jump process-a-mem-section)
+
+;; the control store: 64 bits an item, <31:0> and then <63:32>, which
+;; write-i-mem takes from m<31:0> and a<31:0> (appendix a15b.4).
+process-i-mem-section
+	((m-temp-1) a-section-actual)
+	(jump-not-equal m-temp-1 a-fix-64 error-bad-width)
+	((m-temp-1) a-pad-words)
+	((a-pad-words) sub m-temp-1 a-1)	;two words an item
+i-mem-loop
+	(jump-equal m-d a-fixnum-zero process-section)
+	((m-a) (byte-field 18. 14.) m-c)
+	(jump-not-equal m-a a-zero error-bad-address)
+	;; quux: the microcode must end below 36000, where the prom is.
+	(jump-greater-or-equal m-c a-36000 error-microcode-too-big)
+	(call-xct-next get-next-word)		;<31:0>
+       ((m-d) sub m-d a-1)
+	(call-xct-next get-next-word)		;<63:32>
+       ((m-b) m-a)
+	(call-xct-next skip-padding)
+       ((m-e) m-a)
+	((oa-reg-low) dpb m-c (byte-field 14. 12.) a-zero)
+	(write-i-mem m-b a-e oa-low-select)	;reads oa-reg-low (rev 15)
+	(jump-xct-next i-mem-loop)
+       ((m-c) add m-c a-1)
+
+;; the dispatch memory: 18 bits an item, the entry in <16:0> and its odd
+;; parity in <17>, which the write does not take.
+process-d-mem-section
+	((m-temp-1) a-section-actual)
+	(jump-not-equal m-temp-1 a-fix-18 error-bad-width)
+d-mem-loop
+	(jump-equal m-d a-fixnum-zero process-section)
+	((m-a) (byte-field 20. 12.) m-c)
+	(jump-not-equal m-a a-zero error-bad-address)
+	(call-xct-next get-next-word)
+       ((m-d) sub m-d a-1)
+	((m-b) (byte-field 14. 18.) m-a)	;<31:18>, padding
+	(jump-not-equal m-b a-zero error-nonzero-padding)
+	(call-xct-next skip-padding)
+       ((m-e) m-a)
+	((oa-reg-low) dpb m-c (byte-field 12. 12.) a-zero)
+	(dispatch write-dispatch-ram (byte-field 0 0) (i-arg (a-mem-loc a-e)) oa-low-select)
+	;the oa-low-select above reads oa-reg-low (rev 15)
+	(jump-xct-next d-mem-loop)
+       ((m-c) add m-c a-1)
+
+;; the microcode symbol area: 40 bits an item, <31:0> and then <39:32> in
+;; <7:0>.  it is page 3, 6000-7777, the buffer the partition is read through,
+;; so it is staged in the pdl buffer at 4000-5777, clear of a memory's 0-1777,
+;; and copied into place at done-loading, as a memory is.  the buffer stays on
+;; page 3: a warm boot keeps main memory, and the symbol area is the one page
+;; the prom loads afresh (contract q8); a buffer on any other page would
+;; overwrite a page of the world.
+process-sym-section
+	((m-temp-1) a-section-actual)
+	(jump-not-equal m-temp-1 a-fix-40 error-bad-width)
+	(jump-not-equal m-c a-fix-6000 error-buffer-not-loaded)
+	(jump-not-equal m-d a-fix-2000 error-buffer-not-loaded)
+	((m-temp-1) a-pad-words)
+	((a-pad-words) sub m-temp-1 a-1)	;two words an item
+	((a-sym-loaded) a-1)
+	((pdl-buffer-pointer) dpb m-ones (byte-field 11. 0) a-zero)	;3777: pushes from 4000
+sym-loop
+	(jump-equal m-d a-fixnum-zero process-section)
+	(call-xct-next get-next-word)		;<31:0>
+       ((m-d) sub m-d a-1)
+	(call-xct-next get-next-word)		;<39:32> in <7:0>
+       ((m-b) m-a)
+	((m-temp-1) (byte-field 24. 8.) m-a)	;<31:8>, padding
+	(jump-not-equal m-temp-1 a-zero error-nonzero-padding)
+	(call-xct-next skip-padding)
+       ((m-e) m-a)
+	(jump-xct-next sym-loop)
+       ((c-pdl-buffer-pointer-push) dpb m-e (byte-field 8 32.) a-b)
+
+;; a memory: 40 bits an item, as the symbol area's, staged in the pdl buffer
+;; from its address and copied at done-loading; the address is checked for
+;; every item.
+process-a-mem-section
+	((m-temp-1) a-section-actual)
+	(jump-not-equal m-temp-1 a-fix-40 error-bad-width)
+	((m-temp-1) a-pad-words)
+	((a-pad-words) sub m-temp-1 a-1)	;two words an item
+	((pdl-buffer-pointer) sub m-c a-1)
+a-mem-loop
+	(jump-equal m-d a-fixnum-zero process-section)
+	((m-a) (byte-field 22. 10.) m-c)
+	(jump-not-equal m-a a-zero error-bad-address)
+	(call-xct-next get-next-word)		;<31:0>
+       ((m-d) sub m-d a-1)
+	(call-xct-next get-next-word)		;<39:32> in <7:0>
+       ((m-b) m-a)
+	((m-temp-1) (byte-field 24. 8.) m-a)	;<31:8>, padding
+	(jump-not-equal m-temp-1 a-zero error-nonzero-padding)
+	(call-xct-next skip-padding)
+       ((m-e) m-a)
+	((m-c) add m-c a-1)
+	(jump-xct-next a-mem-loop)
+       ((c-pdl-buffer-pointer-push) dpb m-e (byte-field 8 32.) a-b)
+
+;; a section's 8-word header: the type into m-b, the number of items into m-d,
+;; the start into m-c, the widths into a-section-actual and a-section-storage,
+;; and the words of padding after an item of one word into a-pad-words.
+;; clobbers m-a, m-temp-1 and m-temp-2.
+get-section-header
+	(call get-next-word)			;0, the type
+	(call-xct-next get-next-word)		;1, the number of items
+       ((m-b) m-a)
+	(call-xct-next get-next-word)		;2, the actual width
+       ((m-d) m-a)
+	(call-xct-next get-next-word)		;3, the storage width
+       ((a-section-actual) m-a)
+	(call-xct-next get-next-word)		;4, the start
+       ((a-section-storage) m-a)
+	(call-xct-next get-next-word)		;5
+       ((m-c) m-a)
+	(jump-not-equal m-a a-fixnum-zero error-nonzero-padding)
+	(call get-next-word)			;6
+	(jump-not-equal m-a a-fixnum-zero error-nonzero-padding)
+	(call get-next-word)			;7
+	(jump-not-equal m-a a-fixnum-zero error-nonzero-padding)
+	((m-temp-1) a-section-storage)
+	((m-temp-2) (byte-field 5 0) m-temp-1)
+	(jump-not-equal m-temp-2 a-zero error-bad-width)	;not a multiple of 32
+	(jump-less-than m-temp-1 a-section-actual error-bad-width)	;below the actual
+	(popj-after-next (m-temp-2) (byte-field 27. 5) m-temp-1)	;its words
+       ((a-pad-words) sub m-temp-2 a-1)
+
+;; the words of padding after an item, a-pad-words of them, each zero.
+;; clobbers m-a, m-hunoz, m-temp-1 and m-temp-2.
+skip-padding
+	((m-hunoz) a-pad-words)
+skip-padding-1
+	(popj-equal m-hunoz a-zero)
+	(call get-next-word)
+	(jump-not-equal m-a a-fixnum-zero error-nonzero-padding)
+	(jump-xct-next skip-padding-1)
+       ((m-hunoz) sub m-hunoz a-1)
+)
 
 DONE-LOADING
 ;;; Read back page 0 of physical memory, which we saved on block 1.
@@ -954,6 +1218,7 @@ DONE-LOADING
 ;;; loaded.
 ;;; with 1024-word pages (contract g2, option (w)) the buffer is 6000-6377:
 ;;; at or below 6000 and at or above 6400.
+(if (>= *hardware-revision* 15.) (comment)
 	((m-c) a-main-mem-n-blocks)
 	(jump-equal m-c a-zero error-buffer-not-loaded)
 	((m-a) a-main-mem-address)
@@ -983,6 +1248,25 @@ main-mem-loop
 	(jump-xct-next main-mem-loop)
        ((m-c) sub m-c a-4)
 main-mem-loaded
+)
+(if (< *hardware-revision* 15.) (comment)
+;; quux revision 15 (appendix a15b.7): the symbol area was staged in the pdl
+;; buffer at 4000-5777 (process-sym-section); copy it into physical 6000-7777,
+;; over the buffer, now that nothing more is read through it.  none staged
+;; halts at error-buffer-not-loaded, as the section's absence did before.
+	((m-temp-1) a-sym-loaded)
+	(jump-equal m-temp-1 a-zero error-buffer-not-loaded)
+	((pdl-buffer-index) dpb m-ones (byte-field 1 11.) a-zero)	;4000
+	((m-c) a-buffer-window)			;physical 6000, by the window
+copy-sym-loop
+	((md) c-pdl-buffer-index)
+	((vma-start-write) m-c)
+	(jump-if-page-fault error-page-fault)
+	((pdl-buffer-index) m+1 pdl-buffer-index)
+	(jump-if-bit-clear-xct-next (byte-field 1 10.) pdl-buffer-index copy-sym-loop)	;to 5777
+       ((m-c) add m-c a-1)
+main-mem-loaded
+)
 	((Q-R) A-400)			;Set up constant needed below.
 	;; quux: no md and vma for the prom-disable write; see jump-to-6.
 
@@ -990,7 +1274,7 @@ main-mem-loaded
 	((PDL-BUFFER-INDEX) SETZ)
 FILL-M-LOOP
 	((OA-REG-LOW) DPB PDL-BUFFER-INDEX (BYTE-FIELD 5 14.) A-ZERO)
-	((M-GARBAGE) C-PDL-BUFFER-INDEX)
+	((M-GARBAGE) C-PDL-BUFFER-INDEX oa-low-select)	;reads oa-reg-low (rev 15)
 	((PDL-BUFFER-INDEX) M+1 PDL-BUFFER-INDEX)
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 5) PDL-BUFFER-INDEX FILL-M-LOOP)
 ;; quux: copy exactly 2000 words, a memory's size.  mit stopped when the
@@ -999,7 +1283,7 @@ FILL-M-LOOP
 ;; 2000, and still at 0 for the cadr, whose index never reaches 2000.
 FILL-A-LOOP
 	((OA-REG-LOW) DPB PDL-BUFFER-INDEX (BYTE-FIELD 10. 14.) A-ZERO)
-	((A-GARBAGE) C-PDL-BUFFER-INDEX)
+	((A-GARBAGE) C-PDL-BUFFER-INDEX oa-low-select)	;reads oa-reg-low (rev 15)
 	((PDL-BUFFER-INDEX) M+1 PDL-BUFFER-INDEX)
 	(jump-if-bit-set (byte-field 1 10.) pdl-buffer-index fill-a-done)
 	(JUMP-NOT-EQUAL PDL-BUFFER-INDEX A-ZERO FILL-A-LOOP)
@@ -1152,6 +1436,7 @@ error-odd-micr-start
 	(jump halt-cons error-odd-micr-start)
     (error-table error-odd-micr-start)
 
+(if (>= *hardware-revision* 15.) (comment)
 ;; quux revision 13 (appendix a1.12): a section 4, a memory at 32 bits: a
 ;; microcode assembled for revision 12 or the cadr.
 	(no-op)
@@ -1172,5 +1457,40 @@ error-not-revision-14
 error-microcode-not-revision-14
 	(jump halt-cons error-microcode-not-revision-14)
     (error-table error-microcode-not-revision-14)
+)
+
+(if (< *hardware-revision* 15.) (comment)
+;; quux revision 15 (appendix a15b.1, a15b.7): the halts of the revision check
+;; and of the self-describing .mcr's reader (see process-section).
+	(no-op)
+error-not-revision-15			;go: machine-id's revision below 15
+	(jump halt-cons error-not-revision-15)
+    (error-table error-not-revision-15)
+
+	(no-op)
+error-mcr-format			;the file's first word is not 0x51550001
+	(jump halt-cons error-mcr-format)
+    (error-table error-mcr-format)
+
+	(no-op)
+error-microcode-not-revision-15		;section 6 is not first, or not 15
+	(jump halt-cons error-microcode-not-revision-15)
+    (error-table error-microcode-not-revision-15)
+
+	(no-op)
+error-section-order			;a type twice, or out of order
+	(jump halt-cons error-section-order)
+    (error-table error-section-order)
+
+	(no-op)
+error-bad-width				;an actual or storage width refused
+	(jump halt-cons error-bad-width)
+    (error-table error-bad-width)
+
+	(no-op)
+error-nonzero-padding			;a padding bit or an unused header word set
+	(jump halt-cons error-nonzero-padding)
+    (error-table error-nonzero-padding)
+)
 
 )))
