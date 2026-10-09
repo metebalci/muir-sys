@@ -834,7 +834,8 @@ PGF-SPECIAL-A-MEMORY-REFERENCE
 	(JUMP-IF-BIT-SET-XCT-NEXT M-PGF-WRITE PGF-SA-W)	;JUMP IF CYCLE IS A WRITE
        ((M-GARBAGE) MICRO-STACK-PNTR-AND-DATA-POP)	;FLUSH RETRY-CYCLE RETURN
 	((OA-REG-HIGH) DPB M-T OAH-A-SRC A-ZERO)	 ;NOTE LOWEST-A-MEM-VIRTUAL-ADDRESS 
-	((MD) A-GARBAGE)			 ;MUST BE 0 MODULO A-MEMORY SIZE
+	((MD) A-GARBAGE oa-high-select)			 ;MUST BE 0 MODULO A-MEMORY SIZE
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	(JUMP-XCT-NEXT PGF-RESTORE)
        ((VMA) A-PGF-VMA)		;NOBODY ELSE WILL PUT BACK VMA
 
@@ -917,13 +918,13 @@ PGF-SA-W-NOT-BINDING
 	((M-T) DPB M-ZERO (BYTE-FIELD 22. 10.) A-PGF-VMA)
 	(JUMP-LESS-THAN M-T (A-CONSTANT 40) PGF-SM-W)  ;LOCN REALLY IN M-MEM.
 	((OA-REG-LOW) DPB M-T OAL-A-DEST A-ZERO)
-	((A-GARBAGE) A-PGF-WMD)
+	((A-GARBAGE) A-PGF-WMD oa-low-select)	;reads oa-reg-low (rev 15)
 	((MD) A-PGF-WMD)
 	(JUMP-XCT-NEXT PGF-RESTORE)
        ((VMA) A-PGF-VMA)		;NOBODY ELSE WILL PUT BACK VMA
 
 PGF-SM-W((OA-REG-LOW) DPB M-T OAL-M-DEST A-ZERO)
-	((M-GARBAGE MD) A-PGF-WMD)
+	((M-GARBAGE MD) A-PGF-WMD oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-XCT-NEXT PGF-RESTORE)
        ((VMA) A-PGF-VMA)		;NOBODY ELSE WILL PUT BACK VMA
 
@@ -1983,14 +1984,14 @@ SLOT-BIT
 	;; an ldb of the bit: its rotate is (40. - position) mod 40., 50 less the
 	;; position, ored into the next instruction (see xrgn1).
 	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem)
-       ((m-tem) (byte-field 1 0) md)
+       ((m-tem) (byte-field 1 0) md oa-low-select)	;reads oa-reg-low (rev 15)
 
 SLOT-SET
 	((a-slot-word-tem) md)
 	((m-tem) a-slot-bit-tem)
 	;; a dpb's rotate is the position, ored into the next instruction
 	((oa-reg-low) dpb m-tem (byte-field 5 0) a-zero)
-	((write-memory-data-start-write) dpb (m-constant -1) (byte-field 1 0) a-slot-word-tem)
+	((write-memory-data-start-write) dpb (m-constant -1) (byte-field 1 0) a-slot-word-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(illop-if-page-fault)
 	(popj)
 
@@ -1998,7 +1999,7 @@ SLOT-CLEAR
 	((a-slot-word-tem) md)
 	((m-tem) a-slot-bit-tem)
 	((oa-reg-low) dpb m-tem (byte-field 5 0) a-zero)
-	((write-memory-data-start-write) dpb m-zero (byte-field 1 0) a-slot-word-tem)
+	((write-memory-data-start-write) dpb m-zero (byte-field 1 0) a-slot-word-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(illop-if-page-fault)
 	(popj)
 
@@ -2577,7 +2578,7 @@ XRGN1	;; quux revision 14 (contract g3 revision 14, 10.3; rule a5): an address
 	((m-tem) sub m-zero a-tem)
 	((oa-reg-low) add m-tem (a-constant 50))
        ((M-T) (BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) READ-MEMORY-DATA
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
 	(POPJ-NOT-EQUAL M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	;; 0 in table, is either free space or fixed area
 ;	(JUMP-GREATER-OR-EQUAL M-A A-V-FIRST-UNFIXED-AREA XFALSE)	;Free space
@@ -2589,7 +2590,8 @@ XRGN1	;; quux revision 14 (contract g3 revision 14, 10.3; rule a5): an address
 	((M-T) (A-CONSTANT (A-MEM-LOC A-V-INIT-LIST-AREA)))
 XRGN2	((OA-REG-HIGH) DPB M-T OAH-A-SRC A-ZERO)
 ;       (JUMP-LESS-THAN-XCT-NEXT M-A A-GARBAGE XRGN2)
-       (jump-less-than-unsigned-xct-next m-a a-garbage xrgn2)	;quux revision 14: unsigned
+       (jump-less-than-unsigned-xct-next m-a a-garbage xrgn2 oa-high-select)	;quux revision 14: unsigned
+	;the oa-high-select above reads oa-reg-high (rev 15)
       ((M-T) SUB M-T (A-CONSTANT 1))
 	(POPJ-AFTER-NEXT (M-T) SUB M-T
 		(A-CONSTANT (DIFFERENCE (A-MEM-LOC A-V-RESIDENT-SYMBOL-AREA) 1)))

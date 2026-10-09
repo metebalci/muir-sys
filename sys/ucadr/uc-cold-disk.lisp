@@ -134,7 +134,8 @@ reset-machine-macro-dispatch-fill
 	((m-tem) (byte-field 5 3) m-c)		;the opcode
 	((m-tem) add m-tem (a-constant (a-mem-loc a-macro-dispatch-generic)))
 	((oa-reg-high) dpb m-tem oah-a-src a-zero)	;a source of the next
-	((m-1) a-garbage)				;opdtb's entry
+	((m-1) a-garbage oa-high-select)				;opdtb's entry
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	((macro-dispatch-index) m-c)
 	((m-c) add m-c (a-constant 1))
 	(jump-less-than-xct-next m-c (a-constant 2000) reset-machine-macro-dispatch-fill)
@@ -1209,7 +1210,7 @@ mark-apply-page
 	((m-tem) a-mark-k)			;its bit, k mod 32: an ldb by a rotate
 	((m-tem) (byte-field 5 0) m-tem)	; of 50 less the position, ored into
 	((oa-reg-low) sub (m-constant 50) a-tem)	; the next instruction (slot-bit)
-	((m-tem) (byte-field 1 0) md)
+	((m-tem) (byte-field 1 0) md oa-low-select)	;reads oa-reg-low (rev 15)
 	(jump-equal m-tem a-zero mark-apply-page-1)
 	(call-xct-next find-page-entry)		;marked: <19> ored into the entry
        ((a-tem1) a-walk-va)
@@ -1286,7 +1287,7 @@ DSR-MASK-BIT
 	((m-tem) a-mask-k)
 	((m-tem) (byte-field 5 0) m-tem)
 	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem)
-       ((m-tem) (byte-field 1 0) md)
+       ((m-tem) (byte-field 1 0) md oa-low-select)	;reads oa-reg-low (rev 15)
 
 ;; quux revision 13: m-1, a count of blocks, divided by blocks-per-page, 5: a
 ;; page's blocks in the packed transfer.  by subtraction; only save and restore
@@ -2889,7 +2890,7 @@ BEG03	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
 	(DISPATCH TRANSPORT READ-MEMORY-DATA)
 	((OA-REG-LOW) DPB M-K OAL-A-DEST A-ZERO)	;DESTINATION
-	((A-GARBAGE) READ-MEMORY-DATA)
+	((A-GARBAGE) READ-MEMORY-DATA oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL-XCT-NEXT M-K (A-CONSTANT (A-MEM-LOC A-SCRATCH-PAD-END)) BEG03)
        ((M-K) ADD M-K (A-CONSTANT 1))
 	((VMA-START-READ) A-INITIAL-FEF)	;INDIRECT

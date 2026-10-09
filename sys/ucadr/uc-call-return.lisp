@@ -129,7 +129,8 @@ QMRCL1	((VMA-START-READ) ADD M-A		;GET FUNCTION CELL
 		(A-CONSTANT 1))	;Low 14 bits get address of QMRCL dispatcher.
 	((PDL-INDEX) M-S)	;May have been clobbered by TRANS-TRAP.
 	((OA-REG-LOW) DPB M-TEM OAL-JUMP A-ZERO)
-	(JUMP-XCT-NEXT 0)		;Unskip and redispatch
+	(JUMP-XCT-NEXT 0 oa-low-select)		;Unskip and redispatch
+	;the oa-low-select above reads oa-reg-low (rev 15)
        ((PDL-INDEX-INDIRECT M-A) READ-MEMORY-DATA)	;Store new frob to call
 
 ;DON'T CALL QBND4 TO AVOID REFERENCING A-SELF VIA SLOW VIRTUAL-MEMORY PATH
@@ -788,7 +789,8 @@ QME1A	(CALL-IF-BIT-SET M-TRAP-ON-CALLS QME1-QMRCL-TRAP)
 	;; This return address of QMDDR causes multiple-values to work right.
 
 MISC-TO-RETURN
-	(CALL 0)				;CALL MISC FUNCTION, DROP INTO QMDDR
+	(CALL 0 oa-low-select)				;CALL MISC FUNCTION, DROP INTO QMDDR
+	;the oa-low-select above reads oa-reg-low (rev 15)
 
 ;;; DESTINATION RETURN  value in M-T.  Q-ALL-BUT-TYPED-POINTER bits must be 0.
 QMDDR	(JUMP-NOT-EQUAL M-AP A-IPMARK QMDDR-THROW) ;CHECK FOR UNWIND-PROTECT
@@ -950,7 +952,7 @@ QMMPO2	((VMA-START-READ) A-QLBNDP)		;No transport, known to be a fixnum
 	(CALL-NOT-EQUAL M-TEM (A-CONSTANT (EVAL DTP-FIX)) ILLOP)
 	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%SPECPDL-BLOCK-START-FLAG) READ-MEMORY-DATA QMMPO2)	;Jump if not last
 	((OA-REG-LOW) DPB M-S OAL-JUMP A-ZERO)
-	(JUMP 0)
+	(JUMP 0 oa-low-select)	;reads oa-reg-low (rev 15)
 
 ;GET HERE WHEN RETURNING OUT TOP OF STACK GROUP
 QMXSG	((PDL-POINTER) M-AP)	;AVOID GROSS SCREW WHERE P-F ROUTINES GET CONFUSED
@@ -1214,8 +1216,10 @@ MVRB2	(CHECK-PAGE-READ)				;need to follow invisible pntrs here
 	((WRITE-MEMORY-DATA-START-WRITE)	;Store the value
 		SELECTIVE-DEPOSIT READ-MEMORY-DATA Q-ALL-BUT-TYPED-POINTER A-T)
         (CHECK-PAGE-WRITE)
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)		;More expected, or doing return and that was
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)		;More expected, or doing return and that was
+	(gc-write-test-return)		;More expected, or doing return and that was
        (NO-OP)
+	(popj)				;trans-drop-through's return (rev 15)
 
 ;Cons up list
 ;2nd (lower) ADI word points to list tail.  Initially it is a locative
@@ -1526,8 +1530,10 @@ xthcg	(jump-less-than-unsigned m-1 a-pdl-buffer-virtual-address xthcg1)	;quux re
 
 XTHCG1	((VMA-START-READ) M-1)
 	(CHECK-PAGE-READ)			;WILL PROBABLY ALWAYS FAULT
-	(POPJ-AFTER-NEXT DISPATCH TRANSPORT READ-MEMORY-DATA)
+;	(POPJ-AFTER-NEXT DISPATCH TRANSPORT READ-MEMORY-DATA)
+	(dispatch transport-return READ-MEMORY-DATA)
        ((M-1) Q-TYPED-POINTER READ-MEMORY-DATA)
+	(popj)				;trans-drop-through's return (rev 15)
 
 ;Here from QMDDR if there are open call blocks in this frame.  It could
 ;be an UNWIND-PROTECT, so we come here to check it out by doing a throw
@@ -2765,8 +2771,10 @@ QBSPCL1 ((VMA-START-WRITE) M+A+1 M-ZERO A-QLBNDP)
 	((WRITE-MEMORY-DATA) M-B)
 	((VMA-START-WRITE M-K) ADD VMA (A-CONSTANT 1))
 	(CHECK-PAGE-WRITE)			;Note possible invz pntr cleared from M-K
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+	(gc-write-test-return)
        ((A-QLBNDP) VMA)
+	(popj)				;trans-drop-through's return (rev 15)
 
 ;DATA TYPE CHECKS
 ;QDTATM	(JUMP-EQUAL M-C (A-CONSTANT (EVAL DTP-SYMBOL)) QBDDT1)
@@ -2871,7 +2879,7 @@ BBLKP-PG-FAULT
 ;; Handle the unbinding with special code to make this much faster.
 ;; No need to worry about preserving cdr code of an a-mem loc; just zero it.
 	((OA-REG-LOW) DPB VMA OAL-A-DEST A-ZERO)
-	((A-GARBAGE) Q-TYPED-POINTER M-B)
+	((A-GARBAGE) Q-TYPED-POINTER M-B oa-low-select)	;reads oa-reg-low (rev 15)
 ;; "Return" past where the write normally happens.
 	(JUMP-XCT-NEXT BBLKP3)
        ((M-GARBAGE) MICRO-STACK-DATA-POP)
@@ -3158,8 +3166,10 @@ XAGAR1	((VMA-START-READ) M-S)			;ARRAY-POINTER
 XAGM1	((VMA-START-READ) ADD
 		 M-S (A-CONSTANT (EVAL %FEFHI-FAST-ARG-OPT)));MACRO-COMPILED
 XAGUE2	(CHECK-PAGE-READ)
-	(POPJ-AFTER-NEXT DISPATCH TRANSPORT READ-MEMORY-DATA)
+;	(POPJ-AFTER-NEXT DISPATCH TRANSPORT READ-MEMORY-DATA)
+	(dispatch transport-return READ-MEMORY-DATA)
        ((M-T) Q-TYPED-POINTER READ-MEMORY-DATA)
+	(popj)				;trans-drop-through's return (rev 15)
 
 XARGI3	((VMA-START-READ) ADD M-S (A-CONSTANT 2))	;SYM, REPLACE W FCTN CELL
 	(CHECK-PAGE-READ)

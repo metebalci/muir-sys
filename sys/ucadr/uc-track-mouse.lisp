@@ -63,14 +63,14 @@ CONFINE-CURSOR-3
        ((Q-R) A-MOUSE-SCREEN-LOCATIONS-PER-LINE)	;M-2 GETS OFFSET TO START OF LINE
 	((OA-REG-LOW) A-MOUSE-SCREEN-BUFFER-PIXEL-SIZE-MROT)
 	;; X coordinate gets multiplied by pixel size
-	((M-TEM) DPB M-A Q-POINTER A-ZERO)
+	((M-TEM) DPB M-A Q-POINTER A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-TEM) ADD M-TEM A-MOUSE-SCREEN-BUFFER-BIT-OFFSET)
 	((M-1) (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 5) 5) M-TEM)  ;WORD PART OF X POSITION
 	((OA-REG-HIGH) (BYTE-FIELD 1 (DIFFERENCE Q-POINTER-WIDTH 5 1)) M-1)
 	((M-1) SELECTIVE-DEPOSIT M-ZERO
 	 (BYTE-FIELD (DIFFERENCE 32. (DIFFERENCE Q-POINTER-WIDTH 5))
 		     (DIFFERENCE Q-POINTER-WIDTH 5))
-	 A-1)
+	 A-1 oa-high-select)	;reads oa-reg-high (rev 15)
 	((M-E) ADD M-2 A-1)				;RELATIVE WORD ADDRESS
 	((M-E) ADD M-E A-MOUSE-SCREEN-BUFFER-ADDRESS)
 	((M-T) (BYTE-FIELD 5 0) M-TEM)			;BIT PART OF X POSITION
@@ -102,9 +102,10 @@ XOR-MOUSE-CURSOR-1
 	(jump-greater-or-equal-unsigned vma a-mouse-screen-buffer-end-address xor-mouse-cursor-3)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-HIGH) DPB M-A OAH-A-SRC A-ZERO)
-	((M-TEM) A-GARBAGE)
+	((M-TEM) A-GARBAGE oa-high-select)	;reads oa-reg-high (rev 15)
 	((OA-REG-LOW) M-2)
-	((M-TEM) (BYTE-FIELD 0 0) M-TEM)		;Cursor pattern aligned
+	((M-TEM) (BYTE-FIELD 0 0) M-TEM oa-low-select)		;Cursor pattern aligned
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA-START-WRITE) XOR READ-MEMORY-DATA A-TEM)
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 XOR-MOUSE-CURSOR-2
@@ -124,9 +125,10 @@ XOR-MOUSE-CURSOR-4
 	(popj-greater-or-equal-unsigned vma a-mouse-screen-buffer-end-address)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-HIGH) DPB M-A OAH-A-SRC A-ZERO)
-	((M-TEM) A-GARBAGE)
+	((M-TEM) A-GARBAGE oa-high-select)	;reads oa-reg-high (rev 15)
 	((OA-REG-LOW) DPB M-B OAL-BYTL-1 A-T)
-	((M-TEM) DPB M-TEM (BYTE-FIELD 0 0) A-ZERO)	;Cursor pattern aligned
+	((M-TEM) DPB M-TEM (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;Cursor pattern aligned
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA-START-WRITE) XOR READ-MEMORY-DATA A-TEM)
 	(CHECK-PAGE-WRITE-NO-INTERRUPT)
 XOR-MOUSE-CURSOR-5
@@ -168,13 +170,13 @@ TRACK-MOUSE
 	(CALL READ-MICROSECOND-CLOCK)		;M-2 gets clock
 	((OA-REG-LOW M-TEM) DPB M-T OAL-A-DEST A-ZERO)
 	((A-GARBAGE) BOXED-NUM-EXCEPT-SIGN-BIT M-2	;FIXNUM-MICROSECOND-TIME
-			(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+			(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW M-TEM) ADD M-TEM (A-CONSTANT (BYTE-VALUE OAL-A-DEST 1)))
-	((A-GARBAGE) A-MOUSE-X)
+	((A-GARBAGE) A-MOUSE-X oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW M-TEM) ADD M-TEM (A-CONSTANT (BYTE-VALUE OAL-A-DEST 1)))
-	((A-GARBAGE) A-MOUSE-Y)
+	((A-GARBAGE) A-MOUSE-Y oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW M-TEM) ADD M-TEM (A-CONSTANT (BYTE-VALUE OAL-A-DEST 1)))
-	((A-GARBAGE) (BYTE-FIELD 3 12.) M-A (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	((A-GARBAGE) (BYTE-FIELD 3 12.) M-A (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-T) ADD M-T (A-CONSTANT 4))
 	((M-T) (BYTE-FIELD 5 0) M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(JUMP-NOT-EQUAL-XCT-NEXT M-T A-MOUSE-BUTTONS-BUFFER-OUT-INDEX TRACK-MOUSE-1)
@@ -187,11 +189,11 @@ TRACK-MOUSE-1
 	((M-A) SUB M-A A-MOUSE-LAST-H1)
 	((A-MOUSE-LAST-H1) ADD M-A A-MOUSE-LAST-H1)
 	((OA-REG-HIGH) (BYTE-FIELD 1 11.) M-A)
-	((M-A) DPB M-ZERO (BYTE-FIELD 21. 11.) A-A)
+	((M-A) DPB M-ZERO (BYTE-FIELD 21. 11.) A-A oa-high-select)	;reads oa-reg-high (rev 15)
 	((M-B) SUB M-B A-MOUSE-LAST-H2)
 	((A-MOUSE-LAST-H2) ADD M-B A-MOUSE-LAST-H2)
 	((OA-REG-HIGH) (BYTE-FIELD 1 11.) M-B)
-	((M-B) DPB M-ZERO (BYTE-FIELD 21. 11.) A-B)
+	((M-B) DPB M-ZERO (BYTE-FIELD 21. 11.) A-B oa-high-select)	;reads oa-reg-high (rev 15)
 	;Compute physical speed, which involves time averaging
 	((M-TEM) DPB M-ZERO Q-ALL-BUT-POINTER A-MOUSE-Y-SPEED)
 	(JUMP-EQUAL M-TEM A-ZERO TRACK-MOUSE-1C)
@@ -223,15 +225,16 @@ TRACK-MOUSE-1B
 	((M-2) ADD M-1 (A-CONSTANT 12.))
 TRACK-MOUSE-YSC-LOOP
 	((OA-REG-HI) DPB M-1 OAH-A-SRC A-ZERO)
-	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-GARBAGE)
+	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-GARBAGE oa-high-select)	;reads oa-reg-high (rev 15)
 	(JUMP-GREATER-THAN M-TEM A-MOUSE-Y-SPEED TRACK-MOUSE-YSC)
 	(JUMP-LESS-THAN-XCT-NEXT M-1 A-2 TRACK-MOUSE-YSC-LOOP)
        ((M-1) ADD M-1 (A-CONSTANT 2))
 TRACK-MOUSE-YSC
 	((OA-REG-HI) DPB M-1 OAH-A-SRC A-ZERO)
-	((M-1) A-PGF-TEM)			;A-PGF-TEM = 1@A
+	((M-1) A-PGF-TEM oa-high-select)			;A-PGF-TEM = 1@A
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	((OA-REG-HIGH) BOXED-SIGN-BIT M-1)
-	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-1)
+	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-1 oa-high-select)	;reads oa-reg-high (rev 15)
 	(CALL-XCT-NEXT MPY)
        ((Q-R) M-A)
 	((M-TEM) ADD Q-R A-MOUSE-Y-FRACTION)	;Delta-Y times 1024
@@ -244,15 +247,16 @@ TRACK-MOUSE-YSC
 	((M-2) ADD M-1 (A-CONSTANT 12.))
 TRACK-MOUSE-XSC-LOOP
 	((OA-REG-HI) DPB M-1 OAH-A-SRC A-ZERO)
-	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-GARBAGE)
+	((M-TEM) DPB M-ZERO Q-ALL-BUT-TYPED-POINTER A-GARBAGE oa-high-select)	;reads oa-reg-high (rev 15)
 	(JUMP-GREATER-THAN M-TEM A-MOUSE-X-SPEED TRACK-MOUSE-XSC)
 	(JUMP-LESS-THAN-XCT-NEXT M-1 A-2 TRACK-MOUSE-XSC-LOOP)
        ((M-1) ADD M-1 (A-CONSTANT 2))
 TRACK-MOUSE-XSC
 	((OA-REG-HI) DPB M-1 OAH-A-SRC A-ZERO)
-	((M-1) A-PGF-TEM)			;A-PGF-TEM = 1@A
+	((M-1) A-PGF-TEM oa-high-select)			;A-PGF-TEM = 1@A
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	((OA-REG-HIGH) BOXED-SIGN-BIT M-1)
-	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-1)
+	((M-1) DPB M-ZERO Q-ALL-BUT-POINTER A-1 oa-high-select)	;reads oa-reg-high (rev 15)
 	(CALL-XCT-NEXT MPY)
        ((Q-R) M-B)
 	((M-TEM) ADD Q-R A-MOUSE-X-FRACTION)	;Delta-X times 1024

@@ -135,8 +135,10 @@ QCONS	(CALL-XCT-NEXT LCONS)			;ALLOCATE 2 Q'S, RETURN POINTER IN M-T,
 	((VMA-START-WRITE M-T) DPB M-T Q-POINTER
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LIST)))
 	(CHECK-PAGE-WRITE)
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+	(gc-write-test-return)
        (NO-OP)
+	(popj)				;trans-drop-through's return (rev 15)
 
 (ERROR-TABLE DEFAULT-ARG-LOCATIONS CONS-IN-AREA PP PP M-S)
 
@@ -155,8 +157,10 @@ XNCONQ	(CALL-XCT-NEXT LCONS)			;ALLOCATE 1 Q, RETURN POINTER IN M-T,
 	((VMA-START-WRITE M-T) DPB M-T Q-POINTER
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-LIST)))
 	(CHECK-PAGE-WRITE)
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+	(gc-write-test-return)
        (NO-OP)
+	(popj)				;trans-drop-through's return (rev 15)
 
 ;;; STORAGE ALLOCATION STUFF
 
@@ -924,7 +928,7 @@ scav-walk-young-type-2
 	;; an ldb of the type's bit: its rotate is 50 less the position, ored into
 	;; the next instruction (see slot-bit, uc-page-fault)
 	((oa-reg-low) sub (m-constant 50) a-scav-walk-type)
-	((m-tem) (byte-field 1 0) m-tem)
+	((m-tem) (byte-field 1 0) m-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	(popj-equal m-tem a-zero)
 	(popj-after-next (a-scav-walk-young) (a-constant 1))
        (no-op)
@@ -1056,20 +1060,22 @@ EXTRA-PDL-OV-0
 	((M-E) (A-CONSTANT (M-MEM-LOC M-ZR)))
 EXTRA-PDL-OV-1
 	((OA-REG-HIGH) DPB M-E OAH-M-SRC A-ZERO)
-	((M-T) M-GARBAGE)  ;M-GARBAGE IS LOCATION 0@M
+	((M-T) M-GARBAGE oa-high-select)  ;M-GARBAGE IS LOCATION 0@M
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	(CALL EXTRA-PDL-PURGE)
 	((OA-REG-LOW) DPB M-E OAL-M-DEST A-ZERO)
-	((M-GARBAGE) M-T)
+	((M-GARBAGE) M-T oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL-XCT-NEXT M-E (A-CONSTANT (M-MEM-LOC M-J)) ;DON'T DO M-S, M-K
 		EXTRA-PDL-OV-1)
        ((M-E) ADD M-E (A-CONSTANT 1))
 	((M-E) (A-CONSTANT (A-MEM-LOC A-VERSION)))
 EXTRA-PDL-OV-2
 	((OA-REG-HIGH) DPB M-E OAH-A-SRC A-ZERO)
-	((M-T) A-GARBAGE) ;A-GARBAGE IS LOCATION 0@A
+	((M-T) A-GARBAGE oa-high-select) ;A-GARBAGE IS LOCATION 0@A
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	(CALL EXTRA-PDL-PURGE)
 	((OA-REG-LOW) DPB M-E OAL-A-DEST A-ZERO)
-	((A-GARBAGE) M-T)
+	((A-GARBAGE) M-T oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL-XCT-NEXT M-E (A-CONSTANT (A-MEM-LOC A-END-Q-POINTERS)) EXTRA-PDL-OV-2)
        ((M-E) ADD M-E (A-CONSTANT 1))
 	((PDL-BUFFER-INDEX) A-PDL-BUFFER-HEAD)
@@ -1101,8 +1107,10 @@ EXTRA-PDL-PURGE
 	;; 1024-word pages (contract g2, option (w); appendix a1.9): the system
 	;; communication area is at 2000, a page of its own, not 400
 	((vma) (a-constant (eval (+ 2000 %sys-com-temporary))))
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)		;Use regular GC-WRITE-TEST mechanism
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)		;Use regular GC-WRITE-TEST mechanism
+	(gc-write-test-return)		;Use regular GC-WRITE-TEST mechanism
        ((M-T) MD)
+	(popj)				;trans-drop-through's return (rev 15)
 
 ;Allocate a new region for area in M-S
 ;Must be at least M-B words, desired representation type in M-E, other attributes from
@@ -1501,7 +1509,7 @@ ADDRESS-SPACE-MAP-LOOKUP
 ;; quux revision 13: a right rotate by e is a rotate of 40. - e, 50 octal, in
 ;; the ring of 40 (a1.2)
 	(popj-after-next (oa-reg-low) sub (m-constant 50) a-tem) ;50 doesn't hurt here, iored
-       ((M-TEM) (BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) READ-MEMORY-DATA)
+       ((M-TEM) (BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) READ-MEMORY-DATA oa-low-select)	;reads oa-reg-low (rev 15)
 
 ;Given an address in M-T, store M-K into the address space map.
 ADDRESS-SPACE-MAP-STORE
@@ -1510,9 +1518,17 @@ ADDRESS-SPACE-MAP-STORE
 	(ILLOP-IF-PAGE-FAULT)
 	((M-TEM) ADDRESS-SPACE-MAP-BYTE-NUMBER-BYTE M-T)	;Byte number in that word
 	((A-TEM1) READ-MEMORY-DATA)
-	(POPJ-AFTER-NEXT (OA-REG-LOW) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)
-       ((WRITE-MEMORY-DATA-START-WRITE) DPB M-K 
-		(BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) A-TEM1)
+;	(POPJ-AFTER-NEXT (OA-REG-LOW) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)
+;       ((WRITE-MEMORY-DATA-START-WRITE) DPB M-K
+;		(BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) A-TEM1)
+	;; quux revision 15 (the map-after-start check; cadrlp): a memory
+	;; start is not followed by a word that reads the map, and a start in a
+	;; return's slot is refused, since what runs next is not known.  so the
+	;; start carries the popj, and a no-op is its slot: one word more.
+	((OA-REG-LOW) DPB M-TEM ADDRESS-SPACE-MAP-BYTE-MROT A-ZERO)
+	(POPJ-AFTER-NEXT (WRITE-MEMORY-DATA-START-WRITE) DPB M-K
+		(BYTE-FIELD (EVAL %ADDRESS-SPACE-MAP-BYTE-SIZE) 0) A-TEM1 oa-low-select)	;reads oa-reg-low (rev 15)
+       (no-op)
 
 ;;; CALL THIS ROUTINE TO FREE UP A REGION, NUMBER IN M-K (MUST BE PURE NUMBER).
 ;;; BASHES M-A,M-B,M-D,M-E,M-K,M-T, M-1...M-2, A-TEM1...A-TEM3
@@ -1666,7 +1682,7 @@ GET-AREA-ORIGINS
 BEG02	((VMA-START-READ) ADD VMA (A-CONSTANT 1))
 	(ILLOP-IF-PAGE-FAULT)
 	((OA-REG-LOW) DPB M-K OAL-A-DEST A-ZERO)	;DESTINATION
-	((A-GARBAGE) Q-POINTER READ-MEMORY-DATA (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	((A-GARBAGE) Q-POINTER READ-MEMORY-DATA (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-K) ADD M-K (A-CONSTANT 1))
 	(JUMP-NOT-EQUAL M-K (A-CONSTANT (A-MEM-LOC A-V-FIRST-UNFIXED-AREA)) BEG02)
 	;; Now find the end of the last fixed area, which is where we can start making regions
@@ -2447,10 +2463,11 @@ XFLIPW	(CALL-XCT-NEXT SGLV)		;Save state, don't swap variables
 	((vma) (a-constant (eval (+ 2000 %sys-com-temporary)))) ;pretend was read from here
 	((M-E) (A-CONSTANT (A-MEM-LOC A-VERSION)))
 XFLIPW2	((OA-REG-HIGH) DPB M-E OAH-A-SRC A-ZERO)
-	((MD) A-GARBAGE)		;A-GARBAGE IS LOCATION 0@A
+	((MD) A-GARBAGE oa-high-select)		;A-GARBAGE IS LOCATION 0@A
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	(DISPATCH TRANSPORT-AC MD)
 	((OA-REG-LOW) DPB M-E OAL-A-DEST A-ZERO)
-	((A-GARBAGE) MD)
+	((A-GARBAGE) MD oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL-XCT-NEXT M-E (A-CONSTANT (A-MEM-LOC A-END-Q-POINTERS)) XFLIPW2)
        ((M-E) ADD M-E (A-CONSTANT 1))
 ;Now restore the stack-group, which got copied back there someplace.

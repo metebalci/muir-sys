@@ -120,7 +120,7 @@ TRANS-OLD-COPY
 	;; an ldb at the position: its rotate is 50 less it, ored into the next
 	;; instruction (see slot-bit, uc-page-fault)
 	((oa-reg-low) sub (m-constant 50) a-trans-tem)
-	((m-tem) (byte-field 2 0) m-tem)
+	((m-tem) (byte-field 2 0) m-tem oa-low-select)	;reads oa-reg-low (rev 15)
 	((a-trans-generation) m-tem)
 	(call region-to-area)			;m-t gets area# object is in
 trans-old-copy-1
@@ -177,8 +177,27 @@ TRANS-TRAP
 ;Return to caller, causing dispatch to drop through by OA-modifying it.
 ;Assume that VMA and MD haven't been modified, or have been saved and restored.
 TRANS-DROP-THROUGH	
-	(POPJ-AFTER-NEXT NO-OP)
-	((OA-REG-LOW) DPB (M-CONSTANT -1) OAL-DISP A-ZERO)	;FORCE DISP TO LOC 3777
+;	(POPJ-AFTER-NEXT NO-OP)
+;	((OA-REG-LOW) DPB (M-CONSTANT -1) OAL-DISP A-ZERO)	;FORCE DISP TO LOC 3777
+;; quux revision 15 (appendix a15b.15): no word changes another word, so the
+;; dispatch can no longer be re-run at entry 7777 with its address ored in
+;; from oa-reg-low.  entry 7777 is (p-bit r-bit) with n clear, a drop-through:
+;; its slot, the word after the dispatch, then the word after that, or, for a
+;; dispatch that also returned (popj-after-next), its slot and then the return.
+;; so pop the dispatch's address, which it pushed itself, and jump to the word
+;; after it, through oa-low-select.  a dispatch that returns is written without
+;; the popj, through a table whose drop-throughs return, and with a popj after
+;; its slot (transport-return, gc-write-test-return; uc-parameters), which this
+;; jump reaches after the slot as the popj did.  the dispatch is not re-run, so
+;; its other effects are not repeated: none of the dispatches that come here
+;; steps lc (ir<24>) or pops its source, and nothing after them reads the
+;; dispatch constant.
+;; p-b-mr0-hack, pushed as a return address and not a dispatch's own, comes
+;; here too and goes on at the word after it, its jump to p-b-mr0, as before.
+;; m-tem is a page fault's temporary, which the transporter may clobber.
+	((m-tem) add micro-stack-pntr-and-data-pop (a-constant 1))	;the word after the dispatch
+	((oa-reg-low) dpb m-tem oal-jump a-zero)
+	(jump 0 oa-low-select)			;reads oa-reg-low (rev 15)
 
 
 ;Since MD is not saved in the stack group state, save it elsewhere (on the stack)
@@ -606,6 +625,9 @@ EXTRA-PDL-TRAP-0
 ;; We want to return to P-B-MR0, but we can get there though TRANS-DROP-THROUGH,
 ;; and it expects the return address to be a DISPATCH and modifies it through the OA reg.
 ;; So give it a no-op dispatch so that that does not do anything unpredictable.
+;; quux revision 15: trans-drop-through goes on at the word after the return
+;; address, here the jump to p-b-mr0, as the drop-through did; a plain return
+;; still runs the dispatch, which drops through to the same jump.
 P-B-MR0-HACK
 	(DISPATCH (BYTE-FIELD 0 0) LAST-DMEM-LOCATION)
 	(JUMP P-B-MR0)

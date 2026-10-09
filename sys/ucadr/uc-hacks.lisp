@@ -355,7 +355,7 @@ TV-AOS-TRI-X1-OK
 	(JUMP-EQUAL M-C A-ZERO TV-AOS-TRI-SKIP-LINE)
 	((M-Q) (A-CONSTANT 1))
 	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
-	((M-Q) DPB M-Q (BYTE-FIELD 1 0) A-ZERO)
+	((M-Q) DPB M-Q (BYTE-FIELD 1 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-Q) SUB M-Q (A-CONSTANT 1))
 	;; M-Q has number of bits per pixel minus 1
 	((M-D) M-T)				;Get starting bit position
@@ -370,10 +370,12 @@ TV-AOS-TRI-INC-NEXT-BYTE
 ;; the ring of 40 (a1.2)
 	((m-tem) sub (m-constant 50) a-d)	;reflect around 40. for ldb
 	((OA-REG-LOW) DPB OAL-BYTL-1 M-Q A-TEM)	;Rotation and size
-	((M-TEM) LDB (BYTE-FIELD 0 0) M-K A-ZERO) ;Get byte of interest
+	((M-TEM) LDB (BYTE-FIELD 0 0) M-K A-ZERO oa-low-select) ;Get byte of interest
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((M-TEM) ADD M-TEM A-J)			;Frob pixel
 	((OA-REG-LOW) DPB OAL-BYTL-1 M-Q A-D)
-	((M-K) DPB (BYTE-FIELD 0 0) M-TEM A-K)	;Store frobbed pixel
+	((M-K) DPB (BYTE-FIELD 0 0) M-TEM A-K oa-low-select)	;Store frobbed pixel
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(JUMP-LESS-OR-EQUAL-XCT-NEXT M-C A-ZERO TV-AOS-TRI-INC-WRITE-WORD) ;Jump if row done
        ((M-D) ADD M-D A-Q)			;Also number of bits left in word minus 1
         ;; Write word and get next if at end of word
@@ -463,10 +465,12 @@ COLR-NEXT-BYTE
 ;; the ring of 40 (a1.2)
 	((m-tem) sub (m-constant 50) a-k)		;to rotate byte to low end of word
 	((OA-REG-LOW) DPB M-TEM OAL-MROT A-ZERO)
-	((M-3) (BYTE-FIELD 4 0) M-4 A-ZERO)		;Get byte field
+	((M-3) (BYTE-FIELD 4 0) M-4 A-ZERO oa-low-select)		;Get byte field
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((PDL-BUFFER-INDEX) SUB PDL-BUFFER-POINTER A-3)	;Offset to new byte
 	((OA-REG-LOW) DPB M-K OAL-MROT A-ZERO)
-	((M-4) DPB C-PDL-BUFFER-INDEX (BYTE-FIELD 4 0) A-4)	;Replace byte
+	((M-4) DPB C-PDL-BUFFER-INDEX (BYTE-FIELD 4 0) A-4 oa-low-select)	;Replace byte
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(JUMP-LESS-OR-EQUAL M-C A-ZERO COLR-WRITE-WORD)	;Jump if row done
 	(JUMP-LESS-THAN-XCT-NEXT M-K (A-CONSTANT 34) COLR-NEXT-BYTE)	;Jump if word not done
        ((M-J) ADD M-J (A-CONSTANT 1))			;One more byte rotation
@@ -668,7 +672,7 @@ GCDBB-GIVE-BACK-M-Q
 	((VMA-START-READ) ADD M-D A-ZR)
 	(CHECK-PAGE-READ)
 	((OA-REG-LOW) M-S)
-	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO)
+	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(CALL-XCT-NEXT BIDIV-NORMALIZE)
        ((M-ZR) SUB M-ZR (A-CONSTANT 1))
 GCDBB-RETURN

@@ -54,7 +54,7 @@ LSH-LEFT
 	(POPJ-AFTER-NEXT
 	 (OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-K)
        ((M-T) DPB C-PDL-BUFFER-POINTER-POP (BYTE-FIELD 0 0) 
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
 
 XLSH1	(JUMP-LESS-THAN M-K
 	 (A-CONSTANT (DIFFERENCE (EVAL (ASH 1 %%Q-POINTER)) (DIFFERENCE Q-POINTER-WIDTH 1)))
@@ -69,7 +69,7 @@ XLSH1	(JUMP-LESS-THAN M-K
 	(POPJ-AFTER-NEXT 
 	 (OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-TEM1)
        ((M-T) BYTE-INST (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX))
-			C-PDL-BUFFER-POINTER-POP)
+			C-PDL-BUFFER-POINTER-POP oa-low-select)	;reads oa-reg-low (rev 15)
 
 (ERROR-TABLE DEFAULT-ARG-LOCATIONS ROT PP M-K)
 
@@ -101,14 +101,15 @@ XROT3A	;REALLY DO THE WORK. BY NOW, 0 < M-K < 24.
 	((m-1) m-a-1 (m-constant 40) a-k)	;compute byte length
 ;	(JUMP-LESS-THAN M-1 A-ZERO XLSH-ZERO)   ;CANT BE
 	((OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-K)
-	((A-TEM3) DPB M-T (BYTE-FIELD 0 0) A-ZERO)	;PART 1 DONE
+	((A-TEM3) DPB M-T (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;PART 1 DONE
+	;the oa-low-select above reads oa-reg-low (rev 15)
 ;	((A-TEM2) ADD M-K (A-CONSTANT (DIFFERENCE 32. Q-POINTER-WIDTH)))	; 40-<24.-N>
 ;; quux revision 13: the rotate right by 32. - n is 40. - (32. - n) in the ring of 40
 	((a-tem2) add m-k (a-constant (difference 40. q-pointer-width)))	; 50-<40-n>
 	((M-ZR) SUB M-K (A-CONSTANT 1))		;BYTE LENGTH MINUS ONE
 	((OA-REG-LOW) DPB M-ZR OAL-BYTL-1 A-TEM2)
 	(POPJ-AFTER-NEXT			;PART 2 DONE
-	  (M-T) BYTE-INST M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+	  (M-T) BYTE-INST M-T (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-low-select)	;reads oa-reg-low (rev 15)
        ((M-T) IOR M-T A-TEM3)			;PART 3
 
 XROT2	(JUMP-XCT-NEXT XROT3)			;LOOP UNTIL RESULT AFTER
@@ -209,7 +210,7 @@ XBOOLE0	(DISPATCH-XCT-NEXT Q-DATA-TYPE C-PDL-BUFFER-POINTER D-NUMARG1)
     (ERROR-TABLE ARG-POPPED 0 M-T M-1)
 	((m-2) q-pointer m-t)	;quux revision 13: a fixnum falls through d-fixnum-numarg2, unpacked here
 	((OA-REG-LOW) M-S)
-	(POPJ-AFTER-NEXT (M-1) SETZ M-2 A-1)
+	(POPJ-AFTER-NEXT (M-1) SETZ M-2 A-1 oa-low-select)	;reads oa-reg-low (rev 15)
        ((M-T) Q-POINTER M-1 (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX))))
 
 ;Boolean function of two bignums, M-S has OA-REG-LOW to do the function.
@@ -223,7 +224,8 @@ XBOOLE0	(DISPATCH-XCT-NEXT Q-DATA-TYPE C-PDL-BUFFER-POINTER D-NUMARG1)
 
 BBOOLE	((M-TEM) BIGNUM-HEADER-SIGN M-C)	;Sign of 1st arg
 	((M-A OA-REG-LOW) M-S)			;save alu func, compute sign of result
-	((M-C) SETZ M-D A-C)			; in BIGNUM-HEADER-SIGN bit of M-C
+	((M-C) SETZ M-D A-C oa-low-select)			; in BIGNUM-HEADER-SIGN bit of M-C
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((M-D) BIGNUM-HEADER-SIGN M-D)		;bit 0 of M-D gets sign of 2nd arg
 	(JUMP-GREATER-OR-EQUAL-XCT-NEXT M-I A-J BBOOL0)	;Make M-Q,M-I the longer
        ((M-D) DPB M-TEM (BYTE-FIELD 1 1) A-D)	;bit 1 of M-D gets sign of 1st arg
@@ -260,7 +262,7 @@ BBOL2A	((VMA-START-READ) ADD M-Q A-B)
 	((M-2) SUB M-ZERO A-2)			;Larger arg negative, get 2's comp form
 	((A-BOOLE-CARRY-2) (BYTE-FIELD 1 31.) M-2)
 BBOL2B	((OA-REG-LOW) M-A)
-	((WRITE-MEMORY-DATA) SETZ M-2 A-1)
+	((WRITE-MEMORY-DATA) SETZ M-2 A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA) (BYTE-FIELD 31. 0) WRITE-MEMORY-DATA)
 	((VMA-START-WRITE) ADD M-T A-B)
 	(CHECK-PAGE-WRITE)
@@ -275,7 +277,7 @@ BBOOL3	((VMA-START-READ) ADD M-Q A-B)		;Do bigger arg against sign of smaller
 	((M-2) SUB M-ZERO A-2)			;Larger arg negative, get 2's comp form
 	((A-BOOLE-CARRY-2) (BYTE-FIELD 1 31.) M-2)
 BBOL3B	((OA-REG-LOW) M-A)
-	((WRITE-MEMORY-DATA) SETZ M-2 A-1)
+	((WRITE-MEMORY-DATA) SETZ M-2 A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA) (BYTE-FIELD 31. 0) WRITE-MEMORY-DATA)
 	((VMA-START-WRITE) ADD M-T A-B)
 	(CHECK-PAGE-WRITE)
@@ -283,7 +285,7 @@ BBOL3B	((OA-REG-LOW) M-A)
        ((M-B) ADD M-B (A-CONSTANT 1))
 BBOOL5	((M-2) SUB M-ZERO A-BOOLE-CARRY-2)	;Sign bits for larger arg
 	((OA-REG-LOW) M-A)			;High result word comes from sign bits
-	((WRITE-MEMORY-DATA) SETZ M-2 A-1)
+	((WRITE-MEMORY-DATA) SETZ M-2 A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA) (BYTE-FIELD 31. 0) WRITE-MEMORY-DATA)
 	((VMA-START-WRITE) ADD M-T A-B)
 	(CHECK-PAGE-WRITE)
@@ -312,9 +314,9 @@ FXBBOOLE
 	((M-D) BIGNUM-HEADER-SIGN M-C)		;M-D bit 1 gets sign of bigger arg
 	((M-D) DPB M-D (BYTE-FIELD 1 1))
 	((OA-REG-HIGH) (BYTE-FIELD 1 31.) M-2)	;Get sign bits for smaller arg
-	((M-1) M-ZERO)
+	((M-1) M-ZERO oa-high-select)	;reads oa-reg-high (rev 15)
 	((OA-REG-LOW) M-A)			;Compute sign of result
-	((M-C) SETZ M-C A-1)
+	((M-C) SETZ M-C A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(CALL-XCT-NEXT BNCONS)
        ((M-B) ADD M-I (A-CONSTANT 2))		;Allocate result one longer than bignum arg
 						; due to the damned SETZ case
@@ -326,7 +328,7 @@ FXBBOOLE
 	((M-TEM) SUB M-ZERO A-TEM)		;Larger arg negative, get 2's comp form
 	((A-BOOLE-CARRY-2) (BYTE-FIELD 1 31.) M-TEM)
 BBOLFX	((OA-REG-LOW) M-A)
-	((WRITE-MEMORY-DATA) SETZ M-TEM A-2)
+	((WRITE-MEMORY-DATA) SETZ M-TEM A-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	((WRITE-MEMORY-DATA) (BYTE-FIELD 31. 0) WRITE-MEMORY-DATA)
 	((VMA-START-WRITE) ADD M-T (A-CONSTANT 1))
 	(CHECK-PAGE-WRITE)
@@ -352,7 +354,7 @@ XASH (MISC-INST-ENTRY ASH)
 	((m-1) q-pointer c-pdl-buffer-pointer-pop)	;quux revision 13: a fixnum falls through d-numarg, unpacked here
 	;Fixnum case
 	((OA-REG-HIGH) (BYTE-FIELD 1 31.) M-1)	;M-3 gets sign extension of M-1
-	((M-3) M-ZERO)
+	((M-3) M-ZERO oa-high-select)	;reads oa-reg-high (rev 15)
 	(JUMP-GREATER-THAN M-2 A-ZERO XASH2)	;Jump if left shift
 	((M-2) ADD M-2 (A-CONSTANT 40))		;Number of bits preserved by right shift
 	(JUMP-GREATER-THAN M-2 A-ZERO XASH1)
@@ -363,7 +365,8 @@ XASH1	((M-4) SUB M-2 (A-CONSTANT 1))		;Byte size -1
 ;; 10, in the ring of 40 (a1.2); the length stays m-2.
 	((m-tem) add m-2 (a-constant 10))
 	((oa-reg-low) dpb m-4 oal-bytl-1 a-tem)	;use byte hardware
-	((M-1) (BYTE-FIELD 0 0) M-1 A-3)	;Do the right arithmetic shift
+	((M-1) (BYTE-FIELD 0 0) M-1 A-3 oa-low-select)	;Do the right arithmetic shift
+	;the oa-low-select above reads oa-reg-low (rev 15)
 ;	(JUMP FIXPACK-T)
 ;; quux revision 13: a right shift of a fixnum is a fixnum, and m-1 is no sum
 ;; whose overflow flag fixpack-t could test.
@@ -382,11 +385,13 @@ XASH2	((C-PDL-BUFFER-POINTER-PUSH M-4)	;Put arg 1 back on pdl
 	((m-k) m-a-1 (m-constant 40) a-2)	;31. - n, length - 1 of the bits kept
 	((m-j) sub m-k (a-constant 1))		;30. - n
 	((oa-reg-low) dpb m-j oal-bytl-1 a-zero)
-	((m-tem) (byte-field 0 0) m-1 a-3)	;x's low 31. - n bits under its sign
+	((m-tem) (byte-field 0 0) m-1 a-3 oa-low-select)	;x's low 31. - n bits under its sign
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(jump-not-equal m-tem a-1 xash-bignum)	;bits lost: a bignum
 	((m-garbage) c-pdl-buffer-pointer-pop)	;take arg 1 back off the pdl
 	((oa-reg-low) dpb m-k oal-bytl-1 a-2)
-	((m-1) dpb m-1 (byte-field 0 0) a-zero)	;x's low 32. - n bits at n
+	((m-1) dpb m-1 (byte-field 0 0) a-zero oa-low-select)	;x's low 32. - n bits at n
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(jump fixbox-t)
 xash-bignum
 	((M-1) SELECTIVE-DEPOSIT M-3
@@ -447,7 +452,7 @@ BIGASHR	(JUMP-IF-BIT-SET BIGNUM-HEADER-SIGN M-C BIGASHR-NEGATIVE)
 	((M-TEM) ADD M-J A-I)
 	(JUMP-GREATER-THAN M-TEM A-ZERO BIGASH2)	;Jump if any significance
 	((OA-REG-HIGH) BIGNUM-HEADER-SIGN M-C)	;Result is just sign bits
-	((M-1) M-ZERO)
+	((M-1) M-ZERO oa-high-select)	;reads oa-reg-high (rev 15)
 	(JUMP FIXPACK-T)
 
 ;Fix up for the difference between right-shift and division on negative numbers.

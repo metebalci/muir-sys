@@ -247,8 +247,18 @@ ILLOP	(POPJ HALT-CONS)		;Halt with place called from in lights
 ;;   CODE SELECTS WHICH MEMORY GETS WRITTEN. 1 -> I, 2 -> D, 4 -> A/M . 
 ;;    (THIS IS A SUBSET OF THE CODE USED IN MCR FILES).
 XWIPM (MISC-INST-ENTRY %WRITE-INTERNAL-PROCESSOR-MEMORIES)
-	((M-1) Q-POINTER C-PDL-BUFFER-POINTER-POP)
-	((M-1) DPB C-PDL-BUFFER-POINTER (BYTE-FIELD 10 30) A-1)  ;M-1 GETS 32 BITS DATA
+;	((M-1) Q-POINTER C-PDL-BUFFER-POINTER-POP)
+;	((M-1) DPB C-PDL-BUFFER-POINTER (BYTE-FIELD 10 30) A-1)  ;M-1 GETS 32 BITS DATA
+	;; quux revision 15 (appendix a15b.4): a control store word comes as two
+	;; 32-bit halves, d-hi its <63:32> and d-low its <31:0>, and write-i-mem
+	;; takes the word's <63:32> from a<31:0> and its <31:0> from m<31:0>
+	;; (revision 14 took <47:32> from a<15:0>), so m-3 keeps d-low and m-4
+	;; d-hi whole for xwipm-i on revision 15.  revision 14's halves, and the
+	;; a and dispatch codes', d-hi <23:0> and d-low <23:0>, are made into m-1
+	;; and m-2 as before.
+	((m-3) q-pointer c-pdl-buffer-pointer-pop)		;d-low
+	((m-1) dpb c-pdl-buffer-pointer (byte-field 10 30) a-3)	;m-1 gets 32 bits data
+	((m-4) q-pointer c-pdl-buffer-pointer)			;d-hi
 	((M-2) (BYTE-FIELD 20 10) C-PDL-BUFFER-POINTER-POP)      ;M-2 GETS REST BEYOND THAT
 	((M-A) Q-POINTER C-PDL-BUFFER-POINTER-POP)		;ADDRESS
 	((M-B) Q-POINTER C-PDL-BUFFER-POINTER-POP)		;CODE
@@ -263,20 +273,34 @@ XWIPM (MISC-INST-ENTRY %WRITE-INTERNAL-PROCESSOR-MEMORIES)
 	((m-1) dpb m-2 q-all-but-pointer a-1)
 	(JUMP-LESS-THAN M-A (A-CONSTANT 40) XWIPM-M)
 	((OA-REG-LOW) DPB M-A OAL-A-DEST A-ZERO)
-	((A-GARBAGE) M-1)
+	((A-GARBAGE) M-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP XFALSE)
 
 XWIPM-M ((OA-REG-LOW) DPB M-A OAL-M-DEST A-ZERO)
-	((M-GARBAGE) M-1)
+	((M-GARBAGE) M-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP XFALSE)
 
 XWIPM-D ((OA-REG-LOW) DPB M-A OAL-DISP A-ZERO)
-	(DISPATCH A-1 WRITE-DISPATCH-RAM)
+	(DISPATCH A-1 WRITE-DISPATCH-RAM oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP XFALSE)
 
-XWIPM-I ((OA-REG-LOW) DPB M-A OAL-JUMP A-ZERO)
-	(WRITE-I-MEM A-2 M-1)
+;XWIPM-I ((OA-REG-LOW) DPB M-A OAL-JUMP A-ZERO)
+;	(WRITE-I-MEM A-2 M-1)
+;	(JUMP XFALSE)
+	;; the halves by the machine's revision, machine-id's <15:4>, since the
+	;; tree's microcode runs on revisions 14 and 15 until release-2002 and
+	;; the loaders pass the halves of the machine they load: revision 15's
+	;; <63:32> and <31:0> whole, revision 14's <47:24> and <23:0> made into
+	;; m-2 and m-1 as before.
+XWIPM-I	((m-tem) (byte-field 12. 4) machine-id)
+	(jump-less-than m-tem (a-constant 15.) xwipm-i-14)
+	((OA-REG-LOW) DPB M-A OAL-JUMP A-ZERO)
+	(write-i-mem a-4 m-3 oa-low-select)	;reads oa-reg-low (rev 15); <63:32>, <31:0>
 	(JUMP XFALSE)
+xwipm-i-14
+	((oa-reg-low) dpb m-a oal-jump a-zero)
+	(write-i-mem a-2 m-1 oa-low-select)	;reads oa-reg-low (rev 15); <47:32>, <31:0>
+	(jump xfalse)
 
 ;; Give this an offset into the IO part of the XBUS, not an XBUS address.
 XXBR (MISC-INST-ENTRY %XBUS-READ)
@@ -375,8 +399,10 @@ XSTACQ (MISC-INST-ENTRY %STORE-CONDITIONAL) ;args are pointer, old-val, new-val
 		READ-MEMORY-DATA Q-ALL-BUT-TYPED-POINTER A-A)
 ;and writing the replacement data here
 	(CHECK-PAGE-WRITE)
-	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+;	(POPJ-AFTER-NEXT GC-WRITE-TEST)
+	(gc-write-test-return)
        ((M-T) A-V-TRUE)
+	(popj)				;trans-drop-through's return (rev 15)
 
 
 ;;; Read microsecond clock into M-2  (preserve A-TEM1)

@@ -397,6 +397,9 @@
 ;			   ; HAS BEEN DONE AND INVISIBLE POINTERS HAVE BEEN FOLLOWED.
 ;			   ; VMA HAS THE ADDRESS, MD HAS THE CONTENTS.
 ; IT IS OK TO USE POPJ-AFTER-NEXT ON THE DISPATCH INSTRUCTION.
+;; quux revision 15: no longer; such a dispatch is written (dispatch
+;; transport-return ...) with a (popj) after its slot, and the micro-assembler
+;; refuses the old form (cadrlp, check-returning-dispatches; trans-drop-through).
 ; DON'T USE POPJ-AFTER-NEXT OR JUMP-XCT-NEXT IN THE INSTRUCTION BEFORE
 ; A TRANSPORT.
 
@@ -457,9 +460,26 @@
 ;TO THE EXTRA-PDL REGION, AND IF SO TRAPS, COPIES THE THING OUT,
 ;DOES THE WRITE OVER AGAIN, AND COMES BACK AND DOES THE DISPATCH OVER AGAIN.
 ;OK TO COMBINE THIS WITH POPJ-AFTER-NEXT.
+;; quux revision 15: no longer; write (gc-write-test-return) with a (popj)
+;; after its slot, as transport-return above.
 (ASSIGN GC-WRITE-TEST (PLUS DISPATCH Q-DATA-TYPE-PLUS-ONE-BIT
 				   DISPATCH-ON-MAP-18 DISPATCH-PUSH-OWN-ADDRESS
 				   WRITE-MEMORY-DATA D-GC-WRITE-TEST))
+;; quux revision 15 (appendix a15b.15): for a transport or a write test that
+;; also returns, written (popj-after-next dispatch transport ...) and
+;; (popj-after-next gc-write-test) before: the same dispatch through a table
+;; whose drop-throughs return (d-transport-return, d-gc-write-test-return),
+;; and no popj, so that trans-drop-through, which goes on at the word after
+;; the dispatch, finds a popj after its slot (uc-transporter).
+(assign transport-return (plus (i-arg 1) q-data-type-plus-one-bit dispatch-on-map-19
+			dispatch-push-own-address d-transport-return))
+(assign transport-ivc-return (plus (i-arg 23) q-data-type-plus-one-bit dispatch-on-map-19
+		      dispatch-push-own-address d-transport-return))
+(assign transport-write-return (plus (i-arg 63) q-data-type-plus-one-bit dispatch-on-map-19
+			dispatch-push-own-address d-transport-return))
+(assign gc-write-test-return (plus dispatch q-data-type-plus-one-bit
+				   dispatch-on-map-18 dispatch-push-own-address
+				   write-memory-data d-gc-write-test-return))
 
 (LOCALITY M-MEM)	;ANYTHING WHICH IT IS DESIRED TO LDB OUT OF MUST BE IN M-MEM
 
@@ -1724,7 +1744,16 @@ D-ADVANCE-INSTRUCTION-STREAM
 
 ;This needed even on lambda.  Used at QIMOVE-EXIT, and maybe other places now.
 
-(START-DISPATCH 3 0)
+;(START-DISPATCH 3 0)
+;; quux revision 15 (appendix a15b.15): its users dispatch on
+;; %%lp-cls-destination, four bits, so an entry 10-17 ored in from the field
+;; would land past the eight entries, in whatever table the assembler placed
+;; next: d-misc-dest, whose misc-to-stack, -return and -last now select
+;; oa-reg-low, and which the oa select check therefore holds to be entered
+;; only after misc1a's write.  sixteen entries, the last eight illop as 5-7
+;; are, keep the dispatch inside its own table.  no destination above 4 is
+;; ever stored, so nothing that runs changes.
+(start-dispatch 4 0)
 ;DESTINATION CODE DISPATCH, VALUE IN M-T
 ;EACH USE OF THIS DISPATCH TABLE MUST BE FOLLOWED BY A PUSH OF M-T WITH CDR-NEXT SET
 QMDTBD	(R-BIT INHIBIT-XCT-NEXT-BIT)		;IGNORE (POPJ IMMEDIATELY)
@@ -1732,7 +1761,8 @@ QMDTBD	(R-BIT INHIBIT-XCT-NEXT-BIT)		;IGNORE (POPJ IMMEDIATELY)
 	(QMDDR INHIBIT-XCT-NEXT-BIT)		;D-RETURN
 	(QMDDL INHIBIT-XCT-NEXT-BIT)		;D-LAST
 	(R-BIT INHIBIT-XCT-NEXT-BIT)		;D-MICRO, POPJ TO THE MICROCODE
-(REPEAT 3 (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
+;(REPEAT 3 (P-BIT INHIBIT-XCT-NEXT-BIT ILLOP))
+(repeat 13 (p-bit inhibit-xct-next-bit illop))	;5-17
 (END-DISPATCH)
 
 ;(START-DISPATCH 5 0)
@@ -2334,6 +2364,77 @@ D-TRANSPORT
 
 (REPEAT NQZUSD (INHIBIT-XCT-NEXT-BIT TRANS-TRAP))
 (END-DISPATCH)
+
+;; quux revision 15 (appendix a15b.15): d-transport for a dispatch that also
+;; returns, which was written popj-after-next.  trans-drop-through no longer
+;; re-runs the dispatch at entry 7777 (uc-transporter), so the return is
+;; the table's: each drop-through, (p-bit r-bit) by the constant, is (r-bit),
+;; a return after the slot, as the popj after a drop-through was; every other
+;; entry is the same, the constant's p-bit written in it.  the dispatch's
+;; slot is followed by a popj that only trans-drop-through's jump reaches.
+(start-dispatch 7 0)	;as d-transport, its drop-throughs return
+d-transport-return
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP)	;0 TRAP
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP)	;1 TRAP
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 NULL (TRANSPORT FOR SCAVENGER, XPCAL)
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP)	;1 NULL
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP)	;0 FREE
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP)	;1 FREE
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 SYMBOL
+	(R-BIT)					;1 SYMBOL
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 SYMBOL-HEADER
+	(R-BIT)					;1 SYMBOL-HEADER
+	(R-BIT)					;0 FIX
+	(R-BIT)					;1 FIX
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 EXTENDED-NUMBER
+	(R-BIT)					;1 EXTENDED-NUMBER
+	(R-BIT)					;0 HEADER
+	(R-BIT)					;1 HEADER
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)		;0 GC-FORWARD (SHOULDN'T SEE IN THIS CONTEXT)
+	(P-BIT INHIBIT-XCT-NEXT-BIT ILLOP)		;1 GC-FORWARD (SHOULDN'T SEE IN THIS CONTEXT)
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLDP-EVCP)	;0 EXTERNAL-VALUE-CELL-POINTER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-EVCP)	;1 EXTERNAL-VALUE-CELL-POINTER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD0)	;0 ONE-Q-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OQF)	;1 ONE-Q-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD0)	;0 HEADER-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-HFWD)	;1 HEADER-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-BFWD)	;0 BODY-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-BFWD)	;1 BODY-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 LOCATIVE
+	(R-BIT)					;1 LOCATIVE
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 LIST
+	(R-BIT)					;1 LIST
+	(R-BIT)					;0 U CODE ENTRY
+	(R-BIT)					;1 U CODE ENTRY
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 FEF-POINTER
+	(R-BIT)					;1 FEF-POINTER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 ARRAY-POINTER
+	(R-BIT)					;1 ARRAY-POINTER
+	(R-BIT)					;0 ARRAY-HEADER
+	(R-BIT)					;1 ARRAY-HEADER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 STACK-GROUP
+	(R-BIT)					;1 STACK-GROUP
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 CLOSURE
+	(R-BIT)					;1 CLOSURE
+	(R-BIT)					;0 SMALL-FLONUM
+	(R-BIT)					;1 SMALL-FLONUM
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 SELECT-METHOD
+	(R-BIT)					;1 SELECT-METHOD
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 INSTANCE
+	(R-BIT)					;1 INSTANCE
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 INSTANCE-HEADER
+	(R-BIT)					;1 INSTANCE-HEADER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 ENTITY
+	(R-BIT)					;1 ENTITY
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-OLD)	;0 STACK-CLOSURE
+	(R-BIT)					;1 STACK-CLOSURE
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-SRP)	;0 SELF-REF-POINTER
+	(P-BIT INHIBIT-XCT-NEXT-BIT TRANS-SRP)	;1 SELF-REF-POINTER
+	(R-BIT)					;0 CHARACTER
+	(R-BIT)					;1 CHARACTER
+ (REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP))
+(REPEAT NQZUSD (P-BIT INHIBIT-XCT-NEXT-BIT TRANS-TRAP))
+(END-DISPATCH)
 
 ;(START-DISPATCH 6 P-BIT)	;TRANSPORTER DISPATCH ON DATA TYPE AND MAP BIT
 ;; quux revision 13 (contract g2 2.4): the data type and the map bit is one bit wider, 6-bit types
@@ -2536,6 +2637,77 @@ D-GC-WRITE-TEST
 	(R-BIT)					;1 ENTITY
 	(INHIBIT-XCT-NEXT-BIT STACK-CLOSURE-TRAP)	;0 STACK-CLOSURE
 	(INHIBIT-XCT-NEXT-BIT STACK-CLOSURE-TRAP)	;0 STACK-CLOSURE
+	(R-BIT)					;0 SELF-REF-POINTER
+	(R-BIT)					;1 SELF-REF-POINTER
+	(R-BIT)					;0 CHARACTER
+	(R-BIT)					;1 CHARACTER
+ (REPEAT NQZUSD (R-BIT))
+ (REPEAT NQZUSD (R-BIT))
+(END-DISPATCH)
+
+;; quux revision 15 (appendix a15b.15): d-gc-write-test for a dispatch that also
+;; returns, which was written popj-after-next.  trans-drop-through no longer
+;; re-runs the dispatch at entry 7777 (uc-transporter), so the return is
+;; the table's: each drop-through, (p-bit r-bit) by the constant, is (r-bit),
+;; a return after the slot, as the popj after a drop-through was; every other
+;; entry is the same, the constant's p-bit written in it.  the dispatch's
+;; slot is followed by a popj that only trans-drop-through's jump reaches.
+(start-dispatch 7 0)	;as d-gc-write-test, its drop-throughs return
+d-gc-write-test-return
+	(R-BIT)					;0 TRAP
+	(R-BIT)					;1 TRAP
+	(R-BIT)					;0 NULL
+	(R-BIT)					;1 NULL
+	(R-BIT)					;0 FREE
+	(R-BIT)					;1 FREE
+	(R-BIT)					;0 SYMBOL
+	(R-BIT)					;1 SYMBOL
+	(R-BIT)					;0 SYMBOL-HEADER
+	(R-BIT)					;1 SYMBOL-HEADER
+	(R-BIT)					;0 FIX
+	(R-BIT)					;1 FIX
+	(P-BIT INHIBIT-XCT-NEXT-BIT EXTRA-PDL-TRAP)	;0 EXTENDED-NUMBER
+	(R-BIT)					;1 EXTENDED-NUMBER
+	(R-BIT)					;0 HEADER
+	(R-BIT)					;1 HEADER
+	(R-BIT)					;0 GC-FORWARD (SHOULDN'T SEE IN THIS CONTEXT)
+	(R-BIT)					;1 GC-FORWARD (SHOULDN'T SEE IN THIS CONTEXT)
+	(R-BIT)					;0 EXTERNAL-VALUE-CELL-POINTER
+	(R-BIT)					;1 EXTERNAL-VALUE-CELL-POINTER
+	(R-BIT)					;0 ONE-Q-FORWARD
+	(R-BIT)					;1 ONE-Q-FORWARD
+	(R-BIT)					;0 HEADER-FORWARD
+	(R-BIT)					;1 HEADER-FORWARD
+	(R-BIT)					;0 BODY-FORWARD
+	(R-BIT)					;1 BODY-FORWARD
+	(P-BIT INHIBIT-XCT-NEXT-BIT EXTRA-PDL-TRAP)	;0 LOCATIVE
+	(R-BIT)					;1 LOCATIVE
+	(R-BIT)					;0 LIST
+	(R-BIT)					;1 LIST
+	(R-BIT)					;0 U CODE ENTRY
+	(R-BIT)					;1 U CODE ENTRY
+	(R-BIT)					;0 FEF-POINTER
+	(R-BIT)					;1 FEF-POINTER
+	(P-BIT INHIBIT-XCT-NEXT-BIT EXTRA-PDL-TRAP)	;0 ARRAY-POINTER
+	(R-BIT)					;1 ARRAY-POINTER
+	(R-BIT)					;0 ARRAY-HEADER
+	(R-BIT)					;1 ARRAY-HEADER
+	(R-BIT)					;0 STACK-GROUP
+	(R-BIT)					;1 STACK-GROUP
+	(R-BIT)					;0 CLOSURE
+	(R-BIT)					;1 CLOSURE
+	(R-BIT)					;0 SMALL-FLONUM
+	(R-BIT)					;1 SMALL-FLONUM
+	(R-BIT)					;0 SELECT-METHOD
+	(R-BIT)					;1 SELECT-METHOD
+	(R-BIT)					;0 INSTANCE
+	(R-BIT)					;1 INSTANCE
+	(R-BIT)					;0 INSTANCE-HEADER
+	(R-BIT)					;1 INSTANCE-HEADER
+	(R-BIT)					;0 ENTITY
+	(R-BIT)					;1 ENTITY
+	(P-BIT INHIBIT-XCT-NEXT-BIT STACK-CLOSURE-TRAP)	;0 STACK-CLOSURE
+	(P-BIT INHIBIT-XCT-NEXT-BIT STACK-CLOSURE-TRAP)	;0 STACK-CLOSURE
 	(R-BIT)					;0 SELF-REF-POINTER
 	(R-BIT)					;1 SELF-REF-POINTER
 	(R-BIT)					;0 CHARACTER

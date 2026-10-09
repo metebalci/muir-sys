@@ -226,7 +226,7 @@ XGCD4	((M-TEM) M-2)		;BOTH ODD
        ((M-1) M-TEM)
 
 XGCD5	((OA-REG-LOW) M-A)		;Final shifting step
-	((M-1) DPB M-1 (BYTE-FIELD 0 0) A-ZERO)
+	((M-1) DPB M-1 (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP RETURN-M-1)
 
 ;; quux revision 13: m-1 is -2^31 (see gcd-fix-fix)
@@ -261,11 +261,11 @@ BIGNUM-RIGHT-JUST
 	(JUMP-EQUAL M-E A-ZERO BIGNUM-RIGHT-JUST-FFO)
 	(JUMP-EQUAL M-4 A-ZERO BIGNUM-RIGHT-JUST-PUNT)
 	((OA-REG-LOW) M-A)
-	((MD) DPB M-2 (BYTE-FIELD 0 0) A-1)
+	((MD) DPB M-2 (BYTE-FIELD 0 0) A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	((VMA-START-WRITE) ADD M-S A-E)
 	(CHECK-PAGE-WRITE)
 	((OA-REG-LOW) M-B)
-	(POPJ-AFTER-NEXT (M-1) (BYTE-FIELD 0 0) M-2 A-ZERO)
+	(POPJ-AFTER-NEXT (M-1) (BYTE-FIELD 0 0) M-2 A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
        ((M-E) ADD M-E (A-CONSTANT 1))
 
 BIGNUM-RIGHT-JUST-PUNT
@@ -2098,7 +2098,8 @@ FLONUM-FIX-ROUND
 	((M-TEM) SUB M-TEM (A-CONSTANT 2))	;Number of bits to right of binary point, -1.
 ;M-TEM has position (from bottom).
 	((OA-REG-LOW) A-TEM)
-	((M-2) DPB M-MINUS-ONE A-ZERO)	;M-2 gets a 1 in first bit after binary point.
+	((M-2) DPB M-MINUS-ONE A-ZERO oa-low-select)	;M-2 gets a 1 in first bit after binary point.
+	;the oa-low-select above reads oa-reg-low (rev 15)
 ;What follows is like FADD2, except that we clear out Q to prevent rounding up.
 	((M-1) ADD M-1 A-2 OUTPUT-SELECTOR-RIGHTSHIFT-1	;Do the add, collect
 		SHIFT-Q-RIGHT)	; the overflow, discarded bits to Q
@@ -2113,7 +2114,7 @@ FLONUM-FIX-ROUND
 	((M-TEM) SUB (M-CONSTANT 40) A-TEM)
 	((M-TEM) SUB M-TEM (A-CONSTANT 2))	;Number of bits to right of binary point, -1.
 	((OA-REG-LOW) DPB M-TEM A-ZERO OAL-BYTL-1)
-       ((M-2) BYTE-INST M-1 A-ZERO)
+       ((M-2) BYTE-INST M-1 A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-NOT-EQUAL M-2 A-ZERO FLONUM-FIX-FLOOR)
 ;If it is an exact integer,
 ;clear out the bit just before the binary point to make the result even.
@@ -2121,7 +2122,7 @@ FLONUM-FIX-ROUND
 ;the only bit before the binary point is the sign bit and clearing it gives 0, not -2.0!
 	(JUMP-EQUAL M-I (A-CONSTANT 2000) FLONUM-FIX-ROUND-MINUS-ONE)
 	((OA-REG-LOW) ADD M-TEM (A-CONSTANT 1))
-       ((M-1) DPB M-ZERO A-1)
+       ((M-1) DPB M-ZERO A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP FLONUM-FIX-FLOOR)
 
 FLONUM-FIX-CEIL-SMALL
@@ -2153,7 +2154,7 @@ FLONUM-FIX-CEIL
 	((M-TEM) SUB (M-CONSTANT 40) A-TEM)
 	((M-TEM) SUB M-TEM (A-CONSTANT 2))	;Number of bits to right of binary point, -1.
 	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-ZERO)
-	((M-2) DPB M-MINUS-ONE A-ZERO)
+	((M-2) DPB M-MINUS-ONE A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 ;What follows is like FADD2, except that we clear out Q to prevent rounding up.
 	((M-1) ADD M-1 A-2 OUTPUT-SELECTOR-RIGHTSHIFT-1	;Do the add, collect
 		SHIFT-Q-RIGHT)	; the overflow, discarded bits to Q
@@ -2162,7 +2163,7 @@ FLONUM-FIX-CEIL
 FLONUM-FIX-FLOOR
 	((OA-REG-HIGH) FLONUM-SIGN-BIT M-1)	;M-T gets 0 if arg positive,
        ((M-T) Q-POINTER M-ZERO			;  -1 if arg is negative.
-		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
+		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)) oa-high-select)	;reads oa-reg-high (rev 15)
 	(POPJ-LESS-OR-EQUAL M-I (A-CONSTANT 2000)) ;return 0 or -1 if fractional
 	(JUMP-GREATER-OR-EQUAL M-I (A-CONSTANT (PLUS 2000 Q-POINTER-WIDTH)) FLONUM-BIGFIX)
 		 ;jump if big enough to be bignum
@@ -2172,7 +2173,8 @@ FLONUM-FIX-FLOOR
 ;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
 	((m-b) add m-a (a-constant 12))		;leftward rotation of m-1
 	(POPJ-AFTER-NEXT (OA-REG-LOW) DPB M-A OAL-BYTL-1 A-B)
-       ((M-T) (BYTE-FIELD 0 0) M-1 A-T)		;A boxed signed fixnum!
+       ((M-T) (BYTE-FIELD 0 0) M-1 A-T oa-low-select)		;A boxed signed fixnum!
+	;the oa-low-select above reads oa-reg-low (rev 15)
 
 FLONUM-BIGFIX
 	((M-C) DPB M-T BIGNUM-HEADER-SIGN A-ZERO)	;Save sign
@@ -2199,7 +2201,7 @@ FLONUM-BIGFIX1
 ;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
 	((m-3) add m-1 (a-constant 12))		;get high-order word of result
 	((OA-REG-LOW) DPB M-1 OAL-BYTL-1 A-3)	;[Right-justify high (M-1)+1 bits of 31.]
-	((WRITE-MEMORY-DATA) (BYTE-FIELD 0 0) M-2)
+	((WRITE-MEMORY-DATA) (BYTE-FIELD 0 0) M-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	((m-3) sub m-3 (a-constant 10))		;quux revision 13: as 32 bits had it, below
 	((VMA-START-WRITE) ADD M-T A-I)
 	(CHECK-PAGE-WRITE)
@@ -2207,7 +2209,7 @@ FLONUM-BIGFIX1
 	((M-3) M-A-1 (M-CONSTANT 32.) A-3)	;Get low-order word (may be garbage)
 	((M-1) ADD M-1 (A-CONSTANT 1))		;[Left-justify low 30.-(M-1) bits in 31.]
 	((OA-REG-LOW) DPB M-3 OAL-BYTL-1 A-1)
-	((WRITE-MEMORY-DATA) DPB M-2 (BYTE-FIELD 0 0) A-ZERO)
+	((WRITE-MEMORY-DATA) DPB M-2 (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((VMA-START-WRITE) SUB VMA (A-CONSTANT 1))
 	(CHECK-PAGE-WRITE)
 	(JUMP BIGNUM-DPB-CLEANUP)		;Might really be a fixnum after all! (SETZ)
@@ -2536,17 +2538,20 @@ FADD	(JUMP-EQUAL-XCT-NEXT M-I A-J FADD2)	;Jump if exponents equal, no shifting
        ((M-TEM) M-A-1 M-I A-J)			;Amt to shift M-2 right minus one
 	(JUMP-GREATER-OR-EQUAL M-TEM (A-CONSTANT 37) FADD3)
 	((OA-REG-HIGH) FLONUM-SIGN-BIT M-2)	;Sign-extend M-2
-       ((A-TEM1) M-ZERO)			;Gets either all zeros or all ones.
+       ((A-TEM1) M-ZERO oa-high-select)			;Gets either all zeros or all ones.
+	;the oa-high-select above reads oa-reg-high (rev 15)
 	((M-J) M-A-1 (M-CONSTANT 40) A-TEM)	;40 minus exponent difference
 	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-J)	; becomes m-rotate
-       ((A-TEM2) DPB M-2 (BYTE-FIELD 0 0) A-ZERO) ;Get bits shifted off right end of M-2
+       ((A-TEM2) DPB M-2 (BYTE-FIELD 0 0) A-ZERO oa-low-select) ;Get bits shifted off right end of M-2
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((Q-R) A-TEM2)				;Put them in Q-R where they belong
 	((M-TEM) SUB M-J (A-CONSTANT 1))	;Byte length minus one
 ;; quux revision 13 (appendix a1.2): the rotator's ring is 40 bits, so a right
 ;; shift by n is a left rotation by 40 - n, 8 more than on 32 bits.
 	((m-j) add m-j (a-constant 10))		;the rotation, 40 - exponent difference
 	((OA-REG-LOW) DPB M-TEM OAL-BYTL-1 A-J)
-       ((M-2) (BYTE-FIELD 0 0) M-2 A-TEM1)	;Arithmetically shift M-2 right
+       ((M-2) (BYTE-FIELD 0 0) M-2 A-TEM1 oa-low-select)	;Arithmetically shift M-2 right
+	;the oa-low-select above reads oa-reg-low (rev 15)
 FADD2	((M-1) ADD M-1 A-2 OUTPUT-SELECTOR-RIGHTSHIFT-1	;Do the add, collect
 		SHIFT-Q-RIGHT)	; the overflow, discarded bits to Q
 ;Normalizing loop
@@ -3132,14 +3137,14 @@ FLOAT-A-BIGNUM-X
 ;; stays 32 - m-t, which moves bit m-t - 1 to 31 on either ring.
 	((m-tem) add m-tem (a-constant 10))
 	((OA-REG-LOW) DPB M-4 OAL-BYTL-1 A-TEM)
-	((M-1) (BYTE-FIELD 0 0) M-3 A-ZERO)
+	((M-1) (BYTE-FIELD 0 0) M-3 A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((m-tem) sub m-tem (a-constant 10))
 	((OA-REG-LOW) M-TEM)			;Rotate first dropped bit into sign of M-3
-	((M-3) (BYTE-FIELD 32. 0) M-3)
+	((M-3) (BYTE-FIELD 32. 0) M-3 oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-K) SUB M-T (A-CONSTANT 1))
 	((M-TEM) ADD M-4 (A-CONSTANT 1))
 	((OA-REG-LOW) DPB M-K OAL-BYTL-1 A-TEM)
-	((M-1) DPB C-PDL-BUFFER-POINTER-POP (BYTE-FIELD 0 0) A-1)
+	((M-1) DPB C-PDL-BUFFER-POINTER-POP (BYTE-FIELD 0 0) A-1 oa-low-select)	;reads oa-reg-low (rev 15)
 FLOAT-A-BIGNUM-DONE
 	;; length in M-I   nbits (sig bits in high order word) in M-T
 	;; (length - 1) * 31. + nbits + 2000 =  
@@ -3618,10 +3623,12 @@ BIDIVR-UNNORMALIZE-LOOP
 	((VMA-START-READ) M+A+1 M-T A-D)
 	(CHECK-PAGE-READ)
 	((OA-REG-LOW) M-K)
-	((M-2) (BYTE-FIELD 0 0) M-1 A-ZERO)	;LDB out of lower word
+	((M-2) (BYTE-FIELD 0 0) M-1 A-ZERO oa-low-select)	;LDB out of lower word
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((M-1) MD)
 	((OA-REG-LOW) M-S)
-	((MD M-2) DPB M-1 (BYTE-FIELD 0 0) A-2)	;DPB in from higher word
+	((MD M-2) DPB M-1 (BYTE-FIELD 0 0) A-2 oa-low-select)	;DPB in from higher word
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((VMA-START-WRITE) ADD M-T A-D)		;Put back into lower word
 	(CHECK-PAGE-WRITE)
 	(JUMP-EQUAL M-2 A-ZERO BIDIVR-UNNORMALIZE-1)
@@ -3701,7 +3708,7 @@ BIDIV-REMAINDER-COMMON
 	((M-D) M-T)
 	((M-B) M-R)
 	((OA-REG-LOW) M-S)
-	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO)
+	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(CALL-XCT-NEXT BIDIV-NORMALIZE)
        ((M-ZR) SUB M-J (A-CONSTANT 1))
 	(JUMP-XCT-NEXT BIDIV-READY)
@@ -3917,9 +3924,9 @@ BIDIV-NORMALIZE
 	((VMA-START-READ) ADD M-B A-ZR)
 	(CHECK-PAGE-READ)
 	((OA-REG-LOW) M-K)
-	((M-4) (BYTE-FIELD 0 0) MD A-2)
+	((M-4) (BYTE-FIELD 0 0) MD A-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW) M-S)
-	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO)
+	((M-2) DPB MD (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((MD) M-4)
 	((M-4) ADD M-ZR A-E)
 	((VMA-START-WRITE) M+A+1 M-D A-4)
@@ -4562,7 +4569,7 @@ ARY-TO-BIG-CLEANUP
        ((M-E) SUB M-E (A-CONSTANT 1))
 	;; Number is nothing but sign bits
 	((OA-REG-HIGH) BIGNUM-HEADER-SIGN M-C)
-	((M-TEM) M-ZERO)
+	((M-TEM) M-ZERO oa-high-select)	;reads oa-reg-high (rev 15)
 	((M-1) Q-POINTER M-T)				;For UN-CONS
 	(JUMP-XCT-NEXT BCLEANUP-1)
        ((M-2) ADD M-D (A-CONSTANT 1))

@@ -301,8 +301,10 @@
 
 ;; quux revision 15 (appendix a15b.2, a15b.15): the oa selects, extension bits
 ;; <60> and <61>, which only a revision-15 machine reads.
-(dolist (s '(oa-low-select oa-high-select))
-  (putprop s 15. 'cons-lap-revision))
+;; until release-2002 the tree's microcode assembles for revisions 14 and 15
+;; (contract g3 revision 15), so the selects are not refused below 15: they
+;; assemble as nothing there (cadsym), where imod ors the register into the
+;; next word and the source means the same.
 
 ;; quux revision 14: a word of the pointer-type register (appendix a14.9),
 ;; register-page word 222 for first 0 and 223 for first 32.: bit k is type
@@ -748,8 +750,65 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	  (check-lc-writes)
 	  (check-fiddle-windows))
 	(when (and (target-parameter :oa-select-check) (null cons-lap-init-state))
+	  (check-write-i-mem)
+	  (check-map-after-start)
+	  (check-returning-dispatches)
 	  (check-oa-selects))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
+
+;; quux revision 15 (appendix a15b.15): trans-drop-through goes on at the word
+;; after the dispatch that called the transporter, which pushed its own
+;; address, rather than run it again at entry 7777; a dispatch that also
+;; carried popj (mit's (popj-after-next dispatch transport ...) and
+;; (popj-after-next gc-write-test)) would then run on into the next function
+;; instead of returning.  so such a dispatch is written through a table whose
+;; drop-throughs return (transport-return, gc-write-test-return; uc-parameters)
+;; with a (popj) after its slot, and one written the old way is refused.
+(defun check-returning-dispatches ()
+  "Refuses a dispatch that pushes its own address (ir<25>) and carries popj (ir<42>)."
+  (let ((names (oa-label-names)))
+    (dotimes (x (array-length i-mem))
+      (let ((w (aref i-mem x)))
+	(when (and w (= (ldb 5302 w) 2) (= (ldb 3101 w) 1) (= (ldb 5201 w) 1))
+	  (ferror nil "~A is a dispatch that pushes its own address and carries popj: on revision 15 write it through transport-return or gc-write-test-return, with a (popj) after its slot (appendix a15b.15)."
+		  (oa-word-name x names)))))))
+
+;; quux revision 15 (the write-i-mem check; appendix a15b.2):
+;; write-i-mem, a jump with p and r, only in mit's form, ir<9:0> = 1647 (r, p,
+;; n, unconditional, not inverted), without popj, and never in a delay slot:
+;; the word before it in the store is no jump-class word with n clear (other
+;; than a write-i-mem), no word with popj and no dispatch.  a delay slot is
+;; always the word after its transfer, so the check is complete for assembled
+;; code.  mit's microcode and prom write it only after the byte word that
+;; loads oa-reg-low.
+(defun write-i-mem-word-p (w)
+  "A jump-class word with p and r (ir<9:8> = 3): a write-i-mem in some form."
+  (and (= (ldb 5302 w) 1) (= (ldb 1002 w) 3)))
+
+(defun write-i-mem-breaches ()
+  "The write-i-mem words the write-i-mem check refuses, each (location reason):
+:form (ir<9:0> not 1647), :popj, :after-n-clear (in a jump's or a call's delay
+slot), :after-popj (in a return's slot), :after-dispatch.  In address order."
+  (let ((out nil))
+    (dotimes (x (array-length i-mem))
+      (let ((w (aref i-mem x))
+	    (p (and (> x 0) (aref i-mem (1- x)))))
+	(when (and w (write-i-mem-word-p w))
+	  (unless (= (ldb 0012 w) 1647) (push (list x :form) out))
+	  (when (= (ldb 5201 w) 1) (push (list x :popj) out))
+	  (when p
+	    (cond ((and (= (ldb 5302 p) 1) (= (ldb 0701 p) 0) (not (write-i-mem-word-p p)))
+		   (push (list x :after-n-clear) out))
+		  ((= (ldb 5201 p) 1) (push (list x :after-popj) out))
+		  ((= (ldb 5302 p) 2) (push (list x :after-dispatch) out)))))))
+    (nreverse out)))
+
+(defun check-write-i-mem ()
+  "Refuses a write-i-mem in a form other than mit's, or in a delay slot."
+  (let ((b (write-i-mem-breaches)))
+    (when b
+      (ferror nil "WRITE-I-MEM check: ~A breaks ~S: write-i-mem only in mit's form (ir<9:0> 1647, no popj), and never after a jump with n clear, a popj or a dispatch (appendix a15b.2)."
+	      (oa-word-name (caar b) (oa-label-names)) (cadar b)))))
 
 ;; quux revision 14 (appendix a14.7): the pdl buffer redirect takes its base
 ;; and head by snooping a memory's write pulse at two fixed locations, so a
@@ -783,7 +842,14 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 			     (unless (eq (car v) 'd-mem)
 			       (ferror nil "~A, a map-bit dispatch table, is not in D-MEM." s))
 			     (caddr (cadr v))))
-		       *map-bit-dispatch-tables*))
+		       ;; quux revision 15: and the copies of d-transport and
+		       ;; d-gc-write-test whose drop-throughs return (uc-parameters),
+		       ;; read by the dispatches that returned through their popj
+		       ;; before (appendix a15b.15), where the microcode defines them
+		       ;; (release 2001's has neither)
+		       (append *map-bit-dispatch-tables*
+			       (subset #'(lambda (s) (get s 'cons-lap-user-symbol))
+				       '(d-transport-return d-gc-write-test-return)))))
 	(apart nil) (missing nil)
 	(declared (mapcar #'symeval *pointer-types*)))
     ;; every dispatch on map bits (ir<9:8>) reads one of the tables, by the
@@ -1096,17 +1162,14 @@ hands on to its pending transfers alone, unless it transfers itself."
       (dolist (s (oa-flow w x)) (pushnew s out)))
     out))
 
-(defun oa-select-breaches ()
-  "The OA select check's breaches in the assembled I-MEM and D-MEM: (address rule text) each."
+(defun oa-run-tables ()
+  "How each word of the assembled I-MEM runs, as three arrays by location: how it is entered
+other than by falling through (:target, :return-point or :entry), whether it can run plain,
+and the transfers pending when it runs as a slot."
   (let* ((n (array-length i-mem))
-	 (names (oa-label-names))
 	 (entered (make-array n))		;:target, :return-point or :entry
 	 (plain (make-array n))
 	 (pending (make-array n))
-	 (preds (make-array n))
-	 (register-names '("OA-REG-LOW" "OA-REG-HIGH"))
-	 (select-names '("oa-low-select" "oa-high-select"))
-	 (breaches nil)
 	 (first nil))
     ;; the ways in other than falling through: transfers, return points, entries
     (dotimes (x n)
@@ -1139,6 +1202,34 @@ hands on to its pending transfers alone, unless it transfers itself."
 		 (runs-plain (second flow)) (pend (third flow)))
 	    (when runs-plain (setf (aref plain x) t))
 	    (dolist (p pend) (pushnew p (aref pending x)))))))
+    ;; a transfer with a delay slot of its own can itself run in another
+    ;; transfer's slot: its slot is then each of that transfer's targets, not
+    ;; x+1, so its own transfers are pending on each of them, to a fixed point
+    ;; (the jump-xct-next in a dispatch's slot at qbocpt+4, say)
+    (do ((changed t)) ((not changed))
+      (setq changed nil)
+      (dotimes (x n)
+	(let ((w (aref i-mem x)))
+	  (when (and w (aref pending x))
+	    (let ((own (third (multiple-value-list (oa-flow w x)))))
+	      (when own
+		(dolist (target (aref pending x))
+		  (when (oa-word target)
+		    (dolist (p own)
+		      (unless (memq p (aref pending target))
+			(push p (aref pending target))
+			(setq changed t)))))))))))
+    (values entered plain pending)))
+
+(defun oa-select-breaches ()
+  "The OA select check's breaches in the assembled I-MEM and D-MEM: (address rule text) each."
+  (multiple-value-bind (entered plain pending) (oa-run-tables)
+  (let* ((n (array-length i-mem))
+	 (names (oa-label-names))
+	 (preds (make-array n))
+	 (register-names '("OA-REG-LOW" "OA-REG-HIGH"))
+	 (select-names '("oa-low-select" "oa-high-select"))
+	 (breaches nil))
     ;; what can run right before each word
     (dotimes (x n)
       (let ((w (aref i-mem x)))
@@ -1196,7 +1287,7 @@ hands on to its pending transfers alone, unless it transfers itself."
 	      (push (list x 3 (format nil "~A has oa-low-select on a dispatch that is not a dispatch-memory write without popj (rule 3)"
 				      name))
 		    breaches))))))
-    (nreverse breaches)))
+    (nreverse breaches))))
 
 (defun check-oa-selects ()
   "The OA select check (appendix a15b.15) on the assembled I-MEM and D-MEM: prints each breach,
@@ -1212,6 +1303,123 @@ ua:*oa-select-check-refuses* is nil."
 	(ferror nil "The OA select check refuses this assembly (appendix a15b.15), ~D breach~:[~;es~]; the first: ~A"
 		(length breaches) (cdr breaches) (caddr (car breaches)))))
     breaches))
+
+
+;; quux revision 15 (the map-after-start check): a word that can run in the
+;; microcycle right after a memory start does not read the map, so that port
+;; b's lookup in ex never needs wb's walk fill, write-back or translation of
+;; the same clock.  a memory start is an alu or byte word to functional
+;; destination 21, 22, 31 or 32 (vma or md with start-read or start-write; 25,
+;; 26, 35 and 36 decode as those), or a dispatch with ir<24>, which starts the
+;; instruction fetch when needfetch is up.  a word reads the map when its m
+;; source is functional 11 (map) and it reads m, or when it is a dispatch on
+;; map bits (ir<9:8>).  the words that can run next are the oa select check's
+;; (oa-next), the delay slot and n honoured; a start in a return's slot is
+;; refused, since what runs next is not known, and a return can go back to a
+;; transport's own map-bit dispatch.
+;; quux revision 15 (the md-after-start check, in the same pass): no word
+;; that writes md (destination 30 to 33, 34 to 37) can run right after a
+;; memory start or the fetch's.  after a read start or the fetch's the word
+;; reads md as the start found it, and an md it writes gives way to the read's
+;; word, so it never does what it says; a write carries md as its start's own
+;; microcycle leaves it, so an md written right after it is not the word
+;; written.  a start in a return's slot is refused by the map-after-start
+;; rule.  a return that asks for a fetch lands at qmlp or qmlp+2, which
+;; nothing static names as a start's successor, so qmlp to qmlp+3 are held to
+;; both rules by name.
+(defun functional-destination (w)
+  "The functional destination code of the alu or byte word W, 25-27 and 34-37 decoded as
+21-23 and 30-33, or nil."
+  (and (memq (ldb 5302 w) '(0 3))
+       (zerop (ldb 3101 w))
+       (let ((code (ldb 2305 w)))
+	 (if (zerop (logand code 20)) code (logand code (lognot 4))))))
+
+(defun fetch-start-p (w)
+  "Whether the word W is a dispatch that starts the instruction fetch (ir<24>)."
+  (and (oa-dispatch-transfers-p w) (= (ldb 3001 w) 1)))
+
+(defun memory-start-p (w)
+  "Whether the word W starts a memory cycle, or the instruction fetch."
+  (or (memq (functional-destination w) '(21 22 31 32)) (fetch-start-p w)))
+
+(defun writes-md-p (w)
+  "Whether the word W writes md."
+  (memq (functional-destination w) '(30 31 32 33)))
+
+(defun reads-map-p (w)
+  "Whether the word W reads the map: its m source is map (functional 11) and it reads m, or it
+is a dispatch on map bits."
+  (let ((class (ldb 5302 w)))
+    (or (and (oa-dispatch-transfers-p w) (not (zerop (ldb 1002 w))))
+	(and (= (ldb 3701 w) 1) (= (ldb 3205 w) 11)
+	     (or (not (= class 1))
+		 (zerop (ldb 0501 w))		;a jump on a bit of m
+		 (let ((c (ldb 0005 w)))		;or on a condition that reads m
+		   (memq (if (memq c '(10 11 12)) c (logand c 7)) '(1 2 3 11 12))))))))
+
+(defun start-breaches ()
+  "The map-after-start and md-after-start checks' breaches in the assembled I-MEM and D-MEM, in
+one pass: (address rule text) each, rule :map-after-start or :md-after-start."
+  (multiple-value-bind (entered plain pending) (oa-run-tables)
+    entered				;the checks need only how words run
+    (let ((names (oa-label-names)) (breaches nil)
+	  (qmlp (and (get 'qmlp 'cons-lap-user-symbol) (i-mem-symbol-location 'qmlp))))
+      (dotimes (x (array-length i-mem))
+	(let ((w (aref i-mem x)))
+	  (when (and w (memory-start-p w))
+	    (dolist (s (oa-next x w plain pending))
+	      (cond ((eq s :return)
+		     (push (list x :map-after-start
+				 (format nil "~A starts a memory cycle in a return's slot: what runs next is not known"
+					 (oa-word-name x names)))
+			   breaches))
+		    ((oa-word s)
+		     (when (reads-map-p (aref i-mem s))
+		       (push (list x :map-after-start
+				   (format nil "~A starts a memory cycle, and ~A, which can run next, reads the map"
+					   (oa-word-name x names) (oa-word-name s names)))
+			     breaches))
+		     (when (writes-md-p (aref i-mem s))
+		       (push (list x :md-after-start
+				   (format nil "~A starts a memory cycle, and ~A, which can run next, writes MD"
+					   (oa-word-name x names) (oa-word-name s names)))
+			     breaches))))))))
+      (when (numberp qmlp)
+	(dotimes (k 4)
+	  (let ((w (oa-word (+ qmlp k))))
+	    (when (and w (reads-map-p w))
+	      (push (list (+ qmlp k) :map-after-start
+			  (format nil "~A, where a return that asks for the fetch lands, reads the map"
+				  (oa-word-name (+ qmlp k) names)))
+		    breaches))
+	    (when (and w (writes-md-p w))
+	      (push (list (+ qmlp k) :md-after-start
+			  (format nil "~A, where a return that asks for the fetch lands, writes MD"
+				  (oa-word-name (+ qmlp k) names)))
+		    breaches)))))
+      (nreverse breaches))))
+
+(defun map-after-start-breaches ()
+  "The map-after-start check's breaches in the assembled I-MEM and D-MEM: (address text) each."
+  (mapcan #'(lambda (b) (and (eq (cadr b) :map-after-start) (list (list (car b) (caddr b)))))
+	  (start-breaches)))
+
+(defun md-after-start-breaches ()
+  "The md-after-start check's breaches in the assembled I-MEM and D-MEM: (address text) each."
+  (mapcan #'(lambda (b) (and (eq (cadr b) :md-after-start) (list (list (car b) (caddr b)))))
+	  (start-breaches)))
+
+(defun check-map-after-start ()
+  "Refuses an assembly in which a word that reads the map can run right after a memory start,
+or in which a word that writes MD can run right after a memory start."
+  (let* ((all (start-breaches))
+	 (m (subset #'(lambda (b) (eq (cadr b) :map-after-start)) all))
+	 (d (subset #'(lambda (b) (eq (cadr b) :md-after-start)) all)))
+    (when m
+      (ferror nil "Map-after-start check: ~A (~D breach~:[~;es~])." (caddar m) (length m) (cdr m)))
+    (when d
+      (ferror nil "MD-after-start check: ~A (~D breach~:[~;es~])." (caddar d) (length d) (cdr d)))))
 
 (DEFUN FILE-TEST-ALWAYS (F1 F2) F1 F2 T)
 
@@ -1289,6 +1497,9 @@ ua:*oa-select-check-refuses* is nil."
 	;; quux revision 15: the boot prom, which ua:assemble assembles through
 	;; here, is held to the oa select check (a15b.15) as the microcode is.
 	(when (and (target-parameter :oa-select-check) (null cons-lap-init-state))
+	  (check-write-i-mem)
+	  (check-map-after-start)
+	  (check-returning-dispatches)
 	  (check-oa-selects))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
 

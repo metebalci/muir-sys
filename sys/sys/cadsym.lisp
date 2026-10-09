@@ -517,10 +517,16 @@
 ;; word that reads oa-reg-low or oa-reg-high, which revision 15 no longer ors
 ;; into whatever word runs next.  oa-low-select is the extension's <60>,
 ;; oa-high-select its <61>, as the target description places them (sys: sys;
-;; uatarget); only a revision-15 assembly may name them (cadrlp), and the oa
-;; select check holds every write and every select to each other.
-(defprop oa-low-select (eval (target-extension-bit :oa-low-select)) cons-lap-sym)
-(defprop oa-high-select (eval (target-extension-bit :oa-high-select)) cons-lap-sym)
+;; uatarget), and the oa select check holds every write and every select to
+;; each other.  until release-2002 the selects assemble for revision 14 too: a
+;; target with no extension (revisions 13 and 14, the cadr) gives them 0, and
+;; imod there ors the register into the word as the select does (cadrlp).
+(defprop oa-low-select
+	 (eval (if (target-parameter :extension) (target-extension-bit :oa-low-select) 0))
+	 cons-lap-sym)
+(defprop oa-high-select
+	 (eval (if (target-parameter :extension) (target-extension-bit :oa-high-select) 0))
+	 cons-lap-sym)
 
 ;10 C-PDL-BUFFER-POINTER
 

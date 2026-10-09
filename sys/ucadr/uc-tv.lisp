@@ -100,7 +100,7 @@ SELECT-SHEET-1
 		(ERROR-TABLE ARRAY-NUMBER-DIMENSIONS M-D 2 M-A)
 	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
 	;; Offset of start of buffer in bits	
-	((A-TV-SCREEN-BUFFER-BIT-OFFSET) DPB M-Q (BYTE-FIELD 27. 0) A-ZERO) 
+	((A-TV-SCREEN-BUFFER-BIT-OFFSET) DPB M-Q (BYTE-FIELD 27. 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((A-TV-SCREEN-BUFFER-ADDRESS) M-E)
 ;	((M-TEM) ADD (M-CONSTANT 40) A-TEM)	;Size in words depends on element size
 ;; quux revision 13: the rotate right by 5 - pixel size is 40. - (5 - pixel
@@ -108,7 +108,8 @@ SELECT-SHEET-1
 	((m-tem) add (m-constant 50) a-tem)	;size in words depends on element size
 	((M-TEM) SUB M-TEM (A-CONSTANT 5))	; (also calculate MROT in same calc)
 	((OA-REG-LOW) DPB M-TEM OAL-MROT A-ZERO)
-       ((M-TEM) (BYTE-FIELD 27. 0) M-S)		;Size of buffer in words
+       ((M-TEM) (BYTE-FIELD 27. 0) M-S oa-low-select)		;Size of buffer in words
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(POPJ-AFTER-NEXT
 	 (A-TV-SCREEN-BUFFER-END-ADDRESS) ADD M-TEM A-TV-SCREEN-BUFFER-ADDRESS)
        ((A-TV-CURRENT-SHEET) M-C)
@@ -227,9 +228,9 @@ xtvch2  (jump-less-than-unsigned m-c a-tv-screen-buffer-address xtvcho1)  ;COMME
 	((VMA-START-READ) M-C)				;GET FIRST TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-T (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
-       ((M-2) DPB M-1 (BYTE-FIELD 0 0) A-ZERO)
+       ((M-2) DPB M-1 (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW) M-J)				;COMBINE AND STORE BACK
-       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2)
+       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 XTVCHO1	((VMA) ADD M-C (A-CONSTANT 1))
 ;	(JUMP-LESS-THAN VMA A-TV-SCREEN-BUFFER-ADDRESS XTVCHO2)
@@ -239,15 +240,15 @@ XTVCHO1	((VMA) ADD M-C (A-CONSTANT 1))
 	((VMA-START-READ) ADD M-C (A-CONSTANT 1))	;GET SECOND TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-I (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
-       ((M-2) (BYTE-FIELD 0 0) M-1)
+       ((M-2) (BYTE-FIELD 0 0) M-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW) M-J)				;COMBINE AND STORE BACK
-       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2)
+       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 XTVCHO2	(JUMP-LESS-OR-EQUAL M-D (A-CONSTANT 1) XFALSE)	;STOP IF DONE
 	((M-D) SUB M-D (A-CONSTANT 1))
 	((M-C) ADD M-C A-TV-SCREEN-LOCATIONS-PER-LINE)	;ADVANCE TO NEXT LINE
 	((OA-REG-LOW) SUB M-Q (A-CONSTANT RASTER-ALIGN-OFFSET))		;SHIFT RASTER RIGHT
-       ((M-1) (BYTE-FIELD 0 0) M-1)
+       ((M-1) (BYTE-FIELD 0 0) M-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-GREATER-THAN-XCT-NEXT M-S (A-CONSTANT 1) XTVCH2)	;JUMP IF WORD NOT USED UP
        ((M-S) SUB M-S (A-CONSTANT 1))
 	(JUMP-XCT-NEXT XTVCH1)				;FETCH NEW WORD
@@ -282,15 +283,15 @@ xtvch6	(jump-less-than-unsigned m-c a-tv-screen-buffer-address xtvcho3)  ;COMMEN
 	((VMA-START-READ) M-C)				;GET TV BUFFER WORD
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) SUB M-T (A-CONSTANT RASTER-ALIGN-OFFSET))		;ALIGN RASTER
-       ((M-2) DPB M-1 (BYTE-FIELD 0 0) A-ZERO)
+       ((M-2) DPB M-1 (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((OA-REG-LOW) M-J)				;COMBINE AND STORE BACK
-       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2)
+       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 XTVCHO3	(JUMP-LESS-OR-EQUAL M-D (A-CONSTANT 1) XFALSE)	;STOP IF DONE
 	((M-D) SUB M-D (A-CONSTANT 1))
 	((M-C) ADD M-C A-TV-SCREEN-LOCATIONS-PER-LINE)	;ADVANCE TO NEXT LINE
 	((OA-REG-LOW) SUB M-Q (A-CONSTANT RASTER-ALIGN-OFFSET))		;SHIFT RASTER RIGHT
-       ((M-1) (BYTE-FIELD 0 0) M-1)
+       ((M-1) (BYTE-FIELD 0 0) M-1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-GREATER-THAN-XCT-NEXT M-S (A-CONSTANT 1) XTVCH6)	;JUMP IF WORD NOT USED UP
        ((M-S) SUB M-S (A-CONSTANT 1))
 	(JUMP-XCT-NEXT XTVCH5)				;FETCH NEW WORD
@@ -316,13 +317,13 @@ TVXYADR	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
        ((Q-R) A-TV-SCREEN-LOCATIONS-PER-LINE)		;M-2 GETS OFFSET TO START OF LINE
 TVXYAD0 ((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
 	;; X coordinate gets multiplied by pixel size
-	((M-TEM) DPB C-PDL-BUFFER-POINTER-POP Q-POINTER A-ZERO)
+	((M-TEM) DPB C-PDL-BUFFER-POINTER-POP Q-POINTER A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-TEM) ADD M-TEM A-TV-SCREEN-BUFFER-BIT-OFFSET)
 	((M-1) (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 5) 5) M-TEM)		;WORD PART OF X POSITION
 	((OA-REG-HIGH) (BYTE-FIELD 1 (DIFFERENCE Q-POINTER-WIDTH 5 1)) M-1)
 	((M-1) SELECTIVE-DEPOSIT M-ZERO
 	 (BYTE-FIELD (DIFFERENCE 37. Q-POINTER-WIDTH) (DIFFERENCE Q-POINTER-WIDTH 5))
-	 A-1)
+	 A-1 oa-high-select)	;reads oa-reg-high (rev 15)
 	((M-E) ADD M-2 A-1)				;RELATIVE WORD ADDRESS
 	(POPJ-AFTER-NEXT (M-E) ADD M-E A-TV-SCREEN-BUFFER-ADDRESS)
        ((M-T) (BYTE-FIELD 5 0) M-TEM)			;BIT PART OF X POSITION
@@ -336,7 +337,8 @@ X-DRAW-RECTANGLE (MISC-INST-ENTRY %DRAW-RECTANGLE)
 	    (ERROR-TABLE CALLS-SUB %DRAW-RECTANGLE)
 	((M-D) Q-POINTER C-PDL-BUFFER-POINTER-POP)	;HEIGHT IN RASTER LINES
 XTVERS5	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
-	((M-C) DPB C-PDL-BUFFER-POINTER-POP Q-POINTER A-ZERO)	;WIDTH IN BITS
+	((M-C) DPB C-PDL-BUFFER-POINTER-POP Q-POINTER A-ZERO oa-low-select)	;WIDTH IN BITS
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	;; Fix up tag field
 	((M-C) SELECTIVE-DEPOSIT M-C Q-POINTER (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	(JUMP-EQUAL M-D A-ZERO XFALSE)			;DO NOTHING IF HEIGHT IS ZERO
@@ -347,7 +349,7 @@ XTVERS5	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)
 	((M-Q) (BYTE-FIELD 5 0) (M-CONSTANT -1))	;37 ;LOAD HANDY CONSTANT, USED LATER
 	((M-K) SUB M-Q A-T)				;BYTL-1 FOR FIRST WORD
 	((OA-REG-LOW) DPB M-K OAL-BYTL-1 A-T)		;GET MASK FOR BITS IN LEFT OF 1ST WD
-	((M-K) DPB (M-CONSTANT -1) (BYTE-FIELD 0 0) A-ZERO)
+	((M-K) DPB (M-CONSTANT -1) (BYTE-FIELD 0 0) A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-EQUAL-XCT-NEXT M-C A-ZERO XTVERS3)	;JUMP IF NARROW (LESS THAN 1 WORD)
 XTVERS0((M-B) M-D)					;COPY OF HEIGHT
 ;	(CALL-LESS-THAN M-E A-TV-SCREEN-BUFFER-ADDRESS TRAP)
@@ -369,7 +371,7 @@ XTVERS1	(CHECK-PAGE-READ-NO-INTERRUPT)			;DO FIRST COLUMN
 	(call-greater-or-equal-unsigned vma a-tv-screen-buffer-end-address trap)	;quux revision 14: unsigned (contract g3 revision 14, 10.1)
   (ERROR-TABLE TV-ERASE-OFF-SCREEN)			;This is special.
 	((OA-REG-LOW) M-J)
-	((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-K)
+	((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-K oa-low-select)	;reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 	((M-B) SUB M-B (A-CONSTANT 1))
 	(JUMP-LESS-OR-EQUAL M-B A-ZERO XTVERS2)		;JUMP IF COLUMN ALL DONE
@@ -385,7 +387,7 @@ XTVERS3	((M-B) AND C-PDL-BUFFER-POINTER-POP A-Q)	;NUMBER BITS TO DO IN LAST COLU
 	(JUMP-EQUAL M-B A-ZERO XFALSE)			;NO LAST COLUMN, RETURN NIL
 	((M-B) SUB M-B (A-CONSTANT 1))
 	((OA-REG-LOW) DPB M-B OAL-BYTL-1 A-ZERO)	;CLEAR THAT MANY BITS ON THE LEFT
-	((M-K) (BYTE-FIELD 0 0) M-K)
+	((M-K) (BYTE-FIELD 0 0) M-K oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP XTVERS0)
 
 ;;;Line drawing
@@ -441,7 +443,8 @@ TVDRL2	((M-K) SUB M-R A-S)				;M-K flag for DY>DX
 	((M-R) M-C)
 TVDRL3	((M-A) (BYTE-FIELD (DIFFERENCE Q-POINTER-WIDTH 1) 1) M-R)	;M-A <length of long side>/2
 	((OA-REG-LOW) A-TV-SCREEN-BUFFER-PIXEL-SIZE-MROT)	;Log of pixel size
-	((M-2) DPB (M-CONSTANT -1) (BYTE-FIELD 1 0) A-ZERO)	;Number of bits in pixel
+	((M-2) DPB (M-CONSTANT -1) (BYTE-FIELD 1 0) A-ZERO oa-low-select)	;Number of bits in pixel
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((M-1) SUB M-2 (A-CONSTANT 1))
 	((M-1) DPB M-1 OAL-BYTL-1 A-ZERO)		;Position for hardware byte size
 	(JUMP-EQUAL M-ZERO A-DRAW-LINE-DRAW-FIRST-POINT TVDRL7)	;Skip first point?
@@ -452,9 +455,11 @@ tvdrl4	(jump-less-than-unsigned m-e a-tv-screen-buffer-address tvdrl7) ;Clip	;qu
 	((VMA-START-READ) M-E)				;get data
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) DPB M-T OAL-MROT A-1)		;bit offset
-       ((M-TEM) SELECTIVE-DEPOSIT (BYTE-FIELD 0 0) (M-CONSTANT -1))	;M-TEM byte to twiddle
+       ((M-TEM) SELECTIVE-DEPOSIT (BYTE-FIELD 0 0) (M-CONSTANT -1) oa-low-select)	;M-TEM byte to twiddle
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((OA-REG-LOW) M-J)				;ALU
-       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-TEM)	;munge it
+       ((WRITE-MEMORY-DATA-START-WRITE) SETZ READ-MEMORY-DATA A-TEM oa-low-select)	;munge it
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 TVDRL7	(JUMP-GREATER-THAN-XCT-NEXT M-C (A-CONSTANT 1) TVDRL8)	;lots more to do
        ((M-C) SUB M-C (A-CONSTANT 1))
@@ -548,7 +553,7 @@ BITBLT-1	;Now get the width, check for negative
 	(DISPATCH Q-DATA-TYPE C-PDL-BUFFER-POINTER TRAP-UNLESS-FIXNUM)
 	    (ERROR-TABLE ARGTYP FIXNUM PP 1)
 	((OA-REG-LOW) M-K)				;Convert from bytes to bits
-	((M-1) DPB C-PDL-BUFFER-POINTER-POP A-ZERO)
+	((M-1) DPB C-PDL-BUFFER-POINTER-POP A-ZERO oa-low-select)	;reads oa-reg-low (rev 15)
 	(JUMP-IF-BIT-SET-XCT-NEXT BOXED-SIGN-BIT M-1 BITBLT-RTL) ;Neg width means right to left
        ((A-ALUF) DPB C-PDL-BUFFER-POINTER-POP OAL-ALUF)	;Alu function
 	((A-BITBLT-HOR-COUNT) SUB M-ZERO A-1)		;Sign-extended negative width
@@ -737,15 +742,16 @@ BITBLT-INNER-3		;This is the inner inner loop
 	((VMA-START-READ M-1) ADD M-1 A-B)		;Fetch source word
 	(CHECK-PAGE-READ)
 	((OA-REG-LOW) DPB M-I OAL-MROT A-ZERO)		;Rotate it into position (mod 40)
-	((A-BITBLT-TEM) (BYTE-FIELD 32. 0) READ-MEMORY-DATA)
+	((A-BITBLT-TEM) (BYTE-FIELD 32. 0) READ-MEMORY-DATA oa-low-select)	;reads oa-reg-low (rev 15)
 	((VMA-START-READ M-2) ADD M-2 A-E)		;Fetch destination word
 	(CHECK-PAGE-READ-NO-INTERRUPT)
 	((OA-REG-LOW) A-ALUF)				;ALU func
-	((M-TEM) SETZ READ-MEMORY-DATA A-BITBLT-TEM)	;Combine source and dest
+	((M-TEM) SETZ READ-MEMORY-DATA A-BITBLT-TEM oa-low-select)	;Combine source and dest
+	;the oa-low-select above reads oa-reg-low (rev 15)
 	((A-TEM1) READ-MEMORY-DATA)			;Get onto A side
 	((OA-REG-LOW) M-K)				;Store back under byte control
 	((WRITE-MEMORY-DATA-START-WRITE)
-		SELECTIVE-DEPOSIT M-TEM (BYTE-FIELD 0 0) A-TEM1)
+		SELECTIVE-DEPOSIT M-TEM (BYTE-FIELD 0 0) A-TEM1 oa-low-select)	;reads oa-reg-low (rev 15)
 	(CHECK-PAGE-WRITE)
 	(JUMP-GREATER-THAN-XCT-NEXT M-4 (A-CONSTANT 1) BITBLT-INNER-3)
        ((M-4) SUB M-4 (A-CONSTANT 1))
@@ -793,11 +799,11 @@ BITBLT-DECODE-ARRAY
 	(CALL-XCT-NEXT DIV)
        ((M-2) Q-POINTER M-D)
 	((OA-REG-LOW) M-3)				;Rotate first dimension left
-	((M-1) (BYTE-FIELD 32. 0) M-2)
+	((M-1) (BYTE-FIELD 32. 0) M-2 oa-low-select)	;reads oa-reg-low (rev 15)
 	((M-2) (BYTE-FIELD 5 0) M-1)			;Width must be multiple of 32 bits
 	(CALL-NOT-EQUAL M-2 A-ZERO TRAP)
 	    (ERROR-TABLE BITBLT-ARRAY-FRACTIONAL-WORD-WIDTH M-A)
 	((OA-REG-LOW) M-3)				;Convert X coordinate to bits
-	(POPJ-AFTER-NEXT (M-Q) (BYTE-FIELD 32. 0) M-Q)
+	(POPJ-AFTER-NEXT (M-Q) (BYTE-FIELD 32. 0) M-Q oa-low-select)	;reads oa-reg-low (rev 15)
        ((M-A) Q-POINTER VMA)				;Word address of selected bit
 ))
