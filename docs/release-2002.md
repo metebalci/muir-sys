@@ -1150,6 +1150,30 @@ tree assembles for revision 14 too, which the boards run until then.
   and PROM carry their selects ("The microcode and the boot PROM", below)
   and pass; `ua:*oa-select-check-refuses*` nil (`:1057`) prints the breaches
   and writes the files all the same, for measuring only.
+- **The profile pass** (appendix A15b.8; `profile-pass`,
+  `sys/sys/cadrlp.lisp`, run after the checks on every revision-15 assembly
+  of the microcode) reads the profile, `sys/ucadr/ucadr-profile.text`: one
+  line a site, keyed by the nearest preceding label and an octal offset. It
+  sets H, `<48>`, on a conditional jump whose majority transfers, and a
+  dispatch's predicted address, `<61:48>`, with P and R inverted in `<62>`
+  and `<63>`. A key not found, or found on a word of another class, gives
+  zero, and so does H with `oa-low-select`. From the word itself it sets the
+  PDL address field (E `<48>`, B `<50:49>`, D `<58:51>`) of every ALU word
+  that writes PDL-INDEX with `M-AP`, the PDL pointer or PDL-INDEX plus an A
+  constant, or `A-LOCALP` plus an M constant, D within −128 to 127 and no
+  select (A15b.2; `pdl-field-of`): 82 words of microcode 2002. It reports
+  the share of the profile's conditional jumps' and dispatches' executions
+  it covers. `check-extension` then refuses an extension that breaks A15b.2's
+  rules (`extension-breaches`). Revision 14's assembly is unchanged.
+- **The profile** (`sys/ucadr/ucadr-profile.text`) is muir-sim's profile
+  harness's on microcode 2002 for revision 15 as merged, `rtl`, 32 MW, the
+  twelve workloads and bitblt: 1,422 conditional jumps and 376 dispatches
+  that ran, 83,247,856 and 50,955,858 executions, the record predicting
+  96.07% and 69.11% of them. Every record lands on a word of its class, so
+  the pass covers all of their executions: it sets H on 363 jumps and a
+  predicted transfer on 140 dispatches (64 jumps, 35 calls, 41 returns),
+  and leaves the other 1,059 jumps and 236 dispatches at zero, their
+  fall-through or drop-through prediction.
 - **`tools/assembler-check`** gains `rev15`, `oa-select` and the checks
   under "The checks" below (its README), with the fixture `lisp/oasel.lisp`;
   **`tools/cross-build`**
@@ -1369,8 +1393,12 @@ tree assembles for revision 14 too, which the boards run until then.
   `map-after-start-return-slot`, `ADDRESS-SPACE-MAP-STORE` as MIT wrote it,
   is refused. `md-after-start` finds each of seven planted `MD` writes, after
   reads, writes and the fetch, and not their controls.
-  `a-memory-head-room` is refused; `tree` is its control. The other checks
-  assemble the tree at 14, as before.
+  `a-memory-head-room` is refused; `tree` is its control. `profile` runs
+  the profile pass with a hand-made profile and holds each hint, each
+  predicted target, each key not found or on another class, three PDL
+  address fields and the report, and `extension-breaches` finds each of
+  three planted breaches of A15b.2's rules; `rev15` holds the extension by
+  class. The other checks assemble the tree at 14, as before.
 - **The boot and the warm boot.** On muir-sim's `micro` engine at revision
   15, the PROM loads microcode 2002 and System 2002 reaches its listener. A
   value set before a warm boot (Control-Meta-Return) reads back after it, on

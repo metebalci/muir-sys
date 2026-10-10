@@ -101,6 +101,12 @@ CHECKS = {
     # the tree's microcode at revisions 14 and 15, their <47:0> equal word for
     # word, the dispatch, A memory and symbol area equal (until release-2002)
     'dual': dict(rev=15, plant=None, refused=None),
+    # the profile pass (appendix A15b.8): with profile/hand.text as the
+    # tree's profile, each line's hint or predicted target is set where its
+    # key lands on a word of its class, and nothing else is; a key not found,
+    # or on another class, gives zero; the PDL address field is set from the
+    # word; the pass reports the share of executions it covers
+    'profile': dict(rev=15, plant='profile', refused=None),
     # the WRITE-I-MEM check (appendix A15b.2): the tree's microcode and PROM
     # pass it, and each form or place it refuses, planted in the microcode's
     # image beside XWIPM-I's second write, is found, with controls; and the
@@ -211,6 +217,8 @@ def plant(kind, copy):
         # to 431 and A-PDL-BUFFER-HEAD to 432
         replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'A-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)',
                      b'a-planted-y1\t(0)\nA-PDL-BUFFER-VIRTUAL-ADDRESS\t(0)')
+    elif kind == 'profile':
+        shutil.copy2(os.path.join(HERE, 'profile', 'hand.text'), os.path.join(uc, 'ucadr-profile.text'))
     elif kind == 'a-memory-head-room':
         replace_once(os.path.join(uc, 'uc-parameters.lisp'), b'a-region-area-map\n\t(repeat 100 (-1))\n',
                      b'a-region-area-map\n\t(repeat 100 (-1))\na-planted-y3\n\t(repeat 200 (0))\n')
@@ -489,6 +497,59 @@ MDS_PLANTS = [([], [], 'T'),
                 ('consf1', 0, MDS_MD)], [('consf2', 5)], 'T')]
 
 
+def ext_form(label, offset):
+    """The extension, <63:48>, of the word at LABEL+OFFSET."""
+    return "(ldb #o6020 (aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:%s) %d.)))" % (label, offset)
+
+
+def loc_form(label, offset=0):
+    return "(+ (ua:i-mem-symbol-location 'ua:%s) %d.)" % (label, offset)
+
+
+# The profile check's cases, after the assembly with profile/hand.text: each
+# word's extension (<63:48>: a jump's H in <48>; a dispatch's predicted
+# address in <61:48>, P and R inverted in <62> and <63>; an ALU word's E in
+# <48>, B in <50:49>, D in <58:51>), and the pass's report.
+PROFILE_CASES = [
+    # hints: set by a majority that transfers, not by one that falls through
+    (ext_form('qmlp', 0), '1'),
+    (ext_form('xstacq', 3), '0'),
+    (ext_form('qadr4', 7), '1'),
+    # predicted targets: a call (P 1, R 0: <62> 0, <63> 1), a jump (both 1),
+    # a return (<62> 1, address 0), a drop-through (all 0)
+    ('(= %s (+ %s (expt 2 15.)))' % (ext_form('qmlp', 2), loc_form('xcar')), 'T'),
+    ('(= %s (+ %s (expt 2 14.) (expt 2 15.)))' % (ext_form('xcar', 1), loc_form('xcdr', 3)), 'T'),
+    (ext_form('xldb', 0), str(1 << 14)),
+    (ext_form('xldb', 3), '0'),
+    # a key not found: a target not found leaves the dispatch as it was
+    (ext_form('qadr4', 1), '0'),
+    # keys on another class: the jump at QADR4 stays 0, the ALU word at
+    # CONSF stays 0, and XCAR+1 has its dispatch prediction alone
+    (ext_form('qadr4', 0), '0'),
+    (ext_form('consf', 0), '0'),
+    # nothing else: two jumps with H, three dispatches with a prediction
+    ("(let ((n 0)) (dotimes (x (array-length ua:i-mem)) (let ((w (aref ua:i-mem x))) (when (and w (= (ldb #o5302 w) 1)"
+     " (= (ldb #o6001 w) 1)) (incf n)))) n)", '2'),
+    ("(let ((n 0)) (dotimes (x (array-length ua:i-mem)) (let ((w (aref ua:i-mem x))) (when (and w (= (ldb #o5302 w) 2)"
+     " (not (= (ldb #o1202 w) 2)) (not (zerop (ldb #o6020 w)))) (incf n)))) n)", '3'),
+    # the PDL address field, from the word: SETM M-AP (B 0, D 0), PDL-INDEX
+    # plus 3 (B 3, D 3), M-AP less 2 (B 0, D -2, 376)
+    (ext_form('qafe1', 0), str(1)),
+    (ext_form('qllv-tail-rec-1', 1), str(1 + (3 << 1) + (3 << 3))),
+    (ext_form('mllv1', 7), str(1 + (0o376 << 3))),
+    # the report: conditional jumps' executions covered and in all,
+    # dispatches' the same, and the words given a PDL address field
+    ("(get 'ua:profile-pass 'ua:report)", '(1800 1930 750 840 82)'),
+    # the extension's rules (A15b.2), held after the pass: none broken; H
+    # planted on TRANS-DROP-THROUGH's unconditional jump, E on CONSF's word,
+    # and an address on XLDB+3's drop-through are each found
+    ("(ua:extension-breaches)", 'NIL'),
+] + [("(let* ((loc %s) (old (aref ua:i-mem loc))) (setf (aref ua:i-mem loc) (+ old (expt 2 %d.)))"
+      " (prog1 (equal (mapcar #'car (ua:extension-breaches)) (list loc)) (setf (aref ua:i-mem loc) old)))"
+      % (loc_form(l, o), bit), 'T')
+     for l, o, bit in (('trans-drop-through', 2, 48), ('consf', 0, 48), ('xldb', 3, 49))]
+
+
 def dual_cases(rev):
     """The tree's microcode assembled at REV (check dual)."""
     return '\n'.join(['; tools/assembler-check: dual, revision %d' % rev,
@@ -542,6 +603,8 @@ def cases(check):
         return '\n'.join(lines) + '\n'
     lines.append(assemble_form(version) + (' => T' if c['refused'] is None
                                            else ' =>! %s' % c['refused']))
+    if check == 'profile':
+        lines += ['%s => %s' % (f, want) for f, want in PROFILE_CASES]
     if check == 'map-after-start':
         lines += [mas_plant_form(p, w) + ' => ' + want for p, w, want in MAS_PLANTS]
         # the check refuses what it finds
@@ -570,6 +633,7 @@ def cases(check):
                   "(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL"]
     if check == 'rev15':
         lines += [BREACHES_FORM + ' => "oa-breaches 0 0 0; rule-1 words 0: "',
+                  "(get 'ua:profile-pass 'ua:report) => " + PROFILE_REPORT_15,
                   prom_form(version) + ' => T',
                   BREACHES_FORM + ' => "oa-breaches 0 0 0; rule-1 words 0: "']
     return '\n'.join(lines) + '\n'
@@ -922,6 +986,118 @@ def malformed_15(b):
 # the OA selects the tree's microcode and PROM carry (appendix A15b.15,
 # amendment 1's 1.7): oa-low-select's and oa-high-select's
 SELECTS_15 = {'ucadr.mcr': (129, 30), 'promh.mcr': (8, 0)}
+# the profile pass's hints and predicted targets in the tree's assembly, from
+# sys/ucadr/ucadr-profile.text (made on microcode 2002 for revision 15 by
+# muir-sim's profile harness: 1,422 conditional jumps, 363 of them H, and 376
+# dispatches, 140 of them predicting a transfer), and none in the PROM, which
+# the pass leaves alone; and the pass's report: every record found on a word
+# of its class, so all of the profile's executions covered, and 82 PDL
+# address fields
+PROFILE_15 = {'ucadr.mcr': (363, 140), 'promh.mcr': (0, 0)}
+PROFILE_REPORT_15 = '(83247856 83247856 50955858 50955858 82)'
+
+
+def ext_env(sym_path, amem):
+    """What the PDL address field's rule reads of an assembly: its A and M
+    constants' bounds, M-AP's and A-LOCALP's locations (the .sym) and A
+    memory's words (the constants among them)."""
+    t = open(sym_path, 'rb').read().decode('latin-1')
+    hdr = t[:t.index(')') + 1]
+    num = lambda k: int(re.search(r'\b' + k + r' ([0-7]+)', hdr).group(1), 8)
+    tok = t.split()
+    def sym(n, mem):
+        for i in range(len(tok) - 2):
+            if tok[i] == n and tok[i + 1] == mem:
+                return int(tok[i + 2], 8)
+    return dict(acb=num('A-CONSTANT-BASE'), acl=num('A-CONSTANT-LOC'), mcb=num('M-CONSTANT-BASE'),
+                mcl=num('M-CONSTANT-LOC'), ap=sym('M-AP', 'M-MEM'), localp=sym('A-LOCALP', 'A-MEM'),
+                amem=amem)
+
+
+def pdl_field_of(w, env):
+    """(base, displacement) that appendix A15b.2's rule gives the word W
+    (<47:0>), or None: as the micro-assembler's pdl-field-of (cadrlp)."""
+    if ir(w, 43, 2) != 0 or ir(w, 25, 1) or ir(w, 19, 5) != 0o13 or ir(w, 12, 2) != 1:
+        return None
+    func, carry, a, mfun, msrc = ir(w, 3, 6), ir(w, 2, 1), ir(w, 32, 10), ir(w, 31, 1), ir(w, 26, 5)
+    disp = lambda v: (v & 0o37777) - (0o40000 if v & 0o20000 else 0)
+    base = {(1, 2): 2, (1, 3): 3}.get((mfun, msrc), 0 if (not mfun and msrc == env['ap']) else None)
+    d = None
+    if base is not None:
+        if func == 0o3:
+            d = 0
+        elif func == 0o34:
+            d = carry
+        elif func in (0o31, 0o26) and env['acb'] <= a < env['acl']:
+            c = env['amem'][a]
+            d = disp(c + carry if func == 0o31 else -c - 1 + carry)
+    if d is None and a == env['localp']:
+        if func == 0o5:
+            base, d = 1, 0
+        elif func == 0o31 and not mfun and env['mcb'] <= msrc < env['mcl']:
+            base, d = 1, disp(env['amem'][msrc] + carry)
+    if d is None or not -128 <= d <= 127:
+        return None
+    return base, d
+
+
+def conditional_jump(w):
+    return (ir(w, 43, 2) == 1 and not (ir(w, 8, 1) and ir(w, 9, 1))
+            and not (ir(w, 0, 6) == 0o47 and ir(w, 6, 1) == 1)
+            and not (ir(w, 0, 6) == 0o47 and ir(w, 6, 1) == 0))
+
+
+def extension_census(words, start, env):
+    """The extension by class (appendix A15b.2): the selects, the hints, the
+    predicted targets and the PDL address fields counted, and each breach of
+    its rules, as the micro-assembler's extension-breaches (cadrlp) holds
+    them; ENV None for an image the PDL rule does not apply to (the PROM)."""
+    c = dict(low=0, high=0, hint=0, predicted=0, pdl=0, pdl_missed=0, breaches=[])
+    for i, w in enumerate(words):
+        x, cls = w >> 48, ir(w, 43, 2)
+        low47 = w & ((1 << 48) - 1)
+        f = pdl_field_of(low47, env) if env and cls == 0 else None
+        if f and not (x & 1):
+            c['pdl_missed'] += 1
+        if not x:
+            continue
+        bad = None
+        if cls in (0, 3):
+            sel = (x >> 12) & 3
+            c['low'] += sel & 1; c['high'] += sel >> 1
+            if x & 0o140000 or x & 0o4000:
+                bad = 'bits <63:62> or <59>'
+            elif sel == 3:
+                bad = 'both selects'
+            elif x & 1:
+                if sel or not f or ((x >> 1) & 3, (x >> 3) & 0o377) != (f[0], f[1] & 0o377):
+                    bad = 'E where the rule does not give it'
+                else:
+                    c['pdl'] += 1
+            elif x & 0o3776:
+                bad = 'B or D without E'
+        elif cls == 1:
+            c['low'] += (x >> 12) & 1; c['high'] += (x >> 13) & 1
+            if x & ~0o30001:
+                bad = 'bits a jump does not own'
+            elif x & 1:
+                if not conditional_jump(w) or (x >> 12) & 1:
+                    bad = 'H on a jump that is not conditional, or with oa-low-select'
+                else:
+                    c['hint'] += 1
+        elif ir(w, 10, 2) == 2:
+            if x != 1 << 12:
+                bad = 'a dispatch-memory write with more than its select'
+            else:
+                c['low'] += 1
+        else:
+            if (x >> 14) in (0, 1) and x & 0o37777:
+                bad = 'an address on a drop-through or a return'
+            else:
+                c['predicted'] += 1
+        if bad:
+            c['breaches'].append('%o: %s' % (start + i, bad))
+    return c
 
 
 def check_rev15(out):
@@ -958,13 +1134,22 @@ def check_rev15(out):
 #        ext = [start + i for i, x in enumerate(words) if x >> 48]
 #        lines.append('  words with an extension: %d' % len(ext))
 #        ok &= not ext
-        low = [i for i, x in enumerate(words) if x >> 48 == 1 << 12]
-        high = [i for i, x in enumerate(words) if x >> 48 == 1 << 13]
-        other = [start + i for i, x in enumerate(words) if x >> 48 and x >> 48 not in (1 << 12, 1 << 13)]
+        # the extension by class (A15b.2): the selects, and the profile pass's
+        # fields, the PDL address field on the microcode where its rule gives
+        # it, and a hint or a prediction only where a profile names one
+        env = None if prom else ext_env(os.path.join(out, 'ucadr.sym'), secs[4][1])
+        cen = extension_census(words, start, env)
+        low = [i for i, x in enumerate(words) if (x >> 48) & (1 << 12) and not (ir(x, 43, 2) == 2 and ir(x, 10, 2) != 2)]
+        high = [i for i, x in enumerate(words) if (x >> 48) & (1 << 13) and not (ir(x, 43, 2) == 2 and ir(x, 10, 2) != 2)]
         want = SELECTS_15[name]
-        good = (len(low), len(high)) == want and not other
-        lines.append('  oa-low-select on %d words, oa-high-select on %d (want %d and %d); other extension bits on %d words: %s'
-                     % (len(low), len(high), want[0], want[1], len(other), 'ok' if good else 'WRONG'))
+        good = ((cen['low'], cen['high']) == want and not cen['breaches'] and not cen['pdl_missed']
+                and (cen['hint'], cen['predicted']) == PROFILE_15[name])
+        lines.append('  oa-low-select on %d words, oa-high-select on %d (want %d and %d); hints %d, predicted targets %d'
+                     ' (want %d and %d); PDL address fields %d, missed %d; extension breaches %d: %s'
+                     % (cen['low'], cen['high'], want[0], want[1], cen['hint'], cen['predicted'],
+                        PROFILE_15[name][0], PROFILE_15[name][1], cen['pdl'], cen['pdl_missed'],
+                        len(cen['breaches']), 'ok' if good else 'WRONG'))
+        lines += ['    ' + b for b in cen['breaches'][:10]]
         ok &= good
         def writes(x):
             return ir(x, 43, 2) in (0, 3) and ir(x, 25, 1) == 0 and ir(x, 19, 5) in (0o16, 0o17)
@@ -1027,7 +1212,8 @@ def dual_images(out14, out15):
 
 def dual_differences(one, other):
     """Where the revision-15 assembly differs from the revision-14 one other
-    than in <63:48>, and where its <63:48> holds anything but one select."""
+    than in <63:48> (its extension: the selects, and the profile pass's
+    fields, which rev15 holds to their rules)."""
     (i14, d14, a14, sa14), (i15, d15, a15, sa15) = one, other
     out = []
     for k in range(max(len(i14), len(i15))):
@@ -1035,8 +1221,6 @@ def dual_differences(one, other):
         w15 = i15[k] if k < len(i15) else 0
         if w15 & ((1 << 48) - 1) != w14:
             out.append('I-MEM %o: %016o and %016o' % (k, w14, w15 & ((1 << 48) - 1)))
-        if w15 >> 48 not in (0, 1 << 12, 1 << 13):
-            out.append('I-MEM %o: extension %06o' % (k, w15 >> 48))
     out += ['D-MEM %o' % k for k, (x, y) in enumerate(zip(d14, d15)) if x != y]
     out += ['A-MEM %o' % k for k, (x, y) in enumerate(zip(a14, a15)) if x != y]
     out += ['the symbol area\'s word %o' % k for k, (x, y) in enumerate(zip(sa14, sa15[:len(sa14)])) if x != y]
@@ -1052,7 +1236,7 @@ def check_dual(out):
     select or none; and a planted difference in one word's <47:0> caught."""
     one, other = dual_images(os.path.join(out, 'rev14'), os.path.join(out, 'rev15'))
     diff = dual_differences(one, other)
-    sel = sum(1 for w in other[0] if w >> 48)
+    sel = sum(1 for w in other[0] if (w >> 48) & 0o30000 and not (ir(w, 43, 2) == 2 and ir(w, 10, 2) != 2))
     lines = ['revision 14: %d control store words; revision 15: %d, %d of them with a select'
              % (sum(1 for w in one[0] if w), sum(1 for w in other[0] if w), sel),
              'differences other than the selects: %d' % len(diff)] + ['  ' + d for d in diff[:20]]
@@ -1199,6 +1383,21 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
             bad, more = return_tables(out)
             ok &= not bad
             lines += more
+        elif ok and check == 'profile':
+            for f in ('ucadr.mcr', 'ucadr.sym'):
+                shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))
+            b = open(os.path.join(out, 'ucadr.mcr'), 'rb').read()
+            secs = parse_15(b)
+            start, words = secs[1]
+            cen = extension_census(words, start, ext_env(os.path.join(out, 'ucadr.sym'), secs[4][1]))
+            # profile/hand.text's: H on 2 jumps, a prediction on 3 dispatches
+            good = (cen['hint'], cen['predicted']) == (2, 3) and not cen['breaches'] and not cen['pdl_missed']
+            lines.append('the file: hints %d, predicted targets %d (want 2 and 3); PDL address fields %d, missed %d;'
+                         ' extension breaches %d: %s' % (cen['hint'], cen['predicted'], cen['pdl'],
+                                                         cen['pdl_missed'], len(cen['breaches']),
+                                                         'ok' if good else 'WRONG'))
+            lines += ['  ' + x for x in cen['breaches'][:10]]
+            ok &= good
         elif ok and check == 'return-table-drift':
             for f in ('ucadr.mcr', 'ucadr.sym'):
                 shutil.copy2(os.path.join(served, 'ubin', f), os.path.join(out, f))

@@ -1068,6 +1068,22 @@ and revision-15 assemblies of the tree's microcode to the same `<47:0>`, word
 for word. Boot PROM 2002 for revision 15 reads only revision 15's `.mcr` and
 halts at `ERROR-NOT-REVISION-15` on an earlier machine.
 
+**The profile pass** (appendix A15b.8; `profile-pass`, `sys/sys/cadrlp.lisp`)
+runs on every revision-15 assembly of the microcode, after the checks above.
+It reads the profile, `sys/ucadr/ucadr-profile.text`, made by muir-sim's
+profile harness on this tree's microcode for revision 15. From each line it
+sets a conditional jump's hint, or a dispatch's predicted kind and target,
+its P and R inverted. A key not found, or one on a word of another class,
+gives zero. Without the file it sets no hint and no target. On every word it
+also sets the PDL address field that A15b.2's rule gives the word itself. It
+prints and keeps the share of the profile's executions it covers
+(`(get 'ua:profile-pass 'ua:report)`), and `check-extension` then refuses an
+extension that breaks A15b.2's rules. Revision 14's assembly has no
+extension, so `dual`'s `<47:0>` rule holds. The profile is made again when
+the microcode changes, and its header records the microcode and muir-sim
+commits it came from; `tools/assembler-check`'s `profile` checks the pass
+with a hand-made one.
+
 **Reboot before assembling again.** A second `ua:assemble-system` in the
 same band reuses the source it read the first time, even when the files have
 changed: on 2026-09-23 a second assembly after a source edit came out byte for

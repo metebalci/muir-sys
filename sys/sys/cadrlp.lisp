@@ -758,6 +758,13 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	  (check-map-after-start)
 	  (check-returning-dispatches)
 	  (check-oa-selects))
+	;; quux revision 15 (appendix a15b.8): the profile pass sets the
+	;; extension's predictions and pdl address fields after the checks above,
+	;; which read <61:60> of a transferring dispatch as selects, and the
+	;; extension's own rules are held after it (check-extension)
+	(when (and (target-parameter :extension) (null cons-lap-init-state))
+	  (profile-pass)
+	  (check-extension))
 	(RETURN "Now do (WRITE-VARIOUS-OUTPUTS) and//or (CONS-DUMP-MEMORIES)")))
 
 ;; quux revision 15 (appendix a15b.15): trans-drop-through goes on at the word
@@ -1440,6 +1447,211 @@ or in which a word that writes MD can run right after a memory start."
       (ferror nil "Map-after-start check: ~A (~D breach~:[~;es~])." (caddar m) (length m) (cdr m)))
     (when d
       (ferror nil "MD-after-start check: ~A (~D breach~:[~;es~])." (caddar d) (length d) (cdr d)))))
+
+;; quux revision 15 (appendix a15b.8, a15b.2): the profile pass.  the
+;; profile is a committed text file, sys: ucadr; ucadr-profile text, made by
+;; muir-sim's profile harness on microcode 2002 for revision 15 (the format
+;; is in muir-sim's docs/quux.md).  a line ";" starts is a comment; the first
+;; words of the others:
+;;   profile 1                                   the format
+;;   microcode <version> <...>, muir-sim <...>   where it came from
+;;   jump <key> <h> <executions>                 a conditional jump: h 1 if
+;;                                               its majority transfers
+;;   dispatch <key> <kind> <target> <executions> a dispatch: kind drop, jump,
+;;                                               call or return; target a key,
+;;                                               or - for drop and return
+;; a key is a control store label and an octal offset from it, label+offset,
+;; or the label alone; executions are decimal.  the pass sets h, <48>, on a
+;; conditional jump whose line says 1, and on a transferring dispatch the
+;; predicted address <61:48> and p and r inverted, <62> and <63>, from its
+;; line's kind and target.  a key not found, or found on a word of another
+;; class, gives zero, today's word, and so does h on a jump with
+;; oa-low-select (a15b.2).  without the file only the pdl address fields are
+;; set.  the pdl address field needs no profile: e, <48>, the base b <50:49>
+;; and the displacement d <58:51> of an alu word that writes pdl-index with
+;; m-ap, the pdl pointer or pdl-index on the m side plus an a constant, or
+;; a-localp on the a side plus an m constant, d within -128 to 127, and no
+;; select (a15b.2's rule; pdl-field-of).  the report is the share of the
+;; profile's executions it covers, conditional jumps and dispatches apart,
+;; kept on profile-pass's report property: (jumps-covered jumps
+;; dispatches-covered dispatches pdl-fields).
+(defun profile-pathname ()
+  "The microcode's profile (appendix a15b.8)."
+  (fs:parse-pathname "SYS: UCADR; UCADR-PROFILE TEXT"))
+
+(defun profile-blank-p (ch)
+  (or (eql ch #\space) (eql ch #\tab)))
+
+(defun profile-tokens (line)
+  "LINE's words, split at blanks."
+  (let ((out nil) (i 0) (n (string-length line)))
+    (do () (nil)
+      (do () ((or (>= i n) (not (profile-blank-p (aref line i))))) (setq i (1+ i)))
+      (when (>= i n) (return (nreverse out)))
+      (let ((j i))
+	(do () ((or (>= j n) (profile-blank-p (aref line j)))) (setq j (1+ j)))
+	(push (substring line i j) out)
+	(setq i j)))))
+
+(defun profile-number (string radix)
+  "STRING's value as an unsigned number in RADIX, or nil."
+  (and (plusp (string-length string))
+       (let ((v 0))
+	 (dotimes (i (string-length string) v)
+	   (let ((d (digit-char-p (aref string i) radix)))
+	     (if d (setq v (+ (* v radix) d)) (return nil)))))))
+
+(defun profile-key-location (key)
+  "The control store location KEY, label+offset (octal) or a label, names, or nil."
+  (let* ((plus (string-reverse-search-char #/+ key))
+	 (offset (and plus (profile-number (substring key (1+ plus)) 8.)))
+	 (label (if offset (substring key 0 plus) key))
+	 (sym (intern-soft (string-upcase label) (find-package "UA")))
+	 (loc (and sym (i-mem-symbol-location sym))))
+    (and (numberp loc) (+ loc (or offset 0)))))
+
+(defun profile-conditional-jump-p (w)
+  "Whether the word W is a jump that can transfer on a condition."
+  (and (oa-jump-transfers-p w)
+       (not (and (= (ldb 0006 w) 47) (zerop (ldb 0601 w))))))
+
+(defun m-operand-value (loc)
+  "The value at m memory LOC, from the m constants or a memory."
+  (or (dolist (e m-constant-list) (when (eql (cadr e) loc) (return (car e))))
+      (aref a-mem loc)))
+
+(defun pdl-displacement (v)
+  "V as a 14-bit two's-complement displacement, as pdl-index's (b + d) and 37777 sees it."
+  (let ((d (logand v 37777)))
+    (if (>= d 20000) (- d 40000) d)))
+
+(defun pdl-field-of (w)
+  "The pdl address field a15b.2's rule gives the word W, as (base displacement), or nil:
+w writes pdl-index (functional destination 13) through the alu's output; base 0 m-ap, 2 the
+pdl pointer, 3 pdl-index on the m side with setm, m+carry, or add or sub of an a constant;
+or base 1 a-localp on the a side with seta, or add of an m constant."
+  (let ((ap (let ((v (get 'm-ap 'cons-lap-user-symbol))) (and (eq (car v) 'm-mem) (caddr (cadr v)))))
+	(localp (let ((v (get 'a-localp 'cons-lap-user-symbol)))
+		  (and (eq (car v) 'a-mem) (caddr (cadr v))))))
+    (when (and (= (ldb 5302 w) 0) (zerop (ldb 3101 w)) (= (ldb 2305 w) 13) (= (ldb 1402 w) 1)
+	       (null (oa-selects w)))
+      (let* ((func (ldb 0306 w)) (carry (ldb 0201 w)) (a (ldb 4012 w))
+	     (mfun (= (ldb 3701 w) 1)) (msrc (ldb 3205 w))
+	     (base (cond ((and mfun (= msrc 2)) 2)
+			 ((and mfun (= msrc 3)) 3)
+			 ((and (not mfun) (eql msrc ap)) 0)))
+	     (d nil))
+	(when base
+	  (cond ((= func 3) (setq d 0))
+		((= func 34) (setq d carry))
+		((and (memq func '(31 26)) (>= a a-constant-base) (< a a-constant-loc))
+		 (let ((c (a-operand-value w)))
+		   (when (numberp c)
+		     (setq d (pdl-displacement (if (= func 31) (+ c carry) (+ (- c) -1 carry)))))))))
+	(when (and (null d) (eql a localp))
+	  (cond ((= func 5) (setq base 1 d 0))
+		((and (= func 31) (not mfun) (>= msrc m-constant-base) (< msrc m-constant-loc))
+		 (let ((c (m-operand-value msrc)))
+		   (when (numberp c) (setq base 1 d (pdl-displacement (+ c carry))))))))
+	(and d (>= d -200) (<= d 177) (list base d))))))
+
+(defun profile-set-field (x name value)
+  (setf (aref i-mem x) (dpb value (target-extension-field name) (aref i-mem x))))
+
+(defun profile-pass ()
+  "Sets the extension's predictions from the profile, and the pdl address fields (appendix
+a15b.8); returns the report, (jumps-covered jumps dispatches-covered dispatches pdl-fields)."
+  (let ((jc 0) (jt 0) (dc 0) (dt 0) (pdl 0) (path (profile-pathname)))
+    (when (probef path)
+      (with-open-file (s path :direction :input)
+	(do () (nil)
+	  (multiple-value-bind (line eof) (send s :line-in)
+	    (let ((tokens (and line (not (and (plusp (string-length line)) (eql (aref line 0) #/;)))
+			       (profile-tokens line))))
+	      (cond ((and (equal (car tokens) "jump") (= (length tokens) 4))
+		     (let* ((x (profile-key-location (second tokens)))
+			    (w (and x (oa-word x)))
+			    (n (or (profile-number (fourth tokens) 10.) 0)))
+		       (setq jt (+ jt n))
+		       (when (and w (profile-conditional-jump-p w) (not (memq 0 (oa-selects w))))
+			 (setq jc (+ jc n))
+			 (when (equal (third tokens) "1") (profile-set-field x :hint 1)))))
+		    ((and (equal (car tokens) "dispatch") (= (length tokens) 5))
+		     (let* ((x (profile-key-location (second tokens)))
+			    (w (and x (oa-word x)))
+			    (kind (third tokens))
+			    (target (and (member kind '("jump" "call")) (profile-key-location (fourth tokens))))
+			    (n (or (profile-number (fifth tokens) 10.) 0)))
+		       (setq dt (+ dt n))
+		       (when (and w (oa-dispatch-transfers-p w)
+				  (or (member kind '("drop" "return")) target))
+			 (setq dc (+ dc n))
+			 (cond ((equal kind "jump")
+				(profile-set-field x :predicted-address target)
+				(profile-set-field x :predicted-p-inverted 1)
+				(profile-set-field x :predicted-r-inverted 1))
+			       ((equal kind "call")
+				(profile-set-field x :predicted-address target)
+				(profile-set-field x :predicted-r-inverted 1))
+			       ((equal kind "return")
+				(profile-set-field x :predicted-p-inverted 1))))))))
+	    (when eof (return nil))))))
+    (dotimes (x (array-length i-mem))
+      (let* ((w (aref i-mem x)) (f (and w (pdl-field-of w))))
+	(when f
+	  (setq pdl (1+ pdl))
+	  (profile-set-field x :pdl-field-present 1)
+	  (profile-set-field x :pdl-base (first f))
+	  (profile-set-field x :pdl-displacement (logand (second f) 377)))))
+    (let ((report (list jc jt dc dt pdl)))
+      (putprop 'profile-pass report 'report)
+      (format t "~&profile pass: conditional jumps ~D of ~D executions covered, dispatches ~D of ~D; ~D pdl address fields~%"
+	      jc jt dc dt pdl)
+      report)))
+
+;; quux revision 15 (appendix a15b.2): the extension's rules, held after the
+;; profile pass: zero where its class owns no field and in every bit a field
+;; leaves unused; h only on a conditional jump, and not with oa-low-select;
+;; a transferring dispatch's address zero for a drop-through or a return; a
+;; dispatch-memory write's extension its oa-low-select alone; e only where
+;; the pdl address field's rule gives it, and b and d as it gives them.
+(defun extension-breaches ()
+  "The words whose extension breaks appendix a15b.2's rules: (address text) each."
+  (let ((names (oa-label-names)) (out nil))
+    (dotimes (x (array-length i-mem))
+      (let* ((w (aref i-mem x)) (e (and w (ldb 6020 w))))
+	(when (and e (not (zerop e)))
+	  (let* ((class (ldb 5302 w)) (sel (ldb 1402 e))
+		 (why (cond ((memq class '(0 3))
+			     (let ((f (and (= (ldb 0001 e) 1) (pdl-field-of (dpb 0 6020 w)))))
+			       (cond ((not (zerop (logand e 140000))) "bits <63:62> set")
+				     ((not (zerop (ldb 1301 e))) "bit <59> set")
+				     ((and (zerop (ldb 0001 e)) (not (zerop (ldb 0112 e))))
+				      "a pdl base or displacement without e")
+				     ((and (= (ldb 0001 e) 1) (not (zerop sel))) "e with a select")
+				     ((and (= (ldb 0001 e) 1)
+					   (not (and f (= (ldb 0102 e) (first f))
+						     (= (ldb 0310 e) (logand (second f) 377)))))
+				      "e where the pdl address field's rule does not give it"))))
+			    ((= class 1)
+			     (cond ((not (zerop (logand e (lognot 30001)))) "bits a jump does not own set")
+				   ((and (= (ldb 0001 e) 1) (not (profile-conditional-jump-p w)))
+				    "h on a jump that is not conditional")
+				   ((and (= (ldb 0001 e) 1) (= (ldb 1401 e) 1)) "h with oa-low-select")))
+			    ((= (ldb 1202 w) 2)
+			     (unless (= e 10000) "a dispatch-memory write with an extension other than its select"))
+			    (t (let ((pr (ldb 1602 e)))
+				 (and (memq pr '(0 1)) (not (zerop (ldb 0016 e)))
+				      "a predicted address on a drop-through or a return"))))))
+	    (when why
+	      (push (list x (format nil "~A: ~A" (oa-word-name x names) why)) out))))))
+    (nreverse out)))
+
+(defun check-extension ()
+  "Refuses an assembly whose extension breaks appendix a15b.2's rules."
+  (let ((b (extension-breaches)))
+    (when b
+      (ferror nil "Extension check: ~A (~D breach~:[~;es~])." (cadar b) (length b) (cdr b)))))
 
 (DEFUN FILE-TEST-ALWAYS (F1 F2) F1 F2 T)
 

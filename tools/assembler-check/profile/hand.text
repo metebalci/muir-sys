@@ -1,0 +1,23 @@
+; tools/assembler-check: a hand-made profile (appendix A15b.8's format), for
+; the check profile.  Keys are labels of microcode 2002 for revision 15 and
+; octal offsets; the counts are made up.
+profile 1
+microcode 2002 hand-made
+muir-sim none
+; conditional jumps: H set at QMLP and QADR4+7; XSTACQ+3's majority falls
+; through, so it stays 0
+jump QMLP 1 1000
+jump XSTACQ+3 0 500
+jump QADR4+7 1 300
+; dispatches: a call, a jump, a return and a drop-through
+dispatch QMLP+2 call XCAR 400
+dispatch XCAR+1 jump XCDR+3 200
+dispatch XLDB return - 100
+dispatch XLDB+3 drop - 50
+; keys not found: the site's label, and a dispatch's target
+jump NO-SUCH-LABEL+3 1 70
+dispatch QADR4+1 jump NO-SUCH-LABEL 60
+; keys on a word of another class: a dispatch, an ALU word, a jump
+jump XCAR+1 1 40
+jump CONSF 1 20
+dispatch QADR4 jump XCAR 30
