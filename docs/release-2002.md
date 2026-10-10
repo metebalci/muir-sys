@@ -1150,6 +1150,12 @@ tree assembles for revision 14 too, which the boards run until then.
   and PROM carry their selects ("The microcode and the boot PROM", below)
   and pass; `ua:*oa-select-check-refuses*` nil (`:1057`) prints the breaches
   and writes the files all the same, for measuring only.
+- **D is enabled on revision 15** (appendix A15b.9; `RESET-MACHINE`,
+  `sys/ucadr/uc-cold-disk.lisp:150`): the MACRO-DISPATCH register is written
+  with D's enable, `<30>`, beside the enable, `<31>`, on a machine of
+  revision 15 or later (MACHINE-ID's `<15:4>`, read at run time, as
+  `XWIPM-I` reads it), so that a return that needs a fetch fuses on the
+  fetched word. Revisions 14 and 15 assemble the same `<47:0>`.
 - **The main-loop return check** (contract H8a 3.3; the D-timing ruling;
   `check-main-loop-return-slots`, `sys/sys/cadrlp.lisp`): on revision 15 the
   micro-assembler refuses a word that can run as the delay slot of a

@@ -143,10 +143,24 @@ reset-machine-macro-dispatch-fill
 	;; the main loop, qmlp, whose word a return pops (a-main-dispatch); and
 	;; a-localp's and m-ap's addresses, for the operand address (contract h8a
 	;; section 3.4); with the enable, <31>.
-	((macro-dispatch-register) dpb (m-constant -1) (byte-field 1 31.)
+;	((macro-dispatch-register) dpb (m-constant -1) (byte-field 1 31.)
+;		(a-constant (plus (i-mem-loc qmlp)
+;				  (byte-value (byte-field 10. 14.) (a-mem-loc a-localp))
+;				  (byte-value (byte-field 5 24.) (m-mem-loc m-ap)))))
+	;; quux revision 15 (contract g3 revision 15, a15b.9): and d's enable,
+	;; <30>, on a machine of revision 15 or later, machine-id's <15:4> read
+	;; here, so that a return that needs a fetch fuses on the fetched word.
+	;; the same word for revisions 14 and 15 (dual), the bit chosen at run
+	;; time as xwipm-i chooses its halves.
+	((m-1) dpb (m-constant -1) (byte-field 1 31.)
 		(a-constant (plus (i-mem-loc qmlp)
 				  (byte-value (byte-field 10. 14.) (a-mem-loc a-localp))
 				  (byte-value (byte-field 5 24.) (m-mem-loc m-ap)))))
+	((m-tem) (byte-field 12. 4) machine-id)	;the machine's revision
+	(jump-less-than m-tem (a-constant 15.) reset-machine-macro-dispatch-register)
+	((m-1) dpb (m-constant -1) (byte-field 1 30.) a-1)	;d's enable
+reset-machine-macro-dispatch-register
+	((macro-dispatch-register) m-1)
 	;; the hardware keeps copies of a-localp and m-ap for the operand
 	;; address, taken from every write of the addresses the register names
 	;; and never read back from a and m memory (contract h8a section 3.4).
