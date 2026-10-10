@@ -1031,14 +1031,14 @@ def malformed_15(b):
 # amendment 1's 1.7): oa-low-select's and oa-high-select's
 SELECTS_15 = {'ucadr.mcr': (129, 30), 'promh.mcr': (8, 0)}
 # the profile pass's hints and predicted targets in the tree's assembly, from
-# sys/ucadr/ucadr-profile.text (made on microcode 2002 for revision 15 by
-# muir-sim's profile harness: 1,422 conditional jumps, 363 of them H, and 376
-# dispatches, 140 of them predicting a transfer), and none in the PROM, which
-# the pass leaves alone; and the pass's report: every record found on a word
-# of its class, so all of the profile's executions covered, and 82 PDL
-# address fields
-PROFILE_15 = {'ucadr.mcr': (363, 140), 'promh.mcr': (0, 0)}
-PROFILE_REPORT_15 = '(83247856 83247856 50955858 50955858 82)'
+# sys/ucadr/ucadr-profile.text (made on microcode 2002 for revision 15, D on,
+# by muir-sim's profile harness: 1,405 conditional jumps, 359 of them H, and
+# 376 dispatches, 140 of them predicting a transfer), and none in the PROM,
+# which the pass leaves alone; and the pass's report: every record found on
+# a word of its class, so all of the profile's executions covered, and 82
+# PDL address fields
+PROFILE_15 = {'ucadr.mcr': (359, 140), 'promh.mcr': (0, 0)}
+PROFILE_REPORT_15 = '(72822600 72822600 32404727 32404727 82)'
 
 
 def ext_env(sym_path, amem):

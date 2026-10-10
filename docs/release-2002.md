@@ -1183,13 +1183,13 @@ tree assembles for revision 14 too, which the boards run until then.
   it covers. `check-extension` then refuses an extension that breaks A15b.2's
   rules (`extension-breaches`). Revision 14's assembly is unchanged.
 - **The profile** (`sys/ucadr/ucadr-profile.text`) is muir-sim's profile
-  harness's on microcode 2002 for revision 15 as merged, `rtl`, 32 MW, the
-  twelve workloads and bitblt: 1,422 conditional jumps and 376 dispatches
-  that ran, 83,247,856 and 50,955,858 executions, the record predicting
-  96.07% and 69.11% of them. Every record lands on a word of its class, so
-  the pass covers all of their executions: it sets H on 363 jumps and a
+  harness's on microcode 2002 for revision 15 with D on, `rtl`, 32 MW, the
+  twelve workloads and bitblt: 1,405 conditional jumps and 376 dispatches
+  that ran, 72,822,600 and 32,404,727 executions, the record predicting
+  95.91% and 77.82% of them. Every record lands on a word of its class, so
+  the pass covers all of their executions: it sets H on 359 jumps and a
   predicted transfer on 140 dispatches (64 jumps, 35 calls, 41 returns),
-  and leaves the other 1,059 jumps and 236 dispatches at zero, their
+  and leaves the other 1,046 jumps and 236 dispatches at zero, their
   fall-through or drop-through prediction.
 - **`tools/assembler-check`** gains `rev15`, `oa-select` and the checks
   under "The checks" below (its README), with the fixture `lisp/oasel.lisp`;
