@@ -1,0 +1,17 @@
+; A stack group's saved accumulator holding a DTP-BODY-FORWARD is restored as
+; saved and left alone by the scavenger (sys/ucadr/uc-stack-groups.lisp
+; SG-LOAD-BLOCK-INTO-PDL-BUFFER, uc-storage-allocation.lisp SCAVL3).  Load
+; lisp/sg-saved-body-forward.lisp first.  Microcode that follows the forward
+; from the leader slot meets the DTP-GC-FORWARD the file put where it leads
+; and halts in ILLOP, and the case gets no answer.
+;
+; Preconditions: the husk static, the stack group dynamic.
+(sgf-setup) => (T NIL)
+; The control: the stack group resumed with its saved M-A as it left it.
+(funcall *sgf-sg*) => 1
+; Resumed with a body-forward in its saved M-A (SG-LOAD-BLOCK-INTO-PDL-BUFFER).
+(sgf-resume) => 1
+; A flip copies a stack group; its copy gets a body-forward in its saved M-A
+; and is scavenged by the reclaim (SCAVL3), which keeps the word; then it is
+; resumed.
+(sgf-collect) => (T (DTP-BODY-FORWARD T) 1)

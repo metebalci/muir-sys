@@ -421,7 +421,15 @@ SCAVL3	((VMA-START-READ) A-SCAV-PTR)		;Scavenge some Q's
 	(CHECK-PAGE-READ)
 	((A-SCAV-PTR) M+A+1 M-ZERO A-SCAV-PTR)
 	((A-SCAV-COUNT) ADD (M-CONSTANT -1) A-SCAV-COUNT)
+	;; a body-forward is not dispatched.  in a structure-forwarded husk it
+	;; points into the husk, whose header-forward is dispatched; in a stack
+	;; group's leader it is a saved accumulator's word (sglv), which trans-bfwd
+	;; would take as relative to the leader slot, reading an unrelated word and
+	;; transporting it, or halting in illop.
+	((m-tem) q-data-type read-memory-data)
+	(jump-equal m-tem (a-constant (eval dtp-body-forward)) scavl3-1)
 	(DISPATCH TRANSPORT-SCAV READ-MEMORY-DATA)
+scavl3-1
 	(JUMP-GREATER-THAN-XCT-NEXT M-K (A-CONSTANT 1) SCAVL3)
        ((M-K) SUB M-K (A-CONSTANT 1))
 	(JUMP-NOT-EQUAL A-SCAV-COUNT M-ZERO SCAVX) ;M-E too small to finish this object

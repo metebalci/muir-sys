@@ -134,6 +134,42 @@ Every change to a source file carries a comment in that file saying why.
     `tools/system-check`'s `interpreter-closure` and
     `interpreter-closure-scope`, and `mar-range` and `wire-range` with this
     change's Lisp compiled, pass on micro.
+- **A stack group's saved accumulator that holds a body-forward is left as
+  it is** (`SG-LOAD-BLOCK-INTO-PDL-BUFFER`,
+  `sys/ucadr/uc-stack-groups.lisp:170-191`; `SCAVL3`,
+  `sys/ucadr/uc-storage-allocation.lisp:420-434`). `STRUCTURE-INFO` leaves a
+  `DTP-BODY-FORWARD` in `M-A` after it measures a structure-forwarded object
+  (`SINFS-HFWD`, `:1329`), as `%STRUCTURE-TOTAL-SIZE` of a stale pointer to an
+  array that `ADJUST-ARRAY-SIZE` grew by copying does (`ARRAY-PUSH-EXTEND`
+  does that with the array it is given, `sys/sys/qfctns.lisp:2028-2036`), and
+  a process switch saves `M-A` in the stack group's leader. `TRANS-BFWD`
+  (`sys/ucadr/uc-transporter.lisp:260`) takes a body-forward as relative to
+  the address it was read from, so the resume's transport of the leader and
+  the scavenger's, when a flip copies the stack group, followed it from the
+  leader slot to an unrelated word and went on with that word: put it in the
+  register, transported it, or halted in `ILLOP`. On System 1003 a process
+  that measures such a pointer in a loop had a body-forward in its saved
+  `M-A` at 10 samples of 10, which each resume then followed.
+  Both now leave a body-forward as it is. Fixed on `main` in the same way,
+  where the unrelated address lay in no region and halted the machine.
+  `tools/microcode-check`'s new check `sg-saved-body-forward` puts such a
+  word in a stack group's saved `M-A`, built so that the word it leads to is a
+  `DTP-GC-FORWARD`: microcode without the change halts at the resume
+  (`SG-LOAD-BLOCK-INTO-PDL-BUFFER+4`) and, its case run alone, in the
+  reclaim's scavenge of the copied stack group (`SCAVL3+4`); with the change
+  its four cases pass.
+  - The microcode changes (still numbered 1001 until it is released): four
+    control-store words more (`ucadr.locs`: I-memory 30437 to 30443), and
+    `ucadr.tbl` changes. Assembled twice, each on a freshly booted copy of
+    System 1003's band, the four files were the same both times; the outputs,
+    numbered 1001 (sha256):
+    - `ucadr.mcr` `83b4261ba6e956990ff971f933c017d25ac23f60362fcb01c8ee4a5079e94030`
+    - `ucadr.tbl` `9773c26099d7d2b98655e25b7255892f789a61bc03a1a1233594bdce9a625384`
+    - `ucadr.locs` `58967bfcd4b72218f7b4397d084a592ca866e79957a7685bd176f81a85e0f011`
+    - `ucadr.sym` `9fcf092ba40d56e55f2f720ad70623a2ce45d1f8a3423b15b40f0fb497225ccf`
+
+    System 1003's band boots on it, and `tools/microcode-check` (six checks,
+    26 cases) passes on micro and on rtl.
 - **FORMAT forgets the clause strings it gives back**
   (`format-reclaim-clauses`, `sys/io/format.lisp:1276-1292`). The clause
   buffer, `format-clauses-array`, kept for the next call, still held each

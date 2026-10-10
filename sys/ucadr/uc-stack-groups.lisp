@@ -173,7 +173,17 @@ SG-LOAD-BLOCK-INTO-PDL-BUFFER
 	(CHECK-PAGE-READ)
 	(POPJ-LESS-OR-EQUAL M-ZR (A-CONSTANT 0))  ;IN THIS CASE, USELESS READ DONE & IGNORED
 	((M-ZR) SUB M-ZR (A-CONSTANT 1))
+	;; a body-forward is restored as saved, not transported.  a saved
+	;; accumulator can hold one (structure-info leaves one in m-a after a
+	;; structure-forwarded object, sinfs-hfwd, as %structure-total-size of a
+	;; stale pointer to a grown array does; %p-ldb leaves the word it read in
+	;; m-1), and trans-bfwd takes it as relative to where it lies, the leader
+	;; slot: it read the word the forward's offset gives from the slot, an
+	;; unrelated one, and went on with it, or halted in illop.
+	((m-tem) q-data-type read-memory-data)
+	(jump-equal m-tem (a-constant (eval dtp-body-forward)) sg-l-p-b-2)
 	(DISPATCH TRANSPORT-AC READ-MEMORY-DATA)
+sg-l-p-b-2
 	((C-PDL-BUFFER-POINTER-PUSH) READ-MEMORY-DATA)
 SG-L-P-B-1
 	(JUMP-XCT-NEXT SG-LOAD-BLOCK-INTO-PDL-BUFFER)
