@@ -721,6 +721,49 @@ get the new checksums. Labels are cited, in `sys/ucadr/`.
   1,441,792 with the page and the limit, and not after 19,660,800 (300
   arrays) with the page alone (M-b). Above the limit a large cons pays
   MIT's burst (up to 1.1 s in M-b, as unbounded).
+- **A stack group's saved accumulator that holds a body-forward is left as
+  it is** (`SG-LOAD-BLOCK-INTO-PDL-BUFFER`,
+  `sys/ucadr/uc-stack-groups.lisp:173-193`; `SCAVL3`,
+  `sys/ucadr/uc-storage-allocation.lisp:603-616`). `STRUCTURE-INFO` leaves a
+  `DTP-BODY-FORWARD` in `M-A` after it measures a structure-forwarded object
+  (`SINFS-HFWD`, `:2176`), and a process switch saves `M-A` in the stack
+  group's leader. `TRANS-BFWD` (`sys/ucadr/uc-transporter.lisp:321`) takes a
+  body-forward as relative to the address it was read from, so the resume's
+  transport of the leader and the scavenger's, when a young collection
+  copies the stack group, followed it from the leader slot to an unrelated
+  address. With the leader in ephemeral space that address lay in no region,
+  and the page fault's trap, taken where no trap can be, halted the machine
+  in `ILLOP` (PC 24770). The reclaim checker
+  (`tools/system-check/lisp/generational-collector.lisp`) measures every
+  object, a tenured husk among them, and so made C14 (c) of the save checks
+  halt at 1920x1080: the halted stack group's saved `M-A` was a body-forward
+  to a husk's header-forward, and A-PGF-VMA was exactly that forward's
+  target plus the leader slot's offset from the husk. Both now leave a
+  body-forward as it is, as `SCAV-WALK-WORDS` already did. Fixed on the
+  CADR's line in the same way. `tools/microcode-check`'s new check
+  `sg-saved-body-forward` puts such a word in a stack group's saved `M-A`,
+  built so that following it lands on 2^31, in no region: microcode without
+  the change halts at the resume, and with only the resume fixed, in the
+  young collection that copies the stack group (`SCAVL3+4`); with the change
+  its four cases pass, interpreted and compiled. C14's reproducer, the
+  second session's cases on a band the first saved at 1920x1080, halted 6
+  times in 6 and with the change passed 6 in 6 (on the microcode of the
+  hand-over's commit with the change). The profile's record of
+  `SG-LOAD-BLOCK-INTO-PDL-BUFFER`'s dispatch moves with the dispatch, to
+  `+6` (`sys/ucadr/ucadr-profile.text:1745`). Microcode 2002's files
+  changed again, four instructions more: at revision 14 `ucadr.mcr`
+  `435edb07b00457bf31a1db1a3d125a8d9f6d65337ddcc0ea2725a1ec07573afb`, at
+  revision 15 `ucadr.mcr`
+  `01c62e2cbb33f151c5f41c25550dbe6dc321f1f778bf025635998c20d8eaf377`, both
+  with `.tbl` `403027d72b51e911e801ab0d586fc870cade2b4304fd1e0d9b8b6820bb24ab01`,
+  `.locs` `6f8437661b18529ae5a24dfacf9a58376e37412f1ef69d7d2d72b041e4360f60`
+  and `.sym` `a648682a908f23fb779c2fafc9a9bd1c2fbe78acbcee00b3f947cdcef9f89d7a`;
+  `promh.mcr` is unchanged at both. System 2002's band on the revision-14
+  microcode passes step 2's gate on micro and on rtl as before, with the new
+  check and the save checks at 1920x1080 (C14) added to it; at revision 15
+  System 2002 reaches its listener on micro; `tools/assembler-check` passes
+  all 30 checks, its revision-15 counts unchanged (359 hints, 140 predicted
+  targets, every execution of the profile covered).
 
 ### The Lisp side
 

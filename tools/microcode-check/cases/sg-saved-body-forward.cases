@@ -1,0 +1,18 @@
+; A stack group's saved accumulator holding a DTP-BODY-FORWARD is restored as
+; saved and left alone by the scavenger (sys/ucadr/uc-stack-groups.lisp
+; SG-LOAD-BLOCK-INTO-PDL-BUFFER, uc-storage-allocation.lisp SCAVL3).  Load
+; lisp/sg-saved-body-forward.lisp first, interpreted or compiled.  Microcode
+; that follows the forward from the leader slot halts in ILLOP on the page
+; fault in no region (PC 24770 on microcode 2002), and the case gets no answer.
+;
+; Preconditions: the target address is in no region, the husk tenured, the
+; stack group young.
+(sgf-setup) => (T NIL T)
+; The control: the stack group resumed with its saved M-A as it left it.
+(funcall *sgf-sg*) => 1
+; Resumed with a body-forward in its saved M-A (SG-LOAD-BLOCK-INTO-PDL-BUFFER).
+(sgf-resume) => 1
+; A young collection copies a young stack group whose saved M-A is a
+; body-forward (SCAVL3 scavenges the copy's leader), which keeps the word and
+; then resumes.
+(sgf-collect) => (T T (DTP-BODY-FORWARD T) 1)
