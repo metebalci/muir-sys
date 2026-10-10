@@ -1068,6 +1068,16 @@ and revision-15 assemblies of the tree's microcode to the same `<47:0>`, word
 for word. Boot PROM 2002 for revision 15 reads only revision 15's `.mcr` and
 halts at `ERROR-NOT-REVISION-15` on an earlier machine.
 
+**The main-loop return check** (`check-main-loop-return-slots`,
+`sys/sys/cadrlp.lisp`, every revision-15 assembly of the microcode) refuses a
+word that can run as the delay slot of a main-loop return and pushes, pops,
+reads or writes the SPC stack: with the return fused (contract H8a) the stack
+is kept at the return, and unfused it is popped, so such a slot would see two
+different stacks. A main-loop return is a return at call depth 0 of a handler
+the main loop enters (`main-loop-returns`: from `QMLP`'s dispatch, the misc
+instructions' and the symbol area's entries, on past each call at its return
+point). Microcode 2002 has 391 and no such slot, at revisions 14 and 15.
+
 **The profile pass** (appendix A15b.8; `profile-pass`, `sys/sys/cadrlp.lisp`)
 runs on every revision-15 assembly of the microcode, after the checks above.
 It reads the profile, `sys/ucadr/ucadr-profile.text`, made by muir-sim's

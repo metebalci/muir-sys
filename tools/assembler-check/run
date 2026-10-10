@@ -120,6 +120,11 @@ CHECKS = {
     # control; and the assembly refuses ADDRESS-SPACE-MAP-STORE as MIT wrote
     # it, a start in a POPJ's slot
     'map-after-start': dict(rev=15, plant=None, refused=None),
+    # the main-loop return check (contract H8a 3.3; the D-timing ruling): no
+    # word that runs as the delay slot of a main-loop return uses the SPC
+    # stack; the tree's microcode passes it, and three breaches planted in
+    # the image are found, with controls
+    'main-loop-return': dict(rev=15, plant=None, refused=None),
     # the MD-after-start check, in the same pass (no word that writes MD runs
     # right after a memory start or the fetch's, and QMLP to QMLP+3 neither
     # write MD nor read the map): the tree's microcode and PROM pass it, and
@@ -550,6 +555,38 @@ PROFILE_CASES = [
      for l, o, bit in (('trans-drop-through', 2, 48), ('consf', 0, 48), ('xldb', 3, 49))]
 
 
+def mlr_plant_form(plants, want):
+    """As mas_plant_form, for the main-loop return check's breaches."""
+    return mas_plant_form(plants, want).replace('ua:map-after-start-breaches', 'ua:main-loop-return-slot-breaches')
+
+
+# The main-loop return check's cases: the main-loop returns the walk finds
+# (391 in microcode 2002), none whose slot uses the SPC; MKCONT1, a
+# subroutine's POPJ-AFTER-NEXT with a conditional call (CHECK-PAGE-READ) in
+# its slot, is not one; and planted in the image, each found at its slot: the
+# conditional call of SCAV0X+3 in QIPOP-OPERAND+2 (a handler's
+# POPJ-AFTER-NEXT slot), a read of the SPC (functional source 1) in XTRUE+1,
+# a push (functional destination 15) in M-T-TO-STACK+1; controls: a write of
+# VMA in each place.
+MLR_DISTINCT = ("(let ((seen nil)) (dolist (r (ua:main-loop-returns)) (unless (memq (car r) seen) (push (car r) seen)))"
+                " (length seen))")
+MLR_SPC_SOURCE = '(+ (expt 2 31.) (expt 2 26.))'
+MLR_PUSH = '(* #o15 (expt 2 19.))'
+MLR_CALL = "(aref ua:i-mem (+ (ua:i-mem-symbol-location 'ua:scav0x) 3.))"
+MLR_CASES = [
+    (MLR_DISTINCT, '391'),
+    ("(mapcar #'car (ua:main-loop-return-slot-breaches))", 'NIL'),
+    ("(and (assq %s (ua:main-loop-returns)) t)" % loc_form('mkcont1'), 'NIL'),
+    ("(not (null (ua:uses-spc-p (aref ua:i-mem %s))))" % loc_form('mkcont1', 1), 'T'),
+] + [(mlr_plant_form(p, w), 'T') for p, w in (
+    ([('qipop-operand', 2, MLR_CALL)], [('qipop-operand', 2)]),
+    ([('qipop-operand', 2, MDS_VMA)], []),
+    ([('xtrue', 1, MLR_SPC_SOURCE)], [('xtrue', 1)]),
+    ([('xtrue', 1, MDS_VMA)], []),
+    ([('m-t-to-stack', 1, MLR_PUSH)], [('m-t-to-stack', 1)]),
+    ([('m-t-to-stack', 1, MDS_VMA)], []))]
+
+
 def dual_cases(rev):
     """The tree's microcode assembled at REV (check dual)."""
     return '\n'.join(['; tools/assembler-check: dual, revision %d' % rev,
@@ -562,6 +599,7 @@ def dual_cases(rev):
                      # too, which only revision 15 runs as it assembles
                      + (["(mapcar #'car (ua:map-after-start-breaches)) => NIL",
                          "(mapcar #'car (ua:md-after-start-breaches)) => NIL",
+                         "(mapcar #'car (ua:main-loop-return-slot-breaches)) => NIL",
                          "(mapcar #'car (ua:write-i-mem-breaches)) => NIL",
                          prom_form(2002) + ' => T',
                          "(mapcar #'car (ua:map-after-start-breaches)) => NIL",
@@ -603,6 +641,12 @@ def cases(check):
         return '\n'.join(lines) + '\n'
     lines.append(assemble_form(version) + (' => T' if c['refused'] is None
                                            else ' =>! %s' % c['refused']))
+    if check == 'main-loop-return':
+        lines += ['%s => %s' % (f, want) for f, want in MLR_CASES]
+        # the check refuses what it finds
+        lines += ["(let* ((loc %s) (old (aref ua:i-mem loc))) (setf (aref ua:i-mem loc) %s)"
+                  " (unwind-protect (ua:check-main-loop-return-slots) (setf (aref ua:i-mem loc) old)))"
+                  " =>! (QIPOP-OPERAND+2), the delay slot of the main-loop return" % (loc_form('qipop-operand', 2), MLR_CALL)]
     if check == 'profile':
         lines += ['%s => %s' % (f, want) for f, want in PROFILE_CASES]
     if check == 'map-after-start':

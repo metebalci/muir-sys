@@ -1150,6 +1150,17 @@ tree assembles for revision 14 too, which the boards run until then.
   and PROM carry their selects ("The microcode and the boot PROM", below)
   and pass; `ua:*oa-select-check-refuses*` nil (`:1057`) prints the breaches
   and writes the files all the same, for measuring only.
+- **The main-loop return check** (contract H8a 3.3; the D-timing ruling;
+  `check-main-loop-return-slots`, `sys/sys/cadrlp.lisp`): on revision 15 the
+  micro-assembler refuses a word that can run as the delay slot of a
+  main-loop return and uses the SPC stack (a POPJ, a call or a return, a
+  dispatch that pushes its own address or has P or R entries, functional
+  source 1 or 14, functional destination 15). A fused return keeps the stack
+  at the return, where an unfused one pops it, so such a slot sees two
+  different stacks. The main-loop returns are found by a walk at call depth 0
+  from the handlers the main loop enters (`main-loop-returns`): 391 in
+  microcode 2002, for revisions 14 and 15, and no slot of theirs uses the
+  stack.
 - **The profile pass** (appendix A15b.8; `profile-pass`,
   `sys/sys/cadrlp.lisp`, run after the checks on every revision-15 assembly
   of the microcode) reads the profile, `sys/ucadr/ucadr-profile.text`: one

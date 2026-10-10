@@ -756,6 +756,7 @@ At 32. bits V as it is.  At 40. bits V if it fits in 40 bits, V + 2^32 if it is 
 	(when (and (target-parameter :oa-select-check) (null cons-lap-init-state))
 	  (check-write-i-mem)
 	  (check-map-after-start)
+	  (check-main-loop-return-slots)
 	  (check-returning-dispatches)
 	  (check-oa-selects))
 	;; quux revision 15 (appendix a15b.8): the profile pass sets the
@@ -1447,6 +1448,121 @@ or in which a word that writes MD can run right after a memory start."
       (ferror nil "Map-after-start check: ~A (~D breach~:[~;es~])." (caddar m) (length m) (cdr m)))
     (when d
       (ferror nil "MD-after-start check: ~A (~D breach~:[~;es~])." (caddar d) (length d) (cdr d)))))
+
+;; quux (contract h8a, 3.3; the d-timing ruling, 10 oct): a fused return to
+;; the main loop keeps the micro stack as it pops it, at the return, and the
+;; main loop's dispatch is skipped; unfused, the stack is popped and the main
+;; loop pushes again.  so a word that runs as the delay slot of a main-loop
+;; return and pushes, pops, reads or writes the spc stack (a popj, a call or
+;; a return, a dispatch that pushes its own address or has p or r entries,
+;; functional source 1 or 14, functional destination 15) sees a different
+;; stack fused and unfused, and is refused.  a main-loop return is a return
+;; at call depth 0 of a handler the main loop enters: the walk starts at the
+;; main loop's dispatch's targets (qmlp+2), the misc instructions' (misc1a's
+;; dispatch on the destination) and every entry of the symbol area, goes on past a call
+;; at its return point (the callee runs deeper), follows a delay slot to the
+;; transfer it fills, and stops at a word that moves the stack by hand
+;; (functional source 14 or destination 15), after which the depth is not 0.
+(defun word-reads-m-p (w)
+  "Whether the word W reads its m source."
+  (let ((class (ldb 5302 w)))
+    (or (not (= class 1))
+	(zerop (ldb 0501 w))
+	(memq (logand (ldb 0005 w) 7) '(1 2 3)))))
+
+(defun moves-spc-by-hand-p (w)
+  "Whether the word W pops the spc stack by functional source 14 or pushes it by destination 15."
+  (or (eql (functional-destination w) 15)
+      (and (word-reads-m-p w) (= (ldb 3701 w) 1) (= (ldb 3205 w) 14))))
+
+(defun uses-spc-p (w)
+  "Why the word W uses the spc stack, or nil."
+  (let ((class (ldb 5302 w)))
+    (cond ((= (ldb 5201 w) 1) "pops it (popj)")
+	  ((and (= class 1) (or (= (ldb 1001 w) 1) (= (ldb 1101 w) 1))) "is a call or a return")
+	  ((and (oa-dispatch-transfers-p w) (= (ldb 3101 w) 1)) "is a dispatch that pushes its own address")
+	  ((and (oa-dispatch-transfers-p w)
+		(dolist (e (oa-dispatch-entries w))
+		  (unless (= (ldb 1701 e) (ldb 2001 e)) (return t))))
+	   "is a dispatch with p or r entries")
+	  ((and (word-reads-m-p w) (= (ldb 3701 w) 1) (= (ldb 3205 w) 1)) "reads it (functional source 1)")
+	  ((and (word-reads-m-p w) (= (ldb 3701 w) 1) (= (ldb 3205 w) 14)) "pops it (functional source 14)")
+	  ((eql (functional-destination w) 15) "pushes it (functional destination 15)"))))
+
+(defun main-loop-returns ()
+  "The main-loop returns of the assembled i-mem and the word each one's delay slot runs, or
+nil where it has none: ((return . slot) ...), by a walk at call depth 0 from the handlers the
+main loop enters."
+  (let* ((n (array-length i-mem))
+	 (seen (make-array n))
+	 (work nil) (returns nil)
+	 (qmlp (i-mem-symbol-location 'qmlp))
+	 (misc1a (i-mem-symbol-location 'misc1a)))
+    (let* ((add #'(lambda (a pend)
+		    (when (and (oa-word a) (not (member pend (aref seen a))))
+		      (push pend (aref seen a))
+		      (push (cons a pend) work))))
+	   ;; where control goes after a word: its pending transfers when it
+	   ;; runs as a slot, else TARGETS
+	   (go-on #'(lambda (pend targets)
+		      (dolist (tg (or pend targets)) (funcall add tg nil)))))
+      (when (and qmlp misc1a (oa-word (+ qmlp 2)) (oa-dispatch-transfers-p (aref i-mem (+ qmlp 2))))
+	(dolist (e (oa-dispatch-entries (aref i-mem (+ qmlp 2)))) (funcall add (ldb 0016 e) nil))
+	(dotimes (k 4)
+	  (let ((w (oa-word (+ misc1a k))))
+	    (when (and w (oa-dispatch-transfers-p w))
+	      (dolist (e (oa-dispatch-entries w)) (funcall add (ldb 0016 e) nil)))))
+	(dotimes (k (array-length micro-code-symbol-image))
+	  (let ((loc (aref micro-code-symbol-image k)))
+	    (when (oa-word loc) (funcall add loc nil))))
+	(do () ((null work))
+	  (let* ((state (pop work)) (x (car state)) (pend (cdr state)) (w (aref i-mem x)))
+	    (cond ((moves-spc-by-hand-p w))
+		  ((= (ldb 5201 w) 1)		;popj: the next word is its slot
+		   (unless pend (push (cons x (1+ x)) returns)))
+		  ((oa-jump-transfers-p w)
+		   (let* ((nbit (= (ldb 0701 w) 1)) (tgt (ldb 1416 w))
+			  (cond-p (profile-conditional-jump-p w)))
+		     (cond ((= (ldb 1101 w) 1)		;a return
+			    (unless pend (push (cons x (if nbit nil (1+ x))) returns))
+			    (when cond-p (funcall add (1+ x) nil)))
+			   ((= (ldb 1001 w) 1)		;a call: on at its return point
+			    (funcall go-on pend (list (if nbit (1+ x) (+ x 2))))
+			    (when cond-p (funcall add (1+ x) nil)))
+			   (pend			;a jump in a slot
+			    (dolist (p pend) (if nbit (funcall add tgt nil) (funcall add p (list tgt)))))
+			   (t (cond (nbit (funcall add tgt nil))
+				    ((not (and (oa-word (1+ x)) (moves-spc-by-hand-p (aref i-mem (1+ x)))))
+				     (funcall add (1+ x) (list tgt))))
+			      (when cond-p (funcall add (1+ x) nil))))))
+		  ((oa-dispatch-transfers-p w)
+		   (dolist (e (oa-dispatch-entries w))
+		     (let ((p (ldb 1701 e)) (r (ldb 2001 e)) (nbit (= (ldb 1601 e) 1)) (tg (ldb 0016 e)))
+		       (cond ((and (= p 1) (= r 1)) (if pend (funcall go-on pend nil) (funcall add (1+ x) nil)))
+			     ((= r 1) (unless pend (pushnew (cons x (if nbit nil (1+ x))) returns :test #'equal)))
+			     ((= p 1) (funcall go-on pend (list (cond ((= (ldb 3101 w) 1) x) (nbit (1+ x)) (t (+ x 2))))))
+			     (nbit (funcall add tg nil))
+			     ((not (and (oa-word (1+ x)) (moves-spc-by-hand-p (aref i-mem (1+ x)))))
+			      (funcall add (1+ x) (list tg)))))))
+		  (t (funcall go-on pend (list (1+ x)))))))))
+    (nreverse returns)))
+
+(defun main-loop-return-slot-breaches ()
+  "The words that run as a main-loop return's delay slot and use the spc stack: (address text)."
+  (let ((names (oa-label-names)) (out nil))
+    (dolist (r (main-loop-returns))
+      (let* ((s (cdr r)) (w (and s (oa-word s))) (why (and w (uses-spc-p w))))
+	(when why
+	  (pushnew (list s (format nil "~A, the delay slot of the main-loop return ~A, ~A"
+				   (oa-word-name s names) (oa-word-name (car r) names) why))
+		   out :test #'equal))))
+    (nreverse out)))
+
+(defun check-main-loop-return-slots ()
+  "Refuses an assembly in which a main-loop return's delay slot uses the spc stack (contract h8a, 3.3)."
+  (let ((b (main-loop-return-slot-breaches)))
+    (when b
+      (ferror nil "Main-loop return check: ~A (~D breach~:[~;es~])." (cadar b) (length b) (cdr b)))))
 
 ;; quux revision 15 (appendix a15b.8, a15b.2): the profile pass.  the
 ;; profile is a committed text file, sys: ucadr; ucadr-profile text, made by
