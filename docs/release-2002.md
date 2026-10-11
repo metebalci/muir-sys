@@ -358,6 +358,74 @@ file carries a comment in that file saying why.
   revision 15 System 2002 reaches its listener on micro and on rtl; `tools/assembler-check` passes all
   30 checks, its revision-15 counts unchanged (359 hints, 140 predicted
   targets, every execution of the profile covered).
+- **A call block is opened only below `%SPREAD`'s limit** (`CBM0`,
+  `sys/ucadr/uc-macrocode.lisp:543-553`; `P3ZERO`, `P3ZERO-TOO-LARGE`,
+  `CALL-BLOCK-TOO-LARGE`, `sys/ucadr/uc-call-return.lisp:15-50`). A call
+  block holds its deltas to the active and open blocks in 8 bits
+  (`%%LP-CLS-DELTA-TO-ACTIVE-BLOCK`, `%%LP-CLS-DELTA-TO-OPEN-BLOCK`,
+  `sys/cold/qcom.lisp:628-631`), and the two openers, `CBM0` for macrocode
+  calls and `P3ZERO` for the microcode's calls out to Lisp, stored them with
+  no check: past 255 they wrapped, and the return through the block left
+  the frames in disorder. 64 calls nested in one compiled expression, whose
+  open blocks are 4 words of temporaries each, halted the machine at `TRAP`'s
+  recursive-error `ILLOP` (PC `TRAP+13`); 4 calls nested above a compiled
+  `&rest` frame of 240 arguments halted it at `QMMPO2`'s, in a process too;
+  in a stack group of its own the 64 nested calls signalled a PDL overflow
+  instead. Revision 13's microcode 2001 halts in the same way at 64.
+  Each opener now refuses a block that would make the frame larger than
+  `%SPREAD`'s and `%ASSURE-PDL-ROOM`'s limit, 370 octal (248) words counted
+  as they count it, `PP - AP - 1`, with the block pushed: a delta to the
+  active block, the larger of the two, of at most 249. It signals their
+  error, `STACK-FRAME-TOO-LARGE`; `P3ZERO` pops the word it has already
+  pushed first, and nothing else is changed, so the error is handled as
+  any other and the listener answers afterwards, in a stack group of its own
+  or a process as well. A check at 255 would not do: the error handler's
+  frame, pushed where the refused block would have gone (`SG-SAVE-STATE`,
+  `sys/eh/eh.lisp:250-255`), wraps in the same way, and the listener was
+  lost at every refusal.
+  Now refused, which worked before: 63 nested calls (a delta of 252; 62 is
+  248); a compiled `&rest` function with 4 calls nested above 233 arguments
+  (250; 232 is 249); an interpreted function given 246 to 251 arguments
+  (its entry, `INTP1`, opens `APPLY-LAMBDA`'s block N + 4 words above it;
+  245 is 249), so `APPLY` of an interpreted function now takes at most 245
+  arguments, not 249, and `rev14-fiddles`' interpreted frames 244.
+  The limit that remains: an interpreted function given 252 arguments or
+  more by a compiled caller is refused too, but its frame is already past
+  255 words when its entry opens the block, and the error handler's frame
+  wraps: measured at 252 and 300 arguments, the error is signalled, the
+  throw back to the listener finds no catch, and the listener is lost; the
+  machine does not halt. The compiler does not limit the arguments of a
+  call.
+  `tools/microcode-check`'s new check `call-block-large-frame` opens blocks
+  above such frames each way and at each limit, and in a stack group and a
+  process: microcode without the change fails all ten of its error sections
+  (four halt, six return), one that refuses only past 255 fails all ten
+  (five lose the listener, five return), and with `P3ZERO`'s jump removed
+  three fail; with the change its 22 cases pass on micro and rtl at revisions 14 and
+  15, as do `apply-large-frame`, `rev14-fiddles` and
+  `region-area-map-interrupt`. The two new jumps were never taken in the
+  profile's 13 workloads on revision 15's pipeline at 2 M words (663,177
+  opens) and need no hint: an open costs about two clocks more (1.8 on
+  `calls-ack`, 2.0 on `calls-fib`, where it adds 0.8% to a macroinstruction's
+  clocks), 0.30% of the 13 workloads' clocks. Microcode 2002's files changed again, seven instructions
+  more: at revision 14 `ucadr.mcr`
+  `2a6ee202765bcf0ac6b65c5cdcce5e02056602eae0d17f63fb90c847a45697f4`, at
+  revision 15 `ucadr.mcr`
+  `7dc213f7e82d5761c0a0a40ea03a0dee7cad9be10e2c7ec2fe37c5eab1c3e73e`, both
+  with `.tbl`
+  `0c10806bbd3c8362a2f3af0777edd17c3d49df51f5f339f8ab339eea773c0246`, `.locs`
+  `8df06bad87552c572696b5207b6bf518686153030c666a939ba679d4cd1cd5fb` and
+  `.sym` `40c6085b57e59608968de17467edcef8b632822368359c32e84bd41898e6d424`;
+  `promh.mcr` is unchanged at both. Step 2's gate on revision 15 micro, with
+  System 2002's band on this microcode, gives what it gave at revision 14
+  with FORMAT's change, line for line, but for the new and changed checks
+  above and three lines that differ by how they ran: `generational-rqb` runs
+  once at revision 15's period, not at 4, 5 and 6 ticks; the band's FORMAT
+  is older than its change, so `format-float-digits` passes, 43 of 43, only
+  run with its files as its row says; `eden-default` is run when named.
+  `tools/assembler-check` passes all 30 checks, its revision-15 counts
+  unchanged (359 hints, 140 predicted targets, every execution of the
+  profile covered).
 
 ## Revision 14
 

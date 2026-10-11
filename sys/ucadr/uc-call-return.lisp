@@ -20,6 +20,10 @@ P3ZER1	((M-ZR) ADD PDL-POINTER	;1- because of push just done
 	((A-TEM1) DPB M-TEM (LISP-BYTE %%LP-CLS-DELTA-TO-OPEN-BLOCK)
 		(A-CONSTANT (BYTE-VALUE %%LP-CLS-DESTINATION D-MICRO)))
 	((M-TEM) SUB M-ZR A-AP)
+	((m-tem) pdl-buffer-address-mask m-tem)
+	;; %spread's limit, as %assure-pdl-room counts a frame (pp - ap - 1):
+	;; with this block pushed, at most 370 words, the delta at most 371
+	(jump-greater-than m-tem (a-constant 371) p3zero-too-large)
 	((A-TEM1) DPB M-TEM (LISP-BYTE %%LP-CLS-DELTA-TO-ACTIVE-BLOCK) A-TEM1)
 	((PDL-TOP)		;IOR with LPCLS Q already pushed
 		IOR PDL-TOP A-TEM1)
@@ -29,6 +33,21 @@ P3ZER1	((M-ZR) ADD PDL-POINTER	;1- because of push just done
 	  (PDL-PUSH)
 	    (A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
        ((A-IPMARK) PDL-BUFFER-ADDRESS-MASK M-ZR)	;Caller must push LPFEF Q
+;; a call block opened above a frame past %spread's limit, 370 words with the
+;; block.  its deltas to the active and open blocks have 8 bits
+;; (%%lp-cls-delta-to-active-block, -to-open-block; the delta to the active
+;; block is the larger): past 377 they wrapped, and the return through the
+;; block left the frames in disorder.  the limit leaves the error handler room
+;; for the frame it pushes where the block would have gone (sg-save-state).
+;; cbm0 comes here before it pushes anything, p3zero after its lpcls word,
+;; popped here; nothing else is changed, and the error is %spread's,
+;; stack-frame-too-large.
+p3zero-too-large
+	(jump-xct-next call-block-too-large)
+       ((m-garbage) pdl-pop)		;the lpcls word p3zero pushed
+call-block-too-large
+	(call trap)
+    (error-table stack-frame-too-large)
 
 
 ;;; Calling a function of strange data-type.  Call the interpreter (APPLY-LAMBDA).

@@ -547,6 +547,10 @@ CBM0					;%OPEN-CALL-BLOCK etc. call in here
 	((A-TEM1) DPB M-TEM (LISP-BYTE %%LP-CLS-DELTA-TO-OPEN-BLOCK)
 		(A-CONSTANT (BYTE-VALUE Q-DATA-TYPE DTP-FIX)))
 	((M-TEM) SUB M-ZR A-AP)		;Compute delta to prev active block
+	((m-tem) pdl-buffer-address-mask m-tem)
+	;; %spread's limit, as %assure-pdl-room counts a frame (pp - ap - 1):
+	;; with this block pushed, at most 370 words, the delta at most 371
+	(jump-greater-than m-tem (a-constant 371) call-block-too-large)
 	((A-TEM1) DPB M-TEM (LISP-BYTE %%LP-CLS-DELTA-TO-ACTIVE-BLOCK) A-TEM1)
 	((C-PDL-BUFFER-POINTER-PUSH)	;Push LPCLS Q
 	    DPB M-C (LISP-BYTE %%LP-CLS-DESTINATION) A-TEM1)

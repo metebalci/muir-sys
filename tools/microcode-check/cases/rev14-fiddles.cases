@@ -9,14 +9,15 @@
 ; The control: no alias, the dump and refill meet no eviction.
 (third (si:rev14-d0 200)) => 0
 ; D1: every word of the frame aliases its own stack word's TLB index.  At
-; most 248 args, which APPLY spreads with the hold's first argument: past 249
-; spread arguments, %SPREAD's limit, APPLY signals STACK-FRAME-TOO-LARGE
-; (apply-large-frame); the deep runs below take the frames deeper.
+; most 244 args, which APPLY spreads with the hold's first argument: past 245
+; the interpreted hold's entry opens APPLY-LAMBDA's call block past %SPREAD's
+; limit and signals STACK-FRAME-TOO-LARGE (call-block-large-frame); the deep
+; runs below take the frames deeper.
 (third (si:rev14-d1 200)) => 0
-(third (si:rev14-d1 248)) => 0
+(third (si:rev14-d1 244)) => 0
 ; D2 and R1: the same with SET-MAR on a word of the stack page (status 6).
 (third (si:rev14-d1 200 t)) => 0
-(third (si:rev14-d1 248 t)) => 0
+(third (si:rev14-d1 244 t)) => 0
 ; X1: an extra-PDL bignum above the aliased words, and without the alias.
 (subseq (si:rev14-x1 200) 0 2) => (0 T)
 (subseq (si:rev14-x1 200 nil) 0 2) => (0 T)

@@ -1,0 +1,38 @@
+; Call blocks opened above a large frame (lisp/call-block-large-frame.lisp,
+; which gives the sizes).  A call block holds its deltas to the active and
+; open blocks in 8 bits; past 255 they wrapped, and the return through such a
+; block left the frames in disorder: the machine halted (at TRAP's
+; recursive-error ILLOP, at QMMPO2's or at QMXSG's) and the case got no
+; answer.  The openers, CBM0 and P3ZERO, now signal STACK-FRAME-TOO-LARGE at
+; %SPREAD's limit, a frame of 370 octal (248) words with the new block, and
+; the listener answers afterwards.
+;
+; The controls: the functions compiled, and the largest frames allowed, at
+; the limit itself (a delta of 249) by CBM0 and by P3ZERO.
+(mapcar #'compiled-function-p (list #'cblf-deep-100 #'cblf-rest4 #'cblf-c240 #'cblf-i251 #'cblf-plain)) => (T T T T NIL)
+(cblf-deep-62) => 62
+(cblf-c232) => 236
+(cblf-i245) => 245
+; Nesting in one frame (CBM0): the 63rd call block, the first past the limit.
+(cblf-deep-63) =>! stack frame larger than 256
+(cblf-deep-62) => 62
+(cblf-deep-64) =>! stack frame larger than 256
+(cblf-deep-100) =>! stack frame larger than 256
+(cblf-deep-62) => 62
+; An &rest frame with 4 calls nested above it (CBM0).
+(cblf-c233) =>! stack frame larger than 256
+(cblf-c232) => 236
+(cblf-c240) =>! stack frame larger than 256
+(cblf-c232) => 236
+; An interpreted function given N arguments by a compiled caller: its entry
+; opens APPLY-LAMBDA's call block (P3ZERO).
+(cblf-i246) =>! stack frame larger than 256
+(cblf-i245) => 245
+(cblf-i251) =>! stack frame larger than 256
+(cblf-i245) => 245
+; The error in a stack group of its own, and in a process, caught there.
+(cblf-in-sg #'cblf-deep-64) => :TOO-LARGE
+(cblf-in-sg #'cblf-i246) => :TOO-LARGE
+(cblf-in-process #'cblf-c240) => :TOO-LARGE
+(cblf-in-sg #'cblf-deep-62) => 62
+(cblf-1+ 1) => 2
