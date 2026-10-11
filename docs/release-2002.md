@@ -293,6 +293,24 @@ file carries a comment in that file saying why.
   flip came at 206-213 K words and the fixed loop saw only three. That count
   is left as it is. The new case passes on micro and rtl and fails, as it
   must, with the GC process disabled.
+- **`generational-tuning`'s C31 cases keep tenured collections off**
+  (`tools/system-check/cases/generational-tuning.cases`). C31 (b) conses
+  300,000 words right after a young flip and expects the cons to finish the
+  collection. At 2 M words of main memory the tenured generation has then
+  grown past its growth limit, a quarter of main memory, and when the GC
+  process ran between the young collection's end and the case's read of
+  `%GC-FLIP-READY` it reclaimed and started a tenured collection, and the
+  case read NIL (the revision-14 soak at 2 M words: 1 run in 20 of the
+  check, 3 in 20 of an instrumented copy). The
+  collector did what it should; the case's expectation was wrong. (a) and (b)
+  now run with `SI:GC-TENURED-AUTOMATIC` NIL, set and restored on any exit,
+  and a case after them checks that the setting is the system's again.
+  Forced by a growth limit of 1 word and a scheduler pass after the flip and
+  after the cons, (b) read NIL with one tenured collection started in 6 runs
+  of 6 before the change (2 M and 32 M words), and T in 6 of 6 after it.
+  The check passes 20 runs of 20 at 2 M words on micro at revision 14 and
+  at revision 15, and once on rtl at revision 15; with the restore taken
+  out, the new case fails.
 - **APPLY stops spreading at `%SPREAD`'s limit, with its error** (`UAPLY5`,
   `UAPLY-TOO-LARGE`, `sys/ucadr/uc-call-return.lisp:2150-2185`; MIT's).
   `APPLY` spread its list onto the stack with no size check, unlike `%SPREAD`

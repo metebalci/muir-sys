@@ -71,13 +71,25 @@
 ; cons of 200,000 words (a backlog of about 800,000 units) leaves the
 ; collection running; idle scavenging is inhibited, since the array's page
 ; faults may leave the machine idle.  Fails if a cons scavenges its whole 4n.
+; In (a) and (b) the GC process starts no tenured collection
+; (SI:GC-TENURED-AUTOMATIC NIL, set and not bound, since the GC process reads
+; the global value, and restored on any exit): a tenured collection is due
+; after (b)'s cons by the growth limit when main memory is small (a quarter of
+; 2 M words), and if the GC process ran between the young collection's end
+; and the read of %GC-FLIP-READY it reclaimed and flipped again, and the case
+; read NIL (measured: forced by a growth limit of 1 word and a scheduler pass
+; after the flip and after the cons, at 2 M and 32 M words).
 (defvar *gt-live* nil) => *GT-LIVE*
-(progn (si:gc-on t) (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 200000) si:%gc-flip-ready)) => NIL
+(defvar *gt-auto* :unset) => *GT-AUTO*
+(progn (setq *gt-auto* si:gc-tenured-automatic) t) => T
+(progn (si:gc-on t) (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((auto si:gc-tenured-automatic)) (unwind-protect (progn (setq si:gc-tenured-automatic nil) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 200000) si:%gc-flip-ready)) (setq si:gc-tenured-automatic auto)))) => NIL
 (progn (si:gc-reclaim-oldspace) t) => T
 ; (b) the same with 300,000 words, a backlog of 1.2 M units, over the limit,
 ; finishes it.  Fails without the limit.
-(progn (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 300000) si:%gc-flip-ready)) => T
+(progn (setq *gt-live* nil) (dotimes (i 20000) (push (make-list 5) *gt-live*)) (let ((auto si:gc-tenured-automatic)) (unwind-protect (progn (setq si:gc-tenured-automatic nil) (let ((si:inhibit-idle-scavenging-flag t)) (si:gc-flip-now :young) (make-array 300000) si:%gc-flip-ready)) (setq si:gc-tenured-automatic auto)))) => T
 (progn (setq *gt-live* nil) t) => T
+; and the setting is the system's again
+(eq si:gc-tenured-automatic *gt-auto*) => T
 (progn (si:gc-reclaim-oldspace) t) => T
 ; (c) the committed free space counts the limit over K, 262,144 words, beyond
 ; MIT's rule.  GC-GET-SPACE-SIZES is replaced for the one call by fixed sizes
