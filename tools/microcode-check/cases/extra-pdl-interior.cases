@@ -1,0 +1,14 @@
+; A locative into the middle of an extra-pdl object is copied out with the
+; object (sys/ucadr/uc-transporter.lisp, EXTRA-PDL-TRAP).  Load
+; lisp/extra-pdl-interior.lisp first, interpreted or compiled.  Microcode that
+; reads the copy's header at the locative's address, 2^63's second digit, 0,
+; halts in ILLOP at SINF-FLO, and the case gets no answer.
+;
+; The control and preconditions: the bignum lies in the extra pdl, its digit
+; reads the same through a locative, and the word is 0.
+(epi-control 2097152) => (T T T)
+; The locative stored into an array (EXTRA-PDL-TRAP from the write test).
+(epi-store 2097152) => (T T T)
+; The locative held across a stack-group switch (EXTRA-PDL-TRAP-0, from the
+; pdl buffer's dump).
+(epi-hold 2097152) => (T (T T T))

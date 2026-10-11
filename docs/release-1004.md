@@ -170,6 +170,36 @@ Every change to a source file carries a comment in that file saying why.
 
     System 1003's band boots on it, and `tools/microcode-check` (six checks,
     26 cases) passes on micro and on rtl.
+- **A locative into the middle of an extra-pdl object is copied out with the
+  object** (`EXTRA-PDL-TRAP-2`, `sys/ucadr/uc-transporter.lisp:482-505`;
+  `TRANS-COPY-1K`, `:296-302`). A bignum made by arithmetic lies in
+  `EXTRA-PDL-AREA` until it is stored. When a pointer into it is stored, or
+  dumped from the pdl buffer at a stack-group switch, the write test calls
+  `EXTRA-PDL-TRAP`, which copies the object with `TRANS-COPY` and then reads
+  the copy's header to find its boxed words. MIT's trap read that header at
+  the copy of the pointer stored, which for a locative to one of the
+  bignum's digits is that digit: `SINFSH` dispatched on the digit's
+  header-type bits, so bits that name no header type halted the machine in
+  `ILLOP` (`SINF-FLO`) and any other gave a wrong number of boxed words,
+  which the trap then write-tested. `TRANS-COPY` now leaves the copy's first
+  word in `A-TRANS-TEM`, and the trap reads the header there. Fixed on
+  `main` in the same way. `tools/microcode-check`'s new check
+  `extra-pdl-interior` stores a locative to 2^63's second digit, a word of
+  0, into an array and holds one across a stack-group switch: microcode
+  without the change halts at `SINF-FLO` on micro and rtl, and with it the
+  three cases pass.
+  - The microcode changes (still numbered 1001 until it is released): one
+    control-store instruction more (`ucadr.locs`: I-memory 30443 to 30444),
+    and `ucadr.tbl` changes. Assembled twice, each on a freshly booted copy
+    of System 1003's band, the four files were the same both times; the
+    outputs, numbered 1001 (sha256):
+    - `ucadr.mcr` `6a5373dc80ef6888bd171f5a96202694bc967e7909deebeb693b15b4dd38e406`
+    - `ucadr.tbl` `3cdf0f61a3942df5a0a27be22def55428b4f6b10d8746c4b3c8da3519b3df427`
+    - `ucadr.locs` `a5d765be04aea33c680250e8156c9cd4df41148836691f49ed85cb1f2e12f7fd`
+    - `ucadr.sym` `42eb5bc4456a06831d81be7805dd856f46b85b9bf44a49b1007b9f06cbcf7d43`
+
+    System 1003's band boots on it, and `tools/microcode-check` (seven
+    checks, 29 cases) passes on micro and on rtl.
 - **FORMAT forgets the clause strings it gives back**
   (`format-reclaim-clauses`, `sys/io/format.lisp:1276-1292`). The clause
   buffer, `format-clauses-array`, kept for the next call, still held each
