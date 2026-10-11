@@ -34,6 +34,17 @@
 # a date, but a check on such a band should serve it as it reads.
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
+# The self-test runs on micro only: its question cases are bounded at 20 s of
+# host time, which revision 15's rtl, the pipeline, overruns (44 s on a loaded
+# host), and the tool it tests is the same on either engine.
+prev=
+for a in "$@"; do
+    if [ "$a" = --engine=rtl ] || { [ "$prev" = --engine ] && [ "$a" = rtl ]; }; then
+        echo "lispm-check-test: the self-test runs on micro only (--engine rtl given)" >&2
+        exit 2
+    fi
+    prev=$a
+done
 tree=$(dirname "$(dirname "$here")")
 fails=0
 out=$(mktemp)

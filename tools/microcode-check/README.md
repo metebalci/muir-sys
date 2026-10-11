@@ -46,7 +46,8 @@ later flip's walk may clear a mark legitimately, so only then is a cleared
 mark a lost one), the lists young, and their sums right after three young
 collections; its head gives the arguments. With `--incremental` the save is
 incremental (format 2021 over LOD1), and the checks that read the band's region
-tables are left out.
+tables are left out. With `--engine rtl` each of its session's forms may take
+ten times as long as on micro.
 `generational-mutants` plants a partial fix of each item in a copy of the
 microcode and assembles it, as `rev14-mutants` does (`--list`; `--src` for
 another tree); the machine must then be given a disk with that microcode in

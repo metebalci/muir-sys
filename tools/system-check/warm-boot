@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""tools/system-check/warm-boot: C15 (contract G3 step 2, section 12), the
+warm boot in the middle of a young collection, as a harness.
+
+    tools/system-check/warm-boot --out DIR --band DISK --ubin UBIN
+        [--quux QUUX] [--ozd OZD] [--engine micro|rtl] [--no-wait] [--no-answer]
+
+The band boots cold with its files served by quux's file device; a TELNET
+session loads lisp/generational-collector.lisp and lisp/warm-boot.lisp and
+stops a young collection mid-walk, the scavenger inhibited; the machine is
+warm-booted from its keyboard (Control-Meta-Return, through its RFB terminal);
+a new TELNET session finishes the collection under the reclaim checker (b)
+and checks word 221 and a young list stored into a tenured holder (a).  The
+ports come from LISPM_CHECK_PORTS, as lispm-check's do; QUUX and OZD default
+as lispm-check's.  Exit status 0 when every check passes; the last line is
+RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's and
+ozd's, and the screen at the warm boot and at a failure.
+
+A warm boot that lands while a process other than the scheduler runs asks
+"Reset it?" on the console before the TELNET server is back, and shows no
+banner.  Before the warm boot the session is closed and the TELNET server
+given time to end (5 s on micro; 60 s on rtl, the pipeline being slower in
+host time); after it, when no banner comes in a quarter of the time a check
+may take, the harness answers Yes (and Return) on the console, up to three
+times.
+--no-wait warm-boots at once, while the TELNET server still runs, so that
+the question comes and the answer is checked; --no-answer leaves the
+question unanswered, the control: with --no-wait the run then fails for want
+of a banner.
+"""
+import argparse, os, socket, struct, subprocess, sys, time, zlib
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+lc = SourceFileLoader('lispm_check', os.path.join(TREE, 'tools', 'lispm-check')).load_module()
+
+p = argparse.ArgumentParser(description='C15, the warm boot, as a harness.')
+p.add_argument('--out', required=True)
+p.add_argument('--band', required=True)
+p.add_argument('--ubin', required=True)
+p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
+p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+p.add_argument('--engine', default='micro', choices=('micro', 'rtl'))
+p.add_argument('--no-wait', action='store_true')
+p.add_argument('--no-answer', action='store_true')
+a = p.parse_args()
+up = os.path.dirname(TREE)
+quux = os.path.abspath(a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux'))
+ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
+out = os.path.abspath(a.out)
+os.makedirs(out, exist_ok=True)
+log = open(os.path.join(out, 'telnet.log'), 'w', buffering=1)
+T = 3600 if a.engine == 'rtl' else 1200
+lock, pts = lc.take_ports()
+server = lc.DeviceFileServer(ozd, out, pts, log)
+machine = lc.Machine(quux, os.path.abspath(a.band), out, pts[3], server, a.engine)
+ok = True
+
+
+def say(*x):
+    print(*x, flush=True)
+
+
+# The console, through quux's RFB terminal (RFC 6143, no password).
+def rfb(keys, png):
+    """Types KEYS, each a keysym with its modifiers' keysyms, on the RFB
+    terminal, then writes the screen to PNG, grey levels."""
+    s = socket.create_connection(('127.0.0.1', pts[3]), timeout=30)
+
+    def recvn(n):
+        b = b''
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise EOFError
+            b += c
+        return b
+    recvn(12)
+    s.sendall(b'RFB 003.008\n')
+    recvn(recvn(1)[0])
+    s.sendall(b'\x01')
+    assert struct.unpack('>I', recvn(4))[0] == 0
+    s.sendall(b'\x01')
+    w, h = struct.unpack('>HH', recvn(4))
+    recvn(16)
+    recvn(struct.unpack('>I', recvn(4))[0])
+
+    def key(sym, down):
+        s.sendall(struct.pack('>BBxxI', 4, 1 if down else 0, sym))
+        time.sleep(0.05)
+    for sym, mods in keys:
+        for m in mods:
+            key(m, True)
+        key(sym, True)
+        key(sym, False)
+        for m in reversed(mods):
+            key(m, False)
+        time.sleep(0.15)
+    time.sleep(5)
+    # 32-bit true colour, little endian, red at 16; raw encoding; one frame
+    s.sendall(struct.pack('>BxxxBBBBHHHBBBxxx', 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))
+    s.sendall(struct.pack('>BxH', 2, 1) + struct.pack('>i', 0))
+    s.sendall(struct.pack('>BBHHHH', 3, 0, 0, 0, w, h))
+    fb, got = bytearray(w * h), 0
+    while got < w * h:
+        if recvn(1)[0] != 0:
+            continue
+        recvn(1)
+        for _ in range(struct.unpack('>H', recvn(2))[0]):
+            x, y, rw, rh, _enc = struct.unpack('>HHHHi', recvn(12))
+            data = recvn(rw * rh * 4)
+            for j in range(rh):
+                for i in range(rw):
+                    fb[(y + j) * w + x + i] = max(data[(j * rw + i) * 4:(j * rw + i) * 4 + 3])
+            got += rw * rh
+    s.close()
+    raw = b''.join(b'\x00' + bytes(fb[j * w:(j + 1) * w]) for j in range(h))
+
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    open(png, 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 0, 0, 0, 0))
+                          + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
+CONTROL, META, RETURN = 0xffe3, 0xffe9, 0xff0d
+
+
+def check(sess, form, want=None, timeout=T):
+    global ok
+    r = sess.run(form, timeout)
+    good = r[0] == 'value' and (want is None or lc.normal(r[1]) == lc.normal(want))
+    if want is not None and not good:
+        ok = False
+    say('%s  %s  -> %s %s%s' % ('PASS' if good else 'FAIL', form, r[0], r[1][:300],
+                                '' if want is None else ', expected %s' % want))
+    return r
+
+
+def session(limit=T):
+    sock, _ = server.connect_listener(machine.alive, lc.now() + limit)
+    sock.settimeout(0.2)
+    s = lc.Session(sock, log, False)
+    check(s, server.login())
+    return s
+
+
+try:
+    server.lay_out(TREE, os.path.abspath(a.ubin))
+    names = [server.place(os.path.join(HERE, 'lisp', f), TREE)[0]
+             for f in ('generational-collector.lisp', 'warm-boot.lisp')]
+    server.start()
+    machine.start()
+    s = session()
+    for n in names:
+        check(s, '(progn (let ((si:inhibit-fdefine-warnings :just-warn)) (qc-file-load "%s")) t)'
+              % (n + '.lisp'), 'T')
+    check(s, '(c15-off)', 'T')
+    check(s, '(c15-b-setup)', '(NIL T)')
+    check(s, '(si:feature-page-field #o221 #o0001)', '1')
+    s.s.close()
+    # the TELNET server's process ends before the warm boot, or the band asks
+    # whether to reset it
+    time.sleep(0 if a.no_wait else 60 if a.engine == 'rtl' else 5)
+    say('warm boot: Control-Meta-Return on the RFB terminal')
+    rfb([(RETURN, (CONTROL, META))], os.path.join(out, 'warm-boot.png'))
+    for attempt in range(4):
+        try:
+            s = session(T if a.no_answer else T // 4)
+            break
+        except Exception as e:
+            if a.no_answer or attempt == 3:
+                raise
+            say('no banner yet (%s): Yes on the RFB terminal' % e)
+            # the question is YES-OR-NO-P's: a word and Return, not a key
+            rfb([(ord('Y'), (0xffe1,)), (ord('e'), ()), (ord('s'), ()), (RETURN, ())],
+                os.path.join(out, 'answer-%d.png' % attempt))
+    check(s, 'si:gc-oldspace-exists', 'T')
+    check(s, '(list si:%gc-flip-ready inhibit-scavenging-flag si:inhibit-idle-scavenging-flag)')
+    check(s, '(si:feature-page-field #o221 #o0001)', '1')
+    check(s, '(c15-b-finish)', '(T 49995000 T 0 NIL)')
+    check(s, '(c15-a)', '(1 49995000)')
+    check(s, '(si:feature-page-field #o224 #o0040)', '0')
+except Exception as e:
+    ok = False
+    say('FAILED: %s' % e)
+    try:
+        rfb([], os.path.join(out, 'failed.png'))
+    except Exception:
+        pass
+finally:
+    machine.stop(wait=30)
+    server.stop()
+    lock.release()
+say('RESULT %s' % ('PASS' if ok else 'FAIL'))
+sys.exit(0 if ok else 1)

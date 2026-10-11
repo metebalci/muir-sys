@@ -1574,3 +1574,20 @@ tree assembles for revision 14 too, which the boards run until then.
   ends in `TRANS-DROP-THROUGH`, and the dump stores the pointer below the PDL
   buffer's new address, so the trap always copies the object and returns
   plainly (inferred from the code, not measured).
+- **The gate on revision 15.** Step 2's gate runs on revision 15 with these
+  changes to the checks:
+  - `tools/system-check/cases/rev14-addresses.cases:45` reads MACHINE-ID's
+    revision as 14 or later, since revision 15 keeps revision 14's address
+    space and reads 15 there.
+  - `eden-default`, whose case expects 32 M words' sizes, moves to
+    `tools/system-check/cases-32mw/`, run only when named, as `cases-2mw/`'s
+    checks are (`tools/system-check/run:26`).
+  - `tools/microcode-check/generational-save:130` gives each of its session's
+    forms ten times the time on rtl, where `SI:GS-SUMS` took over its 120 s
+    at 2 M words.
+  - C15, the warm boot, becomes a harness of its own,
+    `tools/system-check/warm-boot` with `lisp/warm-boot.lisp`, which gives
+    the TELNET server time to end before the warm boot and answers the
+    console's "Reset it?" when the boot lands while a process runs.
+  - `tools/lispm-check-test/run.sh:37` refuses `--engine rtl`: its question
+    cases are bounded at 20 s of host time.

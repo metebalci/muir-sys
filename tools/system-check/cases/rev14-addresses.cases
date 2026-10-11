@@ -37,11 +37,12 @@
 (%p-contents-offset (rev14-address #o31777740000) 0) =>! in no region
 
 ; the windows hold no region (rule A5); %XBUS-READ's base and bound (10.8):
-; offset 17777400 is MACHINE-ID, revision 14; %UNIBUS-READ signals (rule A6)
+; offset 17777400 is MACHINE-ID, its revision 14 or later (revision 15 keeps
+; revision 14's address space and reads 15 there); %UNIBUS-READ signals (rule A6)
 (%region-number (rev14-address #o34000000000)) => NIL
 (%region-number (rev14-address #o35700000000)) => NIL
 (%region-number (rev14-address #o36000000000)) => NIL
-(list (ldb (byte 16. 16.) (%xbus-read #o17777400)) (ldb (byte 12. 4) (%xbus-read #o17777400))) => (20821 14)
+(list (ldb (byte 16. 16.) (%xbus-read #o17777400)) (>= (ldb (byte 12. 4) (%xbus-read #o17777400)) 14.)) => (20821 T)
 (%xbus-read #o20000000) =>!
 (%unibus-read 0) =>!
 

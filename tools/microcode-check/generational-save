@@ -124,6 +124,11 @@ def main():
              ('(progn (load "HOST: //home//lispm//generational-save.lisp") t)', 120),
              ('(si:gs-setup)', 600), ('(si:gs-sums)', 120), ('(si:gs-holder-pages)', 300),
              ('(si:gen-register #o224)', 60)]
+    # on rtl every form may take ten times as long: revision 15's rtl, the
+    # pipeline, is slower in host time than revision 14's, and at 2 M words
+    # under a loaded host (si:gs-sums) took over its 120 s
+    if a.engine == 'rtl':
+        forms = [(f, t * 10) for f, t in forms]
     res = r.session(os.path.join(a.out, 'session'), disk, TREE, forms, save_part=x.save, files=lisp,
                     incremental=x.incremental)
     before = {f: t.strip() for f, k, t in res}
