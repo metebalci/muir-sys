@@ -662,3 +662,76 @@ without consing when the area has none."
       (let* ((first (si:area-region-list area))
 	     (x (make-array 10 :area area)))
 	(list (= (%region-number x) first) (gencol-young-p x))))))
+
+;;; The pages a tenured flip cuts off its old regions' ends (generational-reclaim).
+;;; After %GC-FLIP, DEALLOCATE-END-OF-REGION (sys/sys2/gc.lisp) cuts each old
+;;; region's unused quanta off its end, clears them in the address space map,
+;;; and frees their pages through DEALLOCATE-PAGES: each page's frame and slot
+;;; are freed and its page-table entry gets status 0.  A cut that skipped the
+;;; pages kept their frames, slots and entries, and no other check saw it: the
+;;; quanta left the region all the same.  GENCOL-TAILS-RUN watches
+;;; DEALLOCATE-END-OF-REGION through one tenured flip, and before the reclaim
+;;; reads the entry of every page it cut off.  A page is right when its entry
+;;; is status 0 (or there is none), or when its address lies inside the region
+;;; the address space map now gives it: a region made after the cut that
+;;; reused the quantum.  A dynamic area of the check's own, one region of four
+;;; quanta holding one small array, gives the flip a tail to cut whatever the
+;;; band's state.
+(defvar *gencol-tails* nil
+  "(ORIGIN NEW-LENGTH OLD-LENGTH) of each region the last watched flip cut.")
+(defvar *gencol-tails-area* nil "The tail case's area, one region of four quanta.")
+(defvar *gencol-tails-object* nil "The tail case's one object, kept.")
+(defvar *gencol-tails-counts* nil
+  "The last run's (TAILS PAGES PAGES-KEEPING-AN-ENTRY PAGES-REUSED), a record.")
+
+(defun gencol-tails-page-reused-p (address)
+  "T if ADDRESS lies inside the region the address space map gives its quantum to."
+  (let ((r (%region-number address)))
+    (and r
+	 (< (si:%pointer-unsigned (%pointer-difference address (si:region-origin r)))
+	    (si:%pointer-unsigned (si:region-length r)))
+	 t)))
+
+(defun gencol-tails-run ()
+  "One tenured collection with DEALLOCATE-END-OF-REGION watched.  The value is
+(OWN-AREA-CUT SOME-PAGES BAD): OWN-AREA-CUT T when the check's own region was
+among the regions cut, SOME-PAGES T when the tails held pages, and BAD the number
+of cut-off pages whose entry is not status 0 and that no region reused.
+Expected (T T 0)."
+  (si:gc-reclaim-oldspace)
+  (unless *gencol-tails-area*
+    (setq *gencol-tails-area*
+	  (make-area :name 'gencol-tails-area :gc :dynamic :representation :structure
+		     :region-size (* 4 si:%address-space-quantum-size))))
+  (setq *gencol-tails-object* (make-array 10 :area *gencol-tails-area*))
+  (let ((own-origin (si:region-origin (si:area-region-list *gencol-tails-area*)))
+	(old (symbol-function 'si:deallocate-end-of-region))
+	(pages 0) (kept 0) (reused 0) (bad 0))
+    (setq *gencol-tails* nil)
+    (unwind-protect
+	(progn
+	  (fset 'si:deallocate-end-of-region
+		#'(lambda (r)
+		    (let ((len (si:%pointer-unsigned (si:region-length r))))
+		      (prog1 (funcall old r)
+			     (let ((new (si:%pointer-unsigned (si:region-length r))))
+			       (when (< new len)
+				 (push (list (si:region-origin r) new len) *gencol-tails*)))))))
+	  (si:gc-flip-now :tenured))
+      (fset 'si:deallocate-end-of-region old))
+    ;; read every cut-off page's entry before anything else conses
+    (dolist (e *gencol-tails*)
+      (do ((k (second e) (+ k si:page-size))) ((>= k (third e)))
+	(incf pages)
+	(let* ((address (%pointer-plus (first e) k))
+	       (entry (si::page-entry address)))
+	  (when (and entry (not (zerop (ldb si:%%page-entry-status entry))))
+	    (incf kept)
+	    (if (gencol-tails-page-reused-p address)
+		(incf reused)
+	      (incf bad))))))
+    (si:gc-reclaim-oldspace)
+    (setq *gencol-tails-counts* (list (length *gencol-tails*) pages kept reused))
+    (list (and (assoc own-origin *gencol-tails*) t)
+	  (plusp pages)
+	  bad)))

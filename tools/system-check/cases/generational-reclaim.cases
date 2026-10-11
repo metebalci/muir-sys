@@ -39,3 +39,11 @@
 (gencol-c30-after :c) => (((:NEW 0 0 T T)) 0)
 ; every region with a first-object table passes the table checker
 (gencol-check-tables) => 0
+; the pages a tenured flip cuts off its old regions' ends: DEALLOCATE-END-OF-REGION
+; frees each through DEALLOCATE-PAGES, so after the flip each has status 0 or lies
+; in a region made since that reused its quantum.  The check's own area, one
+; region of four quanta with one small array, is among those cut.  The plant
+; -plant-nodealloc (DEALLOCATE-PAGES doing nothing) fails it; the second case
+; records the counts: (TAILS PAGES PAGES-KEEPING-AN-ENTRY PAGES-REUSED).
+(gencol-tails-run) => (T T 0)
+user::*gencol-tails-counts*

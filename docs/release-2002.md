@@ -693,6 +693,21 @@ Citations are of the files as this step left them.
   unchanged on revision 14, where the flip's UPDATE-REGION-PHT writes the
   entries; measured on micro at 32 M words, its share of a flip's pause went
   from 157-217 ms to 74-85 ms (`:910`).
+- **CHANGE-REGION-TO-NEW-SPACE and INVALIDATE-REGION-MAPPING are removed**
+  (`sys/sys2/gc.lisp:886`), commented out in place: nothing in `sys/` or
+  `tools/`, the microcode and the cold load included, calls them once
+  DEALLOCATE-END-OF-REGION's call is commented out (`:1540`).
+  `tools/system-check`'s `generational-reclaim` gains a case for the pages
+  a tenured flip cuts off its old regions' ends (`GENCOL-TAILS-RUN`,
+  `tools/system-check/lisp/generational-collector.lisp:695`): after the
+  flip each has status 0 or lies in a region made since that reused its
+  quantum. No other case saw those pages: with
+  `lisp/generational-collector-plant-nodealloc.lisp` (DEALLOCATE-PAGES doing
+  nothing, `:1549`) every case of `generational-collector`,
+  `generational-reclaim`, `generational-tuning` and
+  `region-area-map-interrupt` passed (micro, revision 14), and the new case
+  fails, 1,632 to 1,920 of 1,936 cut-off pages keeping an entry that no
+  region reused (micro, revisions 14 and 15, 5 runs each).
 - **The microcode metering ranges name microcode 2002's labels**
   (`sys/sys2/usymld.lisp:1081`, `:1093`, `:1121`): the map reload's ranges
   are empty, there being none, and the hash table's search is the page

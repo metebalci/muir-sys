@@ -883,19 +883,27 @@ while running me, do so as a batch process/"."
 ;           ;;; consing
 ;	   (CHANGE-REGION-TO-NEW-SPACE REGION)))))
 
-(defun change-region-to-new-space (region)
-  (setf (region-bits region)
-	(%logdpb 0 %%region-scavenge-enable
-		 (%logdpb %region-space-new %%region-space-type
-			  (%logdpb 1 %%region-oldspace-meta-bit (region-bits region)))))
-  (invalidate-region-mapping region))
+;;; quux revision 14: change-region-to-new-space and invalidate-region-mapping
+;;; are removed, being dead.  nothing in the system, the microcode or the cold
+;;; load calls them: change-region-to-new-space's only callers are in the
+;;; commented-out code above, and invalidate-region-mapping's only callers were
+;;; change-region-to-new-space and deallocate-end-of-region, whose call is
+;;; commented out since a flip stopped remapping a region's pages.
+;;; invalidate-region-mapping rewrote the entry of every page of a region with
+;;; %change-page-status; left defined, it could only be called by mistake.
+;(defun change-region-to-new-space (region)
+;  (setf (region-bits region)
+;	(%logdpb 0 %%region-scavenge-enable
+;		 (%logdpb %region-space-new %%region-space-type
+;			  (%logdpb 1 %%region-oldspace-meta-bit (region-bits region)))))
+;  (invalidate-region-mapping region))
 
-(defun invalidate-region-mapping (region)
-  (do ((ra 0 (+ ra page-size))
-       (virtual-address))
-      ((> ra (region-length region)))
-    (setq virtual-address (%pointer-plus (region-origin region) ra))
-    (%change-page-status virtual-address nil nil)))
+;(defun invalidate-region-mapping (region)
+;  (do ((ra 0 (+ ra page-size))
+;       (virtual-address))
+;      ((> ra (region-length region)))
+;    (setq virtual-address (%pointer-plus (region-origin region) ra))
+;    (%change-page-status virtual-address nil nil)))
 
 
 ;;;; GC Process
@@ -1527,7 +1535,8 @@ It can then be allocated into other regions."
     ;; from its bits, this function leaves the bits as they are, and the pages
     ;; it frees get status 0 from deallocate-pages; so %change-page-status
     ;; over every page of the region rewrote each entry unchanged, a page
-    ;; table search per page that made up most of a flip's pause.
+    ;; table search per page that made up most of a flip's pause.  the
+    ;; function itself is removed (commented out after change-region-to-new-space).
 ;    (INVALIDATE-REGION-MAPPING REGION)
     ))
 
