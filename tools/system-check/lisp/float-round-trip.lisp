@@ -157,3 +157,105 @@ by OP: (OP 1.0 EPS) is not 1.0 and (OP 1.0 P) is, P the single below EPS."
     (if (and (not (= (funcall op 1.0 eps) 1.0)) (= (funcall op 1.0 p) 1.0))
 	t
       (list (funcall op 1.0 eps) (funcall op 1.0 p)))))
+
+;;; For the check format-float-digits (tools/system-check/README.md): FORMAT's
+;;; ~E and ~G over the same samples.  ~E's digits are to be the printer's,
+;;; FLONUM-DIGITS's, the fewest that read back as the float, at most D + 1 of
+;;; them under ~,DE, the last rounded to the nearest (a half to the even
+;;; digit) and the rest padded with zeros, and its
+;;; exponent the power of ten they go with; ~G is to choose between ~F and ~E
+;;; by the float's own power of ten, the N with 10^N <= |X| < 10^(N+1).  ~E
+;;; and ~G took both from SI::SCALE-FLONUM, which scales X to [1, 10) by
+;;; floating multiplication and loses bits.  The references below take the
+;;; digits from FLONUM-DIGITS and N from X's bits in integers, never from
+;;; SCALE-FLONUM.
+
+(defun ffd-exponent (x)
+  "The N with 10^N <= |X| < 10^(N+1), X finite and not zero, from its bits."
+  (destructuring-bind (m e) (frt-decode x)
+    (let* ((a (abs m))
+	   (num (if (minusp e) a (ash a e)))
+	   (den (if (minusp e) (ash 1 (- e)) 1))
+	   (n (floor (* (+ e (integer-length a) -1) 77.) 256.)))
+      (flet ((at-least (n)			;num/den >= 10^n
+	       (if (minusp n)
+		   (>= (* num (expt 10. (- n))) den)
+		 (>= num (* den (expt 10. n))))))
+	(do () ((at-least n)) (decf n))
+	(do () ((not (at-least (1+ n)))) (incf n))
+	n))))
+
+(defun ffd-magnitude (x)
+  "|X| from X's bits: ABS signals on a subnormal, as arithmetic makes none."
+  (frt-from-bits (logand (frt-bits x) (1- (ash 1 31.)))))
+
+(defun ffd-e-text (x d)
+  "What FORMAT's ~E of X, or ~,DE with D, is to give: FLONUM-DIGITS's
+digits, D.DDD, at least one after the point, and the exponent of the first,
+in as many digits as the exponent of the uncut digits takes (MIT's ~E chooses
+the width before the digits round), padded with zeros."
+  (multiple-value-bind (digits k) (flonum-digits x (and d (1+ d)))
+    (let* ((rest (substring digits 1))
+	   (ex (1- k))
+	   (e0 (abs (1- (second (multiple-value-list (flonum-digits x))))))
+	   (*print-base* 10.) (*print-radix* nil)
+	   (etext (princ-to-string (abs ex))))
+      (cond (d (setq rest (string-append rest (make-string (- d (length rest))
+							   :initial-element #/0))))
+	    ((zerop (length rest)) (setq rest "0")))
+      (loop while (< (length etext) (cond ((> e0 99.) 3) ((> e0 9) 2) (t 1)))
+	    do (setq etext (string-append "0" etext)))
+      (string-append (if (minusp x) "-" "") (string (aref digits 0)) "." rest
+		     "e" (if (minusp ex) "-" "+") etext))))
+
+(defun ffd-g-text (x d)
+  "What FORMAT's ~G of X, or ~,DG with D, is to give, by MIT's rule
+in FORMAT-CTL-HAIRY-G-FORMAT with X's own power of ten: ~F with D - N - 1
+digits after the point and four spaces when that is between 0 and D, else ~E;
+D, when not given, the digits FLONUM-TO-STRING gives X, at least N + 1 up to 7."
+  (let* ((n (ffd-exponent x))
+	 (ad (or d (max (1- (length (flonum-to-string (ffd-magnitude x) nil nil nil t)))
+			(min (1+ n) 7))))
+	 (dd (- ad n 1)))
+    (if (<= 0 dd ad)
+	(string-append (format nil "~,vF" dd x) "    ")
+      (if d (format nil "~,vE" d x) (format nil "~E" x)))))
+
+(defun ffd-format (x kind d)
+  (condition-case (err)
+      (selectq kind
+	(:e (if d (format nil "~,vE" d x) (format nil "~E" x)))
+	(:g (if d (format nil "~,vG" d x) (format nil "~G" x))))
+    (error (list 'format-error (send err :report-string)))))
+
+(defun ffd-check (x kind d)
+  "NIL when FORMAT's KIND (:E or :G) with D gives X as the reference does
+and, for ~E of a normal float with no D, its text reads back as X; else
+(WHAT-IT-GAVE WHAT-IT-SHOULD X's (M E))."
+  (let ((got (ffd-format x kind d))
+	(want (condition-case (err)
+		  (if (eq kind :e) (ffd-e-text x d) (ffd-g-text x d))
+		(error (list 'reference-error (send err :report-string))))))
+    (cond ((not (and (stringp got) (equal got want)))
+	   (list got want (frt-decode x)))
+	  ((and (eq kind :e) (null d)
+		(not (zerop (ldb (byte 8 23.) (frt-bits x))))
+		(let ((y (condition-case () (read-from-string got) (error nil))))
+		  (not (and (floatp y) (= (frt-bits y) (frt-bits x))))))
+	   (list got 'does-not-read-back (frt-decode x))))))
+
+(defun ffd-run (kind d set &optional (start 0) end)
+  "FORMAT's KIND (:E or :G), with D digits after the point or none, over the
+sample SET of float-round-trip, its infinities left out (check format-float):
+the number that differ from the reference, the number tried, and up to three."
+  (let ((fails 0) (tried 0) (shown nil))
+    (loop for x in (nthcdr start (frt-sample set))
+	  for i from start
+	  until (and end (>= i end))
+	  unless (= (ldb (byte 8 23.) (frt-bits x)) 255.)
+	    do (incf tried)
+	       (let ((r (ffd-check x kind d)))
+		 (when r
+		   (incf fails)
+		   (if (< (length shown) 3) (push r shown)))))
+    (list* fails tried (nreverse shown))))

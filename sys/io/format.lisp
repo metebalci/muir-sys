@@ -823,7 +823,14 @@ the name of a command, and remaining elements are parameters."
 	   ;; given the positive one, it scaled up past its table of powers of ten,
 	   ;; so ~e of any float stopped with a subscript or overflow error.
 ;	   (SETF (VALUES ARG EXPONENT) (SI::SCALE-FLONUM (ABS ORIGINAL-ARG)))
-	   (setf (values arg exponent) (si::scale-flonum (- (abs original-arg))))
+	   ;; the power of ten and the digits are the printer's, exact, from the
+	   ;; float's bits (si::flonum-e-exponent, si::flonum-scaled-to-string,
+	   ;; sys; io; print): scale-flonum scaled by floating multiplication and
+	   ;; lost bits, so ~e printed the most positive single as 3.4028237e+38,
+	   ;; which reads as infinity; and abs signalled on a subnormal.
+;	   (setf (values arg exponent) (si::scale-flonum (- (abs original-arg))))
+	   (setq arg original-arg
+		 exponent (si::flonum-e-exponent original-arg))
 	   ;; If user does not specify number of exponent digits, guess.
 	   (UNLESS EXPONENT-DIGITS
 	     (SETQ EXPONENT-DIGITS
@@ -835,7 +842,8 @@ the name of a command, and remaining elements are parameters."
 		      (- (IF (OR NEGATIVE ATSIGN-FLAG) (- WIDTH 1) WIDTH)
 			 EXPONENT-DIGITS 2)))
 	   (MULTIPLE-VALUE-BIND (BUFFER DECIMAL-PLACE)
-	       (SI::FLONUM-TO-STRING ARG (TYPEP ARG 'SHORT-FLOAT)
+;	       (SI::FLONUM-TO-STRING ARG (TYPEP ARG 'SHORT-FLOAT)
+	       (si::flonum-scaled-to-string original-arg exponent	;exact, above
 				     (AND WIDTH (1- WIDTH-AFTER-SIGN-AND-EXPONENT))
 				     (AND AFTER-DECIMAL
 					  (IF (PLUSP SCALE)
@@ -941,7 +949,10 @@ the name of a command, and remaining elements are parameters."
 	      )
 	     ;; si::scale-flonum takes a negative number, as in ~e above
 ;	     (MULTIPLE-VALUE (NIL EXPONENT) (SI::SCALE-FLONUM (ABS ARG)))
-	     (multiple-value (nil exponent) (si::scale-flonum (- (abs arg))))
+	     ;; exact, from the float's bits, as in ~e above: scale-flonum's could be
+	     ;; one off, and abs signalled on a subnormal
+;	     (multiple-value (nil exponent) (si::scale-flonum (- (abs arg))))
+	     (setq exponent (si::flonum-decimal-exponent arg))
 	     (UNLESS AFTER-DECIMAL
 	       ;; If number of sig figs not specified, compute # digits needed for fixed format.
 	       ;; with no width given, width is nil and > stopped on it
@@ -951,7 +962,10 @@ the name of a command, and remaining elements are parameters."
 		   ;; We know that E format will be used, so go use it.
 		   (RETURN (FORMAT-CTL-HAIRY-E-FORMAT ARG PARAMS)))
 	       (MULTIPLE-VALUE-BIND (BUFFER)
-		   (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT)
+		   ;; flonum-to-string takes the magnitude from the bits: no abs,
+		   ;; which signalled on a subnormal
+;		   (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT)
+		   (si::flonum-to-string arg (typep arg 'short-float)
 					 (AND WIDTH (- WIDTH-AFTER-EXPONENT
 						       (IF (OR NEGATIVE ATSIGN-FLAG) 2 1)))
 					 NIL T)

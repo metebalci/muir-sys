@@ -160,6 +160,45 @@ file carries a comment in that file saying why.
   and 208 singles do not come back; with the change all 8 pass. The
   CADR's line has the same printer fault, and a reader fault besides, both
   fixed there in System 1004.
+- **FORMAT's `~E` and `~G` give a float's exact digits**
+  (`sys/io/format.lisp:826-846`, FORMAT-CTL-HAIRY-E-FORMAT; `:952-955`,
+  `:965-968`, FORMAT-CTL-HAIRY-G-FORMAT; `sys/io/print.lisp:845-915`,
+  `flonum-decimal-exponent`, `flonum-e-exponent`, `flonum-scaled-to-string`;
+  `flonum-digits`, `:748-751`, `:771-775`, `:792-796`, `:810-825`). `~E` took
+  its power of ten and its digits from `SCALE-FLONUM`, which scales the
+  float to [1, 10) by floating multiplication and loses bits, and from
+  `FLONUM-TO-STRING` of the scaled float: it printed the most positive single
+  as `3.4028237e+38`, which reads as an infinity, the least positive normal
+  one as `1.1754943e-38` and 6.02e23 as `6.0200005e+23`. `~G` chose between
+  `~F` and `~E` by `SCALE-FLONUM`'s power of ten, one off for 36 of the 152
+  singles nearest powers of ten. Both stopped on every subnormal, as `ABS`
+  of one signals "ABS produced a result too small", and on zero, with a
+  subscript error in `SCALE-FLONUM`. `~E` now prints the printer's digits
+  (`flonum-digits`, the fewest that read back as the float) with their
+  exponent, a subnormal too (`-1.0e-45`), and zero as `0.0e+0`; `~G` takes the
+  float's power of ten exactly, in integers, from its bits. Digits cut by
+  `~,dE` or by the width round to the nearest, a tie to the even digit, as
+  IEEE 754 rounds: `~,2E` of 1.375 gives `1.38e+0` and of 1.125 `1.12e+0`
+  (MIT's `~E` rounded a tie down, giving `1.37e+0`; `flonum-digits` rounded it
+  up, giving `1.13e+0`). `flonum-digits` rounds its cut so for every caller,
+  `PRINT-FLONUM`'s MAX-DIGITS too. `~F`, and `~G` when it chooses `~F`, still
+  round a tie down, in `FLONUM-TO-STRING` (`~,2F` of 0.375 is `0.37`). The
+  exponent's width is chosen before the digits round, as MIT's `~E` chose
+  it: `~,1E` of the single nearest 9.96e-10 is `1.0e-09`, as before.
+  `flonum-digits` also counts a decimal halfway to a neighbour as the
+  float's when the significand is even, as the reader rounds such a decimal
+  to even: 1.5e10, halfway between two singles, now prints as `1.5e10`, not
+  `1.5000001e10`, and `~E` gives `1.5e+10` as before. When the cut leaves a
+  single digit, that digit now rounds: `~,0E` of 9.7 gives `1e+1` where it
+  gave `9e+0`, as the old `FLONUM-TO-STRING` truncated an integer digit.
+  `tools/system-check` gains `format-float-digits` (43 cases, its functions
+  in `lisp/float-round-trip.lisp`): `~E`, `~,3E`, `~G` and `~,4G` over
+  `float-round-trip`'s samples, against the printer's digits, and ties that
+  tell the three rounding rules apart. The tree before the change fails
+  19 of the 43 and errs in 2 (revision 14). `~E` gives other digits for 2223 of the 4690 floats of the
+  samples that are not subnormal, and `~E` and `~G` stop on all 208
+  subnormals. With the change all 43 pass, on revisions 14 and 15. The
+  CADR's line has the same `~E` and `~G` path.
 - A new check, `tools/system-check/cases/pointer-unsigned.cases` (row in
   `tools/system-check/README.md`): `SI:%POINTER-UNSIGNED`
   (`sys/sys/qrand.lisp:21`) and `SI:PRINT-POINTER-FIELD`

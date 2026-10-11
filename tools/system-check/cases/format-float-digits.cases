@@ -1,0 +1,71 @@
+; lisp: float-round-trip.lisp
+; FORMAT's ~E and ~G give a float's exact digits (sys/io/format.lisp,
+; FORMAT-CTL-HAIRY-E-FORMAT and FORMAT-CTL-HAIRY-G-FORMAT; sys/io/print.lisp,
+; FLONUM-DIGITS; lisp/float-round-trip.lisp).  SI:FFD-RUN formats every float
+; of a float-round-trip sample, infinities left out, with ~E, ~,3E, ~G or
+; ~,4G, and gives the number that differ from the reference, the number
+; tried, and up to three: what FORMAT gave, the reference, and the float's
+; exact value as (M E), M * 2^E.  ~E's reference is the printer's digits,
+; FLONUM-DIGITS's, the fewest that read back as the float (under ~,3E at most
+; four, rounded, padded with zeros), and their exponent; ~E of a normal float
+; must also read back as it.  ~G's is MIT's choice between ~F and ~E with the
+; float's own power of ten, from its bits.  ~E and ~G took the digits and the
+; power of ten from SI::SCALE-FLONUM, which scales by floating multiplication
+; and loses bits: ~E printed the most positive single as "3.4028237e+38",
+; which reads as infinity, and 6.02e23 as "6.0200005e+23"; and ABS signalled
+; on a subnormal, so ~E and ~G of every subnormal stopped.  The digits cut
+; to D + 1 round to the nearest, a half to the even digit, as IEEE 754
+; rounds: ~,2E of 1.375 is "1.38e+0" (a half down gave 1.37) and of 1.125
+; "1.12e+0" (a half up gave 1.13); ~F (FLONUM-TO-STRING) still rounds a half
+; down, "0.37" for ~,2F of 0.375.  The exponent's width is chosen before the
+; digits round, as MIT's ~E chose it: ~,1E of the single nearest 9.96e-10 is
+; "1.0e-09".  The printer's
+; digits count a decimal halfway to a neighbour as the float's when its
+; significand is even, as the reader rounds it to even: 1.5e10, halfway
+; between two singles, printed as 1.5000001e10.  Run with
+; --compile --files sys/io/print.lisp,sys/io/format.lisp,
+; tools/system-check/lisp/float-round-trip.lisp on a band built before the
+; change.
+(format nil "~E" (si:frt-from-bits #x7F7FFFFF)) => "3.4028235e+38"
+(format nil "~E" (si:frt-from-bits #x00800000)) => "1.1754944e-38"
+(format nil "~E" (si:frt-nearest (* 602. (expt 10. 21.)) 1)) => "6.02e+23"
+(format nil "~E" (si:frt-from-bits #x80000001)) => "-1.0e-45"
+(format nil "~,0E" 9.7) => "1e+1"
+(format nil "~E" 0.0) => "0.0e+0"
+(format nil "~E" (si:frt-nearest 1 (expt 10. 9.))) => "1.0e-9"
+(format nil "~E" (si:frt-make 14648438. 10.)) => "1.5e+10"
+(prin1-to-string (si:frt-make 14648438. 10.)) => "1.5e10"
+(format nil "~,1E" (si:frt-nearest 996. (expt 10. 12.))) => "1.0e-09"
+(format nil "~,3E" (si:frt-make 1 -7)) => "7.812e-3"
+(format nil "~,2E" (si:frt-make 11. -3)) => "1.38e+0"
+(format nil "~,2E" (si:frt-make 9 -3)) => "1.12e+0"
+(format nil "~,2E" (si:frt-make -11. -3)) => "-1.38e+0"
+(format nil "~,0E" (si:frt-make 5 -1)) => "2e+0"
+(format nil "~,0E" (si:frt-make 7 -1)) => "4e+0"
+(multiple-value-list (si::flonum-digits (si:frt-make 11. -3) 3)) => ("138" 1)
+(multiple-value-list (si::flonum-digits (si:frt-make 9 -3) 3)) => ("112" 1)
+(format nil "~,2F" (si:frt-make 3 -3)) => "0.37"
+(si:ffd-run :e nil :extremes) => (0 16)
+(si:ffd-run :e nil :powers-of-2) => (0 1522)
+(si:ffd-run :e nil :powers-of-10) => (0 152)
+(si:ffd-run :e nil :random 0 1500) => (0 1500)
+(si:ffd-run :e nil :random 1500 3000) => (0 1500)
+(si:ffd-run :e nil :subnormal) => (0 208)
+(si:ffd-run :e 3 :extremes) => (0 16)
+(si:ffd-run :e 3 :powers-of-2) => (0 1522)
+(si:ffd-run :e 3 :powers-of-10) => (0 152)
+(si:ffd-run :e 3 :random 0 1500) => (0 1500)
+(si:ffd-run :e 3 :random 1500 3000) => (0 1500)
+(si:ffd-run :e 3 :subnormal) => (0 208)
+(si:ffd-run :g nil :extremes) => (0 16)
+(si:ffd-run :g nil :powers-of-2) => (0 1522)
+(si:ffd-run :g nil :powers-of-10) => (0 152)
+(si:ffd-run :g nil :random 0 1500) => (0 1500)
+(si:ffd-run :g nil :random 1500 3000) => (0 1500)
+(si:ffd-run :g nil :subnormal) => (0 208)
+(si:ffd-run :g 4 :extremes) => (0 16)
+(si:ffd-run :g 4 :powers-of-2) => (0 1522)
+(si:ffd-run :g 4 :powers-of-10) => (0 152)
+(si:ffd-run :g 4 :random 0 1500) => (0 1500)
+(si:ffd-run :g 4 :random 1500 3000) => (0 1500)
+(si:ffd-run :g 4 :subnormal) => (0 208)

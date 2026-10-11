@@ -745,8 +745,10 @@ Pathnames, editor buffers, host objects, and many other hairy things
 ;;; The digits of the float X, a finite single, not zero, of either sign,
 ;;; for the E format: a string of the fewest decimal digits that read back as
 ;;; X, the first not 0, and the power of ten K that places them, |X| about
-;;; 0.DIGITS * 10^K.  With MAX-DIGITS, at most that many, the last rounded
-;;; (half up), as FLONUM-TO-STRING does.  PRINT-FLONUM scaled X to [1, 10) by
+;;; 0.DIGITS * 10^K.  With MAX-DIGITS, at most that many, the last rounded to
+;;; the nearest, a half to the even digit, as IEEE 754 rounds: ~,2E of 1.375
+;;; is 1.38e+0 and of 1.125 1.12e+0.  This rounded a half up;
+;;; FLONUM-TO-STRING, ~F's, rounds it down.  PRINT-FLONUM scaled X to [1, 10) by
 ;;; floating multiplication or division, which loses bits, and printed the
 ;;; digits of the scaled float: the most positive single printed as
 ;;; "3.4028237e38", which reads as infinity, the least positive normal one as
@@ -766,6 +768,11 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	 (f (flonum-mantissa x))
 	 (e (flonum-exponent x))
 	 (k 0) (digits (make-string 16. :fill-pointer 0))
+	 ;; F even: the reader rounds a decimal halfway between X and a
+	 ;; neighbour to X, to even, so the halfway points belong to X too.
+	 ;; Without them 1.5e10, halfway between two singles and read as the
+	 ;; even one, printed as 1.5000001e10, and FORMAT's ~E too.
+	 (even (evenp f))
 	 r s m+ m- u)
     (if (>= e 0)
 	(if (and (= f (ash 1 (1- p))) (> e -149.))
@@ -782,9 +789,11 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	(let ((scale (^ 10. (- k))))
 	  (setq r (* r scale) m+ (* m+ scale) m- (* m- scale)))
       (setq s (* s (^ 10. k))))
-    (do () ((<= (+ r m+) s))
+;    (do () ((<= (+ r m+) s))
+    (do () ((if even (< (+ r m+) s) (<= (+ r m+) s)))	;F even, above
       (setq s (* s 10.) k (1+ k)))
-    (do () ((> (* (+ r m+) 10.) s))
+;    (do () ((> (* (+ r m+) 10.) s))
+    (do () ((if even (>= (* (+ r m+) 10.) s) (> (* (+ r m+) 10.) s)))
       (setq r (* r 10.) m+ (* m+ 10.) m- (* m- 10.) k (1- k)))
     ;; Each digit; the last is the one at which the digits so far, or with the
     ;; last one more, are within half a gap of |X|, the nearer of the two.
@@ -798,13 +807,22 @@ Pathnames, editor buffers, host objects, and many other hairy things
       (when (>= r s4) (setq r (- r s4) u (+ u 4)))
       (when (>= r s2) (setq r (- r s2) u (+ u 2)))
       (when (>= r s) (setq r (- r s) u (+ u 1)))
-      (let ((low (< r m-))
-	    (high (> (+ r m+) s)))
+;      (let ((low (< r m-))
+;	    (high (> (+ r m+) s)))
+      (let ((low (if even (<= r m-) (< r m-)))	;F even, above
+	    (high (if even (>= (+ r m+) s) (> (+ r m+) s))))
 	(cond ((or low high (and max-digits (>= (1+ (fill-pointer digits)) max-digits)))
-	       (if (cond ((and low high) (>= (* 2 r) s))
+	       (if (cond ((and low high)
+;			  (>= (* 2 r) s))
+			  ;; a cut at MAX-DIGITS rounds a half to even, above
+			  (if (and max-digits (>= (1+ (fill-pointer digits)) max-digits))
+			      (or (> (* 2 r) s) (and (= (* 2 r) s) (oddp u)))
+			    (>= (* 2 r) s)))
 			 (low nil)
 			 (high t)
-			 (t (>= (* 2 r) s)))	;MAX-DIGITS reached
+;			 (t (>= (* 2 r) s)))	;MAX-DIGITS reached
+			 ;; MAX-DIGITS reached: to the nearest, a half to even
+			 (t (or (> (* 2 r) s) (and (= (* 2 r) s) (oddp u)))))
 		   (incf u))
 	       (return nil))
 	      (t (vector-push-extend (+ #/0 u) digits)))))
@@ -824,6 +842,77 @@ Pathnames, editor buffers, host objects, and many other hairy things
 		(not (= (aref digits (1- (fill-pointer digits))) #/0))))
       (decf (fill-pointer digits)))
     (values digits k)))
+
+;;; FORMAT's ~E and ~G (sys/io/format.lisp) took the power of ten of a float
+;;; and the digits of ~E from SCALE-FLONUM, which scales the float to [1, 10)
+;;; by floating multiplication and loses bits, and FLONUM-TO-STRING of the
+;;; scaled float: ~E printed the most positive single as "3.4028237e+38",
+;;; which reads as infinity, and 6.02e23 as "6.0200005e+23", and ~G could take
+;;; a power of ten one off; given a subnormal, ABS signalled, as arithmetic
+;;; makes none.  These give them exactly, in integers, from the float's bits,
+;;; with the printer's digits (FLONUM-DIGITS, above).
+
+(defun flonum-decimal-exponent (x)
+  "The power of ten of the finite float X, the N with 10^N <= |X| < 10^(N+1),
+from its bits; 0 for zero.  ~G's, which chooses ~F or ~E by it."
+  (if (zerop x) 0
+    (let* ((f (flonum-mantissa x))		;|X| is F * 2^E, F the magnitude
+	   (e (flonum-exponent x))
+	   (num (if (minusp e) f (ash f e)))
+	   (den (if (minusp e) (ash 1 (- e)) 1))
+	   ;; estimated as in flonum-digits, log10 2 being about 77/256, then
+	   ;; corrected
+	   (n (floor (* (+ e (haulong f) -1) 77.) 256.)))
+      (flet ((at-least (n)			;|X| >= 10^N
+	       (if (minusp n)
+		   (>= (* num (^ 10. (- n))) den)
+		 (>= num (* den (^ 10. n))))))
+	(do () ((at-least n)) (decf n))
+	(do () ((not (at-least (1+ n)))) (incf n))
+	n))))
+
+(defun flonum-e-exponent (x)
+  "The exponent the printer gives the finite float X in the E format, that of
+the first of FLONUM-DIGITS's digits; 0 for zero.  ~E's.  It is
+FLONUM-DECIMAL-EXPONENT's or one more, when those digits are a power of ten
+above |X|: the single nearest 1e-9 is below it and prints as 1.0e-9."
+  (if (zerop x) 0
+    (multiple-value-bind (digits k) (flonum-digits x)
+      (return-array digits)
+      (1- k))))
+
+(defun flonum-scaled-to-string (x exponent max-digits fraction-digits)
+  "X's digits as FLONUM-TO-STRING gave those of X scaled by 10^-EXPONENT, for ~E:
+d.ddd and 1, or 10.0 and 2 when they rounded up to the next power of ten, as
+its carry gave.  X is any finite float, of either sign, and EXPONENT
+FLONUM-E-EXPONENT's.  MAX-DIGITS and FRACTION-DIGITS are FLONUM-TO-STRING's:
+at most MAX-DIGITS digits, or exactly FRACTION-DIGITS after the point, padded
+with zeros.  The digits are FLONUM-DIGITS's, the fewest that read back as X,
+the last rounded when they are cut."
+  (declare (values buffer integer-digits))
+  (let ((buffer (make-string 100. :fill-pointer 0))
+	;; the digits in all; FLONUM-TO-STRING gave the one before the point
+	;; at least, and none after it when that one took the last
+	(n (if fraction-digits (1+ fraction-digits) max-digits))
+	carry)
+    (if (and n (< n 1)) (setq n 1))
+    (multiple-value-bind (digits k)
+	(if (zerop x) (values "0" 1) (flonum-digits x n))
+      ;; cut to N digits, they rounded up to 10^(EXPONENT+1): DIGITS is "1"
+      (setq carry (> (1- k) exponent))
+      (vector-push (aref digits 0) buffer)
+      (if carry (vector-push #/0 buffer))
+      (vector-push (pttbl-decimal-point *readtable*) buffer)
+      (unless (and n (< n 2))
+	(loop for i from 1 below (length digits)
+	      do (vector-push (aref digits i) buffer))
+	(cond (fraction-digits
+	       (loop repeat (- fraction-digits (1- (length digits)))
+		     do (vector-push #/0 buffer)))
+	      ((= (length digits) 1)
+	       (vector-push #/0 buffer))))
+      (unless (zerop x) (return-array digits)))
+    (values buffer (if carry 2 1))))
 
 ;;; Print the mantissa.
 ;;; X is a positive non-zero flonum, SMALL is T if it's a small-flonum.
