@@ -254,6 +254,53 @@ file carries a comment in that file saying why.
   flip came at 206-213 K words and the fixed loop saw only three. That count
   is left as it is. The new case passes on micro and rtl and fails, as it
   must, with the GC process disabled.
+- **APPLY stops spreading at `%SPREAD`'s limit, with its error** (`UAPLY5`,
+  `UAPLY-TOO-LARGE`, `sys/ucadr/uc-call-return.lisp:2150-2185`; MIT's).
+  `APPLY` spread its list onto the stack with no size check, unlike `%SPREAD`
+  and `%ASSURE-PDL-ROOM`, which stop a frame at 370 octal words and signal
+  "Attempt to make a stack frame larger than 256. words."
+  (`STACK-FRAME-TOO-LARGE`, `:1781-1916`). A call block opened above a larger
+  frame holds its deltas to the active and open blocks in 8 bits
+  (`%%LP-CLS-DELTA-TO-ACTIVE-BLOCK`, `%%LP-CLS-DELTA-TO-OPEN-BLOCK`,
+  `sys/cold/qcom.lisp:628-631`), and they wrap. An interpreted function's
+  entry (`INTP1`) opens `APPLY-LAMBDA`'s call block above its arguments, so
+  `APPLY` of an interpreted `&rest` function to 252 arguments, a frame of 256
+  words, halted the machine at `QMXSG` (`ILLOP`, "returning out top of stack
+  group"; PC 1767), with or without a stack-group switch, on revisions 14 and
+  15, micro and rtl; 250 and 251 returned. `APPLY` of a compiled function to
+  300 arguments lost the listener instead: the throw out of the
+  too-many-arguments error found no catch (`THROW-TAG-NOT-SEEN-ERROR`). The
+  spread now stops after 249 arguments, flushes the call block it was filling,
+  as a throw flushes a frame, so that the error's own frames open nothing
+  above it, and signals `%SPREAD`'s error; a check that trapped with the call
+  block still open left the machine in the throw (`XTHRW7`), the case
+  unanswered. Fixed on the CADR's line in the same way.
+  `tools/microcode-check`'s new check `apply-large-frame` applies interpreted
+  `&rest` functions, one of them switching stack groups, to 249, 250, 252, 300
+  and 600 arguments: microcode without the change returns 250 and halts at
+  252, and with the check removed again the same (8 of its 12 cases fail or go
+  unanswered); with the change its 12 cases pass on micro and rtl at both
+  revisions. `rev14-fiddles`' interpreted frames take 248 arguments, not 250:
+  `APPLY` spreads them with the hold's first, 249. The profile needs no
+  change: no record's word moves, and the new jump has no record. Microcode
+  2002's files changed again, eight instructions more: at revision 14
+  `ucadr.mcr`
+  `18ef4476f4727600ee57e7f301207974ddf4b753038009b4f008a9034b8240a5`, at
+  revision 15 `ucadr.mcr`
+  `e953197c00b7edee0f24c70ef2e460be70768ed86a184857dc929e88572c55af`, both
+  with `.tbl`
+  `eaa657df9c7cd4bd47b02d289ffa63eea3b81f6ad9840747f0e11e650f6d470e`, `.locs`
+  `ece269715670c8faee9be05cf2e61dd74d2bac9168e425866c2828babffaa16f` and
+  `.sym` `2efd4e36e65637e48bbd2087593580a686d0e98a8b18e526434b9757d47ea37d`;
+  `promh.mcr` is unchanged at both. Step 2's gate was run with the change
+  on b7943b2, before region-to-area's fix above, not on the tree with both:
+  System 2002's band on that revision-14 microcode passes it on micro and on
+  rtl as before, the new check and the save checks at 1920x1080 (C14) with
+  it. With both changes the new check passes on micro and rtl at both
+  revisions and `region-area-map-interrupt` on micro at revision 14; at
+  revision 15 System 2002 reaches its listener on micro and on rtl; `tools/assembler-check` passes all
+  30 checks, its revision-15 counts unchanged (359 hints, 140 predicted
+  targets, every execution of the profile covered).
 
 ## Revision 14
 

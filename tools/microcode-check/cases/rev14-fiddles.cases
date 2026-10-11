@@ -9,15 +9,14 @@
 ; The control: no alias, the dump and refill meet no eviction.
 (third (si:rev14-d0 200)) => 0
 ; D1: every word of the frame aliases its own stack word's TLB index.  At
-; most 250 args: an interpreted function given 300 or more by APPLY that
-; switches stack groups halts the machine at QMXSG on revision 13 and 14 alike
-; (System 2001 and 2002), which is not this check's; the deep runs below take
-; the frames deeper.
+; most 248 args, which APPLY spreads with the hold's first argument: past 249
+; spread arguments, %SPREAD's limit, APPLY signals STACK-FRAME-TOO-LARGE
+; (apply-large-frame); the deep runs below take the frames deeper.
 (third (si:rev14-d1 200)) => 0
-(third (si:rev14-d1 250)) => 0
+(third (si:rev14-d1 248)) => 0
 ; D2 and R1: the same with SET-MAR on a word of the stack page (status 6).
 (third (si:rev14-d1 200 t)) => 0
-(third (si:rev14-d1 250 t)) => 0
+(third (si:rev14-d1 248 t)) => 0
 ; X1: an extra-PDL bignum above the aliased words, and without the alias.
 (subseq (si:rev14-x1 200) 0 2) => (0 T)
 (subseq (si:rev14-x1 200 nil) 0 2) => (0 T)
