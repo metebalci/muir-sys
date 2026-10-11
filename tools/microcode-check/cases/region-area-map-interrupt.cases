@@ -1,0 +1,20 @@
+; Region-to-area's walk keeps the region it walks for across the interrupts
+; it can take (sys/ucadr/uc-page-fault.lisp, REGION-TO-AREA-WALK).  Load
+; lisp/region-area-map-interrupt.lisp first, interpreted or compiled; it needs
+; revision 14 or 15.  Microcode that keeps the region in A-TEM1 puts an area
+; into region 0's byte when the tick comes during the walk: the storms below
+; (timer 0 at 200 and 50 microseconds) find region 0's byte holding another
+; area's number.
+;
+; Preconditions: the table found in A memory, and the tick tracking the
+; mouse.
+(rgm-find-map) => (T)
+(rgm-mouse-tracking) => T
+; The controls: the table as the system left it, and a storm at the tick's
+; own period.
+(rgm-bad) => NIL
+(rgm-storm 16667) => NIL
+; The storms.
+(rgm-storm 200) => NIL
+(rgm-storm 50) => NIL
+(rgm-storm 50) => NIL

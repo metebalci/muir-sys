@@ -206,6 +206,54 @@ file carries a comment in that file saying why.
   on the microcode before the change); at revision 15 System 2002 reaches its listener on micro;
   `tools/assembler-check` passes all 30 checks, its revision-15 counts
   unchanged.
+- **Region-to-area's walk keeps its region across the interrupts it can
+  take** (`REGION-TO-AREA-WALK`, `sys/ucadr/uc-page-fault.lisp:2504-2518`).
+  `REGION-TO-AREA` keeps each region's area in a byte of
+  `A-REGION-AREA-MAP`, and a byte that says not yet known makes it walk the
+  region's list thread and keep what it finds. The walk held the region
+  number in `A-TEM1` across its reads, which page faults and interrupts
+  clobber, and an interrupt can be taken at each read: the tick's
+  `TRACK-MOUSE` (`sys/ucadr/uc-track-mouse.lisp:202`) sets `A-TEM1` to 4
+  times the mouse's delta, 0 at rest, so the area went into region 0's
+  byte, and `%AREA-NUMBER` and the transporter's destination area were wrong
+  for region 0's objects until the next boot. `generational-tuning`'s
+  `gt-check` found it now and then (micro at 2 MW, rtl at 32 MW). A swap-in
+  during the walk did no harm: it leaves `A-TEM1` at the faulting address,
+  whose low byte is the region's in the page-aligned thread. The region is
+  now kept in `M-A`, which page faults and interrupts keep. The CADR's line
+  is not affected: MIT's `REGION-TO-AREA` walks for every call, with no
+  table, and keeps nothing across its reads. `tools/microcode-check`'s new
+  check `region-area-map-interrupt` runs the tick at 200 and 50
+  microseconds while every region's byte is forgotten and looked up again:
+  microcode 2002 without the change failed all three storms in each of 5
+  runs at revision 14 (micro 3, rtl 2) and two of three in a run at revision
+  15 (micro), and with the change all pass at both.
+  Microcode 2002's files changed again, one instruction fewer: at revision 14
+  `ucadr.mcr`
+  `3c441381b47d01b2fbcdadbd2d6f6e3582575929251273e7fd67276b3fbab650`, at
+  revision 15 `ucadr.mcr`
+  `d52ab0e7fd9e2c84b9bf1f275baf6113d4071a56fc672171ae3e53bca6ff98a0`, both
+  with `.tbl` `f656fc9cbcd843adcdc582268c7489bb4c7d3db647afa46a4a48f74fdf4133fa`,
+  `.locs` `6f8437661b18529ae5a24dfacf9a58376e37412f1ef69d7d2d72b041e4360f60`
+  and `.sym` `126c54ea4e8b670d9120af77c6e17be1069c56362b3abdd65f69f509a0e2c4f5`;
+  `promh.mcr` is unchanged at both. System 2002's band on the revision-14
+  microcode passes step 2's gate on micro and on rtl as before, the new
+  check with it (on rtl C15, the incremental save and the self-test first
+  timed out with the host heavily loaded, and passed run again); at
+  revision 15 System 2002 reaches its listener on micro (muir-sim ffb241b);
+  `tools/assembler-check` passes all 30 checks, its revision-15 counts and
+  the profile unchanged.
+- **`generational-tuning` waits for its three young flips**
+  (`tools/system-check/cases/generational-tuning.cases`). The case that
+  counts the young collections eden's filling starts consed a fixed 600 K
+  words with eden at 128 K and wanted three flips; it now conses until the
+  third, at most 1.2 M words, and records the first flip's words. GC-ON sets
+  the clock's sequence break to every 6 60ths but leaves the count it was
+  making at once a second, so the first flip after it can come up to 59
+  60ths late: forced through GC-OFF, a sleep and GC-ON on rtl, the first
+  flip came at 206-213 K words and the fixed loop saw only three. That count
+  is left as it is. The new case passes on micro and rtl and fails, as it
+  must, with the GC process disabled.
 
 ## Revision 14
 

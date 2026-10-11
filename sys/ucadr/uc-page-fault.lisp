@@ -2502,14 +2502,19 @@ region-to-area
 	((m-t) dpb m-tem q-pointer (a-constant (byte-value q-data-type dtp-fix)))
 	(popj)
 region-to-area-walk				;not yet known: mit's walk, then kept
-	((a-tem1) m-t)
+;	((a-tem1) m-t)
+	;; the region number is kept in m-a, which page faults and interrupts
+	;; keep: a-tem1, which they clobber, held it across the walk's reads,
+	;; and the tick's track-mouse set it to 4 times the mouse's delta (0 at
+	;; rest), so the area went into another region's byte, region 0's.
+	((m-a) m-t)
 region-to-area-walk-1
 	((vma-start-read) add m-t a-v-region-list-thread)
 	(check-page-read)
 	(jump-if-bit-clear-xct-next boxed-sign-bit read-memory-data region-to-area-walk-1)
        ((m-t) boxed-num-except-sign-bit read-memory-data	;get next in list
 		(a-constant (byte-value q-data-type dtp-fix)))
-	((m-a) a-tem1)				;end of list, m-t has area number:
+;	((m-a) a-tem1)				;end of list, m-t has area number:
 	((a-tem2) dpb m-a (byte-field 2 3) a-zero)	; into the region's byte
 	((m-a) (byte-field 6 2) m-a)
 	((m-a) add m-a (a-constant (a-mem-loc a-region-area-map)))
