@@ -11,8 +11,7 @@
 ; fixnum address reads the word itself and transports nothing; the second
 ; holds two fixnum addresses of an extra pdl page across a switch and compares
 ; the page with itself.  lisp/extra-pdl-locative-plant.lisp, given after the
-; check's own file, holds a locative instead: the machine halts in the second
-; case and answers no more.
+; check's own file, holds a locative instead: the second case fails, (T NIL).
 (si::epl-p-ldb) => (10 2)
 (si::epl-hold) => (T T)
 (si:page-tags-equal (si::epl-page) (si::epl-page)) => T

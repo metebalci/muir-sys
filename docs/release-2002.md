@@ -167,6 +167,45 @@ file carries a comment in that file saying why.
   2001 printed `#x807FFFFF` as `-17F800001`, its `%POINTER-UNSIGNED` (MIT's,
   from `sys/sys/qmisc.lisp`) adding the shifted sign bit instead of
   subtracting it; System 2002's already subtracts it.
+- **A locative into the middle of an extra-pdl object is copied out with the
+  object** (`EXTRA-PDL-TRAP-2`, `sys/ucadr/uc-transporter.lisp:558-585`;
+  `TRANS-COPY-1K`, `:357-363`). A bignum made by arithmetic lies in
+  `EXTRA-PDL-AREA` until it is stored. When a pointer into it is stored, or
+  dumped from the pdl buffer at a stack-group switch, the write test calls
+  `EXTRA-PDL-TRAP`, which copies the object with `TRANS-COPY` and then reads
+  the copy's header to find its boxed words. It read that header at the
+  copy of the pointer stored, which for a locative to one of the bignum's
+  digits is that digit: `SINFSH` dispatched on the digit's header-type bits,
+  so bits that name no header type halted the machine in `ILLOP`
+  (`SINF-FLO`) and any other gave a wrong number of boxed words, which the
+  trap then write-tested. `TRANS-COPY` now leaves the copy's first word in
+  `A-TRANS-TEM`, and the trap reads the header there. MIT's microcode has
+  the same path; fixed on the CADR's line in the same way.
+  `tools/microcode-check`'s new check `extra-pdl-interior` stores a
+  locative to 2^63's second digit, a word of 0, into an array and holds one
+  across a stack-group switch: microcode 2002 halted at `SINF-FLO` on micro
+  and rtl, and with the change its three cases pass, interpreted and
+  compiled. `tools/system-check`'s planted `extra-pdl-locative` holds a
+  locative past every object of the extra pdl; the trap gives it the
+  copy's address plus its offset, so the plant fails its second case,
+  `(T NIL)`, on both engines; before, the run halted or not by what lay at
+  that address (at `SINF-FLO`, `TRANS-REALLY-TRAP` or `SG-LOAD-STATIC-STATE`,
+  and on rtl once not at all), a fault of the microcode and not of the
+  engines. Microcode 2002's files changed again, one instruction more: at
+  revision 14 `ucadr.mcr`
+  `3a89c1bef30604a577dcff7e0333f4735afcbc9d6510fa1ffd690d835f238d9f`, at
+  revision 15 `ucadr.mcr`
+  `33d546109530fa8e3f31cd3a43fbd8633a3d8a10dcc25ccd26e1709462390fbf`, both
+  with `.tbl` `22632c9d4862e9b694367da58de8c59d00c7814782f18fffa52693b4bbf5881b`,
+  `.locs` `9f7918e8e496a3d1d1161c7417b37df1549a53c86aa48496300c0cf08aa4ea79`
+  and `.sym` `7e7f11c636e489f4803f07ad074fe8ddaa76488d3b44d66dde65eb8b7f8bbcf4`;
+  `promh.mcr` is unchanged at both. System 2002's band on the revision-14
+  microcode passes step 2's gate on micro and on rtl as before, the new
+  check with it (on rtl `generational-tuning`'s case that counts automatic
+  young collections fell short once in three runs, as it did in three runs
+  on the microcode before the change); at revision 15 System 2002 reaches its listener on micro;
+  `tools/assembler-check` passes all 30 checks, its revision-15 counts
+  unchanged.
 
 ## Revision 14
 

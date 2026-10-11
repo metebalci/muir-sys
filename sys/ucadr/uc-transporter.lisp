@@ -357,6 +357,10 @@ TRANS-COPY-1
 TRANS-COPY-1K
 	;; Copy it, boxed and unboxed Q's alike, since shouldn't transport here.
 	;; Length is in M-B, last A-SINF-PAD Q's not to be copied.
+	;; the copy's first word, for extra-pdl-trap, which reads the copy's
+	;; header there: md is the copy of the pointer given, which may point
+	;; into the middle of the object.
+	((a-trans-tem) m-t)
 	((M-E) SUB C-PDL-BUFFER-POINTER-POP (A-CONSTANT 1)) ;Old object minus 1
 TRANS-COPY-2  ;Copy loop
 	((VMA-START-READ M-E) ADD M-E (A-CONSTANT 1))
@@ -570,7 +574,15 @@ EXTRA-PDL-TRAP-2
 	((PDL-PUSH) MD)
 ;Now look at the header of the object we copied
 ;and find out how many boxed Qs the object contains (in M-3).
-	((VMA-START-READ) MD)
+;	((VMA-START-READ) MD)
+	;; the header is at the copy's first word, which trans-copy leaves in
+	;; a-trans-tem: md, the copy of the pointer stored, is a locative into the
+	;; middle of the object when the stored pointer was one, and sinfsh took
+	;; the word there, a bignum's digit, as the header and halted in illop
+	;; (sinf-flo) or gave a wrong number of boxed words.  a pointer past the
+	;; object that the structure search finds, into the extra pdl's free
+	;; words, still gets the copy's address plus its offset.
+	((vma-start-read) a-trans-tem)
 	(CHECK-PAGE-READ)
 	(CALL-XCT-NEXT SINFSH)
        ((M-3) A-ZERO)
