@@ -1,0 +1,20 @@
+; APPLY of an interpreted &rest function to N arguments (lisp/apply-large-frame.lisp).
+; UAPLY spreads the list onto the stack, and the frame then holds N + 4 words
+; when INTP1 opens APPLY-LAMBDA's call block, whose deltas have 8 bits: at
+; N = 252 (256 words) they wrap and microcode 1001 used to halt the machine at
+; QMXSG's ILLOP, and the case got no answer.  The spread now stops at %SPREAD's
+; limit, 370 octal words of frame, and signals its error,
+; STACK-FRAME-TOO-LARGE: up to 249 arguments the call returns N; past them it
+; signals the error, and the listener answers afterwards.
+(compiled-function-p #'alf-plain) => NIL
+(alf-plain-n 10) => 10
+(alf-plain-n 249) => 249
+(alf-n 249) => 249
+(alf-plain-n 250) =>! stack frame larger than 256
+(alf-plain-n 252) =>! stack frame larger than 256
+(alf-plain-n 300) =>! stack frame larger than 256
+(alf-plain-n 600) =>! stack frame larger than 256
+(alf-n 300) =>! stack frame larger than 256
+(alf-n 600) =>! stack frame larger than 256
+(alf-plain-n 10) => 10
+(alf-n 10) => 10

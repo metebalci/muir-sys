@@ -200,6 +200,36 @@ Every change to a source file carries a comment in that file saying why.
 
     System 1003's band boots on it, and `tools/microcode-check` (seven
     checks, 29 cases) passes on micro and on rtl.
+- **APPLY stops spreading at `%SPREAD`'s limit, with its error**
+  (`UAPLY5`, `UAPLY-TOO-LARGE`, `sys/ucadr/uc-call-return.lisp:2069-2104`;
+  MIT's). `APPLY` spread its list onto the stack with no size check, unlike
+  `%SPREAD` and `%ASSURE-PDL-ROOM`, which stop a frame at 370 octal words
+  and signal "Attempt to make a stack frame larger than 256. words."
+  (`STACK-FRAME-TOO-LARGE`, `:1710-1843`). A call block opened above a
+  larger frame holds its deltas to the active and open blocks in 8 bits
+  (`%%LP-CLS-DELTA-TO-ACTIVE-BLOCK`, `%%LP-CLS-DELTA-TO-OPEN-BLOCK`,
+  `sys/cold/qcom.lisp:446-449`), and they wrap. An interpreted function's
+  entry (`INTP1`) opens `APPLY-LAMBDA`'s call block above its arguments, so
+  `APPLY` of an interpreted `&rest` function to 252 arguments, a frame of
+  256 words, halted the machine at `QMXSG` (`ILLOP`, "returning out top of
+  stack group"; PC 1677 on System 1003); 250 and 251 arguments
+  returned. The spread now stops after 249 arguments, flushes the call block
+  it was filling, as a throw flushes a frame, and signals `%SPREAD`'s error.
+  Fixed on `main` in the same way. `tools/microcode-check`'s new check
+  `apply-large-frame` applies interpreted `&rest` functions, one of them
+  switching stack groups, to 249, 250, 252, 300 and 600 arguments: microcode
+  without the change returns 250 and halts at 252; with it the 12 cases
+  pass on micro and on rtl.
+  - The microcode changes (still numbered 1001): eight control-store words
+    more (`ucadr.locs`: I-memory 30444 to 30454). Assembled twice on System
+    1003's band, the four files were the same both times (sha256):
+    - `ucadr.mcr` `295d2aee378868536075649f1c99a015017549d90fd61e3e0e45537725016830`
+    - `ucadr.tbl` `0134145ec7ed75bef57c11ba6ddb1a7f27686bfa86d9605672e3ce6ce9504438`
+    - `ucadr.locs` `8181d40e72a3c1905e0521818eef5449246cc9597bc4b356005dd3ba5fb57c30`
+    - `ucadr.sym` `bb9daeafe8425958490b7eec02b05a143922529930d6ed42c486b20a7d652666`
+
+    System 1003's band boots on it, and `tools/microcode-check` (eight
+    checks, 41 cases) passes on micro and on rtl.
 - **FORMAT forgets the clause strings it gives back**
   (`format-reclaim-clauses`, `sys/io/format.lisp:1276-1292`). The clause
   buffer, `format-clauses-array`, kept for the next call, still held each

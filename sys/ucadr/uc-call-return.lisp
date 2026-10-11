@@ -2075,6 +2075,13 @@ UAPLY5	(CALL-XCT-NEXT QCAR)
 	(DISPATCH Q-DATA-TYPE M-T SKIP-IF-LIST)
 	 (JUMP UAPLY6)
 	((M-A) M-T)
+	;; the spread stops at %spread's limit, 370 words of frame (its fudge
+	;; factor of 10 kept): m-r + 1 pushed and more to come.  a larger frame
+	;; wraps the 8-bit deltas of the next call block opened above it
+	;; (%%lp-cls-delta-to-active-block and -to-open-block), as an
+	;; interpreted callee's intp1 opens apply-lambda's, and the return then
+	;; leaves the stack group's top at qmxsg and halts in illop.
+	(jump-greater-or-equal m-r (a-constant 370) uaply-too-large)
 	(JUMP-XCT-NEXT UAPLY5)
        ((M-R) ADD M-R (A-CONSTANT 1))
 
@@ -2082,6 +2089,19 @@ UAPLY6	((PDL-TOP) DPB PDL-TOP Q-ALL-BUT-CDR-CODE
 		(A-CONSTANT (BYTE-VALUE Q-CDR-CODE CDR-NIL)))
 	(JUMP-XCT-NEXT UAPLY4)
        ((M-R) ADD M-R (A-CONSTANT 1))
+
+;; the spread past %spread's limit: the call block it was filling is flushed
+;; and a-ipmark restored, as xthrw1b flushes a frame, so that no call block
+;; is opened above a frame too large for its deltas, then %spread's error.
+uaply-too-large
+	((m-tem) a-ipmark)
+	((pdl-index) add m-tem (a-constant (eval %lp-call-state)))
+	((a-tem1) (lisp-byte %%lp-cls-delta-to-open-block) pdl-index-indirect)
+	((pdl-pointer) sub m-tem (a-constant (eval %lp-call-block-length)))
+	((m-tem) sub m-tem a-tem1)
+	((a-ipmark) pdl-buffer-address-mask m-tem)
+	(call trap)
+    (error-table stack-frame-too-large)
 
 UAPFX	(CALL P3ZERO)		;Push micro-to-macro call block, FEXPR call
 	((PDL-TOP) (A-CONSTANT (PLUS (BYTE-VALUE Q-DATA-TYPE DTP-FIX)
