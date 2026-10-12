@@ -199,6 +199,37 @@ file carries a comment in that file saying why.
   samples that are not subnormal, and `~E` and `~G` stop on all 208
   subnormals. With the change all 43 pass, on revisions 14 and 15. The
   CADR's line has the same `~E` and `~G` path.
+- **FORMAT's `~F`, `~$` and `~G` give a float's exact digits**
+  (`sys/io/format.lisp:772-784`, FORMAT-CTL-HAIRY-F-FORMAT; `:980-982`,
+  FORMAT-CTL-HAIRY-G-FORMAT; `:1013-1025`, FORMAT-CTL-MONEY; `:868-874`,
+  FORMAT-CTL-HAIRY-E-FORMAT; `sys/io/print.lisp:916-993`,
+  `flonum-half-compare`, `flonum-fixed-to-string`). They took their digits
+  from `FLONUM-TO-STRING`, which carried nothing out of the integer part
+  from 2^24 up, so `~F` of the single nearest 1e11 printed `:0000000000.0`
+  (36 of the 152 singles nearest powers of ten, under `~F`, `~G` and `~$`
+  alike). It also took half a gap on both sides of a power of two, where the
+  gap below is half the gap above, so 46 powers of two (34 under `~G`), such
+  as 2^-103, printed digits that read back as the single below. It rounded a
+  cut digit's tie down, and it truncated the integer digit when no fraction
+  digit was left (`~,0F` of 3.7 printed `3.`). `~F` and `~$` stopped on
+  every subnormal, as `ABS` of one signals, a negative scale (`~,,-2F`)
+  stopped with a subscript error, and a positive one multiplied the float.
+  `flonum-fixed-to-string` lays out `flonum-digits`'s digits as
+  `FLONUM-TO-STRING` laid out its own: the width, the dropped leading zero,
+  overflow and padding as before. A cut rounds to the nearest, a tie to the
+  even digit, as `~E`'s does: `~,2F` of 0.375 gives `0.38` (it gave `0.37`)
+  and of 0.125 `0.12`. A cut to no fraction digits rounds the integer digits
+  (`~,0F` of 3.7 gives `4.`, `~5F` of 123456.7 `123457.`), and the scale
+  moves the point exactly. `~F` and `~$` pass the float itself, as `~G` does.
+  `~$` keeps its 1e50 test for numbers other than floats only, since no
+  finite single reaches it. With no width, `~,2,,0E` prints its leading
+  zero, `0.12e+3`, as when a width leaves room for it; comparing the width
+  with NIL stopped it with an error. MIT's lines are commented out in place.
+  `tools/system-check` gains `format-float-fixed` (58 cases, its functions in
+  `lisp/float-round-trip.lisp`). The tree before the change fails 18 of the
+  58 and errs in 8; with it all 58 pass, on revisions 14 and 15. The CADR's
+  line has the same `FLONUM-TO-STRING` and the same `~E` code, but no
+  subnormals.
 - A new check, `tools/system-check/cases/pointer-unsigned.cases` (row in
   `tools/system-check/README.md`): `SI:%POINTER-UNSIGNED`
   (`sys/sys/qrand.lisp:21`) and `SI:PRINT-POINTER-FIELD`

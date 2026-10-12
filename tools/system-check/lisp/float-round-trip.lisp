@@ -212,9 +212,10 @@ the width before the digits round), padded with zeros."
   "What FORMAT's ~G of X, or ~,DG with D, is to give, by MIT's rule
 in FORMAT-CTL-HAIRY-G-FORMAT with X's own power of ten: ~F with D - N - 1
 digits after the point and four spaces when that is between 0 and D, else ~E;
-D, when not given, the digits FLONUM-TO-STRING gives X, at least N + 1 up to 7."
+D, when not given, the digits ~F gives X (FLONUM-FIXED-TO-STRING), at least N + 1
+up to 7."
   (let* ((n (ffd-exponent x))
-	 (ad (or d (max (1- (length (flonum-to-string (ffd-magnitude x) nil nil nil t)))
+	 (ad (or d (max (1- (length (flonum-fixed-to-string x nil nil t)))
 			(min (1+ n) 7))))
 	 (dd (- ad n 1)))
     (if (<= 0 dd ad)
@@ -255,6 +256,94 @@ the number that differ from the reference, the number tried, and up to three."
 	  unless (= (ldb (byte 8 23.) (frt-bits x)) 255.)
 	    do (incf tried)
 	       (let ((r (ffd-check x kind d)))
+		 (when r
+		   (incf fails)
+		   (if (< (length shown) 3) (push r shown)))))
+    (list* fails tried (nreverse shown))))
+
+;;; For the check format-float-fixed (tools/system-check/README.md): FORMAT's
+;;; ~F, and ~G when it chooses ~F, over the same samples.  Their text, with no
+;;; digits asked for, is to read back as the float: a normal one through the
+;;; reader, a subnormal one, which the reader takes as an underflow, by its
+;;; exact decimal value lying within half a gap of the float.
+;;; FLONUM-TO-STRING carried nothing out of its integer part, so ~F of the
+;;; single nearest 1e11 printed ":0000000000.0"; and ~F signalled on a
+;;; subnormal, as ABS of one does.
+
+(defun fff-format (x kind)
+  (condition-case (err)
+      (string-trim '(#/space) (selectq kind
+				(:f (format nil "~F" x))
+				(:g (format nil "~G" x))))
+    (error (list 'format-error (send err :report-string)))))
+
+(defun fff-parse (s)
+  "S, [-]ddd.ddd with an exponent e[+-]ddd or none, as (N D), its value
+N / 10^D; NIL when it is not that."
+  (let ((n 0) (d nil) (neg nil) (any nil)
+	(e (string-search-char #/e s)))
+    (dotimes (i (or e (length s)))
+      (let ((c (aref s i)))
+	(cond ((and (= i 0) (= c #/-)) (setq neg t))
+	      ((and (= c #/.) (null d)) (setq d 0))
+	      ((digit-char-p c)
+	       (setq n (+ (* n 10.) (digit-char-p c)) any t)
+	       (if d (incf d)))
+	      (t (return-from fff-parse nil)))))
+    (let ((ex (if e (fff-parse-exponent (substring s (1+ e))) 0)))
+      (and any ex
+	   (let ((dd (- (or d 0) ex)))
+	     (if (minusp dd)
+		 (list (* (if neg (- n) n) (expt 10. (- dd))) 0)
+	       (list (if neg (- n) n) dd)))))))
+
+(defun fff-parse-exponent (s)
+  (let ((v 0) (neg nil) (any nil))
+    (dotimes (i (length s))
+      (let ((c (aref s i)))
+	(cond ((and (= i 0) (memq c '(#/+ #/-))) (setq neg (= c #/-)))
+	      ((digit-char-p c) (setq v (+ (* v 10.) (digit-char-p c)) any t))
+	      (t (return-from fff-parse-exponent nil)))))
+    (and any (if neg (- v) v))))
+
+(defun fff-within (x s)
+  "T when the decimal text S lies within half a gap of the float X, X's
+gap from its bits: 2^(field - 150), or 2^-149 for a subnormal."
+  (let ((p (fff-parse s)))
+    (when p
+      (let* ((b (frt-bits x))
+	     (field (ldb (byte 8 23.) b))
+	     (sig (+ (logand b (1- (ash 1 23.))) (if (zerop field) 0 (ash 1 23.))))
+	     (q (if (zerop field) -149. (- field 150.)))
+	     (xs (if (logbitp 31. b) (- sig) sig))
+	     (n (first p))
+	     (ten (expt 10. (second p))))
+	(if (>= q 0)
+	    (<= (abs (- (* 2 n) (* 2 xs (ash 1 q) ten))) (* (ash 1 q) ten))
+	  (<= (abs (- (* 2 n (ash 1 (- q))) (* 2 xs ten))) ten))))))
+
+(defun fff-check (x kind)
+  "NIL when FORMAT's KIND (:F or :G) of X reads back as X; else (TEXT X's (M E))."
+  (let ((s (fff-format x kind)))
+    (cond ((not (stringp s)) (list s (frt-decode x)))
+	  ((zerop (ldb (byte 8 23.) (frt-bits x)))
+	   (if (fff-within x s) nil (list s (frt-decode x))))
+	  ((let ((y (condition-case () (read-from-string s) (error nil))))
+	     (and (floatp y) (= (frt-bits y) (frt-bits x))))
+	   nil)
+	  (t (list s (frt-decode x))))))
+
+(defun fff-run (kind set &optional (start 0) end)
+  "FORMAT's KIND (:F or :G) over the sample SET of float-round-trip, its
+infinities left out: the number that do not read back, the number tried, and
+up to three."
+  (let ((fails 0) (tried 0) (shown nil))
+    (loop for x in (nthcdr start (frt-sample set))
+	  for i from start
+	  until (and end (>= i end))
+	  unless (= (ldb (byte 8 23.) (frt-bits x)) 255.)
+	    do (incf tried)
+	       (let ((r (fff-check x kind)))
 		 (when r
 		   (incf fails)
 		   (if (< (length shown) 3) (push r shown)))))

@@ -769,12 +769,19 @@ the name of a command, and remaining elements are parameters."
 	    (WIDTH-AFTER-SIGN
 	      (AND WIDTH
 		   (IF (OR (MINUSP ARG) ATSIGN-FLAG) (- WIDTH 1) WIDTH))))
-	  (WHEN SCALE
-	    (SETQ ARG (* ARG (SI::XR-GET-POWER-10 SCALE))))
+	  ;; the digits are the printer's, exact, from the float's bits
+	  ;; (si::flonum-fixed-to-string, sys; io; print), the scale moving the
+	  ;; point exactly: flonum-to-string carried nothing out of the integer
+	  ;; part (the single nearest 1e11 printed as :0000000000.0), rounded a
+	  ;; tie down, and truncated the integer digit at ~,0f; the scale was a
+	  ;; float multiplication; and abs signalled on a subnormal.
+;	  (WHEN SCALE
+;	    (SETQ ARG (* ARG (SI::XR-GET-POWER-10 SCALE))))
 	  (MULTIPLE-VALUE-BIND (BUFFER)
-	      (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT)
+;	      (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT)
+	      (si::flonum-fixed-to-string arg
 				    (AND WIDTH (1- WIDTH-AFTER-SIGN))
-				    AFTER-DECIMAL T)
+				    AFTER-DECIMAL T (or scale 0))
 	    (WHEN WIDTH
 	      (WHEN (AND OVERFLOWCHAR
 			 (> (LENGTH BUFFER) WIDTH-AFTER-SIGN))
@@ -858,8 +865,13 @@ the name of a command, and remaining elements are parameters."
 	       (DECF DECIMAL-PLACE)
 	       (INCF EXPONENT))
 	     (DECF EXPONENT (- SCALE 1))
-	     (SETQ EXTRA-ZERO (AND ( SCALE 0)
-				   (> WIDTH-AFTER-SIGN-AND-EXPONENT (LENGTH BUFFER))))
+;	     (SETQ EXTRA-ZERO (AND ( SCALE 0)
+;				   (> WIDTH-AFTER-SIGN-AND-EXPONENT (LENGTH BUFFER))))
+	     ;; with no width the field has room for the 0 before the point:
+	     ;; compared with nil, the width stopped ~,2,,0e with an error
+	     (setq extra-zero (and (<= scale 0)
+				   (or (null width)
+				       (> width-after-sign-and-exponent (length buffer)))))
 	     (WHEN WIDTH
 	       (WHEN (AND OVERFLOWCHAR
 			  (OR (> (LENGTH BUFFER) WIDTH-AFTER-SIGN-AND-EXPONENT)
@@ -965,7 +977,9 @@ the name of a command, and remaining elements are parameters."
 		   ;; flonum-to-string takes the magnitude from the bits: no abs,
 		   ;; which signalled on a subnormal
 ;		   (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT)
-		   (si::flonum-to-string arg (typep arg 'short-float)
+;		   (si::flonum-to-string arg (typep arg 'short-float)
+		   ;; ~f's digits, as ~f lays them out (format-ctl-hairy-f-format)
+		   (si::flonum-fixed-to-string arg
 					 (AND WIDTH (- WIDTH-AFTER-EXPONENT
 						       (IF (OR NEGATIVE ATSIGN-FLAG) 2 1)))
 					 NIL T)
@@ -996,12 +1010,19 @@ the name of a command, and remaining elements are parameters."
     ;; (format-infinity-p); a single's 1e50 is itself an infinity, which no
     ;; float exceeds, so the test below no longer caught it.
 ;    (COND ((OR (NOT (NUMBERP ARG)) (> (ABS ARG) 1e50))
-    (cond ((or (not (numberp arg)) (format-infinity-p arg) (> (abs arg) 1e50))
+;    (cond ((or (not (numberp arg)) (format-infinity-p arg) (> (abs arg) 1e50))
+    ;; no finite single exceeds 1e50, itself an infinity, and abs signalled on
+    ;; a subnormal: the test is kept for the other numbers only
+    (cond ((or (not (numberp arg)) (format-infinity-p arg)
+	       (and (not (floatp arg)) (> (abs arg) 1e50)))
 	   (FORMAT-CTL-JUSTIFY FIELD (FLATC ARG) PADCHAR)
 	   (PRINC ARG))
 	  (T (OR (FLOATP ARG) (SETQ ARG (FLOAT ARG)))
 	     (MULTIPLE-VALUE-BIND (STR IDIG)
-		 (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT) NIL RDIG)
+		 ;; the printer's digits, exact; abs signalled on a subnormal
+		 ;; (format-ctl-hairy-f-format)
+;		 (SI::FLONUM-TO-STRING (ABS ARG) (TYPEP ARG 'SHORT-FLOAT) NIL RDIG)
+		 (si::flonum-fixed-to-string arg nil rdig)
 	       (LET ((WIDTH (+ (IF (OR ATSIGN-FLAG (MINUSP ARG)) 1 0)
 			       (MAX (- LDIG IDIG) 0)
 			       (ARRAY-ACTIVE-LENGTH STR))))

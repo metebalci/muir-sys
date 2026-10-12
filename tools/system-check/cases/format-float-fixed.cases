@@ -1,0 +1,88 @@
+; lisp: float-round-trip.lisp
+; FORMAT's ~F, ~$, ~G when it chooses ~F, and ~E with no width and a scale
+; of 0 or less (sys/io/format.lisp, FORMAT-CTL-HAIRY-F-FORMAT,
+; FORMAT-CTL-MONEY, FORMAT-CTL-HAIRY-G-FORMAT, FORMAT-CTL-HAIRY-E-FORMAT;
+; sys/io/print.lisp, FLONUM-TO-STRING; lisp/float-round-trip.lisp).
+; SI:FFF-RUN formats every float of a float-round-trip sample, infinities
+; left out, with ~F or ~G, and gives the number whose text does not read back
+; as the float, the number tried, and up to three: the text and the float's
+; exact value as (M E), M * 2^E.  A subnormal's text, which the reader takes
+; as an underflow, is to lie within half a gap of it.  FLONUM-TO-STRING
+; carried nothing out of its integer part at 2^24 and above, so ~F of the
+; single nearest 1e11 printed ":0000000000.0"; its digits took half a gap on
+; both sides of a power of two, where the gap below is half the gap above, so
+; ~F of 2^-103 printed digits that read back as the single below it; ~F and ~$ signalled on a
+; subnormal, as ABS of one does; ~E with no width and a scale of 0 or less
+; compared the width with NIL.  Digits cut by ~,dF, ~$ or the width round to
+; the nearest, a tie to the even digit, as ~E's do: ~,2F of 0.375 is 0.38
+; (it gave 0.37) and of 0.125 0.12; a cut to no fraction digits rounds the
+; integer digit (~,0F of 3.7 gave "3.").  Run with --compile --files
+; sys/io/print.lisp,sys/io/format.lisp,
+; tools/system-check/lisp/float-round-trip.lisp on a band built before the
+; change.  The first four cases are controls, and those of the layout pass
+; without the change but for ~5F, the negative scales and ~,0F of 0.75.
+(format nil "~F" 1.5) => "1.5"
+(format nil "~F" 0.1) => "0.1"
+(format nil "~F" (* 3 (expt 2.0 30))) => "3221225500.0"
+(format nil "~,2F" 9.999) => "10.00"
+; the integer part's carry
+(format nil "~F" (si:frt-nearest (expt 10. 11.) 1)) => "100000000000.0"
+(format nil "~,2F" (si:frt-nearest (expt 10. 11.) 1)) => "100000000000.00"
+(format nil "~$" (si:frt-nearest (expt 10. 11.) 1)) => "100000000000.00"
+(si:fff-run :f :extremes) => (0 16)
+(si:fff-run :f :powers-of-2) => (0 1522)
+(si:fff-run :f :powers-of-10) => (0 152)
+(si:fff-run :f :random 0 1500) => (0 1500)
+(si:fff-run :f :random 1500 3000) => (0 1500)
+(si:fff-run :g :extremes) => (0 16)
+(si:fff-run :g :powers-of-2) => (0 1522)
+(si:fff-run :g :powers-of-10) => (0 152)
+(si:fff-run :g :random 0 1500) => (0 1500)
+(si:fff-run :g :random 1500 3000) => (0 1500)
+; subnormals
+(format nil "~F" (si:frt-from-bits 1)) => "0.000000000000000000000000000000000000000000001"
+(format nil "~F" (si:frt-from-bits #x80000001)) => "-0.000000000000000000000000000000000000000000001"
+(format nil "~,3F" (si:frt-from-bits #x80400000)) => "-0.000"
+(format nil "~$" (si:frt-from-bits 1)) => "0.00"
+(si:fff-run :f :subnormal) => (0 208)
+(si:fff-run :g :subnormal) => (0 208)
+; ~E with no width and a scale of 0 or less, as with a width that fits
+(format nil "~,2,,0E" 123.456) => "0.12e+3"
+(format nil "~,2,,-1E" 123.456) => "0.01e+4"
+; ties to even, and a cut to no fraction digits
+(format nil "~,2F" (si:frt-make 3 -3)) => "0.38"
+(format nil "~,2F" (si:frt-make 1 -3)) => "0.12"
+(format nil "~,2F" (si:frt-make -3 -3)) => "-0.38"
+(format nil "~,1F" (si:frt-make 3 -2)) => "0.8"
+(format nil "~,1F" (si:frt-make 1 -2)) => "0.2"
+(format nil "~4F" (si:frt-make 3 -3)) => "0.38"
+(format nil "~,0F" (si:frt-make 5 -1)) => "2."
+(format nil "~,0F" (si:frt-make 7 -1)) => "4."
+(format nil "~,0F" 3.7) => "4."
+(format nil "~$" (si:frt-make 3 -3)) => "0.38"
+(format nil "~$" (si:frt-make 1 -3)) => "0.12"
+(format nil "~,3G" (si:frt-make 11. -3)) => "1.38    "
+(format nil "~,3G" (si:frt-make 9 -3)) => "1.12    "
+; the layout: width, the dropped leading zero, overflow and pad characters,
+; the sign, and the scale, which moves the point exactly (a negative one
+; stopped with a subscript error)
+(format nil "~6F" 3.14159) => "3.1416"
+(format nil "~6,2F" 3.14159) => "  3.14"
+(format nil "~4,2F" 0.5) => "0.50"
+(format nil "~3,2F" 0.5) => ".50"
+(format nil "~3,2,,'*F" 1.5) => "***"
+(format nil "~8,3,,,'.F" 2.5) => "...2.500"
+(format nil "~@F" 2.5) => "+2.5"
+(format nil "~5F" 123456.7) => "123457."
+(format nil "~4F" 123456.0) => "123456."
+(format nil "~,2,1F" 1.005) => "10.05"
+(format nil "~,,3F" 1.1) => "1100.0"
+(format nil "~,,-2F" 123.0) => "1.23"
+(format nil "~,2,-1F" 0.07) => "0.01"
+(format nil "~,0F" (si:frt-make 1 -1)) => "0."
+(format nil "~,0F" (si:frt-make 3 -2)) => "1."
+(format nil "~,2F" (si:frt-nearest 5 1000.)) => "0.00"
+(format nil "~,2F" (si:frt-make 1 -12)) => "0.00"
+(format nil "~,1F" (si:frt-nearest 996. 100.)) => "10.0"
+(format nil "~,4$" 3.5) => "0003.50"
+(format nil "~8G" 3.14159) => "3.14    "

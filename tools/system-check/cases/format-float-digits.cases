@@ -16,8 +16,8 @@
 ; on a subnormal, so ~E and ~G of every subnormal stopped.  The digits cut
 ; to D + 1 round to the nearest, a half to the even digit, as IEEE 754
 ; rounds: ~,2E of 1.375 is "1.38e+0" (a half down gave 1.37) and of 1.125
-; "1.12e+0" (a half up gave 1.13); ~F (FLONUM-TO-STRING) still rounds a half
-; down, "0.37" for ~,2F of 0.375.  The exponent's width is chosen before the
+; "1.12e+0" (a half up gave 1.13); ~F rounds alike, "0.38" for ~,2F of 0.375
+; (format-float-fixed).  The exponent's width is chosen before the
 ; digits round, as MIT's ~E chose it: ~,1E of the single nearest 9.96e-10 is
 ; "1.0e-09".  The printer's
 ; digits count a decimal halfway to a neighbour as the float's when its
@@ -44,7 +44,7 @@
 (format nil "~,0E" (si:frt-make 7 -1)) => "4e+0"
 (multiple-value-list (si::flonum-digits (si:frt-make 11. -3) 3)) => ("138" 1)
 (multiple-value-list (si::flonum-digits (si:frt-make 9 -3) 3)) => ("112" 1)
-(format nil "~,2F" (si:frt-make 3 -3)) => "0.37"
+(format nil "~,2F" (si:frt-make 3 -3)) => "0.38"
 (si:ffd-run :e nil :extremes) => (0 16)
 (si:ffd-run :e nil :powers-of-2) => (0 1522)
 (si:ffd-run :e nil :powers-of-10) => (0 152)

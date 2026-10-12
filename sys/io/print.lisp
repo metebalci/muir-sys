@@ -748,7 +748,7 @@ Pathnames, editor buffers, host objects, and many other hairy things
 ;;; 0.DIGITS * 10^K.  With MAX-DIGITS, at most that many, the last rounded to
 ;;; the nearest, a half to the even digit, as IEEE 754 rounds: ~,2E of 1.375
 ;;; is 1.38e+0 and of 1.125 1.12e+0.  This rounded a half up;
-;;; FLONUM-TO-STRING, ~F's, rounds it down.  PRINT-FLONUM scaled X to [1, 10) by
+;;; FLONUM-TO-STRING rounds it down.  PRINT-FLONUM scaled X to [1, 10) by
 ;;; floating multiplication or division, which loses bits, and printed the
 ;;; digits of the scaled float: the most positive single printed as
 ;;; "3.4028237e38", which reads as infinity, the least positive normal one as
@@ -913,6 +913,84 @@ the last rounded when they are cut."
 	       (vector-push #/0 buffer))))
       (unless (zerop x) (return-array digits)))
     (values buffer (if carry 2 1))))
+
+;;; FORMAT's ~F, ~$ and ~G (sys/io/format.lisp) took their digits from
+;;; FLONUM-TO-STRING, below, which carried nothing out of its integer part
+;;; (the single nearest 1e11 printed as ":0000000000.0"), took half a gap on
+;;; both sides of a power of two, where the gap below is half the gap above,
+;;; so 2^-103 printed as digits that read back as the single below it,
+;;; rounded a cut digit's tie down, and truncated the integer digit when no
+;;; fraction digit was left.  FLONUM-FIXED-TO-STRING lays out FLONUM-DIGITS's
+;;; digits as FLONUM-TO-STRING laid out its own, with the cut rounded as
+;;; FLONUM-DIGITS rounds it, to the nearest, a tie to the even digit.
+
+(defun flonum-half-compare (x k)
+  "The sign of |X| - 10^K / 2, X a finite float not zero, exactly from its bits."
+  (let* ((f (flonum-mantissa x))		;|X| is F * 2^E, F the magnitude
+	 (e (flonum-exponent x))
+	 ;; 2|X| is A / B
+	 (a (if (minusp e) (* 2 f) (ash (* 2 f) e)))
+	 (b (if (minusp e) (ash 1 (- e)) 1))
+	 (l (if (minusp k) (* a (^ 10. (- k))) a))
+	 (r (if (minusp k) b (* b (^ 10. k)))))
+    (cond ((> l r) 1) ((< l r) -1) (t 0))))
+
+(defun flonum-fixed-to-string (x max-digits fraction-digits
+			       &optional drop-leading-zero (scale 0))
+  "X's digits in fixed format, as FLONUM-TO-STRING laid them out, for ~F, ~$
+and ~G: ddd.ddd, the digits FLONUM-DIGITS's, the fewest that read back as X,
+of either sign, a subnormal too.  MAX-DIGITS and FRACTION-DIGITS are
+FLONUM-TO-STRING's: at most MAX-DIGITS digits, the integer ones all kept
+and the 0 before the point of a number below 1 counted, or exactly
+FRACTION-DIGITS after the point, padded with zeros; a cut rounds to the
+nearest, a tie to the even digit, and with no digit left after the point the
+integer digits round.  DROP-LEADING-ZERO drops that 0 when FRACTION-DIGITS
+is MAX-DIGITS, as FLONUM-TO-STRING did.  SCALE moves the point SCALE places
+to the right, exactly, as ~F's scale.  The second value is the number of
+characters before the point."
+  (declare (values buffer integer-digits))
+  (let ((buffer (make-string 100. :fill-pointer 0))
+	digits k f)
+    ;; |X| is about 0.DIGITS * 10^K, before the scale
+    (if (zerop x)
+	(setq digits "" k 0)
+      (multiple-value-setq (digits k) (flonum-digits x)))
+    (setq k (+ k scale))
+    ;; F, the digits allowed after the point; NIL for any
+    (setq f (cond (fraction-digits)
+		  (max-digits (max 0 (- max-digits (max k 1))))))
+    (when (and f (> (- (length digits) k) f))
+      ;; cut to F digits after the point, N digits in all
+      (let ((n (+ k f)))
+	(cond ((plusp n)
+	       (multiple-value-setq (digits k) (flonum-digits x n))
+	       (setq k (+ k scale)))
+	      ;; no digit left: 10^-F when |X| is above half of it, else 0,
+	      ;; a tie to 0, the even one
+	      ((and (zerop n) (plusp (flonum-half-compare x (- k scale))))
+	       (setq digits "1" k (1+ k)))
+	      (t (setq digits "" k 0)))))
+    ;; the integer part, at least a 0
+    (if (<= k 0)
+	(unless (and fraction-digits drop-leading-zero (eql max-digits fraction-digits))
+	  (vector-push-extend #/0 buffer))
+      (dotimes (i k)
+	(vector-push-extend (if (< i (length digits)) (aref digits i) #/0) buffer)))
+    (let ((integer-digits (fill-pointer buffer)))
+      (vector-push-extend (pttbl-decimal-point *readtable*) buffer)
+      (when (or (null f) (plusp f))
+	(let ((start (fill-pointer buffer)))
+	  (when (plusp (length digits))
+	    (dotimes (i (- k))
+	      (vector-push-extend #/0 buffer))
+	    (loop for i from (max k 0) below (length digits)
+		  do (vector-push-extend (aref digits i) buffer)))
+	  (cond (fraction-digits
+		 (loop while (< (- (fill-pointer buffer) start) fraction-digits)
+		       do (vector-push-extend #/0 buffer)))
+		((= (fill-pointer buffer) start)
+		 (vector-push-extend #/0 buffer)))))
+      (values buffer integer-digits))))
 
 ;;; Print the mantissa.
 ;;; X is a positive non-zero flonum, SMALL is T if it's a small-flonum.
