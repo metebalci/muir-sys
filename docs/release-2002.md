@@ -230,7 +230,7 @@ file carries a comment in that file saying why.
   58 and errs in 8; with it all 58 pass, on revisions 14 and 15. The CADR's
   line has the same `FLONUM-TO-STRING` and the same `~E` code, but no
   subnormals.
-- **The printer prints `~F`'s digits** (`sys/io/print.lisp:1011-1017`,
+- **The printer prints `~F`'s digits** (`sys/io/print.lisp:1019-1025`,
   `PRINT-FLONUM-INTERNAL`). A float in [1e-3, 1e7), printed with no exponent,
   took its digits from `FLONUM-TO-STRING`. Where two shortest decimals lie
   equally near the float, that took the lower and `flonum-digits` the upper,
@@ -243,6 +243,23 @@ file carries a comment in that file saying why.
   `float-reading` and the format checks pass. `format-float-fixed` gains five
   cases, which fail 4 without the change. `FLONUM-TO-STRING` stays, and
   nothing in this tree calls it; it is still exported (`sys/cold/export.lisp:129`).
+- **A float halfway between two shortest decimals prints the even one**
+  (`sys/io/print.lisp:820-828`, `flonum-digits`; its comment `:751-753`).
+  Where two decimals of the fewest digits lie equally near the float and both
+  read back as it, `flonum-digits` took the upper, Burger and Dybvig's
+  choice; it now takes the one with the even last digit, as IEEE 754 rounds
+  a tie and as a cut at `MAX-DIGITS` already did. `prin1`, `~F`, `~$`, `~G`
+  and `~E`'s free-format digits all follow: 2097152.25 prints as `2097152.2`
+  (it printed `2097152.3`) and 382884.625 as `382884.62`. Of the 19 such
+  floats in `float-round-trip`'s samples, 13 change; the six of the form n.75
+  already ended in an even digit. The earlier line is commented out in
+  place. `format-float-fixed` gains four cases and changes one: the 19
+  floats' `prin1` and `~F` texts, and two of them under `~E`. The tree
+  before the change fails 5 of the 67, and so does it with the upper digit
+  put back alone. With the change all pass on revisions 14 and 15, as do
+  `format-float-digits`, `format-float`, `float-printing`, `float-reading`,
+  `float-round-trip` (every printed float reads back) and `format-clauses`.
+  The CADR's line has the same upper-digit choice in its `flonum-digits`.
 - A new check, `tools/system-check/cases/pointer-unsigned.cases` (row in
   `tools/system-check/README.md`): `SI:%POINTER-UNSIGNED`
   (`sys/sys/qrand.lisp:21`) and `SI:PRINT-POINTER-FIELD`

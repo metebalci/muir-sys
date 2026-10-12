@@ -748,7 +748,10 @@ Pathnames, editor buffers, host objects, and many other hairy things
 ;;; 0.DIGITS * 10^K.  With MAX-DIGITS, at most that many, the last rounded to
 ;;; the nearest, a half to the even digit, as IEEE 754 rounds: ~,2E of 1.375
 ;;; is 1.38e+0 and of 1.125 1.12e+0.  This rounded a half up;
-;;; FLONUM-TO-STRING rounds it down.  PRINT-FLONUM scaled X to [1, 10) by
+;;; FLONUM-TO-STRING rounds it down.  Without MAX-DIGITS, of two shortest
+;;; decimals equally near X, the one with the even last digit, as IEEE 754
+;;; rounds: 2097152.25 gives 2097152.2; this gave the upper, 2097152.3.
+;;; PRINT-FLONUM scaled X to [1, 10) by
 ;;; floating multiplication or division, which loses bits, and printed the
 ;;; digits of the scaled float: the most positive single printed as
 ;;; "3.4028237e38", which reads as infinity, the least positive normal one as
@@ -815,9 +818,14 @@ Pathnames, editor buffers, host objects, and many other hairy things
 	       (if (cond ((and low high)
 ;			  (>= (* 2 r) s))
 			  ;; a cut at MAX-DIGITS rounds a half to even, above
-			  (if (and max-digits (>= (1+ (fill-pointer digits)) max-digits))
-			      (or (> (* 2 r) s) (and (= (* 2 r) s) (oddp u)))
-			    (>= (* 2 r) s)))
+;			  (if (and max-digits (>= (1+ (fill-pointer digits)) max-digits))
+;			      (or (> (* 2 r) s) (and (= (* 2 r) s) (oddp u)))
+;			    (>= (* 2 r) s)))
+			  ;; and so does the free format, as IEEE 754 rounds a
+			  ;; tie: it took the upper digit, Burger and Dybvig's
+			  ;; choice, and printed 2097152.25 as 2097152.3, not
+			  ;; 2097152.2, both reading back
+			  (or (> (* 2 r) s) (and (= (* 2 r) s) (oddp u))))
 			 (low nil)
 			 (high t)
 ;			 (t (>= (* 2 r) s)))	;MAX-DIGITS reached

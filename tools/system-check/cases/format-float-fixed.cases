@@ -90,7 +90,15 @@
 ;; printed FLONUM-TO-STRING's, which took the lower of two shortest decimals
 ;; halfway from the float, ~F the upper; these 19 sample floats are such
 (si:fff-printer-differ '(#x4A000001 #xCA000001 #x4A7FFFFF #xCA7FFFFF #xC9FB0FC2 #xCA232F79 #x49E7F236 #x4A1EBA59 #xCA089677 #x48BAF494 #xCA344C85 #xC9920882 #xCA29B869 #x49934102 #xC9E166A6 #x4A5C1FF9 #xCA7BAA25 #x49D28D86 #xCA3B8CD7)) => NIL
-(prin1-to-string (si:frt-from-bits #x4A000001)) => "2097152.3"
+;; both take the even one of the two shortest decimals, as IEEE 754 rounds a
+;; tie: they took the upper, Burger and Dybvig's choice, and printed
+;; 2097152.25 as 2097152.3 and 382884.625 as 382884.63; ~E's free-format
+;; digits are the same
+(mapcar #'(lambda (b) (prin1-to-string (si:frt-from-bits b))) '(#x4A000001 #xCA000001 #x4A7FFFFF #xCA7FFFFF #xC9FB0FC2 #xCA232F79 #x49E7F236 #x4A1EBA59 #xCA089677 #x48BAF494 #xCA344C85 #xC9920882 #xCA29B869 #x49934102 #xC9E166A6 #x4A5C1FF9 #xCA7BAA25 #x49D28D86 #xCA3B8CD7)) => ("2097152.2" "-2097152.2" "4194303.8" "-4194303.8" "-2056696.2" "-2673630.2" "1900102.8" "2600598.2" "-2237853.8" "382884.62" "-2954017.2" "-1196304.2" "-2780698.2" "1206304.2" "-1846484.8" "3606526.2" "-4123273.2" "1724848.8" "-3072821.8")
+(mapcar #'(lambda (b) (format nil "~F" (si:frt-from-bits b))) '(#x4A000001 #xCA000001 #x4A7FFFFF #xCA7FFFFF #xC9FB0FC2 #xCA232F79 #x49E7F236 #x4A1EBA59 #xCA089677 #x48BAF494 #xCA344C85 #xC9920882 #xCA29B869 #x49934102 #xC9E166A6 #x4A5C1FF9 #xCA7BAA25 #x49D28D86 #xCA3B8CD7)) => ("2097152.2" "-2097152.2" "4194303.8" "-4194303.8" "-2056696.2" "-2673630.2" "1900102.8" "2600598.2" "-2237853.8" "382884.62" "-2954017.2" "-1196304.2" "-2780698.2" "1206304.2" "-1846484.8" "3606526.2" "-4123273.2" "1724848.8" "-3072821.8")
+(prin1-to-string (si:frt-from-bits #x4A000001)) => "2097152.2"
+(format nil "~E" (si:frt-from-bits #x4A000001)) => "2.0971522e+6"
+(format nil "~E" (si:frt-from-bits #x48BAF494)) => "3.8288462e+5"
 (car (si:fff-printer-run :powers-of-2)) => 0
 (car (si:fff-printer-run :powers-of-10)) => 0
 (car (si:fff-printer-run :random)) => 0
