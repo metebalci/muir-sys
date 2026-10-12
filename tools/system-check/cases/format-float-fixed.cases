@@ -86,3 +86,11 @@
 (format nil "~,1F" (si:frt-nearest 996. 100.)) => "10.0"
 (format nil "~,4$" 3.5) => "0003.50"
 (format nil "~8G" 3.14159) => "3.14    "
+;; the printer, in [1e-3, 1e7), prints FLONUM-DIGITS's digits as ~F does: it
+;; printed FLONUM-TO-STRING's, which took the lower of two shortest decimals
+;; halfway from the float, ~F the upper; these 19 sample floats are such
+(si:fff-printer-differ '(#x4A000001 #xCA000001 #x4A7FFFFF #xCA7FFFFF #xC9FB0FC2 #xCA232F79 #x49E7F236 #x4A1EBA59 #xCA089677 #x48BAF494 #xCA344C85 #xC9920882 #xCA29B869 #x49934102 #xC9E166A6 #x4A5C1FF9 #xCA7BAA25 #x49D28D86 #xCA3B8CD7)) => NIL
+(prin1-to-string (si:frt-from-bits #x4A000001)) => "2097152.3"
+(car (si:fff-printer-run :powers-of-2)) => 0
+(car (si:fff-printer-run :powers-of-10)) => 0
+(car (si:fff-printer-run :random)) => 0

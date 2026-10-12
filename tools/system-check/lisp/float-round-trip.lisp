@@ -348,3 +348,27 @@ up to three."
 		   (incf fails)
 		   (if (< (length shown) 3) (push r shown)))))
     (list* fails tried (nreverse shown))))
+
+(defun fff-printer-differ (bits-list)
+  "The floats of BITS-LIST that the printer and ~F print with other digits:
+(BITS PRIN1 ~F)."
+  (loop for b in bits-list
+	for x = (frt-from-bits b)
+	for p = (prin1-to-string x)
+	for f = (format nil "~F" x)
+	unless (string-equal p f)
+	  collect (list b p f)))
+
+(defun fff-printer-run (set)
+  "The floats of the sample SET in [1e-3, 1e7), where the printer prints no
+exponent, that the printer and ~F print with other digits: their number and
+the number tried."
+  (let ((differ 0) (tried 0))
+    (dolist (x (frt-sample set))
+      (let ((a (ffd-magnitude x))
+	    (field (ldb (byte 8 23.) (frt-bits x))))
+	(when (and (not (= field 255.)) (not (zerop field)) (>= a 1.0e-3) (< a 1.0e7))
+	  (incf tried)
+	  (unless (string-equal (prin1-to-string x) (format nil "~F" x))
+	    (incf differ)))))
+    (list differ tried)))

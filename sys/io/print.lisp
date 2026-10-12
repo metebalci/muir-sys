@@ -1008,7 +1008,13 @@ characters before the point."
 (DEFUN PRINT-FLONUM-INTERNAL (X SMALL STREAM MAX-DIGITS &OPTIONAL MOVE-DECIMAL-POINT)
   (LET (PLACE-MOVED)
     (MULTIPLE-VALUE-BIND (BUFER DECIMAL-PLACE)
-	(FLONUM-TO-STRING X SMALL MAX-DIGITS NIL)
+;	(FLONUM-TO-STRING X SMALL MAX-DIGITS NIL)
+	;; FLONUM-DIGITS's digits, as ~F and the E format print them: with
+	;; FLONUM-TO-STRING's own, the printer and ~F gave other digits for a
+	;; float halfway between two shortest decimals, both reading back:
+	;; 2097152.25 printed as 2097152.2 and ~F gave 2097152.3.  SMALL was
+	;; ignored there too.
+	(flonum-fixed-to-string x max-digits nil)
       (WHEN (AND MOVE-DECIMAL-POINT (= DECIMAL-PLACE 2))
 	(SETF (AREF BUFER 2) (AREF BUFER 1))
 	(SETF (AREF BUFER 1) #/.)

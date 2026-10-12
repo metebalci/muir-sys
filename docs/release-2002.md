@@ -230,6 +230,19 @@ file carries a comment in that file saying why.
   58 and errs in 8; with it all 58 pass, on revisions 14 and 15. The CADR's
   line has the same `FLONUM-TO-STRING` and the same `~E` code, but no
   subnormals.
+- **The printer prints `~F`'s digits** (`sys/io/print.lisp:1011-1017`,
+  `PRINT-FLONUM-INTERNAL`). A float in [1e-3, 1e7), printed with no exponent,
+  took its digits from `FLONUM-TO-STRING`. Where two shortest decimals lie
+  equally near the float, that took the lower and `flonum-digits` the upper,
+  so `prin1` and `~F` gave other digits, both reading back: 2097152.25
+  printed as `2097152.2` and `~F` gave `2097152.3`. Of the samples of
+  `float-round-trip`, 19 such floats change, all of the form n.25 or n.75 (or
+  382884.625) between 2^18 and 2^22. The printer now lays out
+  `flonum-digits`'s digits with `flonum-fixed-to-string`, as `~F`, `~$`,
+  `~G` and the E format do. `float-printing`, `float-round-trip`,
+  `float-reading` and the format checks pass. `format-float-fixed` gains five
+  cases, which fail 4 without the change. `FLONUM-TO-STRING` stays, and
+  nothing in this tree calls it; it is still exported (`sys/cold/export.lisp:129`).
 - A new check, `tools/system-check/cases/pointer-unsigned.cases` (row in
   `tools/system-check/README.md`): `SI:%POINTER-UNSIGNED`
   (`sys/sys/qrand.lisp:21`) and `SI:PRINT-POINTER-FIELD`
