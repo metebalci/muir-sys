@@ -1,0 +1,55 @@
+; A HOST: file opened for output in a directory that does not exist is
+; written once the error is proceeded with :CREATE-DIRECTORY-AND-RETRY, the
+; debugger's "Creates the directory and tries again" (sys/io/file/hostfs.lisp,
+; FILE-OPERATION-RETRY around the file device's operations;
+; sys/io/file/open.lisp, DIRECTORY-NOT-FOUND-ERROR; lisp/host-create-
+; directory.lisp).  Without the change the directory is made and the open
+; then stops at "Invalid proceed-type :RETRY-FILE-OPERATION returned by
+; handler".  Run with the tree's hostfs.lisp compiled first: --compile
+; --files sys/io/file/hostfs.lisp,tools/system-check/lisp/host-create-directory.lisp.
+
+; the directory is missing: a control
+(probe-file "HOST: //home//lispm//hcd//f.text") =>! Directory not found
+
+; what the debugger offers for it: retrying, and creating the directory
+(hcd-proceed-types #'(lambda () (open "HOST: //home//lispm//hcd//f.text" :direction :output))) => (:RETRY-FILE-OPERATION :CREATE-DIRECTORY-AND-RETRY)
+
+; proceeding with :CREATE-DIRECTORY-AND-RETRY writes the file; it reads
+; back, and the file and the directory are deleted (the directory's
+; pathname unmerged, which the device's DELETE takes as the directory)
+(hcd-write "HOST: //home//lispm//hcd//f.text" "written") => 1
+(hcd-read "HOST: //home//lispm//hcd//f.text") => "written"
+(progn (deletef "HOST: //home//lispm//hcd//f.text") t) => T
+(probe-file "HOST: //home//lispm//hcd//f.text") => NIL
+(send (pathname "HOST: //home//lispm//hcd//") :delete) => T
+(probe-file "HOST: //home//lispm//hcd//f.text") =>! Directory not found
+
+; two directories missing: CREATE-DIRECTORY's :RECURSIVE makes both
+(hcd-write "HOST: //home//lispm//hcd2//sub//g.text" "nested") => 1
+(hcd-read "HOST: //home//lispm//hcd2//sub//g.text") => "nested"
+(progn (deletef "HOST: //home//lispm//hcd2//sub//g.text") t) => T
+(send (pathname "HOST: //home//lispm//hcd2//sub//") :delete) => T
+(send (pathname "HOST: //home//lispm//hcd2//") :delete) => T
+(probe-file "HOST: //home//lispm//hcd2//sub//g.text") =>! Directory not found
+
+; every operation of the file device that can fail offers a retry, as
+; QFILE's do: open, delete, rename, a directory's listing, creating a
+; directory.  delete and rename are sent to the pathname: DELETEF and
+; RENAMEF first ask for the truename, which opens the file, so their errors
+; for a missing file come from the open
+(hcd-proceed-types #'(lambda () (open "HOST: //home//lispm//none.text"))) => (:RETRY-FILE-OPERATION)
+(hcd-proceed-types #'(lambda () (send (pathname "HOST: //home//lispm//none.text") :delete))) => (:RETRY-FILE-OPERATION)
+(hcd-proceed-types #'(lambda () (send (pathname "HOST: //home//lispm//none.text") :rename (pathname "HOST: //home//lispm//other.text")))) => (:RETRY-FILE-OPERATION)
+(hcd-proceed-types #'(lambda () (fs:directory-list "HOST: //home//lispm//nodir//*.*"))) => (:RETRY-FILE-OPERATION :CREATE-DIRECTORY-AND-RETRY)
+(hcd-proceed-types #'(lambda () (fs:create-directory "HOST: //home//lispm//"))) => (:RETRY-FILE-OPERATION)
+
+; and the retry works: a handler that writes the missing file and proceeds
+; with :RETRY-FILE-OPERATION opens it
+(hcd-retry-open "HOST: //home//lispm//late.text") => "made by the handler"
+(progn (deletef "HOST: //home//lispm//late.text") t) => T
+
+; :NEW-PATHNAME, which OPEN offers whatever the host, writes another file
+; instead, in a directory that exists, and creates no directory
+(hcd-new-pathname "HOST: //home//lispm//hcd3//x.text" "HOST: //home//lispm//np.text") => "elsewhere"
+(progn (deletef "HOST: //home//lispm//np.text") t) => T
+(probe-file "HOST: //home//lispm//hcd3//x.text") =>! Directory not found

@@ -84,6 +84,13 @@
 	    "Unknown operation" "Data error on the host" "File position out of range"
 	    "Rename across folders served separately"))
 
+;; the condition is signaled with no proceed types of its own, as qfile's
+;; are: the access's operations that can fail run inside file-operation-retry
+;; (access.lisp), as qfile's do, which offers :retry-file-operation.  without
+;; it, the debugger's "creates the directory and tries again" for a missing
+;; directory (directory-not-found-error, open.lisp), which proceeds with
+;; :retry-file-operation, made the directory and then stopped at "invalid
+;; proceed-type :retry-file-operation returned by handler".
 (defun file-device-error (status operation pathname-or-stream &optional noerror new-pathname)
   "Signal the file condition for device status STATUS, or return it if NOERROR."
   (let ((code (nth status file-device-status-codes)))
@@ -236,29 +243,32 @@ every file host (access.lisp), as LM-HOST-INITIALIZE is."
 		      nil (not error) :remote-connect))
 
 (defmethod (file-device-access :delete) (pathname &optional (error-p t))
-  (let ((name (file-device-name pathname :delete)))
-    (let ((status (si:file-device-call si:%file-device-op-delete 0 0 name)))
-      (if (zerop status) t
-	(file-device-error status :delete pathname (not error-p))))))
+  (file-operation-retry				;offers a retry (file-device-error)
+    (let ((name (file-device-name pathname :delete)))
+      (let ((status (si:file-device-call si:%file-device-op-delete 0 0 name)))
+	(if (zerop status) t
+	  (file-device-error status :delete pathname (not error-p)))))))
 
 (defmethod (file-device-access :rename) (pathname new-pathname &optional (error-p t))
   (declare (values new-truename old-truename))
   (setq new-pathname (send new-pathname :translated-pathname))
-  (if (neq (pathname-host new-pathname) host)
-      (file-device-error 17. :rename pathname (not error-p) new-pathname)
-    (let* ((old (file-device-name pathname :rename))
-	   (new (file-device-name new-pathname :rename))
-	   (status (si:file-device-call si:%file-device-op-rename 0 0 old new)))
-      (if (zerop status)
-	  (values (file-device-truename new-pathname new) (file-device-truename pathname old))
-	(file-device-error status :rename pathname (not error-p) new-pathname)))))
+  (file-operation-retry				;offers a retry (file-device-error)
+    (if (neq (pathname-host new-pathname) host)
+	(file-device-error 17. :rename pathname (not error-p) new-pathname)
+      (let* ((old (file-device-name pathname :rename))
+	     (new (file-device-name new-pathname :rename))
+	     (status (si:file-device-call si:%file-device-op-rename 0 0 old new)))
+	(if (zerop status)
+	    (values (file-device-truename new-pathname new) (file-device-truename pathname old))
+	  (file-device-error status :rename pathname (not error-p) new-pathname))))))
 
 (defmethod (file-device-access :create-directory) (pathname &optional (error t))
-  (let* ((name (file-device-name pathname :create-directory t))
-	 (status (si:file-device-call si:%file-device-op-create-directory 0 0 name)))
-    (if (zerop status) t
-      (file-device-error status :create-directory
-			 (send pathname :new-pathname :name nil :type nil) (not error)))))
+  (file-operation-retry				;offers a retry (file-device-error)
+    (let* ((name (file-device-name pathname :create-directory t))
+	   (status (si:file-device-call si:%file-device-op-create-directory 0 0 name)))
+      (if (zerop status) t
+	(file-device-error status :create-directory
+			   (send pathname :new-pathname :name nil :type nil) (not error))))))
 
 ;;;; Properties and directories
 
@@ -369,46 +379,47 @@ every file host (access.lisp), as LM-HOST-INITIALIZE is."
 	   (file-device-wild-match pattern name (1+ p) (1+ n))))))
 
 (defmethod (file-device-access :directory-list) (pathname options)
-  (let ((noerror (memq :noerror options))
-	(directories-only (memq :directories-only options))
-	(name (pathname-name pathname))
-	(type (pathname-type pathname)))
-    (if (and name (not (memq name '(:wild :unspecific)))
-	     (not (eq type :wild))
-	     (not (send pathname :wild-p)))
-	;; one file: PATHNAME :PROPERTIES asks this way.  one probe.
+  (file-operation-retry				;offers a retry (file-device-error)
+    (let ((noerror (memq :noerror options))
+	  (directories-only (memq :directories-only options))
+	  (name (pathname-name pathname))
+	  (type (pathname-type pathname)))
+      (if (and name (not (memq name '(:wild :unspecific)))
+	       (not (eq type :wild))
+	       (not (send pathname :wild-p)))
+	  ;; one file: PATHNAME :PROPERTIES asks this way.  one probe.
+	  (condition-case-if noerror (condition)
+	      (multiple-value-bind (truename plist status)
+		  (file-device-probe pathname :directory-list)
+		(if (zerop status)
+		    (list (list nil) (cons truename plist))
+		  (file-device-error status :directory-list pathname)))
+	    (file-error condition))
 	(condition-case-if noerror (condition)
-	    (multiple-value-bind (truename plist status)
-		(file-device-probe pathname :directory-list)
-	      (if (zerop status)
-		  (list (list nil) (cons truename plist))
-		(file-device-error status :directory-list pathname)))
-	  (file-error condition))
-      (condition-case-if noerror (condition)
-	  (let* ((directory (file-device-name pathname :directory-list t))
-		 (pattern (unix-filename (pathname-raw-name pathname) (pathname-raw-type pathname)))
-		 (entries (file-device-directory-entries pathname directory
-							 :directory-list nil))
-		 (list nil))
-	    (dolist (entry entries)
-	      (destructuring-bind (entry-name bytes mtime flags) entry
-		(when (and (or (not directories-only) (ldb-test #o0001 flags))
-			   (file-device-wild-match pattern entry-name))
-		  (let ((entry-pathname (parse-pathname (string-append directory entry-name) host)))
-		    (push (cons entry-pathname
-				(let ((plist (list :creation-date (file-device-universal-time mtime)
-						   :byte-size 8)))
-				  (when bytes
-				    (setq plist (list* :length-in-bytes bytes
-						       :length-in-blocks (ceiling bytes 1024.)
-						       plist)))
-				  (if (ldb-test #o0001 flags) (list* :directory t plist) plist)))
-			  list)))))
-	    (setq list (nreverse list))
-	    (when (memq :sorted options)
-	      (setq list (sortcar list #'pathname-lessp)))
-	    (cons (list nil :settable-properties nil) list))
-	(file-error condition)))))
+	    (let* ((directory (file-device-name pathname :directory-list t))
+		   (pattern (unix-filename (pathname-raw-name pathname) (pathname-raw-type pathname)))
+		   (entries (file-device-directory-entries pathname directory
+							   :directory-list nil))
+		   (list nil))
+	      (dolist (entry entries)
+		(destructuring-bind (entry-name bytes mtime flags) entry
+		  (when (and (or (not directories-only) (ldb-test #o0001 flags))
+			     (file-device-wild-match pattern entry-name))
+		    (let ((entry-pathname (parse-pathname (string-append directory entry-name) host)))
+		      (push (cons entry-pathname
+				  (let ((plist (list :creation-date (file-device-universal-time mtime)
+						     :byte-size 8)))
+				    (when bytes
+				      (setq plist (list* :length-in-bytes bytes
+							 :length-in-blocks (ceiling bytes 1024.)
+							 plist)))
+				    (if (ldb-test #o0001 flags) (list* :directory t plist) plist)))
+			    list)))))
+	      (setq list (nreverse list))
+	      (when (memq :sorted options)
+		(setq list (sortcar list #'pathname-lessp)))
+	      (cons (list nil :settable-properties nil) list))
+	  (file-error condition))))))
 
 (defmethod (file-device-access :complete-string) (pathname string options)
   options
@@ -696,14 +707,15 @@ the file was not written." truename)))
   (check-type if-does-not-exist (member :error :create nil))
   (when element-type-p
     (multiple-value-setq (characters byte-size) (file-device-element-type element-type byte-size)))
-  (condition-case-if (not error) (condition)
-      (condition-case-if (null if-does-not-exist) ()
-	  (condition-case-if (null if-exists) ()
-	      (file-device-open-1 access file pathname direction characters byte-size
-				  if-exists if-does-not-exist)
-	    (file-already-exists nil))
-	(file-not-found nil))
-    (file-error condition)))
+  (file-operation-retry				;offers a retry (file-device-error)
+    (condition-case-if (not error) (condition)
+	(condition-case-if (null if-does-not-exist) ()
+	    (condition-case-if (null if-exists) ()
+		(file-device-open-1 access file pathname direction characters byte-size
+				    if-exists if-does-not-exist)
+	      (file-already-exists nil))
+	  (file-not-found nil))
+      (file-error condition))))
 
 (defun file-device-open-1 (access file pathname direction characters byte-size
 			   if-exists if-does-not-exist)

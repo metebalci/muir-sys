@@ -487,6 +487,35 @@ file carries a comment in that file saying why.
   `tools/assembler-check` passes all 30 checks, its revision-15 counts
   unchanged (359 hints, 140 predicted targets, every execution of the
   profile covered).
+- **"Creates the directory and tries again" works on `HOST:`**
+  (`sys/io/file/hostfs.lisp:87-93`, `:246`, `:255`, `:266`, `:382`, `:710`).
+  Opening a `HOST:` file for output in a directory that does not exist
+  offered it, s-A in the debugger; it made the directory and then stopped at
+  "Invalid proceed-type :RETRY-FILE-OPERATION returned by handler for
+  #<FS::DIRECTORY-NOT-FOUND-ERROR ...>" (`sys/eh/ehf.lisp:861`), as System
+  2001's notes record. `DIRECTORY-NOT-FOUND-ERROR` offers the option whatever
+  the signal accepts and proceeds with `:RETRY-FILE-OPERATION`
+  (`sys/io/file/open.lisp:190-201`), which the file device's operations did
+  not offer: `FILE-DEVICE-ERROR` signals with no proceed type, and nothing
+  around it gave one. QFILE signals the same way but runs each operation
+  inside `FILE-OPERATION-RETRY` (`sys/io/file/access.lisp:14-27`), which
+  offers the retry; the file device's operations that can fail, open,
+  delete, rename, creating a directory and a directory's listing, now do
+  too, so the option makes the directory and the open is tried again, and
+  the debugger also offers "Retry the operation on the same file" for their
+  errors. The operations that `HOST:` does not have (changing properties,
+  links, expunge, remote connect) and the streams' reads, writes and closes
+  offer no retry, as before. The other proceed types such an error can be
+  offered are given by its callers or its condition, not by the device:
+  `:NEW-PATHNAME`, from `OPEN`, `DELETEF` and the like
+  (`FILE-RETRY-NEW-PATHNAME-IF`, `sys/sys2/lmmac.lisp:1324-1345`), writes
+  another file instead (measured), and a full host's `:DIRED` and
+  `:CLEAN-DIRECTORY` (`NO-MORE-ROOM-ERROR`) run their tool and return to the
+  debugger without proceeding. `tools/system-check` gains
+  `host-create-directory`, 24 cases: without the change 11 pass at
+  revisions 14 and 15 on micro and 11 at revision 15 on rtl; with it 24 at
+  each; with one operation's `FILE-OPERATION-RETRY` taken out, that
+  operation's case fails, for each of the five.
 
 ## Revision 14
 
