@@ -516,6 +516,30 @@ file carries a comment in that file saying why.
   revisions 14 and 15 on micro and 11 at revision 15 on rtl; with it 24 at
   each; with one operation's `FILE-OPERATION-RETRY` taken out, that
   operation's case fails, for each of the five.
+- **An interpreted function runs while `SELF` is an instance**
+  (`sys/sys/eval.lisp:2453-2467`, `:2486-2498`, `APPLY-LAMBDA`). Called
+  while `SELF` is an instance, as a `CONDITION-BIND` handler written as
+  `#'(lambda ...)` is when the error is signalled inside a method (the file
+  system's `OPEN` signals from one), an interpreted `DEFMETHOD`, a
+  `CONDITION-CALL` clause, or a lambda given to `:FUNCALL-INSIDE-YOURSELF`,
+  every interpreted function stopped at "The function %PUSH is undefined."
+  `APPLY-LAMBDA` binds the instance's variables and then pushes the binding
+  of `.SLOTS.BOUND.INSTANCE.`; the push, and the place it compares, were
+  wrapped in a `LOCALLY` for its `SPECIAL` declaration, and the compiler has
+  no `LOCALLY` inside a body: it compiles one as a `%FEXPR-CALL` of the
+  interpreter's `LOCALLY` (measured in the band's `APPLY-LAMBDA`), so the
+  interpreter evaluated the `%PUSH`, an instruction with no function
+  (`sys/cold/defmic.lisp:229`). A compiled handler is called directly and
+  never met it, so the same code compiled worked. A `LET` with the
+  declaration now carries it in compiled code, and the place is taken with
+  `VARIABLE-LOCATION`. MIT's: System 100 on microcode 323 and System 1003
+  fail the same way under muir-sim's cadr; the CADR's line has it too.
+  `tools/system-check` gains `interpreted-function-under-self`, 9 cases:
+  without the change 3 pass at revisions 14 and 15 on micro and 3 at
+  revision 15 on rtl; with it 9 at each; with the first site's `LOCALLY`
+  put back, its evalhook case fails (the hook saw `APPLY-LAMBDA`'s own form
+  and the evaluation stopped at ".SLOTS.BOUND.INSTANCE. is unbound"), and
+  with the second's, six cases fail at "%PUSH is undefined".
 
 ## Revision 14
 

@@ -2453,11 +2453,18 @@ Encloses a lambda-expression in the current environment"
 			     (when (setq tem (get-lexical-value-cell
 					       (car tail)
 					       ;; all this to avoid a compiler warning...
-					       (locally
+;					       (locally
+;						 (declare (special .slots.bound.instance.))
+;						 (inhibit-style-warnings
+;						   (locf (symbol-value
+;							   '.slots.bound.instance.))))))
+					       ;; the compiler has no LOCALLY inside a body: it
+					       ;; compiled one as a call of the interpreter's LOCALLY,
+					       ;; which evaluated this form on every call.  A LET
+					       ;; carries the declaration in compiled code.
+					       (let ()
 						 (declare (special .slots.bound.instance.))
-						 (inhibit-style-warnings
-						   (locf (symbol-value
-							   '.slots.bound.instance.))))))
+						 (variable-location .slots.bound.instance.))))
 			       (return (eq (contents tem) self))))
 		     ;;??? Here should take care of special instance variables!!!
 		     ;; Probably just omit them, since they were bound when
@@ -2476,10 +2483,19 @@ Encloses a lambda-expression in the current environment"
 			   (setf (car vars-env) tem1)
 			   ;; extend previous frame
 			 (%p-dpb-offset cdr-next %%q-cdr-code thisval -1)))
-		     (locally
-		       (declare (special .slots.bound.instance.))
-		       (inhibit-style-warnings
-			 (%push (locf (symbol-value '.slots.bound.instance.)))))
+;		     (locally
+;		       (declare (special .slots.bound.instance.))
+;		       (inhibit-style-warnings
+;			 (%push (locf (symbol-value '.slots.bound.instance.)))))
+		     ;; pushed here, in this frame.  Inside a LOCALLY, which the compiler
+		     ;; compiles as a call of the interpreter's LOCALLY, the interpreter
+		     ;; evaluated the %PUSH, an instruction with no function, so an
+		     ;; interpreted function called while SELF is an instance (a
+		     ;; CONDITION-BIND handler run from inside a method, an interpreted
+		     ;; method) stopped at "The function %PUSH is undefined."
+		     (%push (let ()
+			      (declare (special .slots.bound.instance.))
+			      (variable-location .slots.bound.instance.)))
 		     (%push self)
 		     (with-stack-list (tem1 nil)
 		       (%p-dpb-offset cdr-nil %%q-cdr-code tem1 -1))))

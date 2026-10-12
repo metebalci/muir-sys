@@ -1,0 +1,32 @@
+; An interpreted function runs when it is called while SELF is an instance:
+; a CONDITION-BIND handler written as #'(lambda ...) and run from inside a
+; method, as the file system's OPEN signals its errors from one, an
+; interpreted DEFMETHOD, a lambda given to :FUNCALL-INSIDE-YOURSELF.
+; APPLY-LAMBDA (sys/sys/eval.lisp) then binds SELF's instance variables and
+; pushes the binding of .SLOTS.BOUND.INSTANCE.; that push was wrapped in a
+; LOCALLY, which the compiler compiles as a call of the interpreter's LOCALLY,
+; so the interpreter evaluated %PUSH, an instruction with no function, and
+; every such call stopped at "The function %PUSH is undefined."  A compiled
+; function is called directly and never met it.  Run with the tree's eval.lisp
+; compiled first: --compile --files sys/sys/eval.lisp.
+
+; no instance in SELF: a control
+(funcall #'(lambda () 'ok)) => OK
+; SELF an instance, as inside a method
+(let ((self (make-condition 'ferror :format-string "x"))) (funcall #'(lambda () 'ok))) => OK
+; a lambda inside it, whose environment already holds SELF's instance variables
+(let ((self (make-condition 'ferror :format-string "x"))) (funcall #'(lambda () (funcall #'(lambda () 'inner))))) => INNER
+; an instance variable seen by an interpreted lambda run inside the instance
+(send (make-condition 'ferror :format-string "fs") :funcall-inside-yourself #'(lambda () eh::format-string)) => "fs"
+; the handler that declines an error signalled inside OPEN's method
+(condition-case (e) (condition-bind ((error #'(lambda (e) e nil))) (open "HOST: //home//lispm//nonesuch.text")) (error (send e :report-string))) => "File not found for HOST: //home//lispm//nonesuch.text"
+; CONDITION-CALL, whose handler is an interpreted lambda
+(condition-call (e) (open "HOST: //home//lispm//nonesuch.text") ((errorp e) 'called)) => CALLED
+; APPLY-LAMBDA's own forms run compiled: an evalhook, as the stepper's, sees
+; only the forms of the code it runs.  With the binding's place taken inside a
+; LOCALLY, the interpreter evaluated it and the hook saw
+; (INHIBIT-STYLE-WARNINGS (LOCF (SYMBOL-VALUE '.SLOTS.BOUND.INSTANCE.))) for
+; each frame of a nested lambda's environment.
+(defvar interpreted-function-under-self-forms nil) => INTERPRETED-FUNCTION-UNDER-SELF-FORMS
+(defun interpreted-function-under-self-evalhook (form env) (push form interpreted-function-under-self-forms) (evalhook form #'interpreted-function-under-self-evalhook nil env)) => INTERPRETED-FUNCTION-UNDER-SELF-EVALHOOK
+(progn (setq interpreted-function-under-self-forms nil) (list (evalhook '(let ((self (make-condition 'ferror :format-string "x"))) (funcall #'(lambda () (funcall #'(lambda () 'inner))))) #'interpreted-function-under-self-evalhook nil) (si::mem*q 'si::.slots.bound.instance. interpreted-function-under-self-forms) (> (length interpreted-function-under-self-forms) 3))) => (INNER NIL T)
