@@ -1,0 +1,36 @@
+; LOCALLY in the body of a compiled function (lisp/compiled-locally.lisp,
+; compiled).  The compiler had no LOCALLY of its own there and compiled one as
+; a call of the interpreter's LOCALLY with the body quoted (sys/sys/eval.lisp,
+; LOCALLY), so the body ran interpreted, without the function's lexical
+; variables: "X is referenced as a free variable but not declared special."
+; Run with --compile --files tools/system-check/lisp/compiled-locally.lisp.
+
+; the control: the same declaration in a LET
+(compiled-locally-control 5) => (5)
+; and LOCALLY typed at the listener, interpreted
+(let ((x 5)) (locally (declare (special compiled-locally-nothing)) (list x))) => (5)
+; the compiled code does not call the interpreter's LOCALLY
+(compiled-locally-calls-locally 'compiled-locally-read) => NIL
+; a lexical variable read inside it
+(compiled-locally-read 5) => (5)
+; written inside it, and read after it
+(compiled-locally-write 1) => 2
+; a closure made inside it
+(funcall (compiled-locally-closure 3)) => 3
+; under DONT-OPTIMIZE, which leaves its argument forms unoptimized
+(compiled-locally-dont-optimize 7) => (7)
+; a closure whose body holds the LOCALLY
+(funcall (compiled-locally-in-closure 4)) => (4)
+; its SPECIAL declaration takes effect inside it and not after it
+(compiled-locally-special) => (GLOBAL LEXICAL)
+(compiled-locally-special-set 'set) => SET
+; its value and multiple values
+(multiple-value-list (compiled-locally-values 1)) => (1 2 3)
+(multiple-value-list (compiled-locally-constant-values)) => (1 2 3)
+(compiled-locally-empty) => NIL
+; inside a LET, and inside a loop
+(compiled-locally-let 3) => 9
+(compiled-locally-loop 3) => (2 1 0)
+; a LOCALLY at the top level of the file: its DEFUN is compiled
+(compiled-locally-top 6) => (6)
+(compiled-function-p #'compiled-locally-top) => T

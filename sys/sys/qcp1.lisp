@@ -2455,6 +2455,15 @@ It still works now, but fix it quickly before it stops working." SYMBOL)
       `(,(P1V (CAR CLAUSE) 'PREDICATE) . ,(P1PROGN-1 (CDR CLAUSE)))
       `(,(P1 (CAR CLAUSE)))))
 
+
+;;; LOCALLY is PROGN with declarations that hold inside it alone, compiled as
+;;; the LET with no variables that holds them.  With no P1 of its own, a
+;;; LOCALLY in a function's body was compiled as a call of the interpreter's
+;;; LOCALLY with the body quoted, so the body ran interpreted, without the
+;;; function's lexical variables ("X is referenced as a free variable").
+(defun (:property locally p1) (form)
+  (p1 `(let () . ,(cdr form))))
+
 (DEFPROP PROGN P1PROGN P1)
 (DEFUN P1PROGN (FORM)
   (SETQ TLEVEL NIL)

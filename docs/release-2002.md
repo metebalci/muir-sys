@@ -540,6 +540,40 @@ file carries a comment in that file saying why.
   put back, its evalhook case fails (the hook saw `APPLY-LAMBDA`'s own form
   and the evaluation stopped at ".SLOTS.BOUND.INSTANCE. is unbound"), and
   with the second's, six cases fail at "%PUSH is undefined".
+- **`LOCALLY` compiles** (`sys/sys/qcp1.lisp:2459-2465`,
+  `sys/sys/qcluke.lisp:573-576`, `sys/sys/qcfile.lisp:528-533`, `:627-633`).
+  The compiler had no `LOCALLY` of its own: in a function's body it compiled
+  one as a `%FEXPR-CALL` of the interpreter's `LOCALLY` (`sys/sys/eval.lisp`)
+  with the body quoted, so the body ran interpreted, without the function's
+  lexical variables. `(defun f (x) (locally (declare (special y)) (list x)))`
+  compiled stopped at "X is referenced as a free variable but not declared
+  special", and the compile warned that X was bound but never used. The
+  compiler's code walker took `LOCALLY` as a call with its arguments quoted
+  too, so a closure whose body held one did not close over the variables
+  used inside it; and a `LOCALLY` at the top level of a file was run at load
+  as a random form, so its `DEFUN`s stayed interpreted. `LOCALLY` now
+  compiles as a `LET` with no variables, which holds its declarations; the
+  code walker walks its body as `PROGN`'s; and `COMPILE-DRIVER` takes a
+  top-level `LOCALLY`'s forms as top-level forms with its declarations in
+  effect. The last two are MIT's, from the patch file of System 99.21
+  (`patch/system-99-21.lisp` of System 100, not kept in this tree), whose
+  changes to these files System 100's sources never took. That patch's
+  `DEFCOMPILER-SYNONYM` of `LOCALLY` to `PROGN` is replaced by the P1
+  handler, which also holds under `DONT-OPTIMIZE`, where the synonym's
+  rewrite is not made; its `SETF` and `LOCF` of `LOCALLY` are not taken.
+  MIT's: System 100 on microcode 323 and System 1003 fail the same way; the
+  CADR's line has it too. No other system source compiles a
+  `LOCALLY`: APPLY-LAMBDA's two were taken out with the change above, and
+  `sys/sys2/meth.lisp:118` and `:124` make interpreted methods.
+  `tools/system-check` gains `compiled-locally`, 17 cases: without the
+  change 6 pass at revisions 14 and 15 on micro and 6 at revision 15 on
+  rtl; with it 17 at each; without the P1 handler 7 pass, without the code
+  walker's property the closure's case fails, and without `COMPILE-DRIVER`'s
+  clause the top-level `DEFUN` is not compiled. The system compiled
+  natively with the compiler before and after the change
+  (`tools/cross-build/cases/native-compile.cases`, revision 15 micro) gives
+  218 QFASLs equal by `tools/cross-check/same40.py` but for the three
+  compiler files' own.
 
 ## Revision 14
 

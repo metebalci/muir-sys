@@ -525,9 +525,12 @@ READ-THEN-PROCESS-FLAG says read the entire file before compiling (less thrashin
       ;; Don't expand LOCALLY into PROGN here!
       ;; This way, we protect DECLAREs inside the LOCALLY
       ;; from being treated as top-level DECLARE, which would be erroneous.
-      ;; The LOCALLY form will just be executed as a random form.
-      (IF (EQ (CAR FORM) 'LOCALLY)
-	  (RETURN))
+;      ;; The LOCALLY form will just be executed as a random form.
+;      (IF (EQ (CAR FORM) 'LOCALLY)
+;	  (RETURN))
+      ;; a top-level LOCALLY is not a macro, so it is left as it is and taken
+      ;; below, its declarations local to its forms.  Run as a random form, its
+      ;; DEFUNs were made at load by the interpreter, and stayed interpreted.
       (SETQ NFORM
 	    (WARN-ON-ERRORS ('MACRO-EXPANSION-ERROR "Error expanding macro ~S at top level"
 			     (CAR FORM))
@@ -621,6 +624,13 @@ must be a list of EVAL, LOAD, and//or COMPILE."
 				"Malformed defun ~S" FORM)
 			(FUNCALL PROCESS-FN FORM 'DEFUN)))
 		     (T (COMPILE-DRIVER TEM PROCESS-FN OVERRIDE-FN COMPILE-TIME-TOO NIL)))))
+	    ;; LOCALLY's forms are top-level forms, as PROGN's are, compiled with
+	    ;; its declarations in effect (MIT's patch 99.21 has this clause).
+	    ((eq fn 'locally)
+	     (multiple-value-bind (body local-declarations)
+		 (si:extract-declarations (cdr form) local-declarations nil)
+	       (compile-driver `(progn . ,body)
+			       process-fn override-fn compile-time-too t)))
 	    (T (FUNCALL PROCESS-FN FORM 'RANDOM))))))
 
 (DEFUN COMPILE-DECLARE (DECL-LIST PROCESS-FN)

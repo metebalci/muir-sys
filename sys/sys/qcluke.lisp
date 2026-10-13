@@ -570,6 +570,10 @@ This is for parallel binding such as is found in PROG and LET."
 (defprop setq cw-eval-args cw-handler)
 (defprop login-setq cw-eval-args cw-handler)
 (defprop progn cw-eval-args cw-handler)
+;; LOCALLY's body is code, as PROGN's is.  Seen as a call with its arguments
+;; quoted (sys/sys/eval.lisp), the body was not walked, so a closure whose
+;; body held a LOCALLY did not close over the variables used inside it.
+(defprop locally cw-eval-args cw-handler)
 (defprop progv cw-eval-args cw-handler)
 (defprop progw cw-eval-args cw-handler)
 (defprop unwind-protect cw-eval-args cw-handler)
