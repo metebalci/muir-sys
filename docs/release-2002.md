@@ -574,6 +574,29 @@ file carries a comment in that file saying why.
   (`tools/cross-build/cases/native-compile.cases`, revision 15 micro) gives
   218 QFASLs equal by `tools/cross-check/same40.py` but for the three
   compiler files' own.
+- **The TELNET server closes when its client sends EOF**
+  (`sys/network/chaos/chsaux.lisp:1268-1270`, ECHOING-STREAM's `:TYI`, and
+  `:1290-1310`, TELNET-SERVER-EOF). `:TYI` reads NIL at end of file, and
+  ECHOING-STREAM compared it with `#o37`: at a client's EOF alone (a TCP
+  half-close through the gateway) the listener stopped at "The first
+  argument to >, NIL, was of the wrong type", the debugger, reading the same
+  stream, erred again one level deeper about every 0.27 s, and after about
+  590 errors the band ran out of regions ("Address space low!") and halted
+  in HALT-CONS, on System 2002 as on the CADR's 1002. After EOF then CLS,
+  what the gateway sends when its TCP client closes, the server process
+  ended without a close of its own and its connection was left in
+  CLS-RECEIVED-STATE or LOS-RECEIVED-STATE. Now the server closes the stream
+  normally, which on Chaos forces out what is buffered, sends EOF, waits until
+  everything is acknowledged and then sends CLS, so the value of a form
+  still running arrives first; then its process ends, as it does on a
+  network error. The change is in the server's body, which uses only the
+  stream and the process, so it moves with the body when the server is
+  served over TCP. `tools/system-check` gains `telnet-eof`, a client on the
+  band itself over Chaos to its own address: without the change 10 of its
+  30 cases fail, with it all pass; with the EOF test inverted the check's own
+  session closes at once, with the normal close left out (an abort, CLS
+  alone) 4 cases fail, and without the end of the process 7 fail. ECHOING-STREAM's
+  `:TYI` is unchanged since System 1000.
 
 ## Revision 14
 
