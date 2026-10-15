@@ -1562,7 +1562,9 @@ def must_38(s):
     # The full MSS is acknowledged at once with a window of 540, so the
     # edge stands still and no retransmission timer runs out first.
     one = s.wait_for(t0 + 200 * MS, lambda x: a.ours(x) and x.tcp.data)
+    acked = None    # when the full MSS was acknowledged: rule 4's late side
     if one is not None and len(one.tcp.data) == 1460:
+        acked = s.now
         ack_to(s, a, (one.tcp.seq + 1460) & 0xFFFFFFFF, window=540)
     # The rest when the override runs out, acknowledged at once.
     s.wait_for(t0 + 400 * MS, lambda x: a.ours(x) and x.tcp.data and x is not one)
@@ -1577,7 +1579,20 @@ def must_38(s):
     if len(segs) < 2 or len(segs[1].tcp.data) != 540:
         raise Fail('rule 4: the 540 bytes left did not go at the override: %s'
                    % (', '.join(str(x) for x in segs[1:]) or 'nothing'))
-    near(segs[1].t - segs[0].t, 200 * MS, 'rule 4: the override timer')
+    # Rule 4's two sides (F47, F50): the band starts the override timer as it
+    # sends the full MSS, so the early side is timed from that segment; but
+    # a band may let our ACK of it restart the timer (F28's freedom), and it
+    # takes that ACK up to a tick and the pass latency after it arrives, so
+    # the late side is timed from the ACK, with that and the timer's own
+    # tick and pass latency: 200 ms and twice a tick and the pass latency.
+    if acked is None:
+        raise Fail('rule 1: the full MSS was not the first data within 200 ms, so not acknowledged')
+    early = segs[1].t - segs[0].t
+    late = segs[1].t - acked
+    if early < 200 * MS - TICK or late > 200 * MS + 2 * (TICK + PASS_LATENCY):
+        raise Fail('rule 4: the override timer: %s after the full MSS, not 200 ms less a tick or more; '
+                   '%s after its ACK, not 200 ms and twice a tick and the pass latency or less' % (
+                       at(early), at(late)))
     t1 = s.now
     ack_to(s, a, a.rcv_nxt, window=2000)
     s.wait_for(t1 + 150 * MS, lambda x: False)
@@ -1660,12 +1675,22 @@ def shrink(s):
     return 'no new data past a window shrunk below SND.NXT (%d bytes out); the data after' % top
 
 
+# The ISN's clock bound (section 9, T1, ISN; F46): the band reads the clock
+# as it takes each SYN, up to a tick and the pass latency after the SYN
+# arrives, and either SYN may be the late one, so a tick and the pass
+# latency's worth in 4 us units, rounded up: 4,417 at 1 ms.  Taken from
+# TICK and PASS_LATENCY, so that PASS_LATENCY stays its one place.
+ISN_SLACK = -(-(TICK + PASS_LATENCY) // 4000)
+
+
 def isn(s):
     """Two connections on one four-tuple 1 s apart get ISNs 250,000 apart
-    (the clock in 4 us units), within a tick's worth, 4,167; two four-tuples
-    at one time get ISNs more than a tick's worth apart, so that their
+    (the clock in 4 us units), within a tick and the pass latency's worth,
+    ISN_SLACK (4,417 at 1 ms), since the band reads the clock as it takes
+    each SYN, up to a tick and the pass latency after it arrives; two
+    four-tuples at one time get ISNs more than that apart, so that their
     hashes differ and not only their clock terms (section 5.5; RFC 6528;
-    O2; F30)."""
+    O2; F30; F46)."""
     p = s.p
     s.boot()
     a = s.connect(40111, p.telnet_port, ISN_A, F.opt_mss(1460))
@@ -1687,9 +1712,9 @@ def isn(s):
     s.conns.remove(b)
     step = (b.irs - a.irs) & 0xFFFFFFFF
     want = (t_b - t_a) // 4000
-    if abs(step - want) > 4167:
-        raise Fail('two ISNs on one four-tuple %s apart differ by %d, not %d within 4,167' % (
-            at(t_b - t_a), step, want))
+    if abs(step - want) > ISN_SLACK:
+        raise Fail('two ISNs on one four-tuple %s apart differ by %d, not %d within %s' % (
+            at(t_b - t_a), step, want, format(ISN_SLACK, ',')))
     x = s.connect(40112, p.telnet_port, ISN_B, F.opt_mss(1460))
     y = s.connect(40113, p.telnet_port, ISN_B, F.opt_mss(1460))
     x.auto_ack = y.auto_ack = False
@@ -1697,9 +1722,9 @@ def isn(s):
     if x.synack is None or y.synack is None:
         raise Fail('no SYN-ACKs to two SYNs at once by %s' % at(s.now))
     d = (x.irs - y.irs) & 0xFFFFFFFF
-    if min(d, 2 ** 32 - d) <= 4167:
-        raise Fail('two four-tuples at one time got ISNs %d apart, within a tick\'s worth, 4,167 (F30)'
-                   % min(d, 2 ** 32 - d))
+    if min(d, 2 ** 32 - d) <= ISN_SLACK:
+        raise Fail('two four-tuples at one time got ISNs %d apart, within a tick and the pass latency\'s worth, %s (F30, F46)'
+                   % (min(d, 2 ** 32 - d), format(ISN_SLACK, ',')))
     return 'ISNs %d apart in %s; two four-tuples different' % (step, at(t_b - t_a))
 
 
