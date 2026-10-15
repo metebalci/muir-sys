@@ -92,6 +92,7 @@ class Session:
         self.note = note or (lambda line: None)
         self.started = None     # the gratuitous ARP, once seen
         self.idents = {}        # (destination, protocol, identification) -> Seen
+        self.peer_macs = None   # check.problems's; None for the peer's own
 
     @property
     def now(self):
@@ -115,7 +116,7 @@ class Session:
         for s in new:
             self.seen.append(s)
             self.note('band %s' % s)
-            bad = check.problems(s.raw, self.p)
+            bad = check.problems(s.raw, self.p, self.peer_macs)
             if bad:
                 raise Fail('a bad Ethernet frame from the band (%s): %s' % ('; '.join(bad), s))
             if s.ip is not None:

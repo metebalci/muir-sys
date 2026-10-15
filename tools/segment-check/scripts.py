@@ -37,15 +37,35 @@ def tick_tolerance():
 
 
 # --------------------------------------------------------------------------
+def other_mac(p):
+    """A MAC address of the peer's other than its own, for the merge."""
+    return p.peer_mac[:5] + bytes([p.peer_mac[5] ^ 0x80])
+
+
+def peer_requests(s, lo, hi=None):
+    """The band's ARP requests for the peer sent after LO (and up to HI)."""
+    return [x for x in s.seen if x.arp and x.arp.op == F.ARP_REQUEST and x.arp.tpa == s.p.peer_ip
+            and x.t > lo and (hi is None or x.t <= hi)]
+
+
 def arp(s):
     """The band replies only to its own address, sends one gratuitous ARP,
-    and sends at most one request a second (section 5.2)."""
+    and sends at most one request a second; RFC 826's merge adds an entry
+    only from a packet for the band and updates one from any; of two
+    datagrams waiting on one resolution only the newer goes (section 5.2;
+    F43, F44)."""
     p = s.p
     g = s.boot()
     if g is None:
         raise Fail('no gratuitous ARP by machine time %s' % at(s.now))
     if g.eth.dst != F.BROADCAST:
         raise Fail('the gratuitous ARP is sent to %s, not broadcast' % F.mac_text(g.eth.dst))
+
+    # RFC 826's merge, before the band knows the peer: a request from the
+    # peer for another address adds no entry, so the echo requests below
+    # still need ARP requests.
+    far = off_subnet(p)
+    s.ether_to_band(F.ETH_ARP, F.arp(F.ARP_REQUEST, p.peer_mac, p.peer_ip, b'\0' * 6, far), dst=F.BROADCAST)
 
     # The rate.  Echo requests from the peer, which the band has not seen in
     # an ARP packet, every 250 ms for 3.5 s: to answer it must resolve the
@@ -60,6 +80,9 @@ def arp(s):
     s.run(s.now + 500 * MS)
     reqs = [x for x in s.seen if x.t >= t0 and x.arp and x.arp.op == F.ARP_REQUEST and x.arp.tpa == p.peer_ip]
     if not reqs:
+        if any(x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY for x in s.seen):
+            raise Fail('echo replies to the peer with no ARP request: an entry added from the peer\'s ARP request '
+                       'for another address, not for the band (RFC 826\'s merge, F44)')
         raise Fail('no ARP request for the peer %s by %s, with 14 echo requests waiting'
                    % (F.ip_text(p.peer_ip), at(s.now)))
     for a, b in zip(reqs, reqs[1:]):
@@ -68,7 +91,20 @@ def arp(s):
                        % (F.ip_text(p.peer_ip), b.t - a.t, at(a.t), at(b.t)))
     rate_line = '%d requests for the peer in 3.5 s' % len(reqs)
 
-    # A request for the band's own address gets a reply, to the asker.
+    # Every resolution of the rate phase ends: three requests unanswered,
+    # then the band's wait, and no fourth (F43).
+    end = s.now + 10 * S
+    while s.now < end and s.now - max([x.t for x in peer_requests(s, t0)] or [t0]) < 3 * S + TICK:
+        s.run(s.now + 10 * MS)
+    # Two echo requests waiting on one resolution: the newer replaces the
+    # older (F43).
+    s.echo_request(0x4155, 1, b'held older')
+    s.run(s.now + 100 * MS)
+    s.echo_request(0x4155, 2, b'held newer')
+    s.run(s.now + 100 * MS)
+
+    # A request for the band's own address gets a reply, to the asker; the
+    # band learns the peer from it, and the held datagram goes.
     s.arp_answer = True
     s.ether_to_band(F.ETH_ARP, F.arp(F.ARP_REQUEST, p.peer_mac, p.peer_ip, b'\0' * 6, p.band_ip),
                     dst=F.BROADCAST)
@@ -78,6 +114,31 @@ def arp(s):
         raise Fail('no ARP reply for the band\'s own address %s by %s' % (F.ip_text(p.band_ip), at(s.now)))
     if (r.arp.sha, r.arp.spa, r.arp.tha, r.arp.tpa) != (p.band_mac, p.band_ip, p.peer_mac, p.peer_ip):
         raise Fail('the ARP reply names the wrong addresses: %s' % r)
+    s.run(t1 + p.answer)
+    held = [x.icmp.seq for x in s.seen if x.t > t1 and x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY
+            and x.icmp.ident == 0x4155]
+    if held != [2]:
+        raise Fail('of two echo requests waiting on one resolution the band answered %s, not the newer alone '
+                   '(seq 2; the newest datagram is held, F43)' % (held or 'neither'))
+
+    # The merge once the band knows the peer: a request from the peer for
+    # another address, from another MAC address, updates the entry, and the
+    # band's next datagram goes there with no request (F44); then back.
+    for mac, what in ((other_mac(p), 'another MAC address'), (p.peer_mac, 'its own MAC address again')):
+        s.peer_macs = (p.peer_mac, other_mac(p))
+        s.ether_to_band(F.ETH_ARP, F.arp(F.ARP_REQUEST, mac, p.peer_ip, b'\0' * 6, far), dst=F.BROADCAST)
+        s.run(s.now + 50 * MS)
+        t2 = s.now
+        s.echo_request(0x4156, 1 if mac != p.peer_mac else 2, b'merge')
+        e = s.wait_for(t2 + p.answer, lambda x: x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY)
+        if peer_requests(s, t2):
+            raise Fail('an ARP request for the peer after its ARP request gave %s: %s' % (what, peer_requests(s, t2)[0]))
+        if e is None:
+            raise Fail('no echo reply after the peer\'s ARP request gave %s, by %s' % (what, at(s.now)))
+        if e.eth.dst != mac:
+            raise Fail('the echo reply went to %s, not %s, the MAC address the peer\'s ARP request for another '
+                       'address gave (RFC 826\'s merge, F44)' % (F.mac_text(e.eth.dst), F.mac_text(mac)))
+    s.peer_macs = None
 
     # Requests for other addresses get none: the peer's own, another on no
     # subnet of the band's, and the /30's broadcast.
@@ -90,7 +151,8 @@ def arp(s):
     gs = [x for x in s.seen if s.is_gratuitous(x)]
     if len(gs) != 1:
         raise Fail('%d gratuitous ARPs, at %s; one is sent' % (len(gs), ', '.join(at(x.t) for x in gs)))
-    return 'gratuitous ARP at %s; %s; own address answered; 3 others not' % (at(g.t), rate_line)
+    return 'gratuitous ARP at %s; %s; the newer held datagram sent; the merge followed; own address answered; ' \
+           '3 others not' % (at(g.t), rate_line)
 
 
 # --------------------------------------------------------------------------
@@ -232,6 +294,11 @@ CONTROL = {
     # F36).
     'isn-next': ('(progn (setq net:*isn-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "isn-set"))',
                  r'\{sc-isn-set\}'),
+    # The R2 hook: NIL, or a number of seconds.  The next connection the
+    # test echo service accepts gets it as its R2, through section 5.5's
+    # keyword (MUST-21), and it is then NIL (F41).
+    'r2-next': ('(progn (setq net:*r2-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "r2-set"))',
+                r'\{sc-r2-set\}'),
     # The urgent state of the connection whose foreign port is the
     # argument: two numbers, 1 or 0 for urgent data waiting or not, and how
     # much, the octets from the next one the server reads up to the urgent
@@ -703,13 +770,14 @@ def ip_options(s):
 # Slice 2: RST, SYN and close (section 5.5; section 9, T1).
 
 TICK = -(-S // 60)      # 1/60 s, rounded up to the nanosecond
-# A probe that a record has ended goes a tick and this much after its end
-# is due.  The record ends in the network process's pass at the first tick
-# at or after that, and the pass takes every waiting Ethernet frame before
-# it runs the timers (section 5.1), so a probe arriving at the due time and
-# a tick, 0.33 ns after that tick, would still find the record if the pass
-# started later than that.  1 ms is the bound of the stand-in's pass-order
-# variant; E4 measures the Lisp's pass latency, and this must cover it.
+# The pass latency (section 9, T1, Latency; F45): the most the band's
+# network process starts its pass after a tick, or posts a timer's segment
+# after its due time.  A timer checked within a tick may be up to a tick
+# early, and up to a tick and this late (near()); a probe that a record has
+# ended goes a tick and this after its end is due, since the record ends in
+# the pass at the first tick at or after that, and the pass takes every
+# waiting Ethernet frame before it runs the timers (section 5.1).  A T1
+# parameter, 1 ms until E4 measures it; this is its one place.
 PASS_LATENCY = 1 * MS
 
 
@@ -1031,8 +1099,11 @@ LONG_STEP = 10 * MS     # the long scripts idle in steps of this
 
 
 def near(dt, want, what):
-    if abs(dt - want) > TICK:
-        raise Fail('%s: %s, not %s within a tick' % (what, at(dt), at(want)))
+    """A timer within its bounds (section 9, T1, Latency; F45): up to a tick
+    early, and up to a tick and the pass latency late."""
+    if dt < want - TICK or dt > want + TICK + PASS_LATENCY:
+        raise Fail('%s: %s, not %s within a tick (early) or a tick and the pass latency (late)' % (
+            what, at(dt), at(want)))
 
 
 def resent_at(s, prev, cur):
@@ -1087,6 +1158,9 @@ def rto(s):
     from a resent segment (Karn, MUST-18) (section 5.5; RFC 6298)."""
     p = s.p
     s.boot()
+    # The band resolves the peer first, so that the first SYN-ACK is not
+    # held for ARP and the first gap is the band's RTO alone.
+    echo_answered(s, 0x5254, 1, 'an echo request before the SYN')
     h = s.connect(40101, p.telnet_port, ISN_A, F.opt_mss(1460))
     h.auto_ack = False
     s.wait_for(s.now + p.answer, lambda x: h.synack is not None)
@@ -1097,7 +1171,7 @@ def rto(s):
         return [y.t for y in h.segments if y.tcp.flags & F.SYN]
     for k, want, what in ((1, 1 * S, 'the first RTO (the SYN-ACK resent)'),
                           (2, 2 * S, 'the RTO doubled (the SYN-ACK resent again)')):
-        s.wait_for(s.now + want + 2 * TICK + p.answer, lambda x: len(syns()) > k)
+        s.wait_for(s.now + want + 2 * TICK + PASS_LATENCY + p.answer, lambda x: len(syns()) > k)
         if len(syns()) <= k:
             raise Fail('%s: not by %s' % (what, at(s.now)))
         near(syns()[k] - syns()[k - 1], want, what)
@@ -1113,7 +1187,7 @@ def rto(s):
         raise Fail('no echo of 6 bytes by %s' % at(s.now))
     for k, at_most, what in ((1, 200 * MS, 'the RTO after RTT samples (the 200 ms floor)'),
                              (2, 600 * MS, 'the RTO doubled from the floor')):
-        s.wait_for(first.t + at_most + 2 * TICK, lambda x: len(copies(e, first.tcp.seq, first.t)) >= k)
+        s.wait_for(first.t + at_most + 2 * TICK + PASS_LATENCY, lambda x: len(copies(e, first.tcp.seq, first.t)) >= k)
         re = copies(e, first.tcp.seq, first.t)
         if len(re) < k:
             raise Fail('%s: not resent by %s' % (what, at(s.now)))
@@ -1265,10 +1339,10 @@ def r2(s):
     r = s.wait_for(t + 2 * TICK, lambda x: x.t > t and e.ours(x))
     if r is None or r.tcp.flags & F.RST:
         raise Fail('R2: the connection is gone before 100 s less a tick: %s' % (r or 'no answer'))
-    s.run(first.t + 100 * S + TICK)
+    s.run(first.t + 100 * S + TICK + PASS_LATENCY)
     cond = ask(s, c, 'condition')[0]
     s.wait_for(first.t + 104 * S, lambda x: False, step=LONG_STEP)
-    late = [x for x in e.segments if x.t > first.t + 100 * S + TICK and not x.tcp.flags & F.RST]
+    late = [x for x in e.segments if x.t > first.t + 100 * S + TICK + PASS_LATENCY and not x.tcp.flags & F.RST]
     if late:
         raise Fail('R2: the band sent after 100 s and a tick: %s' % late[0])
     if 'HOST-STOPPED-RESPONDING' not in cond.upper():
@@ -1314,18 +1388,31 @@ def zero_window(s):
     if got is None:
         raise Fail('the zero window: no 536 bytes of the echo by %s' % at(s.now))
     s.run(s.now + 2 * MS)
-    ack_to(s, e, e.rcv_nxt, window=0)
+    # The zero window comes on a segment of one octet, so that the band
+    # answers it at once: the first probe is timed from the peer's segment
+    # on its early side and from the band's answer on its late side, since
+    # the band may take a frame up to its pass latency or more after it
+    # arrives, and its timer starts then (section 9, T1, Latency).
+    e.window = 0
+    raw_segment(s, e, F.ACK | F.PSH, e.snd_nxt, e.rcv_nxt, b'Z')
+    e.snd_nxt = (e.snd_nxt + 1) & 0xFFFFFFFF
+    data += b'Z'
     t0 = s.now
+    answer = None
     probes = []
     end = t0 + 200 * S
     opened = None
-    limit = end + 60 * S + 2 * TICK
+    limit = end + 60 * S + 2 * TICK + PASS_LATENCY
     while s.now < limit and opened is None:
         for x in s.run(min(s.now + LONG_STEP, limit)):
             if not e.ours(x) or x.t <= t0:
                 continue
             if x.tcp.flags & F.RST:
                 raise Fail('the zero window: RST at %s' % at(x.t))
+            if answer is None and x.tcp.ack == e.snd_nxt:
+                answer = x
+                if not x.tcp.data and not is_probe(e, x):
+                    continue        # the ACK of the octet
             if not is_probe(e, x):
                 raise Fail('the zero window: a segment that is not a probe (F27): %s' % x)
             probes.append(x)
@@ -1341,7 +1428,14 @@ def zero_window(s):
         raise Fail('the zero window: %d probes in 200 s' % len(probes))
     if opened is None:
         raise Fail('the zero window: no zero-window probe in the 60 s after 200 s')
-    near(probes[0].t - t0, 200 * MS, 'the first zero-window probe, one RTO after the zero window')
+    if answer is None:
+        raise Fail('the zero window: the octet that brought it was never acknowledged')
+    first = 'the first zero-window probe, one RTO after the zero window'
+    if probes[0].t - t0 < 200 * MS - TICK:
+        raise Fail('%s: %s after the peer\'s segment, not 200 ms less a tick or more' % (first, at(probes[0].t - t0)))
+    if probes[0].t - answer.t > 200 * MS + TICK + PASS_LATENCY:
+        raise Fail('%s: %s after the band\'s answer, more than 200 ms, a tick and the pass latency' % (
+            first, at(probes[0].t - answer.t)))
     gap = 400 * MS
     for k in range(1, len(probes)):
         near(probes[k].t - probes[k - 1].t, gap, 'zero-window probe %d' % (k + 1))
@@ -1699,6 +1793,11 @@ def synack_r2(s):
     long script: about 181 s."""
     p = s.p
     s.boot()
+    # The band resolves the peer first, so that A's first SYN-ACK is not
+    # held for ARP: held, it leaves the wire later than the band's R2 is
+    # timed from, by the ARP round trip and the band's taking of the reply,
+    # and A's ACK a tick before 180 s from it could come after R2.
+    echo_answered(s, 0x5352, 1, 'an echo request before the SYNs')
     a = s.connect(40116, p.telnet_port, ISN_A, F.opt_mss(1460))
     a.auto_ack = False
     s.wait_for(s.now + 500 * MS, lambda x: False)     # in steps, so that the band's ARP is answered at once
@@ -1774,7 +1873,7 @@ def rule_5_7(s):
     first = s.wait_for(s.now + p.answer, lambda x: e.ours(x) and x.tcp.data)
     if first is None:
         raise Fail('no echo by %s' % at(s.now))
-    s.wait_for(first.t + 3 * S + 2 * TICK, lambda x: copies(e, first.tcp.seq, first.t))
+    s.wait_for(first.t + 3 * S + 2 * TICK + PASS_LATENCY, lambda x: copies(e, first.tcp.seq, first.t))
     other = [x for x in e.data_segments if x.tcp.seq != first.tcp.seq]
     if other:
         raise Fail('after a resent SYN-ACK more than one segment went before the first ACK (an initial window '
@@ -1925,6 +2024,13 @@ def ping_report(s, c, mark, until):
     return int(m.group(1)), int(m.group(2))
 
 
+def report_text(r):
+    """A ping report (ping_report's) in words."""
+    if r is None or r == 'nothing':
+        return r or 'nothing at all'
+    return 'id %d seq %d' % r
+
+
 def ping(s):
     """The band's ping, called on the control session (section 5.4; F5,
     F36).  Of the peer: its echo request goes to the peer's address and
@@ -1946,12 +2052,12 @@ def ping(s):
     if early is not None:
         raise Fail('the band\'s ping reported %s before the reply matching its request came (id %d seq %d; '
                    'replies of another sequence and another identifier must be ignored)' % (
-                       'nothing' if early == 'nothing' else 'id %d seq %d' % early, m.ident, m.seq))
+                       report_text(early), m.ident, m.seq))
     s.ipv4_to_band(F.IP_ICMP, F.icmp(F.ICMP_ECHO_REPLY, 0, m.ident, m.seq, m.data))
     got = ping_report(s, c, mark, s.now + 2 * S)
     if got is None or got == 'nothing':
         raise Fail('the band\'s ping reported %s by %s, after the reply matching its request' % (
-            got or 'nothing at all', at(s.now)))
+            report_text(got), at(s.now)))
     if got != (m.ident, m.seq):
         raise Fail('the band\'s ping reported id %d seq %d, not its own request\'s id %d seq %d' % (
             got + (m.ident, m.seq)))
@@ -1964,7 +2070,7 @@ def ping(s):
     got2 = ping_report(s, c, mark, s.now + 2 * S)
     if got2 != (m2.ident, m2.seq):
         raise Fail('the band\'s ping of %s reported %s, not id %d seq %d' % (
-            F.ip_text(far), got2 if got2 in (None, 'nothing') else 'id %d seq %d' % got2, m2.ident, m2.seq))
+            F.ip_text(far), report_text(got2), m2.ident, m2.seq))
     return 'the ping of the peer ignored two wrong replies and reported the right one (id %d seq %d); %s through ' \
            'the gateway' % (got + (F.ip_text(far),))
 
@@ -1973,21 +2079,27 @@ ARP_LIFE = 600 * S      # section 5.2: each entry kept 10 minutes
 
 
 def arp_cache(s):
-    """The band's ARP entry for the peer is kept 10 minutes from when it
-    was learned, even while it is used, within a tick (section 5.2; RFC 1122
-    section 2.3.2.1, which section 5.2 follows: "periodically time out cache
-    entries, even if they are in use", the timeout restarted only by an ARP
-    packet from the host, and the script sends none).  An echo request makes
-    the band resolve the peer; one 600 s less a tick after the peer's ARP
-    reply is answered with no ARP request, and one 600 s and a tick after
-    the band's first use of the entry needs a new one.  A long script: about
-    601 s."""
+    """The band's ARP entry for the peer is kept 10 minutes from the last
+    ARP packet from the peer's address, request or reply, whatever its
+    target, even while it is used, within a tick (section 5.2, F42; RFC 1122
+    section 2.3.2.1).  An echo request makes the band resolve the peer; 10 s
+    later the peer broadcasts an ARP request for another address, which
+    restarts the 10 minutes and draws no reply.  An echo request 600 s, a
+    tick and the pass latency after the band first used the entry is
+    answered with no ARP request (the restart); one 600 s less a tick after
+    the refresh too; one 600 s, a tick and the pass latency after the band's
+    first datagram after the refresh needs a new request.  A long script:
+    about 611 s."""
     p = s.p
     s.boot()
 
     def requests(lo, hi):
-        return [x for x in s.seen if x.arp and x.arp.op == F.ARP_REQUEST and x.arp.tpa == p.peer_ip
-                and lo < x.t <= hi]
+        return peer_requests(s, lo, hi)
+
+    def echo(seq):
+        t = s.now
+        s.echo_request(0x4143, seq, b'arp cache %d' % seq)
+        return t, s.wait_for(t + p.answer, lambda x: x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY)
     t = s.now
     s.echo_request(0x4143, 1, b'arp cache 1')
     req = s.wait_for(t + p.answer, lambda x: x.arp is not None and x.arp.op == F.ARP_REQUEST
@@ -1999,37 +2111,155 @@ def arp_cache(s):
     if r is None:
         raise Fail('no echo reply after the peer\'s ARP reply by %s' % at(s.now))
     used = r.t
-    s.wait_for(learned + ARP_LIFE - TICK, lambda x: False, step=1 * S)
+    # The refresh: an ARP request from the peer for another address.
+    s.wait_for(learned + 10 * S, lambda x: False, step=100 * MS)
+    s.ether_to_band(F.ETH_ARP, F.arp(F.ARP_REQUEST, p.peer_mac, p.peer_ip, b'\0' * 6, off_subnet(p)),
+                    dst=F.BROADCAST)
+    refreshed = s.now
+    t, r = echo(2)                      # taken after the refresh, in order
+    if r is None:
+        raise Fail('no echo reply after the peer\'s ARP request for another address, by %s' % at(s.now))
+    if any(x.arp and x.t > refreshed for x in s.seen):
+        raise Fail('an ARP packet after the peer\'s ARP request for another address: %s' % next(
+            x for x in s.seen if x.arp and x.t > refreshed))
+    after = r.t
+    s.wait_for(used + ARP_LIFE + TICK + PASS_LATENCY, lambda x: False, step=1 * S)
     early = requests(req.t, s.now)
     if early:
         raise Fail('an ARP request for the peer before 10 minutes, with nothing sent: %s' % early[0])
-    # Still kept a tick before 10 minutes.
-    t = s.now
-    s.echo_request(0x4143, 2, b'arp cache 2')
-    r = s.wait_for(t + p.answer, lambda x: x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY)
+    # Kept past 10 minutes from the learning: the refresh restarted it.
+    t, r = echo(3)
     if requests(t, s.now):
-        raise Fail('the ARP entry for the peer gone 600 s less a tick after it was learned (%s): an ARP request '
-                   'at %s' % (at(learned), at(requests(t, s.now)[0].t)))
+        raise Fail('the ARP entry for the peer gone 600 s and a tick after it was learned (%s), though the peer\'s '
+                   'ARP request at %s restarted its 10 minutes (F42): an ARP request at %s' % (
+                       at(learned), at(refreshed), at(requests(t, s.now)[0].t)))
     if r is None:
-        raise Fail('no echo reply 600 s less a tick after the ARP entry was learned, by %s' % at(s.now))
-    # Gone a tick and the pass latency after 10 minutes from its first use.
-    s.run(max(s.now, used + ARP_LIFE + TICK + PASS_LATENCY))
-    t = s.now
-    s.echo_request(0x4143, 3, b'arp cache 3')
-    r = s.wait_for(t + p.answer, lambda x: x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY)
+        raise Fail('no echo reply 600 s after the ARP entry was learned, by %s' % at(s.now))
+    # Still kept a tick before 10 minutes from the refresh.
+    s.wait_for(refreshed + ARP_LIFE - TICK, lambda x: False, step=1 * S)
+    t, r = echo(4)
+    if requests(t, s.now):
+        raise Fail('the ARP entry for the peer gone 600 s less a tick after the refresh (%s): an ARP request '
+                   'at %s' % (at(refreshed), at(requests(t, s.now)[0].t)))
+    if r is None:
+        raise Fail('no echo reply 600 s less a tick after the refresh, by %s' % at(s.now))
+    # Gone a tick and the pass latency after 10 minutes from the refresh,
+    # timed from the band's first datagram after it, which follows the
+    # refresh in the band's own order.
+    s.run(max(s.now, after + ARP_LIFE + TICK + PASS_LATENCY))
+    t, r = echo(5)
     asked = requests(t, r.t if r is not None else s.now)
     if not asked:
-        raise Fail('the ARP entry for the peer still used 600 s and a tick after the band first used it (%s): '
-                   '%s with no ARP request (kept 10 minutes even in use, section 5.2)' % (
-                       at(used), r or 'no echo reply'))
+        raise Fail('the ARP entry for the peer still used 600 s and a tick after the refresh (%s): %s with no '
+                   'ARP request (kept 10 minutes from the last ARP packet, even in use, section 5.2)' % (
+                       at(refreshed), r or 'no echo reply'))
     if r is None:
         raise Fail('no echo reply after the new ARP request, by %s' % at(s.now))
-    return 'the entry kept at 600 s - tick (no request), gone at 600 s + tick (a request at %s)' % at(asked[0].t)
+    return 'refreshed at 10 s; kept at 600 s + tick from the learning and 600 s - tick from the refresh, gone at ' \
+           '600 s + tick from it (a request at %s)' % at(asked[0].t)
+
+
+def arp_hold(s):
+    """One echo request with nothing answering the band's ARP requests: a
+    second echo request while the first is held replaces it and the count
+    of requests goes on, so three requests come and no fourth in the 3 s
+    after the third; the peer's ARP reply, once the third has gone
+    unanswered for the band's own interval (from its first two requests), a
+    tick and the pass latency, draws no echo reply, the held datagram having
+    dropped; the merge still learns it, the band being its target, so the
+    next echo request is answered with no ARP request (section 5.2; F43,
+    F44)."""
+    p = s.p
+    s.boot()
+    s.arp_answer = False
+    t0 = s.now
+    s.echo_request(0x4148, 1, b'held 1')
+    r1 = s.wait_for(t0 + p.answer, lambda x: x.arp is not None and x.arp.op == F.ARP_REQUEST
+                    and x.arp.tpa == p.peer_ip)
+    if r1 is None:
+        raise Fail('no ARP request for the peer by %s, with an echo request waiting' % at(s.now))
+    s.run(r1.t + 500 * MS)
+    s.echo_request(0x4148, 2, b'held 2')
+    s.wait_for(r1.t + 3 * S, lambda x: len(peer_requests(s, t0)) >= 3)
+    reqs = peer_requests(s, t0)
+    if len(reqs) < 3:
+        raise Fail('%d ARP requests for the peer by %s, not 3' % (len(reqs), at(s.now)))
+    a1, a2, a3 = (x.t for x in reqs[:3])
+    gap = a2 - a1
+    late = a3 + gap + TICK + PASS_LATENCY
+    s.wait_for(late, lambda x: False)
+    if len(peer_requests(s, t0)) > 3:
+        raise Fail('a fourth ARP request for the peer: %s (three unanswered requests drop the datagram, and a newer '
+                   'datagram does not restart the count, F43)' % peer_requests(s, t0)[3])
+    t = s.now
+    s.send(F.ether(p.band_mac, p.peer_mac, F.ETH_ARP, F.arp(F.ARP_REPLY, p.peer_mac, p.peer_ip, p.band_mac,
+                                                         p.band_ip)))
+    s.wait_for(max(t + p.answer, a3 + 3 * S), lambda x: False)
+    sent = [x for x in s.seen if x.t > t and x.icmp is not None]
+    if sent:
+        raise Fail('the peer\'s ARP reply after the third request went unanswered for the band\'s interval drew %s: '
+                   'the held datagram is dropped by then (F43)' % sent[0])
+    if len(peer_requests(s, t0)) > 3:
+        raise Fail('a fourth ARP request for the peer: %s (F43)' % peer_requests(s, t0)[3])
+    t = s.now
+    s.echo_request(0x4148, 3, b'held 3')
+    e = s.wait_for(t + p.answer, lambda x: x.icmp is not None and x.icmp.type == F.ICMP_ECHO_REPLY)
+    if peer_requests(s, t) or e is None:
+        raise Fail('after the peer\'s late ARP reply an echo request %s: the merge learns a reply to the band '
+                   '(F44)' % ('drew an ARP request' if peer_requests(s, t) else 'got no reply'))
+    if e.icmp.seq != 3:
+        raise Fail('after the late ARP reply the band answered %s' % e)
+    return 'three requests %s apart, no fourth; the late reply sent nothing and was learned' % at(gap)
+
+
+def r2_hook(s):
+    """R2 set for one connection by its keyword, through the control
+    session's R2 hook (MUST-21; F41): connection A, accepted after the hook
+    is set to 10 s, and B after it, each with data nobody acknowledges.  A
+    still answers 10 s less a tick after the first transmission of its
+    data, and 10 s, a tick and the pass latency after it is closed: the
+    echo service saw SYS:HOST-STOPPED-RESPONDING, nothing more was resent,
+    and its four-tuple gets RST; B, given the default, still answers then.
+    About 12 s of machine time."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    ask(s, c, 'r2-next', 10)
+    a = echo_conn(s, 40125, ISN_A, what='connection A')
+    b = echo_conn(s, 40126, ISN_B, what='connection B')
+    a.write(b'r2 hook A')
+    fa = s.wait_for(s.now + p.answer, lambda x: a.ours(x) and x.tcp.data == b'r2 hook A')
+    b.write(b'r2 hook B')
+    fb = s.wait_for(s.now + p.answer, lambda x: b.ours(x) and x.tcp.data == b'r2 hook B')
+    if fa is None or fb is None:
+        raise Fail('no echo on connection %s by %s' % ('A' if fa is None else 'B', at(s.now)))
+    s.wait_for(fa.t + 10 * S - TICK, lambda x: False, step=LONG_STEP)
+    t = s.now
+    raw_segment(s, a, F.ACK, a.iss, fa.tcp.seq, b'\0')
+    r = s.wait_for(t + 2 * TICK, lambda x: x.t > t and a.ours(x))
+    if r is None or r.tcp.flags & F.RST:
+        raise Fail('the R2 hook: connection A gone before 10 s less a tick: %s' % (r or 'no answer'))
+    s.wait_for(fa.t + 10 * S + TICK + PASS_LATENCY, lambda x: False, step=LONG_STEP)
+    cond = ask(s, c, 'condition')[0]
+    if 'HOST-STOPPED-RESPONDING' not in cond.upper():
+        raise Fail('the R2 hook: 10 s and a tick after connection A\'s data the echo service saw %s, not '
+                   'SYS:HOST-STOPPED-RESPONDING (R2 of 10 s by the keyword, MUST-21)' % cond)
+    late = [x for x in a.segments if x.t > fa.t + 10 * S + TICK + PASS_LATENCY and not x.tcp.flags & F.RST]
+    if late:
+        raise Fail('the R2 hook: connection A sent after 10 s and a tick: %s' % late[0])
+    if probe(s, a, 'connection A after its R2 of 10 s') != 'RST':
+        raise Fail('the R2 hook: connection A still there after its R2 of 10 s')
+    if probe(s, b, 'connection B, accepted after A') != 'ACK':
+        raise Fail('the R2 hook: connection B, accepted after A, gone too: the hook used for more than one '
+                   'connection (F41)')
+    return 'connection A closed at its R2 of 10 s (%s); B kept the default' % cond
 
 
 SCRIPTS = {
     'arp': arp,
     'arp-cache': arp_cache,
+    'arp-hold': arp_hold,
     'icmp-echo': icmp_echo,
     'handshake': handshake,
     'mss': mss,
@@ -2046,6 +2276,7 @@ SCRIPTS = {
     'rto-restart': rto_restart,
     'cwnd-reset': cwnd_reset,
     'r2': r2,
+    'r2-hook': r2_hook,
     'zero-window': zero_window,
     'own-zero-window': own_zero_window,
     'must-38': must_38,

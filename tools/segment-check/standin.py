@@ -143,7 +143,7 @@ PLANTS = {
     'backlog-5': ('a backlog of 5', 'syn', 'fifth half-open'),
     'backlog-rst': ('a SYN past the backlog gets RST, not dropped', 'syn', 'fifth half-open'),
     'fin-no-seq': ('T5: FIN consuming no sequence number', 'close', 'the peer closing first'),
-    'eof-no-close': ('the server does not close on EOF (rests on F22, held for Mete)', 'close', 'the peer closing first: no FIN from the band'),
+    'eof-no-close': ('the server does not close on EOF (F22)', 'close', 'the peer closing first: no FIN from the band'),
     'closing-broken': ('a FIN in FIN-WAIT-1 crossing ours is ignored', 'close', 'CLOSING'),
     'time-wait-skipped': ('T5: TIME-WAIT skipped', 'close', 'no TIME-WAIT'),
     'time-wait-30': ('TIME-WAIT of 30 s', 'time-wait', 'TIME-WAIT ended before 60 s'),
@@ -238,9 +238,38 @@ PLANTS = {
                          'a later close by its server sends nothing'),
     'isn-hook-consumed-by-refused': ('the ISN hook taken by a refused SYN (F36)', 'wrap', 'after a refused one'),
     'arp-cache-forever': ('ARP entries never time out (section 5.2)', 'arp-cache', 'still used'),
-    'arp-cache-300': ('ARP entries kept 5 minutes, not 10', 'arp-cache', 'less a tick'),
+    'arp-cache-300': ('ARP entries kept 5 minutes, not 10', 'arp-cache', 'restarted its 10 minutes'),
     'arp-cache-refresh-on-use': ('an ARP entry\'s 10 minutes restarted by each use (RFC 1122 section 2.3.2.1: '
                                  '"even if they are in use")', 'arp-cache', 'still used'),
+    # Slice 6.
+    'r2-hook-ignored': ('R2\'s keyword ignored: the R2 hook\'s connection closes at 100 s (MUST-21; F41)', 'r2-hook',
+                        'R2 of 10 s by the keyword'),
+    'r2-hook-sticky': ('the R2 hook kept for every later connection (F41)', 'r2-hook',
+                       'the hook used for more than one'),
+    'arp-merge-no-restart': ('RFC 826\'s merge updating an entry without restarting its 10 minutes (F42)',
+                             'arp-cache', 'restarted its 10 minutes'),
+    'arp-learn-any': ('an ARP entry added from any ARP packet, not only one for the band (F44)', 'arp',
+                      'not for the band (RFC 826'),
+    'arp-merge-untargeted-ignored': ('an ARP packet for another address not updating the entry (F44)', 'arp',
+                                     'the MAC address the peer'),
+    'arp-older-held': ('the older datagram held, not the newer (F43)', 'arp', 'not the newer alone'),
+    'arp-count-restarted': ('a newer held datagram restarting the count of requests: a fourth request (F43)',
+                            'arp-hold', 'a fourth ARP request'),
+    'arp-late-reply-sends': ('the held datagram kept after the third request and sent on a late reply (F43)',
+                             'arp-hold', 'the held datagram is dropped by then'),
+}
+
+# Measurement variants: right behaviours run by the pass-latency sweep, not
+# by `run --plants`: they measure how late a pass can be against T1's
+# allowance for a late timer (F45; section 9, T1, Latency), so their
+# failures are counted, not required to be none.
+MEASURES = {
+    'pass-order': 'in tick mode, the network process woken by each Ethernet frame and taking it a seeded 0-1 ms '
+                  'after it arrives (the pass latency), answering at once and arming its timers from then; each '
+                  'timer pass a seeded 0-1 ms after its tick, the frames waiting by then handled first (section 5.1)',
+    'pass-clock-restart': 'pass-order, and each timer restarted from the clock read in its pass, not from its tick',
+    'pass-busy': 'pass-order, each frame taken up to a tick and the pass latency after it arrives, as when another '
+                 'process holds the machine until the next tick',
 }
 
 # Variants: right behaviours the scripts must pass.
@@ -261,8 +290,6 @@ VARIANTS = {
                       'of its moment; the listener echoing what it reads',
     # Slice 5b.
     'resend-no-psh': 'resent segments without PSH (whether a resend carries it is free)',
-    'pass-order': 'in tick mode, each timer pass a seeded 0-1 ms after its tick, the Ethernet frames waiting by '
-                  'then handled first (section 5.1)',
     'r1-every-resend': 'negative advice at every retransmission from R1 on (RFC 9293 section 3.8.3 (b), "reaches '
                        'or exceeds")',
 }
@@ -383,6 +410,7 @@ class Band:
         self.ipv4_total = 0     # <15:9>'s
         self.timewait = {}      # key -> TIME-WAIT record
         self.next_isn = None    # the control session's ISN hook
+        self.next_r2 = None     # and its R2 hook, in seconds
         self.ping = None        # (ident, seq, control connection) awaiting a reply
         self.ping_seq = 0
         self.echo_condition = None   # the last condition the echo service saw
@@ -509,8 +537,16 @@ class Band:
         op = struct.unpack('>H', b[6:8])[0]
         sha, spa, tpa = b[8:14], b[14:18], b[24:28]
         merged = False
-        if spa in self.arp:
-            self.learn(t, spa, sha)
+        if spa in self.arp and not (self.plant == 'arp-merge-untargeted-ignored' and tpa != self.ip):
+            # RFC 826's merge: the entry updated, and its 10 minutes restarted
+            # (F42; the arp-merge-no-restart plant updates it only).
+            if self.plant == 'arp-merge-no-restart':
+                self.arp[spa] = sha
+            else:
+                self.learn(t, spa, sha)
+            merged = True
+        if self.plant == 'arp-learn-any' and not merged and spa != self.ip:
+            self.learn(t, spa, sha)     # an entry added from any ARP packet
             merged = True
         if tpa == self.ip or self.plant == 'arp-any':
             if not merged and tpa == self.ip:
@@ -592,8 +628,7 @@ class Band:
         d = hdr[:10] + struct.pack('>H', c) + hdr[12:] + body
         # Routing (section 5.3): on the subnet directly, any other through the
         # gateway; the no-gateway-route plant sends every datagram directly.
-        hop = dst if (int.from_bytes(dst, 'big') & self.mask) == (int.from_bytes(self.ip, 'big') & self.mask) \
-            or self.plant == 'no-gateway-route' else self.gw
+        hop = dst if self.same_subnet(dst) or self.plant == 'no-gateway-route' else self.gw
         if hop in self.arp:
             if self.plant == 'arp-cache-refresh-on-use':
                 self.learn(t, hop, self.arp[hop])
@@ -603,8 +638,15 @@ class Band:
         if p is None:
             self.pending[hop] = [d, 0, None]
             self.resolve(t, hop)
+        elif self.plant == 'arp-older-held':
+            pass                # the older datagram kept
         else:
-            p[0] = d            # the newest datagram is held
+            # The newest datagram is held, replacing the older, and the count
+            # of requests goes on (F43); the arp-count-restarted plant starts
+            # it again.
+            p[0] = d
+            if self.plant == 'arp-count-restarted':
+                p[1] = 0
 
     def resolve(self, t, hop):
         p = self.pending.get(hop)
@@ -612,8 +654,12 @@ class Band:
             return
         gap = S // 2 if self.plant == 'arp-rate' else S
         if p[1] >= 3:
-            p[0] = None         # three unanswered: the datagram drops
+            # The third request unanswered as long as the band waits between
+            # requests: the held datagram drops and no fourth goes (F43).  The
+            # arp-late-reply-sends plant keeps it for a late reply.
             if p[2] is not None and t - p[2] < gap:
+                return
+            if self.plant == 'arp-late-reply-sends':
                 return
             del self.pending[hop]
             return
@@ -745,6 +791,12 @@ class Band:
                           (1460 if self.plant == 'send-mss-default' else 536),
                           1400 if self.plant == 'send-mss-1400' else 1460)
                 c = Conn(key, seq, self.isn(t, key), mss, win, dport)
+                if dport == self.a.echo_port and self.next_r2 is not None and self.plant != 'r2-hook-ignored':
+                    # The R2 hook: this connection's R2, through section 5.5's
+                    # keyword, used once (F41; the r2-hook-sticky plant keeps it).
+                    c.r2 = self.next_r2 * S
+                    if self.plant != 'r2-hook-sticky':
+                        self.next_r2 = None
                 if self.plant == 'first-rto-3s':
                     c.rto_base = 3 * S
                 self.conns[key] = c
@@ -1047,6 +1099,9 @@ class Band:
                 marker = '{sc-totals %d %d}' % (self.type_total, self.ipv4_total)
             elif name == 'condition':
                 marker = '{sc-condition %s}' % (self.echo_condition or 'NIL')
+            elif name == 'r2-next':
+                self.next_r2 = args[0]
+                marker = '{sc-r2-set}'
             elif name == 'isn-next':
                 self.next_isn = args[0] & 0xFFFFFFFF
                 marker = '{sc-isn-set}'
@@ -1066,10 +1121,10 @@ class Band:
                         self.ping = None
                         ping[2].buf += b'\r\n{sc-pinged NIL NIL}\r\n'
                         self.output(tt, ping[2])
-                self.at(t + 1 * S, give_up)
                 body = struct.pack('>BBHHH', 8, 0, 0, 0x5150, self.ping_seq) + b'segment script ping'
                 body = body[:2] + struct.pack('>H', csum(body)) + body[4:]
                 self.send_ip(t, bytes(args[:4]), 1, body)
+                self.at(t + 1 * S, give_up)
                 continue
             elif name == 'close':
                 target = next((x for x in self.conns.values() if x.key[1] == args[0]), None)
@@ -1318,7 +1373,7 @@ class Band:
         c.retries += 1
         c.backoff += 1
         c.timed = None
-        if self.plant == 'r2-at-timer' and c.first_tx and t - c.first_tx[0][1] >= 100 * S:
+        if self.plant == 'r2-at-timer' and c.first_tx and t - c.first_tx[0][1] >= getattr(c, 'r2', 100 * S):
             return self.r2_close(t, c)
         if c.state == 'SYN-RECEIVED' and self.plant == 'synack-r2-at-timer' and t - c.synack_tx >= 180 * S:
             # R2 checked only when the timer runs out: closed at 183 s.
@@ -1356,12 +1411,13 @@ class Band:
         return (int.from_bytes(ip, 'big') & self.mask) == (int.from_bytes(self.ip, 'big') & self.mask)
 
     def r2_arm(self, t, c):
-        """R2: 100 s from the first transmission of the oldest
-        unacknowledged segment the connection closes, at that time (O4)."""
+        """R2: 100 s, or what the R2 hook gave the connection (F41), from the
+        first transmission of the oldest unacknowledged segment the
+        connection closes, at that time (O4)."""
         c.r2_gen += 1
         if not c.first_tx or self.plant == 'r2-at-timer':
             return
-        g, deadline = c.r2_gen, c.first_tx[0][1] + 100 * S
+        g, deadline = c.r2_gen, c.first_tx[0][1] + getattr(c, 'r2', 100 * S)
 
         def fire(tt, c=c, g=g):
             if self.conns.get(c.key) is c and c.r2_gen == g:
@@ -1531,8 +1587,13 @@ def main():
     a = ap.parse_args()
     a.plant = Plants(a.plant)
     for n in a.plant.names:
-        if n not in PLANTS and n not in VARIANTS:
+        if n not in PLANTS and n not in VARIANTS and n not in MEASURES:
             ap.error('no plant or variant %r' % n)
+    if a.plant == 'pass-clock-restart' or a.plant == 'pass-busy':
+        a.plant = Plants(a.plant + ',pass-order')
+    # The pass model (MEASURES): every frame taken in the network process's
+    # pass, when its seeded delay ends, and answered at once.
+    passes = a.timing == 'tick' and a.plant == 'pass-order'
 
     clock = Clock(int(round(a.microcycle_ns * 2)))
     sent = []                   # (half-ns, frame) not yet reported
@@ -1548,9 +1609,10 @@ def main():
         if a.plant == 'pad-sent' and len(frame) < 60:
             frame = frame + bytes(60 - len(frame))
         t = t_ns * 2 + proc
-        if a.timing == 'tick' and not band.in_timer:
+        if a.timing == 'tick' and not band.in_timer and not passes:
             # The network process's pass: an answer takes up to a tick.  A
-            # timer's own output goes at its tick.
+            # timer's own output goes at its tick.  (With the pass model the
+            # frame itself is taken late instead, and answered at once.)
             t += rng.randrange(tick2)
         if band.in_timer:
             t += 2 * band.late
@@ -1566,7 +1628,8 @@ def main():
     if a.timing == 'tick':
         band.tick = True
     band.start()
-    inbound = []                # heap of (half-ns, n, frame)
+    inbound = []                # heap of (half-ns, n, frame); n < 0 once taken late (passes)
+    taken = [0]
     n = 0
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(a.socket)
@@ -1587,11 +1650,25 @@ def main():
                 break
             t, kind = min(nxt)
             if kind == 0:
-                _, _, f = heapq.heappop(inbound)
+                _, k, f = heapq.heappop(inbound)
+                if passes and k > 0:
+                    # Delivered: taken when its seeded delay ends (0-1 ms, or
+                    # with pass-busy up to a tick more), in order, its timers
+                    # armed from then.  Each is
+                    # taken at least a half-ns after the one before, so that
+                    # no two share a time and the heap cannot reorder them
+                    # (the peer never resends, so a reordered segment stalls).
+                    delay = rng.randrange(2 * MS) + (rng.randrange(tick2) if a.plant == 'pass-busy' else 0)
+                    taken[0] = max(t + delay, taken[0] + 1)
+                    heapq.heappush(inbound, (taken[0], -k, f))
+                    continue
                 band.receive(t // 2, f)
             else:
                 _, _, fn, tt, band.late = heapq.heappop(band.timers)
                 band.in_timer = True
+                if a.plant == 'pass-clock-restart':
+                    # Timers reckoned from the clock read in their pass.
+                    tt, band.late = tt + band.late, 0
                 fn(tt)
                 band.in_timer = False
                 band.late = 0

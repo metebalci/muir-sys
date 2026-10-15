@@ -28,7 +28,10 @@ nothing is.
 import frames as F
 
 
-def problems(frame, p):
+def problems(frame, p, peer_macs=None):
+    """PEER_MACS: the MAC addresses an IPv4 datagram may go to, by default
+    the peer's alone (a script that moves the band's ARP entry for the peer
+    allows the one it gave)."""
     out = []
     e = F.parse_ether(frame)
     if e.error:
@@ -70,7 +73,7 @@ def problems(frame, p):
         out.append('IPv4 TTL %d, not %d' % (ip.ttl, p.ttl))
     if ip.src != p.band_ip:
         out.append('IPv4 source %s, not the band\'s' % F.ip_text(ip.src))
-    if e.dst != p.peer_mac:
+    if e.dst not in (peer_macs or (p.peer_mac,)):
         out.append('an IPv4 datagram to Ethernet %s, not the peer\'s %s' % (
             F.mac_text(e.dst), F.mac_text(p.peer_mac)))
     if ip.proto == F.IP_ICMP:

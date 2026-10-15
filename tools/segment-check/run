@@ -211,7 +211,7 @@ def main():
     a = ap.parse_args()
 
     for n in (a.plant or '').split(','):
-        if n and n not in standin.PLANTS and n not in standin.VARIANTS:
+        if n and n not in standin.PLANTS and n not in standin.VARIANTS and n not in standin.MEASURES:
             sys.exit('run: no plant or variant %r' % n)
     names = [n for n in a.scripts.split(',') if n]
     for n in names:
