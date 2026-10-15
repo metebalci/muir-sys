@@ -597,6 +597,30 @@ file carries a comment in that file saying why.
   session closes at once, with the normal close left out (an abort, CLS
   alone) 4 cases fail, and without the end of the process 7 fail. ECHOING-STREAM's
   `:TYI` is unchanged since System 1000.
+- **The numeric comparisons check every argument's type**
+  (`sys/sys/qfctns.lisp:1514-1572`, GREATERP, LESSP, `=`, `<=` and `>=`;
+  `sys/sys/qcopt.lisp:204-222`, ARITHEXP, and `:383-478`, the optimizers of
+  `=`, `>`, `<`, `<=` and `>=`). The four ordering functions walked their
+  arguments with NIL as the mark of no previous argument, so a first
+  argument of NIL was never compared: `(< nil 60)` returned T, interpreted,
+  through FUNCALL and APPLY, and `(< nil 1 2)` what the rest gave. Now they
+  compare adjacent arguments from the first. One argument was checked by
+  neither the functions nor the compiler: `(< nil)` and `(= nil)` returned
+  T, and the compiler made `(< x)`, `(> x)`, `(<= x)` and `(>= x)`
+  `(progn x 't)`, `(= x)` `'t` without evaluating x, and `(max x)` and
+  `(min x)` x, so a compiled `(max nil)` was NIL. Now GREATERP, LESSP, `<=`
+  and `>=` check a single argument with `CHECK-TYPE` as a non-complex number
+  and `=` as a number, as MAX and MIN do; the optimizers give `'t` (MAX and
+  MIN the constant) only when the one argument is a number constant of
+  that type, and otherwise leave the form a call of the function. With no
+  argument the comparisons still give T. A compiled call of two arguments is one
+  instruction, which checks both types, and was not affected. MIT's: the
+  text is System 100's, and System 100 and the CADR's 1002 and 1003 give the
+  same results to the interpreted forms. `tools/system-check`
+  gains `number-compare-type`, 61 cases: without the change 39 fail, with
+  it all pass; with only LESSP changed 23 fail, without the change to `<=`
+  and `>=` 10, with `<`'s optimizer unchanged 3, with ARITHEXP unchanged 2,
+  and without the functions' check of one argument 18.
 
 ## Revision 14
 

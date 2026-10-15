@@ -214,7 +214,10 @@
 	   (-		`(minus ,(cadr x)))
 	   (//		`(*quo 1 ,(cadr x)))
 	   (cli://	`(%div 1 ,(cadr x)))
-	   (t		(cadr x))))		;+ * logior logxor logand mix max
+	   ;; one argument that is not a number constant is left to the
+	   ;; function, which checks its type
+	   ((min max)	(if (typep (cadr x) 'non-complex-number) (cadr x) x))
+	   (t		(cadr x))))		;+ * logior logxor logand
 	((= l 2) `(,op . ,(cdr x)))
 	(t `(,op (,(car x) . ,(butlast (cdr x))) . ,(last x)))))
 
@@ -379,13 +382,17 @@
 
 ;;;; Expand the numerical equality/sign predicates.
 
+;;; one argument that is not a number constant is left to the function, which
+;;; checks its type: (< x) was made (progn x 't), so a compiled (< nil) was T,
+;;; and (= x) did not evaluate x at all.
+
 (defoptimizer =-optimizer = (internal-=) (form)
   (let* ((args (cdr form))
 	 (n-args (length args)))
     (cond ((< n-args 2)
 	   (warn 'wrong-number-of-arguments ':implausible
 		 "Too few arguments to ~S." (car form))
-	   ''t)
+	   (if (and args (not (numberp (car args)))) form ''t))
 	  ((= n-args 2)
 	   (if (eq (second args) 0)
 	       `(zerop ,(first args))
@@ -413,7 +420,7 @@
   (let* ((args (cdr form))
 	 (n-args (length args)))
     (cond ((< n-args 2)
-	   `(progn ,(car args) 't))
+	   (if (and args (not (typep (car args) 'non-complex-number))) form ''t))
 	  ((= n-args 2)
 	   (if (eq (second args) '0)
 	       `(plusp ,(first args))
@@ -428,7 +435,7 @@
   (let* ((args (cdr form))
 	 (n-args (length args)))
     (cond ((< n-args 2)
-	   `(progn ,(car args) 't))
+	   (if (and args (not (typep (car args) 'non-complex-number))) form ''t))
 	  ((= n-args 2)
 	   (if (eq (second args) 0)
 	       `(minusp ,(first args))
@@ -444,7 +451,7 @@
   (let* ((args (cdr form))
 	 (n-args (length args)))
     (cond ((< n-args 2)
-	   `(progn ,(car args) 't))
+	   (if (and args (not (typep (car args) 'non-complex-number))) form ''t))
 	  ((= n-args 2)
 	   (if (eq (second args) 0)
 	       `(not (minusp ,(first args)))
@@ -459,7 +466,7 @@
   (let* ((args (cdr form))
 	 (n-args (length args)))
     (cond ((< n-args 2)
-	   `(progn ,(car args) 't))
+	   (if (and args (not (typep (car args) 'non-complex-number))) form ''t))
 	  ((= n-args 2)
 	   (if (eq (second args) 0)
 	       `(not (plusp ,(first args)))

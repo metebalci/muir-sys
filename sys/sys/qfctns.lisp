@@ -1511,52 +1511,64 @@ or a locative or cons cell whose cdr is the property list."
 	((NULL REST) ARG0)
       (SETQ ARG0 (MIN ARG0 (CAR REST))))))
 
+;; GREATERP, LESSP, <= and >= compare adjacent arguments from the first, and
+;; they and = check the type of a single argument, as MAX and MIN do.  the
+;; walk took NIL for "no previous argument", (or (null a) (> a c) ...), so a
+;; first argument of NIL was never compared: (< nil 60) returned T, and so did
+;; (< nil) and (= nil).  a compiled two-argument call is one instruction,
+;; which checks both types, and was not affected.
 (DEFUN GREATERP (&REST NUMBERS)
   "Return T if the arguments are in strictly decreasing numerical order."
-  (DO ((A NIL C)
-       (B NUMBERS (CDR B))
-       (C))
-      ((NULL B) T)
-    (SETQ C (CAR B))
-    (OR (NULL A) (> A C) (RETURN NIL))))
+  (IF (CDR NUMBERS)
+      (DO ((REST NUMBERS (CDR REST)))
+	  ((NULL (CDR REST)) T)
+	(OR (> (CAR REST) (CADR REST)) (RETURN NIL)))
+    (LET ((ARG0 (CAR NUMBERS)))
+      (WHEN NUMBERS (CHECK-TYPE ARG0 NON-COMPLEX-NUMBER))
+      T)))
 (DEFF > #'GREATERP)
 
 (DEFUN LESSP (&REST NUMBERS)
   "Return T if the arguments are in strictly increasing numerical order."
-  (DO ((A NIL C)
-       (B NUMBERS (CDR B))
-       (C))
-      ((NULL B) T)
-    (SETQ C (CAR B))
-    (OR (NULL A) (< A C) (RETURN NIL))))
+  (IF (CDR NUMBERS)
+      (DO ((REST NUMBERS (CDR REST)))
+	  ((NULL (CDR REST)) T)
+	(OR (< (CAR REST) (CADR REST)) (RETURN NIL)))
+    (LET ((ARG0 (CAR NUMBERS)))
+      (WHEN NUMBERS (CHECK-TYPE ARG0 NON-COMPLEX-NUMBER))
+      T)))
 (DEFF < #'LESSP)
 
 (DEFUN = (&REST NUMBERS)
   "Return T if the arguments are all numerically equal."
-  (DOLIST (N (CDR NUMBERS) T)
-    (UNLESS (= N (CAR NUMBERS))
-      (RETURN NIL))))
+  (IF (CDR NUMBERS)
+      (DOLIST (N (CDR NUMBERS) T)
+	(UNLESS (= N (CAR NUMBERS))
+	  (RETURN NIL)))
+    (LET ((ARG0 (CAR NUMBERS)))
+      (WHEN NUMBERS (CHECK-TYPE ARG0 NUMBER))
+      T)))
   
 (DEFUN <= (&REST NUMBERS)
   "Return T if the arguments are in nondecreasing numerical order."
-  (DO ((A NIL C)
-       (B NUMBERS (CDR B))
-       (C))
-      ((NULL B) T)
-    (SETQ C (CAR B))
-    (UNLESS (NULL A)
-      (WHEN (> A C) (RETURN NIL)))))
+  (IF (CDR NUMBERS)
+      (DO ((REST NUMBERS (CDR REST)))
+	  ((NULL (CDR REST)) T)
+	(WHEN (> (CAR REST) (CADR REST)) (RETURN NIL)))
+    (LET ((ARG0 (CAR NUMBERS)))
+      (WHEN NUMBERS (CHECK-TYPE ARG0 NON-COMPLEX-NUMBER))
+      T)))
 (DEFF  #'<=)
 
 (DEFUN >= (&REST NUMBERS)
   "Return T if the arguments are in nonincreasing numerical order."
-  (DO ((A NIL C)
-       (B NUMBERS (CDR B))
-       (C))
-      ((NULL B) T)
-    (SETQ C (CAR B))
-    (UNLESS (NULL A)
-      (WHEN (< A C) (RETURN NIL)))))
+  (IF (CDR NUMBERS)
+      (DO ((REST NUMBERS (CDR REST)))
+	  ((NULL (CDR REST)) T)
+	(WHEN (< (CAR REST) (CADR REST)) (RETURN NIL)))
+    (LET ((ARG0 (CAR NUMBERS)))
+      (WHEN NUMBERS (CHECK-TYPE ARG0 NON-COMPLEX-NUMBER))
+      T)))
 (DEFF  #'>=)
 
 (DEFUN //= (&REST NUMBERS)

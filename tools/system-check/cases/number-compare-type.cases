@@ -1,0 +1,91 @@
+; The numeric comparisons signal a wrong-type error for an argument that is
+; not a number, in every position and with any number of arguments, called as
+; functions (interpreted, FUNCALL, APPLY) and compiled.  LESSP, GREATERP, <=
+; and >= (sys/sys/qfctns.lisp) walked their arguments with NIL as the "no
+; previous argument" mark, (or (null a) (< a c) ...), so a first argument of
+; NIL was taken for that mark and never compared: (< nil 60) returned T.  A
+; symbol, string or list first, or NIL later, was compared and signalled.
+; Compiled two-argument calls are one instruction (M-<, M->, M-=), whose
+; microcode checks both types, and were never affected.  One argument was
+; checked by neither: (< x), (> x), (<= x), (>= x) and (= x) returned T, and
+; the compiler's optimizers (sys/sys/qcopt.lisp, <-optimizer and its
+; siblings; ARITHEXP for MAX and MIN) made (< x) (progn x 't), (= x) 't and
+; (max x) x, so a compiled (max nil) was NIL; an interpreted MAX or MIN
+; checked its argument with CHECK-TYPE.
+; The cases marked "control" pass on the bands without the change, and the
+; others fail (measured on System 2002; the CADR's 1002 and 1003 and MIT's
+; System 100 alike in the cases before those of one argument).
+; Run it with --compile --files sys/sys/qfctns.lisp,sys/sys/qcopt.lisp on a
+; band built before the change.
+;
+; control: compiled, the microcode alone, NIL in either position
+(progn (defun nct-lt (a b) (< a b)) (compile 'nct-lt) (nct-lt nil 60)) =>!
+(progn (defun nct-ge (a b) (>= a b)) (compile 'nct-ge) (nct-ge 60 nil)) =>!
+(progn (defun nct-lt3 (a b c) (< a b c)) (compile 'nct-lt3) (nct-lt3 nil 1 2)) =>!
+; control: right values, and a non-number after the first argument
+(list (< 1 60) (> 1 60) (<= 60 60) (>= 1 60) (= 60 60) (< 1 2 3) (> 3 1 2)) => (T NIL T NIL T T NIL)
+(list (< 1) (> 1) (<= 1) (>= 1) (= 1)) => (T T T T T)
+(< 60 nil) =>!
+(> 60 'foo) =>!
+(<= 1 nil 2) =>!
+(funcall #'>= 60 "abc") =>!
+(apply #'< (list 60 '(1 2))) =>!
+(< 'foo 60) =>!
+(= nil 60) =>!
+(max nil 60) =>!
+(min 60 nil) =>!
+; NIL first: interpreted, FUNCALL, APPLY, and an interpreted lambda
+(< nil 60) =>!
+(> nil 31) =>!
+(<= nil 60) =>!
+(>= nil 60) =>!
+(funcall #'< nil 60) =>!
+(funcall #'> nil 60) =>!
+(apply #'<= (list nil 60)) =>!
+(apply #'>= (list nil 60)) =>!
+(funcall '(lambda (a b) (< a b)) nil 60) =>!
+(let ((n nil)) (> n 60)) =>!
+(funcall #'lessp nil 60) =>!
+(funcall #'greaterp nil 60) =>!
+; NIL first with more arguments, and NIL twice
+(< nil 1 2) =>!
+(> nil 2 1) =>!
+(<= nil 1 2) =>!
+(>= nil 2 1) =>!
+(< nil nil) =>!
+(> nil nil) =>!
+;
+; One argument, interpreted, FUNCALL and APPLY: a wrong-type error.
+(< nil) =>! which is not a
+(> 'foo) =>! which is not a
+(<= "abc") =>! which is not a
+(>= '(1 2)) =>! which is not a
+(= nil) =>! which is not a
+(funcall #'< nil) =>! which is not a
+(apply #'> (list nil)) =>! which is not a
+(funcall #'lessp 'foo) =>! which is not a
+(apply #'greaterp (list nil)) =>! which is not a
+(apply #'= (list 'foo)) =>! which is not a
+(< #c(1 2)) =>! which is not a
+; control: interpreted MAX and MIN check one argument
+(max nil) =>! which is not a
+(min 'foo) =>! which is not a
+; One argument, compiled: the optimizers leave it to the function.
+(progn (defun nct-1lt (a) (< a)) (compile 'nct-1lt) (nct-1lt nil)) =>! which is not a
+(progn (defun nct-1gt (a) (> a)) (compile 'nct-1gt) (nct-1gt 'foo)) =>! which is not a
+(progn (defun nct-1le (a) (<= a)) (compile 'nct-1le) (nct-1le nil)) =>! which is not a
+(progn (defun nct-1ge (a) (>= a)) (compile 'nct-1ge) (nct-1ge "abc")) =>! which is not a
+(progn (defun nct-1eq (a) (= a)) (compile 'nct-1eq) (nct-1eq nil)) =>! which is not a
+(progn (defun nct-1max (a) (max a)) (compile 'nct-1max) (nct-1max nil)) =>! which is not a
+(progn (defun nct-1min (a) (min a)) (compile 'nct-1min) (nct-1min 'foo)) =>! which is not a
+(progn (defun nct-1lessp (a) (lessp a)) (compile 'nct-1lessp) (nct-1lessp nil)) =>! which is not a
+(progn (defun nct-1k () (< 'foo)) (compile 'nct-1k) (nct-1k)) =>! which is not a
+; control: one number, a number constant, a complex for =, no argument
+(progn (defun nct-1n (a) (list (< a) (> a) (<= a) (>= a) (= a) (max a) (min a))) (compile 'nct-1n) (nct-1n 5)) => (T T T T T 5 5)
+(progn (defun nct-1k5 () (list (< 5) (> 5) (<= 5) (>= 5) (= 5) (max 5) (min 5))) (compile 'nct-1k5) (nct-1k5)) => (T T T T T 5 5)
+(list (< 1.5) (> 1.5) (<= 1.5) (>= 1.5) (= #c(1 2)) (max 1.5) (min 1.5)) => (T T T T T 1.5 1.5)
+(progn (defun nct-1c (a) (= a)) (compile 'nct-1c) (nct-1c #c(1 2))) => T
+(list (<) (>) (<=) (>=) (=)) => (T T T T T)
+(progn (defun nct-0 () (list (<) (>) (<=) (>=) (=))) (compile 'nct-0) (nct-0)) => (T T T T T)
+; A compiled single argument is evaluated, once: (= x) did not evaluate it.
+(progn (defun nct-1ev () (let ((n 0)) (= (setq n (1+ n))) (< (setq n (1+ n))) (max (setq n (1+ n))) n)) (compile 'nct-1ev) (nct-1ev)) => 3
