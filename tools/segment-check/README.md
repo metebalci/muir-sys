@@ -126,13 +126,34 @@ octet, so that the band's answer times the first probe's late side, and
 SYN-ACK is not held for ARP.
 
 The pass model is three measurement variants (`standin.MEASURES`), run by
-the latency sweep rather than by `--plants`: `pass-order`, the network
-process woken by each Ethernet frame and taking it 0-1 ms after it arrives,
-answering at once, and each timer pass 0-1 ms after its tick, the frames
-waiting by then first; `pass-clock-restart`, as that with each timer
-restarted from the clock read in its pass; `pass-busy`, as `pass-order` with
-each frame taken up to a tick more late, as when another process holds the
-machine.
+the latency sweep (below) rather than by `--plants`. All three follow section
+5.1's one network process (F52): `pass-order` is woken by each Ethernet frame
+and takes it 0-1 ms after it arrives, unless a timer pass starts first, which
+takes every frame waiting by its start before it runs the timers; each timer
+pass starts 0-1 ms after its tick, and the timers are reckoned in ticks;
+`pass-clock-restart` is that with each timer restarted from the clock read in
+its pass; `pass-busy` is `pass-order` with each frame taken only in the pass
+of the next tick, before that pass's timers, as when another process holds
+the machine. Under them the ticks sit at a seeded phase and the network
+starts off the grid, so that a seed draws the phase at which the scripts'
+timeline, which follows the gratuitous ARP, meets the ticks.
+
+**The latency sweep** runs the scripts under each measurement variant in
+tick timing over seeds, with `run --margins FILE`: every timer check then
+writes a line to FILE instead of failing (the script, the kind of check,
+what it checks, its raw figure in ns and its excess over its late bound;
+`near` checks log their time less the time wanted, gone probes 1 for found
+gone, and an excess above 0 is a check that would fail), and
+`run --pass-latency-ms MS` sets the pass latency the checks allow in place of
+`scripts.PASS_LATENCY`. A sweep is then, for each variant, seed and latency:
+
+```
+tools/segment-check/run --machine standin --runs 1 --standin-timing tick --standin-seed SEED \
+    --plant pass-busy --pass-latency-ms 0 --margins sweep/pass-busy-0-SEED.margins
+```
+
+counting the lines whose excess is above 0. At 0 some gone probes and late
+sides fail; at the pass latency none should.
 
 The addresses are flags of `run` (section 3, amendment 2): tap quuxN has a
 /30 of its own, the peer, also the band's gateway, at 169.254.1NN.1 and the

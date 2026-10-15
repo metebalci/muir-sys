@@ -780,6 +780,38 @@ TICK = -(-S // 60)      # 1/60 s, rounded up to the nanosecond
 # parameter, 1 ms until E4 measures it; this is its one place.
 PASS_LATENCY = 1 * MS
 
+# The latency sweep's log (README, "The latency sweep"): run --margins FILE
+# sets it, and every timer check then writes its margin there instead of
+# failing, so that a sweep counts how near each comes to its bound; run
+# --pass-latency-ms sets PASS_LATENCY above for the run.  None: checks fail.
+MARGINS = None
+
+
+def _script_name():
+    import inspect
+    names = {f.__name__ for f in SCRIPTS.values()}
+    return next((f.function for f in inspect.stack() if f.function in names), '?')
+
+
+def margin(kind, what, raw, excess):
+    """One line of the margins log: the script, the kind of check, what it
+    checks, its raw figure in ns (for near, the time less the time wanted)
+    and its excess over its late bound at this run's pass latency (above 0
+    would fail).  A gone probe logs 1 found gone, 0 still there, and its
+    excess 0 or 1."""
+    with open(MARGINS, 'a') as f:
+        f.write('%s\t%s\t%s\t%d\t%d\n' % (_script_name(), kind, what, raw, excess))
+
+
+def gone(reason, what):
+    """A probe that a record has ended: REASON is None when it found the
+    record gone, else why not.  With MARGINS it is logged, not failed."""
+    if MARGINS:
+        margin('gone', what, 0 if reason else 1, 1 if reason else 0)
+        return
+    if reason:
+        raise Fail(reason)
+
 
 def settled_conn(s, sport, dport, iss, what, auto_ack=True):
     c = open_connection(s, sport, dport, iss, F.opt_mss(1460), what)
@@ -1084,8 +1116,8 @@ def time_wait(s):
         raise Fail('TIME-WAIT ended before 60 s less a tick from our FIN (%s)' % at(fin_a))
     xb, _, ack_b, _ = tw['B']
     s.run(max(s.now, ack_b + 60 * S + TICK + PASS_LATENCY))
-    if probe(s, xb, 'TIME-WAIT at 60 s and a tick') != 'RST':
-        raise Fail('TIME-WAIT still there 60 s and a tick after the band acknowledged our FIN (%s)' % at(ack_b))
+    gone(None if probe(s, xb, 'TIME-WAIT at 60 s and a tick') == 'RST' else
+         'TIME-WAIT still there 60 s and a tick after the band acknowledged our FIN (%s)' % at(ack_b), 'TIME-WAIT B')
     return 'resent FIN acknowledged; SYN above RCV.NXT accepted at %s; ended between 60 s - tick and 60 s + tick' % (
         at(n.synack.t))
 
@@ -1101,6 +1133,9 @@ LONG_STEP = 10 * MS     # the long scripts idle in steps of this
 def near(dt, want, what):
     """A timer within its bounds (section 9, T1, Latency; F45): up to a tick
     early, and up to a tick and the pass latency late."""
+    if MARGINS:
+        margin('near', what, dt - want, dt - (want + TICK + PASS_LATENCY))
+        return
     if dt < want - TICK or dt > want + TICK + PASS_LATENCY:
         raise Fail('%s: %s, not %s within a tick (early) or a tick and the pass latency (late)' % (
             what, at(dt), at(want)))
@@ -1343,12 +1378,10 @@ def r2(s):
     cond = ask(s, c, 'condition')[0]
     s.wait_for(first.t + 104 * S, lambda x: False, step=LONG_STEP)
     late = [x for x in e.segments if x.t > first.t + 100 * S + TICK + PASS_LATENCY and not x.tcp.flags & F.RST]
-    if late:
-        raise Fail('R2: the band sent after 100 s and a tick: %s' % late[0])
-    if 'HOST-STOPPED-RESPONDING' not in cond.upper():
-        raise Fail('R2: the echo service saw %s, not SYS:HOST-STOPPED-RESPONDING' % cond)
-    if probe(s, e, 'after R2') != 'RST':
-        raise Fail('R2: the connection is still there after 100 s')
+    gone('R2: the band sent after 100 s and a tick: %s' % late[0] if late else
+         'R2: the echo service saw %s, not SYS:HOST-STOPPED-RESPONDING' % cond
+         if 'HOST-STOPPED-RESPONDING' not in cond.upper() else
+         'R2: the connection is still there after 100 s' if probe(s, e, 'after R2') != 'RST' else None, 'R2')
     return 'resent from 200 ms doubling, ARP again after R1, closed at 100 s (%s)' % cond
 
 
@@ -1433,7 +1466,10 @@ def zero_window(s):
     first = 'the first zero-window probe, one RTO after the zero window'
     if probes[0].t - t0 < 200 * MS - TICK:
         raise Fail('%s: %s after the peer\'s segment, not 200 ms less a tick or more' % (first, at(probes[0].t - t0)))
-    if probes[0].t - answer.t > 200 * MS + TICK + PASS_LATENCY:
+    if MARGINS:
+        margin('late', first, probes[0].t - answer.t - 200 * MS,
+               probes[0].t - answer.t - (200 * MS + TICK + PASS_LATENCY))
+    elif probes[0].t - answer.t > 200 * MS + TICK + PASS_LATENCY:
         raise Fail('%s: %s after the band\'s answer, more than 200 ms, a tick and the pass latency' % (
             first, at(probes[0].t - answer.t)))
     gap = 400 * MS
@@ -1589,7 +1625,10 @@ def must_38(s):
         raise Fail('rule 1: the full MSS was not the first data within 200 ms, so not acknowledged')
     early = segs[1].t - segs[0].t
     late = segs[1].t - acked
-    if early < 200 * MS - TICK or late > 200 * MS + 2 * (TICK + PASS_LATENCY):
+    if MARGINS:
+        margin('late', 'rule 4: the override timer, from its ACK', late - 200 * MS,
+               late - (200 * MS + 2 * (TICK + PASS_LATENCY)))
+    elif early < 200 * MS - TICK or late > 200 * MS + 2 * (TICK + PASS_LATENCY):
         raise Fail('rule 4: the override timer: %s after the full MSS, not 200 ms less a tick or more; '
                    '%s after its ACK, not 200 ms and twice a tick and the pass latency or less' % (
                        at(early), at(late)))
@@ -1680,13 +1719,14 @@ def shrink(s):
 # arrives, and either SYN may be the late one, so a tick and the pass
 # latency's worth in 4 us units, rounded up: 4,417 at 1 ms.  Taken from
 # TICK and PASS_LATENCY, so that PASS_LATENCY stays its one place.
-ISN_SLACK = -(-(TICK + PASS_LATENCY) // 4000)
+def isn_slack():
+    return -(-(TICK + PASS_LATENCY) // 4000)
 
 
 def isn(s):
     """Two connections on one four-tuple 1 s apart get ISNs 250,000 apart
     (the clock in 4 us units), within a tick and the pass latency's worth,
-    ISN_SLACK (4,417 at 1 ms), since the band reads the clock as it takes
+    isn_slack() (4,417 at 1 ms), since the band reads the clock as it takes
     each SYN, up to a tick and the pass latency after it arrives; two
     four-tuples at one time get ISNs more than that apart, so that their
     hashes differ and not only their clock terms (section 5.5; RFC 6528;
@@ -1712,9 +1752,11 @@ def isn(s):
     s.conns.remove(b)
     step = (b.irs - a.irs) & 0xFFFFFFFF
     want = (t_b - t_a) // 4000
-    if abs(step - want) > ISN_SLACK:
+    if MARGINS:
+        margin('bound', 'two ISNs on one four-tuple', step - want, abs(step - want) - isn_slack())
+    elif abs(step - want) > isn_slack():
         raise Fail('two ISNs on one four-tuple %s apart differ by %d, not %d within %s' % (
-            at(t_b - t_a), step, want, format(ISN_SLACK, ',')))
+            at(t_b - t_a), step, want, format(isn_slack(), ',')))
     x = s.connect(40112, p.telnet_port, ISN_B, F.opt_mss(1460))
     y = s.connect(40113, p.telnet_port, ISN_B, F.opt_mss(1460))
     x.auto_ack = y.auto_ack = False
@@ -1722,9 +1764,9 @@ def isn(s):
     if x.synack is None or y.synack is None:
         raise Fail('no SYN-ACKs to two SYNs at once by %s' % at(s.now))
     d = (x.irs - y.irs) & 0xFFFFFFFF
-    if min(d, 2 ** 32 - d) <= ISN_SLACK:
+    if min(d, 2 ** 32 - d) <= isn_slack():
         raise Fail('two four-tuples at one time got ISNs %d apart, within a tick and the pass latency\'s worth, %s (F30, F46)'
-                   % (min(d, 2 ** 32 - d), format(ISN_SLACK, ',')))
+                   % (min(d, 2 ** 32 - d), format(isn_slack(), ',')))
     return 'ISNs %d apart in %s; two four-tuples different' % (step, at(t_b - t_a))
 
 
@@ -1868,9 +1910,10 @@ def synack_r2(s):
         raise Fail('R2 for a SYN-ACK: no banner after the ACK 180 s less a tick after the first SYN-ACK, by %s'
                    % at(s.now))
     r = next((y for y in b.segments if y.t > tb), None)
-    if r is None or r.tcp.flags & (F.RST | F.ACK | F.SYN) != F.RST or r.tcp.seq != ack_b:
-        raise Fail('R2 for a SYN-ACK: the ACK 180 s and a tick after the first SYN-ACK is answered by %s, not '
-                   'LISTEN\'s RST <SEQ=%d><CTL=RST>' % (r or 'nothing', ack_b))
+    gone('R2 for a SYN-ACK: the ACK 180 s and a tick after the first SYN-ACK is answered by %s, not '
+         'LISTEN\'s RST <SEQ=%d><CTL=RST>' % (r or 'nothing', ack_b)
+         if r is None or r.tcp.flags & (F.RST | F.ACK | F.SYN) != F.RST or r.tcp.seq != ack_b else None,
+         'synack-r2 B')
     raw_segment(s, a, F.RST, a.snd_nxt, 0)      # done with A
     return 'resent at 1, 3, 7, 15, 31, 63 and 123 s, ARP again after R1; alive 180 s - tick, gone 180 s + tick'
 
@@ -1953,8 +1996,8 @@ def fin_wait_2(s):
     if xb.rst is not None:
         raise Fail('an RST on a connection the band had closed, before its FIN-WAIT-2 ended (a later close '
                    'by its server sends nothing, F36): %s' % xb.rst)
-    if probe(s, xb, 'FIN-WAIT-2 at 60 s and a tick') != 'RST':
-        raise Fail('FIN-WAIT-2 still there 60 s and a tick after the band\'s FIN (%s)' % at(fb))
+    gone(None if probe(s, xb, 'FIN-WAIT-2 at 60 s and a tick') == 'RST' else
+         'FIN-WAIT-2 still there 60 s and a tick after the band\'s FIN (%s)' % at(fb), 'FIN-WAIT-2 B')
     return 'FIN-WAIT-2 ended between 60 s - tick and 60 s + tick after the band\'s FIN, its ACK 50 ms later'
 
 
@@ -2174,6 +2217,9 @@ def arp_cache(s):
     s.run(max(s.now, after + ARP_LIFE + TICK + PASS_LATENCY))
     t, r = echo(5)
     asked = requests(t, r.t if r is not None else s.now)
+    if MARGINS:
+        gone(None if asked else 'still used', 'the ARP entry after the refresh')
+        return 'margins logged'
     if not asked:
         raise Fail('the ARP entry for the peer still used 600 s and a tick after the refresh (%s): %s with no '
                    'ARP request (kept 10 minutes from the last ARP packet, even in use, section 5.2)' % (
@@ -2221,7 +2267,9 @@ def arp_hold(s):
                                                          p.band_ip)))
     s.wait_for(max(t + p.answer, a3 + 3 * S), lambda x: False)
     sent = [x for x in s.seen if x.t > t and x.icmp is not None]
-    if sent:
+    if MARGINS:
+        gone('drew' if sent else None, 'the held datagram after the third request')
+    elif sent:
         raise Fail('the peer\'s ARP reply after the third request went unanswered for the band\'s interval drew %s: '
                    'the held datagram is dropped by then (F43)' % sent[0])
     if len(peer_requests(s, t0)) > 3:
@@ -2267,14 +2315,13 @@ def r2_hook(s):
         raise Fail('the R2 hook: connection A gone before 10 s less a tick: %s' % (r or 'no answer'))
     s.wait_for(fa.t + 10 * S + TICK + PASS_LATENCY, lambda x: False, step=LONG_STEP)
     cond = ask(s, c, 'condition')[0]
-    if 'HOST-STOPPED-RESPONDING' not in cond.upper():
-        raise Fail('the R2 hook: 10 s and a tick after connection A\'s data the echo service saw %s, not '
-                   'SYS:HOST-STOPPED-RESPONDING (R2 of 10 s by the keyword, MUST-21)' % cond)
     late = [x for x in a.segments if x.t > fa.t + 10 * S + TICK + PASS_LATENCY and not x.tcp.flags & F.RST]
-    if late:
-        raise Fail('the R2 hook: connection A sent after 10 s and a tick: %s' % late[0])
-    if probe(s, a, 'connection A after its R2 of 10 s') != 'RST':
-        raise Fail('the R2 hook: connection A still there after its R2 of 10 s')
+    gone('the R2 hook: 10 s and a tick after connection A\'s data the echo service saw %s, not '
+         'SYS:HOST-STOPPED-RESPONDING (R2 of 10 s by the keyword, MUST-21)' % cond
+         if 'HOST-STOPPED-RESPONDING' not in cond.upper() else
+         'the R2 hook: connection A sent after 10 s and a tick: %s' % late[0] if late else
+         'the R2 hook: connection A still there after its R2 of 10 s'
+         if probe(s, a, 'connection A after its R2 of 10 s') != 'RST' else None, 'r2-hook A')
     if probe(s, b, 'connection B, accepted after A') != 'ACK':
         raise Fail('the R2 hook: connection B, accepted after A, gone too: the hook used for more than one '
                    'connection (F41)')

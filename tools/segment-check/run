@@ -206,9 +206,18 @@ def main():
     ap.add_argument('--answer', type=float, default=1.0, help='machine seconds to wait for an answer')
     ap.add_argument('--step-ms', type=float, default=1.0, help='machine ms between "run until"s')
     ap.add_argument('--wall-timeout', type=float, default=600.0)
+    ap.add_argument('--pass-latency-ms', type=float, default=None,
+                    help='the pass latency the timer checks allow, in place of scripts.PASS_LATENCY (1 ms; F45)')
+    ap.add_argument('--margins', default=None,
+                    help='the latency sweep: log every timer check\'s margin, and each gone probe\'s verdict, to '
+                         'this file instead of failing it')
     ap.add_argument('--work', default=None, help='where the sockets go (default: a temporary folder)')
     ap.add_argument('--log-dir', default=None)
     a = ap.parse_args()
+    if a.pass_latency_ms is not None:
+        SC.PASS_LATENCY = int(round(a.pass_latency_ms * MS))
+    if a.margins:
+        SC.MARGINS = os.path.abspath(a.margins)
 
     for n in (a.plant or '').split(','):
         if n and n not in standin.PLANTS and n not in standin.VARIANTS and n not in standin.MEASURES:

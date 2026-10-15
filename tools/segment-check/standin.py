@@ -34,6 +34,7 @@ scripts' (frames.py) so that one fault in both cannot hide itself.
 """
 
 import argparse
+import collections
 import hashlib
 import heapq
 import os
@@ -406,6 +407,13 @@ class Band:
         self.tick = False       # timers on 1/60 s ticks (--timing tick)
         self.in_timer = False
         self.late = 0           # the timer pass's lateness (the pass-order variant)
+        # Under MEASURES (the latency sweep) the ticks sit at a seeded phase
+        # and the network starts off the grid, so that the scripts' timeline,
+        # which follows the gratuitous ARP, meets the ticks at a phase the
+        # seed draws, not one the timeline fixes (F52).
+        self.phase = 0
+        if a.timing == 'tick' and any(n in MEASURES for n in self.plant.names):
+            self.phase = int.from_bytes(hashlib.sha256(b'phase %d' % a.seed).digest()[:4], 'big') % (S // 60)
         self.echo_on = self.plant == 'echo-port-open'
         self.type_total = 0     # status 241 <7:4>'s total, the driver's
         self.ipv4_total = 0     # <15:9>'s
@@ -430,13 +438,18 @@ class Band:
         return a < b if self.plant == 'seq-no-wrap' else seq_lt(a, b)
 
     # ---- timers ------------------------------------------------------------
+    def tick_index(self, t):
+        """The first tick at or after T (ns), as its number: tick K is at
+        tick_time(K), a rounded 1/60 s from the grid's phase (a time already
+        on a boundary stays there)."""
+        return -(-((t - self.phase) * 60 - 59) // S)
+
+    def tick_time(self, k):
+        return -(-k * S // 60) + self.phase
+
     def at(self, t, fn):
         if self.tick:
-            # The first tick boundary at or after T, a tick being 1/60 s.
-            # (A time already on a boundary, which is a rounded 1/60 s,
-            # stays there.)
-            k = -(-(t * 60 - 59) // S)
-            t = -(-k * S // 60)
+            t = self.tick_time(self.tick_index(t))
         self.n += 1
         # With the pass-order variant the timer pass of a tick starts a
         # seeded 0-1 ms after it, and every Ethernet frame delivered by then
@@ -451,7 +464,12 @@ class Band:
         return int.from_bytes(h[:4], 'big') % MS
 
     def start(self):
-        self.at(self.a.boot_ns, self.gratuitous)
+        if self.phase:
+            # Off the grid: the network's start is not a tick's timer.
+            self.n += 1
+            heapq.heappush(self.timers, (self.a.boot_ns, self.n, self.gratuitous, self.a.boot_ns, 0))
+        else:
+            self.at(self.a.boot_ns, self.gratuitous)
         if self.plant == 'garp-twice':
             self.at(self.a.boot_ns + 2 * S, self.gratuitous)
 
@@ -1629,8 +1647,10 @@ def main():
     if a.timing == 'tick':
         band.tick = True
     band.start()
-    inbound = []                # heap of (half-ns, n, frame); n < 0 once taken late (passes)
-    taken = [0]
+    inbound = []                # heap of (half-ns, n, frame)
+    # With the pass model, Ethernet frames delivered and not yet taken, in
+    # order: [arrival, frame, when] in half-ns.
+    waiting = collections.deque()
     n = 0
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(a.socket)
@@ -1645,26 +1665,42 @@ def main():
             nxt = []
             if inbound and inbound[0][0] <= end:
                 nxt.append((inbound[0][0], 0))
+            if waiting and waiting[0][2] <= end:
+                nxt.append((waiting[0][2], 1))
             if band.timers and band.timers[0][0] * 2 <= end:
-                nxt.append((band.timers[0][0] * 2, 1))
+                nxt.append((band.timers[0][0] * 2, 2))
             if not nxt:
                 break
             t, kind = min(nxt)
             if kind == 0:
                 _, k, f = heapq.heappop(inbound)
-                if passes and k > 0:
-                    # Delivered: taken when its seeded delay ends (0-1 ms, or
-                    # with pass-busy up to a tick more), in order, its timers
-                    # armed from then.  Each is
-                    # taken at least a half-ns after the one before, so that
-                    # no two share a time and the heap cannot reorder them
-                    # (the peer never resends, so a reordered segment stalls).
-                    delay = rng.randrange(2 * MS) + (rng.randrange(tick2) if a.plant == 'pass-busy' else 0)
-                    taken[0] = max(t + delay, taken[0] + 1)
-                    heapq.heappush(inbound, (taken[0], -k, f))
+                if passes:
+                    # Section 5.1's one process (F52): pass-order is woken
+                    # by the frame and takes it 0-1 ms later, unless a timer
+                    # pass starts first, which takes it before its timers
+                    # (below); pass-busy takes it in the pass of the next
+                    # tick, which starts pass_late after the tick.  In order,
+                    # each a half-ns after the one before (the peer never
+                    # resends, so a reordered segment would stall).
+                    if a.plant == 'pass-busy':
+                        k0 = band.tick_index(t // 2)
+                        prev = band.tick_time(k0 - 1)
+                        tick_k = prev if t <= 2 * (prev + band.pass_late(prev)) else band.tick_time(k0)
+                        when = 2 * (tick_k + band.pass_late(tick_k))
+                    else:
+                        when = t + rng.randrange(2 * MS)
+                    waiting.append([t, f, max(when, waiting[-1][2] + 1 if waiting else when)])
                     continue
                 band.receive(t // 2, f)
+            elif kind == 1:
+                _, f, when = waiting.popleft()
+                band.receive(when // 2, f)
             else:
+                # A timer pass takes every frame that arrived by its start
+                # before it runs the timers (section 5.1).
+                while waiting and waiting[0][0] <= t:
+                    _, f, _ = waiting.popleft()
+                    band.receive(t // 2, f)
                 _, _, fn, tt, band.late = heapq.heappop(band.timers)
                 band.in_timer = True
                 if a.plant == 'pass-clock-restart':
