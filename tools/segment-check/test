@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""The segment scripts' own check: the checksum code against known vectors
+and against the stand-in's independent code, every script passing on the
+stand-in twice bit-identical, every plant in the stand-in failing its own
+script for its reason, and every variant passing; all under both of the
+stand-in's timings.  Exit status 0 when all of it holds.  Takes run's
+--work and --log-dir, and --jobs.
+"""
+
+import os
+import random
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import frames as F       # noqa: E402
+import standin           # noqa: E402
+
+
+def vectors():
+    bad = []
+    # RFC 1071, section 3: the sum of 00 01 f2 03 f4 f5 f6 f7 is ddf2.
+    if F.ones_sum(bytes.fromhex('0001f203f4f5f6f7')) != 0xDDF2:
+        bad.append('RFC 1071 sum')
+    # A well-known IPv4 header whose checksum is b861.
+    h = bytes.fromhex('450000730000400040110000c0a80001c0a800c7')
+    if F.checksum(h) != 0xB861:
+        bad.append('IPv4 header b861')
+    # Odd lengths, and the two codes agreeing on random data, with the
+    # pseudo-header for TCP.
+    if F.checksum(b'\x01') != 0xFEFF:
+        bad.append('one byte')
+    r = random.Random(1)
+    for n in list(range(0, 70)) + [1460, 1479, 1480]:
+        d = bytes(r.randrange(256) for _ in range(n))
+        if F.checksum(d) != standin.csum(d):
+            bad.append('random data of %d bytes' % n)
+        src, dst = bytes(r.randrange(256) for _ in range(4)), bytes(r.randrange(256) for _ in range(4))
+        seg = F.tcp(src, dst, 1234, 23, r.getrandbits(32), r.getrandbits(32), F.ACK, 8192, d)
+        if standin.csum(src + dst + bytes([0, 6]) + len(seg).to_bytes(2, 'big') + seg) != 0:
+            bad.append('a TCP segment of %d data bytes' % n)
+        t = F.parse_tcp(src, dst, seg)
+        if not t.csum_ok or t.data != d:
+            bad.append('parsing a TCP segment of %d data bytes' % n)
+    # Options: unaligned and unknown parse, a zero or overlong length does not.
+    if F.parse_tcp_options(b'\x01\x02\x04\x05\xb4\xfe\x03\x00\x00') != [(1, b''), (2, b'\x05\xb4'), (254, b'\x00')]:
+        bad.append('unaligned and unknown options')
+    for raw in (b'\x02\x00', b'\x02\x01', b'\x02\x09\x05\xb4', b'\xfe'):
+        if not isinstance(F.parse_tcp_options(raw), str):
+            bad.append('options %s accepted' % raw.hex())
+    return bad
+
+
+def main():
+    rest = sys.argv[1:]
+    bad = vectors()
+    print('checksum and option vectors: %s' % ('; '.join(bad) if bad else 'all hold'), flush=True)
+    run = os.path.join(HERE, 'run')
+    # Both of the stand-in's timings: exact, and the Lisp's ticks with
+    # answers delayed up to a tick, which works the scripts' tick slack.
+    # Seed 2's delays put two of the arp script's ARP requests 0.990 s
+    # apart, inside the tick of slack, so the slack is used, not only
+    # allowed.
+    codes = []
+    for timing in (['exact'], ['tick', '--standin-seed', '2']):
+        t = ['--standin-timing'] + timing
+        codes.append(subprocess.call([run, '--machine', 'standin'] + t + rest))
+        codes.append(subprocess.call([run, '--machine', 'standin', '--plants'] + t + rest))
+    print('test: runs exited %s' % codes, flush=True)
+    ok = not bad and not any(codes)
+    print('test: %s' % ('PASS' if ok else 'FAIL'))
+    return 0 if ok else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

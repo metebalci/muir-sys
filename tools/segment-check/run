@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""Run the segment scripts (QUUX's Ethernet contract, section 9, T1) on a
+machine in clocked mode: muir's quux on micro or rtl with a band, or the
+stand-in band.  Each script runs twice, on two fresh machines, and passes
+only if both runs pass and the band's Ethernet frames, with their times,
+agree bit for bit.
+
+  run --machine standin                       every script on the stand-in
+  run --machine standin --plants              every plant, every script
+  run --machine micro --quux EXE --band PACK --prom PROM --file-root DIR
+  run --machine rtl ... --scripts arp,handshake
+
+The exit status is 0 when every script passes (with --plants, when every
+plant makes at least one script fail).  Logs go to --log-dir: for each
+script and run, every Ethernet frame the band sent with its time, and the
+machine's own output.  Standard library only.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import clocked                              # noqa: E402
+import frames as F                          # noqa: E402
+import scripts as SC                        # noqa: E402
+import standin                              # noqa: E402
+from session import Fail, Params, Session, S, MS, at   # noqa: E402
+
+
+class Outcome:
+    def __init__(self, kind, text, frames, end):
+        self.kind, self.text, self.frames, self.end = kind, text, frames, end
+
+
+def machine_command(a, sock, eng):
+    if eng == 'standin':
+        cmd = [sys.executable, os.path.join(HERE, 'standin.py'), '--socket', sock, '--mac', a.band_mac,
+               '--ip', a.band_ip, '--prefix', str(a.prefix), '--gateway', a.peer_ip,
+               '--telnet-port', str(a.telnet_port), '--echo-port', str(a.echo_port)]
+        if a.microcycle_ns:
+            cmd += ['--microcycle-ns', a.microcycle_ns]
+        if a.plant:
+            cmd += ['--plant', a.plant]
+        cmd += ['--timing', a.standin_timing, '--seed', str(a.standin_seed)]
+        return cmd, None
+    for need in ('quux', 'band', 'prom', 'file_root'):
+        if not getattr(a, need):
+            sys.exit('run: --machine %s needs --%s' % (eng, need.replace('_', '-')))
+    cmd = [a.quux, '-c', '/dev/null', '--' + eng, '--no-pace', '--rtc', str(a.rtc),
+           '--disk-pack', a.band + ',ro', '--prom', a.prom, '--file-root', a.file_root,
+           '--ethernet-socket', sock + ',clocked', '--ethernet-mac', a.band_mac]
+    if a.microcycle_ns:
+        cmd += ['--microcycle-ns', a.microcycle_ns]
+    if a.ethernet_trace:
+        cmd += ['--ethernet-trace']
+    # Revision 16 is the one with the Ethernet device.
+    return cmd, dict(os.environ, MUIR_QUUX_REVISION='16')
+
+
+def one_run(a, params, name, k):
+    """Script NAME's run K on a fresh machine."""
+    work = tempfile.mkdtemp(prefix='%s-%d-' % (name, k), dir=a.work)
+    sock = os.path.join(work, 's')
+    tag = '%s%s.run%d' % (name, '.' + a.plant if a.plant else '', k)
+    note_path = os.path.join(a.log_dir, tag + '.frames')
+    notes = open(note_path, 'w')
+    peer = clocked.Peer(sock, wall_timeout=a.wall_timeout)
+    cmd, env = machine_command(a, sock, a.machine)
+    mlog = open(os.path.join(a.log_dir, tag + '.machine'), 'wb')
+    mlog.write(('# %s\n' % ' '.join(cmd)).encode())
+    mlog.flush()
+    m = subprocess.Popen(cmd, env=env, cwd=work, stdin=subprocess.PIPE, stdout=mlog, stderr=mlog,
+                         start_new_session=True)
+    t0 = time.time()
+    s = None
+    try:
+        peer.accept(alive=lambda: None if m.poll() is None else 'exit status %s' % m.returncode)
+        s = Session(peer, params, note=lambda line: notes.write(line + '\n'))
+        line = SC.SCRIPTS[name](s)
+        out = Outcome('pass', line, list(peer.sent), peer.now)
+    except Fail as e:
+        out = Outcome('fail', str(e), list(peer.sent), peer.now)
+    except clocked.PeerError as e:
+        out = Outcome('error', 'harness: %s' % e, list(peer.sent), peer.now)
+    except Exception as e:
+        out = Outcome('error', 'harness: %s' % ''.join(traceback.format_exception_only(type(e), e)).strip(),
+                      list(peer.sent), peer.now)
+        notes.write(traceback.format_exc())
+    finally:
+        peer.close()
+        stop(m)
+        mlog.close()
+    out.wall = time.time() - t0
+    notes.write('# %s: %s\n# machine time %s, wall %.1f s, %d Ethernet frames from the band\n'
+                % (out.kind, out.text, at(out.end or 0), out.wall, len(out.frames)))
+    notes.close()
+    return out
+
+
+def stop(m):
+    if m.poll() is not None:
+        return
+    try:
+        m.stdin.write(b'quit\n')
+        m.stdin.flush()
+    except OSError:
+        pass
+    try:
+        m.wait(15)
+    except subprocess.TimeoutExpired:
+        m.kill()
+        m.wait()
+
+
+def compare(runs):
+    """None when the runs' Ethernet frames agree bit for bit with their
+    times, else what differs first."""
+    first = runs[0].frames
+    for k, r in enumerate(runs[1:], 2):
+        other = r.frames
+        for i, (x, y) in enumerate(zip(first, other)):
+            if x != y:
+                return 'run 1 and run %d differ at the band\'s Ethernet frame %d: %s against %s' % (
+                    k, i, '%d bytes at %s' % (len(x[1]), at(x[0])), '%d bytes at %s' % (len(y[1]), at(y[0])))
+        if len(first) != len(other):
+            return 'run 1 sent %d Ethernet frames, run %d %d' % (len(first), k, len(other))
+        if (runs[0].kind, runs[0].text) != (r.kind, r.text):
+            return 'run 1 and run %d end differently' % k
+    return None
+
+
+def run_scripts(a, params, names):
+    """{name: (verdict, reason, [Outcome])}"""
+    jobs = [(n, k) for n in names for k in range(1, a.runs + 1)]
+    with ThreadPoolExecutor(max_workers=a.jobs) as ex:
+        futs = {j: ex.submit(one_run, a, params, *j) for j in jobs}
+        results = {j: f.result() for j, f in futs.items()}
+    table = {}
+    for n in names:
+        rs = [results[(n, k)] for k in range(1, a.runs + 1)]
+        kinds = {r.kind for r in rs}
+        diff = compare(rs) if len(rs) > 1 else None
+        if 'error' in kinds:
+            verdict, why = 'ERROR', next(r.text for r in rs if r.kind == 'error')
+        elif kinds == {'pass'} and diff is None:
+            verdict, why = 'PASS', rs[0].text
+        elif diff is not None:
+            verdict, why = 'FAIL', 'not deterministic: ' + diff
+        else:
+            verdict, why = 'FAIL', next(r.text for r in rs if r.kind == 'fail')
+        table[n] = (verdict, why, rs)
+    return table
+
+
+def report(table, out):
+    for n, (v, why, rs) in table.items():
+        print('%-12s %-5s %s' % (n, v, why), file=out)
+        print('%-12s       machine %s, wall %s s, %s Ethernet frames' % (
+            '', ' / '.join(at(r.end or 0) for r in rs), ' / '.join('%.1f' % r.wall for r in rs),
+            ' / '.join(str(len(r.frames)) for r in rs)), file=out)
+    out.flush()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--machine', choices=('standin', 'micro', 'rtl'), default='standin')
+    ap.add_argument('--scripts', default=','.join(SC.SCRIPTS), help='comma-separated; default all')
+    ap.add_argument('--runs', type=int, default=2)
+    ap.add_argument('--jobs', type=int, default=2, help='runs at once; at most 3 muir runs please')
+    ap.add_argument('--plant', help='a fault or a right variant in the stand-in, or several comma-separated')
+    ap.add_argument('--plants', action='store_true',
+                    help='every plant in turn, every script; each must fail its own script for its reason, '
+                         'and every variant must pass')
+    ap.add_argument('--plants-own', action='store_true',
+                    help='with --plants, a quick development form: each plant against its own script only')
+    ap.add_argument('--standin-timing', choices=('exact', 'tick'), default='exact',
+                    help='tick: the stand-in\'s timers on 1/60 s ticks, its answers delayed up to a tick')
+    ap.add_argument('--standin-seed', type=int, default=1)
+    ap.add_argument('--quux', help='muir\'s quux executable (revision 16)')
+    ap.add_argument('--band', help='the band\'s disk pack, opened read-only')
+    ap.add_argument('--prom', help='the PROM .mcr for the band\'s microcode')
+    ap.add_argument('--file-root', help='HOST\'s / for the file device')
+    ap.add_argument('--rtc', type=int, default=1700000000, help='a fixed RTC, so that two runs agree')
+    ap.add_argument('--microcycle-ns', help='the clock\'s period (muir: 5 to 63.5)')
+    ap.add_argument('--ethernet-trace', action='store_true')
+    # quux0's addresses, muir's defaults since amendment 2 (section 3).
+    ap.add_argument('--band-mac', default='02:00:00:00:00:01')
+    ap.add_argument('--band-ip', default='169.254.100.2')
+    ap.add_argument('--prefix', type=int, default=30)
+    ap.add_argument('--peer-mac', default='02:00:00:00:00:02')
+    ap.add_argument('--peer-ip', default='169.254.100.1', help='the peer, the band\'s gateway')
+    ap.add_argument('--telnet-port', type=int, default=23)
+    ap.add_argument('--echo-port', type=int, default=7)
+    ap.add_argument('--boot-wait', type=float, default=120.0,
+                    help='machine seconds to wait for the gratuitous ARP')
+    ap.add_argument('--answer', type=float, default=1.0, help='machine seconds to wait for an answer')
+    ap.add_argument('--step-ms', type=float, default=1.0, help='machine ms between "run until"s')
+    ap.add_argument('--wall-timeout', type=float, default=600.0)
+    ap.add_argument('--work', default=None, help='where the sockets go (default: a temporary folder)')
+    ap.add_argument('--log-dir', default=None)
+    a = ap.parse_args()
+
+    for n in (a.plant or '').split(','):
+        if n and n not in standin.PLANTS and n not in standin.VARIANTS:
+            sys.exit('run: no plant or variant %r' % n)
+    names = [n for n in a.scripts.split(',') if n]
+    for n in names:
+        if n not in SC.SCRIPTS:
+            sys.exit('run: no script %r (%s)' % (n, ', '.join(SC.SCRIPTS)))
+    a.work = a.work or tempfile.mkdtemp(prefix='segment-check-')
+    os.makedirs(a.work, exist_ok=True)
+    a.log_dir = a.log_dir or os.path.join(a.work, 'log')
+    os.makedirs(a.log_dir, exist_ok=True)
+    params = Params(a.band_mac, a.band_ip, a.prefix, a.peer_mac, a.peer_ip,
+                    boot_wait=int(a.boot_wait * S), answer=int(a.answer * S), step=int(a.step_ms * MS),
+                    echo_port=a.echo_port, telnet_port=a.telnet_port)
+    summary = open(os.path.join(a.log_dir, 'summary'), 'a')
+
+    def both(line):
+        print(line)
+        print(line, file=summary)
+        summary.flush()
+
+    both('# machine %s, scripts %s, %d runs each' % (a.machine, ','.join(names), a.runs))
+    if not a.plants:
+        table = run_scripts(a, params, names)
+        report(table, sys.stdout)
+        report(table, summary)
+        return 0 if all(v == 'PASS' for v, _, _ in table.values()) else 1
+    if a.machine != 'standin':
+        sys.exit('run: --plants is the stand-in\'s')
+    caught = 0
+    for plant in sorted(standin.PLANTS):
+        a.plant = plant
+        what, meant, words = standin.PLANTS[plant]
+        if a.plants_own and meant not in names:
+            continue
+        table = run_scripts(a, params, [meant] if a.plants_own else names)
+        failing = [n for n, (v, _, _) in table.items() if v == 'FAIL']
+        errors = [n for n, (v, _, _) in table.items() if v == 'ERROR']
+        own = table.get(meant)
+        if own is None:
+            verdict = 'NOT RUN'     # its script was left out by --scripts
+        elif own[0] == 'FAIL' and words in own[1]:
+            verdict = 'CAUGHT'
+        elif failing:
+            verdict = 'ELSEWHERE'   # failed, but not where and why it is meant to
+        else:
+            verdict = 'MISSED'
+        caught += verdict == 'CAUGHT'
+        both('%-24s %-9s %s (meant for %s: "%s")' % (plant, verdict, what, meant, words))
+        for n, (v, why, _) in table.items():
+            both('    %-18s %-5s %s' % (n, v, why))
+        if errors:
+            both('    harness errors in %s' % ', '.join(errors))
+    passed = 0
+    for variant in sorted(standin.VARIANTS):
+        a.plant = variant
+        table = run_scripts(a, params, names)
+        ok = all(v == 'PASS' for v, _, _ in table.values())
+        passed += ok
+        both('%-24s %-9s %s' % (variant, 'PASSES' if ok else 'FAILS', standin.VARIANTS[variant]))
+        for n, (v, why, _) in table.items():
+            if v != 'PASS':
+                both('    %-18s %-5s %s' % (n, v, why))
+    not_run = sum(1 for pl in standin.PLANTS if standin.PLANTS[pl][1] not in names)
+    both('# %d of %d plants caught by their own script and reason (%d not run: their script was left out); '
+         '%d of %d variants pass' % (caught, len(standin.PLANTS) - not_run, not_run, passed, len(standin.VARIANTS)))
+    return 0 if caught == len(standin.PLANTS) - not_run and passed == len(standin.VARIANTS) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
