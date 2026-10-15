@@ -735,3 +735,23 @@ Expected (T T 0)."
     (list (and (assoc own-origin *gencol-tails*) t)
 	  (plusp pages)
 	  bad)))
+
+;;; Loaded as source, as tools/system-check/run gives this file without
+;;; --compile, every function above is interpreted: the table checker's walk
+;;; of every object then took 550 to 840 s on micro against 3 to 9 s compiled,
+;;; past the suites' 600 s a case, and the reclaim checker (C21) reads every
+;;; word of memory.  So each function of this file still interpreted is
+;;; compiled here, all of them, as a QFASL of the file has them; loaded from
+;;; a QFASL, none is left to compile.
+(defun gencol-compile-interpreted ()
+  "Compile every GENCOL- function of this package still interpreted; the count."
+  (let ((n 0))
+    (si:do-local-symbols (s *package* nil nil)
+      (when (and (eql 0 (string-search "GENCOL-" (symbol-name s)))
+		 (fboundp s)
+		 (consp (fdefinition s)))
+	(compile s)
+	(incf n)))
+    n))
+
+(gencol-compile-interpreted)
