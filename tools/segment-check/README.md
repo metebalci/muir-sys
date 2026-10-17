@@ -42,6 +42,7 @@ most three muir runs at once is a fair load (`--jobs`).
 | `scripts.py` | The scripts. |
 | `standin.py` | The stand-in band (below). |
 | `run`, `test` | The runner, and the scripts' own check. |
+| `measure` | Section 15's clocked measurements, M-refill and M-ack (below, "The measurements"). |
 
 ## The scripts
 
@@ -287,3 +288,47 @@ flush of three bytes for each IAC. Before `data` and `options` moved to the
 echo service, `data` failed under that variant (exact timing) for the wrong
 reason, an ACK taken from older output. `test` runs it all under both timings; its tick run uses seed 2,
 whose delays put two ARP requests 0.990 s apart, inside the tick of slack.
+
+## The measurements: `measure`
+
+`measure` runs section 15's clocked measurements on the same harness, one
+machine and one configuration a run, and prints one `RESULT` line (`FAIL`
+when the band failed, `ERROR` when the harness did). Both define their
+workload on the control session and time it by the band's own microsecond
+clock, which is machine time.
+
+```
+measure m-refill --quux EXE --band PACK --prom PROM --file-root DIR \
+        --board kria|de25|arty --rate N --coherence sweep|line-clearing \
+        --workload array|small [--iterations 20] [--feed-seconds 30]
+measure m-ack --engine micro|rtl ... --board kria --gc on|off [--segments 1000] [--seed 1]
+measure m-ack ... --gc on|off --idle-check [--idle-seconds 10]
+```
+
+**M-refill** (section 2.5's rule). rtl at the board's revision 15 fit:
+`kria` 19 ns, a cache of 64K words, `--memory-timing kria`; `de25` 22.5 ns,
+16K, `de25`; `arty` 48 ns, 4K, `arty` (muir-fpga's fits of 15 Oct). The
+mechanism is `MUIR_ETHERNET_COHERENCE`, which the run passes to quux. From
+the timed form's typing the peer delivers 1,514-byte UDP frames to the
+band's discard port at `--rate` a second of machine time, for at most
+`--feed-seconds`: each passes the device's checks, moves 251 and is dropped
+by the stack (`dropped=`, the band's count, says they came; `no-buffer=` the
+frames the device dropped for want of a buffer). The workload conses
+nothing: `array` sums a 16,384-word array (2,048 lines) `--iterations`
+times, `small` runs a fixnum loop as long. `SATURATED` marks a workload that
+ended only after the frames stopped: the network process, at priority 25,
+had taken every cycle while they came, and the time is a lower bound.
+
+**M-ack** (section 2.6). With the compute-bound loop at priority 0 in the
+control session's listener, the collector on and a consing loop, or off and
+a loop that conses nothing, `--segments` one-byte data segments go to the
+test echo service at seeded random machine times (gaps of 10 to 90 ms), and
+each delay is the machine time from its delivery to the band's first segment
+that acknowledges it: `max`, `p99` and `mean` against 200 ms and 40 ms.
+`--idle-check` instead counts the loop's iterations in `--idle-seconds` with
+the network up and idle, then stopped (`ip:network-stop`), and gives how much
+slower the first is, against 1%. Two experiments, not the measurement:
+`--echo-priority N` puts the test echo service's process at priority N, and
+`--idle-tick` keeps the clock's break every tick in the stopped loop.
+`--delays`, `--frames` and `--session-log` keep each delay, every frame the
+band sent and what the band sent on each connection.

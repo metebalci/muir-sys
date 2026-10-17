@@ -4,7 +4,7 @@ other, with counts and its own check of every Ethernet frame the band sends
 (QUUX's Ethernet contract, sections 3 and 9).
 
 usage:
-  relay [--tap NAME[,NAME...]] [--report FILE] PATH
+  relay [--tap NAME[,NAME...]] [--report FILE] [FAULTS] PATH
   relay --help
 
 It is the Ethernet frame mover (muir-sim's tools/ethernet-frame-mover) with
@@ -46,9 +46,23 @@ checksum good (RFC 791, 768, 792, 9293, the sum of RFC 1071, written out
 here); any other type is bad.  A bad frame is moved all the same: the
 relay reports, it does not filter, and Linux behind the tap checks again.
 
-Faults (section 9, T4: loss, duplicates, reordering, a changed byte, delay
-jitter, the injected Ethernet frames of other types) come at E5's later
-slices; the two places they go are Relay.to_band and Relay.to_tap.
+**The faults** (section 9, T4), seeded, on the directions --direction
+names (to-band, from-band, both):
+
+  --seed N        the random generator's seed [default: 1]
+  --loss P        a frame lost, P percent of the time
+  --duplicate P   a frame sent twice, the copy 1 ms after
+  --reorder P     a frame held 20 ms, so that the frames after it overtake it
+  --corrupt P     toward the band only: one byte inside the IPv4 datagram
+                  changed, counted
+  --jitter MS     each frame delayed by a uniform 0 to MS ms, a direction's
+                  order kept
+  --inject N      N frames of 0x86DD, 0x0804 and 0x8100 in turn toward the
+                  band, one after each frame the band sends
+  --arm-on-signal none of them until SIGUSR2
+
+The report's "faults" says what each did, and each direction's "resent" the
+TCP segments resent on it (the band's from it, Linux's toward it).
 
 Exit status: 0 at the end, 2 for a usage error, 75 when every tap tried was
 taken (sysexits.h's EX_TEMPFAIL, the mover's), so that a caller may wait and
@@ -57,14 +71,17 @@ try again, and 1 otherwise.  Python's standard library only.
 
 import errno
 import fcntl
+import heapq
 import json
 import os
+import random
 import select
 import signal
 import socket
 import stat
 import struct
 import sys
+import time
 
 PROGRAM = 'relay'
 
@@ -259,16 +276,111 @@ def sender(f):
 
 
 # --------------------------------------------------------------------------
+# The faults (section 9, T4), seeded.
+
+WAYS = ('to_band', 'from_band')
+INJECT_TYPES = (0x86DD, 0x0804, 0x8100)
+HOST_MAC = bytes.fromhex('020000000002')    # every tap's host side (section 3)
+REORDER_HOLD = 0.020                         # seconds a reordered frame is held
+
+
+class Faults:
+    """What happens to each Ethernet frame on its way, in DIRECTION (to-band,
+    from-band or both): lost with LOSS percent, sent twice with DUPLICATE,
+    held REORDER_HOLD s so that the frames after it overtake it with
+    REORDER, one byte inside its IPv4 datagram changed with CORRUPT (toward
+    the band only, as section 9 has it), and delayed by a uniform 0 to
+    JITTER ms, the frames of a direction kept in their order by it; and,
+    with INJECT, that many Ethernet frames of other types (0x86DD, 0x0804,
+    0x8100 in turn) sent toward the band, one after each frame the band
+    sends.  One random generator, seeded, draws every choice in the order
+    the frames come."""
+
+    def __init__(self, seed=1, loss=0.0, duplicate=0.0, reorder=0.0, corrupt=0.0, jitter=0.0,
+                 direction='both', inject=0, arm_on_signal=False):
+        # ARM_ON_SIGNAL: no fault until SIGUSR2 arms them, so that a caller
+        # reads the band's totals first, and a setup's cold boot runs clean
+        self.armed = not arm_on_signal
+        self.rng = random.Random(seed)
+        self.loss, self.duplicate, self.reorder = loss / 100, duplicate / 100, reorder / 100
+        self.corrupt, self.jitter, self.inject = corrupt / 100, jitter / 1000, inject
+        self.direction = direction
+        self.counts = {w: {'lost': 0, 'duplicated': 0, 'reordered': 0, 'corrupted': 0, 'delayed': 0}
+                       for w in WAYS}
+        self.counts['injected'] = 0
+        self.counts['settings'] = {'seed': seed, 'loss': loss, 'duplicate': duplicate, 'reorder': reorder,
+                                   'corrupt': corrupt, 'jitter_ms': jitter, 'direction': direction,
+                                   'inject': inject}
+        self.last_due = {w: 0.0 for w in WAYS}
+
+    def none(self):
+        return not (self.loss or self.duplicate or self.reorder or self.corrupt or self.jitter or self.inject)
+
+    def active(self, way):
+        return self.armed and (self.direction == 'both' or self.direction.replace('-', '_') == way)
+
+    def plan(self, way, f, now):
+        """[(when, frame)] for F, arriving at NOW on WAY."""
+        if not self.active(way):
+            return [(now, f)]
+        c, rng = self.counts[way], self.rng
+        if self.loss and rng.random() < self.loss:
+            c['lost'] += 1
+            return []
+        if way == 'to_band' and self.corrupt and rng.random() < self.corrupt:
+            f = self.changed(f, c)
+        when = now
+        if self.jitter:
+            d = rng.uniform(0, self.jitter)
+            if d:
+                c['delayed'] += 1
+            when = max(now + d, self.last_due[way])
+        self.last_due[way] = when
+        if self.reorder and rng.random() < self.reorder:
+            c['reordered'] += 1
+            when += REORDER_HOLD
+        out = [(when, f)]
+        if self.duplicate and rng.random() < self.duplicate:
+            c['duplicated'] += 1
+            out.append((when + 0.001, f))
+        return out
+
+    def changed(self, f, c):
+        """F with one byte inside its IPv4 datagram changed, counted; any
+        other frame as it is."""
+        if len(f) < 34 or struct.unpack('!H', f[12:14])[0] != ETH_IPV4:
+            return f
+        tl = struct.unpack('!H', f[16:18])[0]
+        end = min(len(f), 14 + tl) if tl >= 20 else len(f)
+        i = self.rng.randrange(14, end)
+        c['corrupted'] += 1
+        return f[:i] + bytes([f[i] ^ self.rng.randrange(1, 256)]) + f[i + 1:]
+
+    def injected(self, f):
+        """The frame to inject toward the band after F, a frame the band
+        sent, or None."""
+        if not self.armed or self.counts['injected'] >= self.inject or len(f) < 14:
+            return None
+        t = INJECT_TYPES[self.counts['injected'] % len(INJECT_TYPES)]
+        self.counts['injected'] += 1
+        return f[6:12] + HOST_MAC + struct.pack('!H', t) + bytes(46)
+
+
+# --------------------------------------------------------------------------
 # The relay.
 
 class Relay:
-    def __init__(self, tap_fd, name, host, quux, report=None, err=sys.stderr):
+    def __init__(self, tap_fd, name, host, quux, report=None, err=sys.stderr, faults=None):
         self.tap_fd, self.name, self.host, self.quux = tap_fd, name, host, quux
         self.report, self.err = report, err
+        self.faults = faults or Faults()
+        self.due = []           # (when, n, way, frame): the frames the faults hold
+        self.n = 0
+        self.furthest = {}      # (way, source, destination, ports): the furthest sequence end seen
         self.line = '%s --ip-address %s/30 --ip-gateway %s' % (name, dotted(quux), dotted(host))
         self.counts = {'connections': 0,
-                       'to_band': {'frames': 0, 'bytes': 0, 'types': {}},
-                       'from_band': {'frames': 0, 'bytes': 0, 'types': {}},
+                       'to_band': {'frames': 0, 'bytes': 0, 'types': {}, 'resent': 0},
+                       'from_band': {'frames': 0, 'bytes': 0, 'types': {}, 'resent': 0},
                        'dropped_unconnected': 0, 'tap_write_failed': 0,
                        'bad_from_band': 0, 'bad': []}
 
@@ -281,20 +393,64 @@ class Relay:
         c['bytes'] += len(f)
         t = '0x%04x' % struct.unpack('!H', f[12:14])[0] if len(f) >= 14 else 'short'
         c['types'][t] = c['types'].get(t, 0) + 1
+        # resends (section 9, T4: "resend counts are reported"): a TCP
+        # segment with data, or a SYN or FIN, that ends at or before the
+        # furthest sequence number already seen on its connection that way
+        if t == '0x0800' and len(f) >= 34 and f[23] == PROTO_TCP:
+            ihl = (f[14] & 15) * 4
+            tl = struct.unpack('!H', f[16:18])[0]
+            p = f[14 + ihl:14 + tl]
+            if len(p) >= 20:
+                seq = struct.unpack('!I', p[4:8])[0]
+                flags = p[13]
+                n = len(p) - (p[12] >> 4) * 4 + (1 if flags & 0x02 else 0) + (1 if flags & 0x01 else 0)
+                if n > 0 and not flags & 0x04:
+                    key = (way, f[26:30], f[30:34], p[0:4])
+                    end = (seq + n) & 0xFFFFFFFF
+                    far = self.furthest.get(key)
+                    if far is not None and ((far - end) & 0xFFFFFFFF) < 0x80000000:
+                        c['resent'] = c.get('resent', 0) + 1
+                    else:
+                        self.furthest[key] = end
 
     def write_report(self):
         if not self.report:
             return
-        out = dict(self.counts, tap=self.name, line=self.line)
+        out = dict(self.counts, tap=self.name, line=self.line, faults=self.faults.counts)
         tmp = '%s.%d.tmp' % (self.report, os.getpid())
         with open(tmp, 'w') as f:
             json.dump(out, f, indent=1, sort_keys=True)
         os.replace(tmp, self.report)
 
+    def hold(self, way, f):
+        """F, arrived on WAY, through the faults: sent now or held."""
+        for when, g in self.faults.plan(way, f, time.monotonic()):
+            self.n += 1
+            heapq.heappush(self.due, (when, self.n, way, g))
+
+    def send_due(self, conn):
+        """Every held frame whose time has come; the seconds to the next."""
+        now = time.monotonic()
+        while self.due and self.due[0][0] <= now:
+            _, _, way, f = heapq.heappop(self.due)
+            if way == 'to_band':
+                conn.sendall(struct.pack('!I', len(f)) + f)
+            else:
+                self.write_tap(f)
+        return max(0.0, self.due[0][0] - now) if self.due else None
+
     def to_band(self, conn, f):
-        """An Ethernet frame from the tap, to the machine (T4's faults go here)."""
+        """An Ethernet frame from the tap, to the machine, through the faults."""
         self.count('to_band', f)
-        conn.sendall(struct.pack('!I', len(f)) + f)
+        self.hold('to_band', f)
+        self.send_due(conn)
+
+    def write_tap(self, f):
+        try:
+            os.write(self.tap_fd, f)
+        except OSError as e:
+            self.counts['tap_write_failed'] += 1
+            self.say('%s: an Ethernet frame of %d bytes not taken: %s' % (self.name, len(f), e.strerror))
 
     def to_tap(self, f, warned):
         """An Ethernet frame the machine sent: checked, counted and written to
@@ -313,17 +469,19 @@ class Relay:
                      ' its Ethernet frames are moved all the same'
                      % (dotted(s), self.name, dotted(self.quux), self.line.split(' ', 1)[1]))
             warned = True
-        try:
-            os.write(self.tap_fd, f)
-        except OSError as e:
-            self.counts['tap_write_failed'] += 1
-            self.say('%s: an Ethernet frame of %d bytes not taken: %s' % (self.name, len(f), e.strerror))
+        self.hold('from_band', f)
+        g = self.faults.injected(f)
+        if g is not None:
+            # injected after the faults, so that each is counted and none is lost
+            self.n += 1
+            heapq.heappush(self.due, (time.monotonic(), self.n, 'to_band', g))
         return warned
 
     def pump(self, conn):
         held, warned = b'', False
+        self.due = []
         while True:
-            ready, _, _ = select.select([self.tap_fd, conn], [], [])
+            ready, _, _ = select.select([self.tap_fd, conn], [], [], self.send_due(conn))
             if self.tap_fd in ready:
                 self.to_band(conn, os.read(self.tap_fd, 65536))
             if conn in ready:
@@ -338,6 +496,7 @@ class Relay:
                     f, held = held[4:4 + n], held[4 + n:]
                     if n:
                         warned = self.to_tap(f, warned)
+            self.send_due(conn)
 
     def serve(self, listener):
         while True:
@@ -392,18 +551,44 @@ def listen(path):
 def usage(message=None):
     if message:
         print('%s: %s' % (PROGRAM, message), file=sys.stderr)
-    print('usage: relay [--tap NAME[,NAME...]] [--report FILE] PATH', file=sys.stderr)
+    print('usage: relay [--tap NAME[,NAME...]] [--report FILE] [--seed N] [--loss P] [--duplicate P]'
+          ' [--reorder P] [--corrupt P] [--jitter MS] [--direction to-band|from-band|both] [--inject N]'
+          ' [--arm-on-signal] PATH',
+          file=sys.stderr)
     sys.exit(2)
+
+
+FAULT_FLAGS = {'--seed': ('seed', int), '--loss': ('loss', float), '--duplicate': ('duplicate', float),
+               '--reorder': ('reorder', float), '--corrupt': ('corrupt', float), '--jitter': ('jitter', float),
+               '--direction': ('direction', str), '--inject': ('inject', int)}
+FAULT_SWITCHES = {'--arm-on-signal': 'arm_on_signal'}
 
 
 def parse(argv):
     names, report, path = None, None, None
+    faults = {}
     args = list(argv)
     while args:
         a = args.pop(0)
         if a in ('-h', '--help'):
             print(__doc__.strip())
             sys.exit(0)
+        elif a in FAULT_SWITCHES:
+            faults[FAULT_SWITCHES[a]] = True
+        elif a in FAULT_FLAGS:
+            if not args:
+                usage('%s wants a value' % a)
+            key, kind = FAULT_FLAGS[a]
+            try:
+                faults[key] = kind(args.pop(0))
+            except ValueError:
+                usage('%s wants a number' % a)
+            if key == 'direction' and faults[key] not in ('to-band', 'from-band', 'both'):
+                usage('--direction is to-band, from-band or both')
+            if key in ('loss', 'duplicate', 'reorder', 'corrupt') and not 0 <= faults[key] <= 100:
+                usage('%s is a percentage, 0 to 100' % a)
+            if key in ('jitter', 'inject') and faults[key] < 0:
+                usage('%s is 0 or more' % a)
         elif a in ('--tap', '--report'):
             if not args or not args[0] or args[0].startswith('-'):
                 usage('%s wants a value' % a)
@@ -422,11 +607,11 @@ def parse(argv):
             usage('%s: one PATH only' % a)
     if path is None:
         usage('PATH wanted: the socket muir\'s --ethernet-socket names')
-    return names, report, path
+    return names, report, path, faults
 
 
 def main(argv):
-    names, report, path = parse(argv)
+    names, report, path, faults = parse(argv)
     listener, relay = None, None
 
     def end(*_):
@@ -434,8 +619,9 @@ def main(argv):
     signal.signal(signal.SIGTERM, end)
     try:
         name, fd, host, quux = take(names if names is not None else pool(), names is not None)
-        relay = Relay(fd, name, host, quux, report)
+        relay = Relay(fd, name, host, quux, report, faults=Faults(**faults))
         signal.signal(signal.SIGUSR1, lambda *_: relay.write_report())
+        signal.signal(signal.SIGUSR2, lambda *_: setattr(relay.faults, 'armed', True))
         listener = listen(path)
         print(relay.line, flush=True)
         relay.serve(listener)

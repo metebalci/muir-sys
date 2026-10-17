@@ -3,9 +3,9 @@
 sockets as clients, to the band through the fault relay and a pooled tap.
 
 usage:
-  tools/tcp-check/run [--parts telnet,echo,churn,limit,stall] [--echo-sizes 1,1024,65536,1048576]
+  tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals] [--echo-sizes 1,1024,65536,1048576]
                       [--echo-times 10] [--connections 1000] [--stall 30,180]
-                      [--transfer-timeout S]
+                      [--faults 'RELAY-FLAGS'] [--transfer-timeout S]
                       [-- LISPM-CHECK-ARGS...]
 
 It takes a tap and resumes that index's checkpoint as tools/lispm-check does
@@ -31,6 +31,11 @@ it, as Linux's own TCP:
            connections at once, each echoing one byte, and a ninth refused
            with RST; after them the band holds none but a new control
            session's
+  table    T4, run when named: after the parts before it, no connection
+           but the control session's
+  totals   T4, run when named: since the faults started, the band's totals
+           of 241 <15:9> and <7:4> risen by exactly the frames the relay
+           corrupted and injected
   stall    M-tap's stall test (section 15, Q8), run only when named: the
            machine stopped for each of --stall's seconds (30 and 180) with a
            form in flight on a TELNET session over TCP; the session is kept
@@ -356,9 +361,57 @@ def part_stall(band, control, opts, log):
     return 'the session kept through each stall: ' + ', '.join(figures)
 
 
-# The parts run by default are T2's; stall is M-tap's, run when named.
+def part_table(band, control, opts, log):
+    """T4: the connection table empty after the other parts, but for the
+    control session's."""
+    others, tw = control.others(), control.time_wait()
+    if others != 0:
+        raise PartFailed('%d connections besides the control session' % others)
+    return 'no connection besides the control session; %d TIME-WAIT records' % tw
+
+
+def relay_report(control):
+    """The relay's report, written fresh on SIGUSR1."""
+    path = control.link.report
+    before = os.path.getmtime(path) if os.path.exists(path) else 0
+    os.kill(control.link.proc.pid, signal.SIGUSR1)
+    end = time.monotonic() + 10
+    while time.monotonic() < end:
+        if os.path.exists(path) and os.path.getmtime(path) != before:
+            break
+        time.sleep(0.1)
+    with open(path) as f:
+        return json.load(f)
+
+
+def totals(control):
+    return [int(x) for x in control.value('(list (ip:type-filter-total) (ip:ipv4-checks-total))').strip('()').split()]
+
+
+def part_totals(band, control, opts, log):
+    """T4: since the control session began, the band's total of 241 <15:9>,
+    the IPv4 checks, risen by exactly the frames the relay corrupted toward
+    it, and of <7:4>, the type filter, by exactly the frames it injected.  A
+    corrupted frame still in flight is waited for, five times a second."""
+    t0, c0 = control.start_totals
+    for _ in range(5):
+        t1, c1 = totals(control)
+        r = relay_report(control)['faults']
+        corrupted, injected = r['to_band']['corrupted'], r['injected']
+        if (c1 - c0, t1 - t0) == (corrupted, injected):
+            return '<15:9> up %d, the relay corrupted %d; <7:4> up %d, it injected %d' % (
+                c1 - c0, corrupted, t1 - t0, injected)
+        if c1 - c0 > corrupted or t1 - t0 > injected:
+            break
+        time.sleep(1)
+    raise PartFailed('<15:9> up %d, the relay corrupted %d; <7:4> up %d, it injected %d' % (
+        c1 - c0, corrupted, t1 - t0, injected))
+
+
+# The parts run by default are T2's; stall is M-tap's, and table and totals
+# T4's, each run when named.
 PARTS = {'telnet': part_telnet, 'echo': part_echo, 'churn': part_churn, 'limit': part_limit,
-         'stall': part_stall}
+         'stall': part_stall, 'table': part_table, 'totals': part_totals}
 T2_PARTS = ('telnet', 'echo', 'churn', 'limit')
 
 
@@ -375,7 +428,13 @@ def main():
     p.add_argument('--echo-times', type=int, default=10)
     p.add_argument('--connections', type=int, default=1000)
     p.add_argument('--transfer-timeout', type=float, default=900)
+    p.add_argument('--faults', default=None,
+                   help="T4: the fault relay's fault flags, as one string (LISPM_CHECK_RELAY_FLAGS)")
     opts = p.parse_args(argv)
+    if opts.faults is not None:
+        # armed once the control session has read the band's totals, so
+        # that the setup, the resume and the snapshot run without faults
+        os.environ['LISPM_CHECK_RELAY_FLAGS'] = opts.faults + ' --arm-on-signal'
 
     def on_signal(sig, frame):
         raise SystemExit(128 + sig)
@@ -408,6 +467,7 @@ def main():
             server.start()
             machine.start(resume=chk)
             control = Control(a, server, machine, log)
+            control.link = link
             control.open()
             band = Band(link, opts.transfer_timeout)
             # the test switch is a line of its own; the parts run whatever
@@ -420,6 +480,11 @@ def main():
             except PartFailed as e:
                 results.append('FAIL')
                 print('%-6s %-5s %s' % ('switch', 'FAIL', e), flush=True)
+            if 'totals' in parts:
+                control.start_totals = totals(control)
+            if opts.faults is not None:
+                os.kill(link.proc.pid, signal.SIGUSR2)
+                print('%-6s %-5s %s' % ('faults', 'on', opts.faults), flush=True)
             for name in parts:
                 t0 = time.monotonic()
                 try:

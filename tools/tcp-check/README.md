@@ -5,8 +5,9 @@ own TCP, its sockets as clients, to the band through the fault relay
 (`tools/fault-relay/`) and a pooled tap. Python's standard library only.
 
 ```
-tools/tcp-check/run [--parts telnet,echo,churn,limit] [--echo-sizes 1,1024,65536,1048576]
-                    [--echo-times 10] [--connections 1000] [--transfer-timeout S]
+tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals]
+                    [--echo-sizes 1,1024,65536,1048576] [--echo-times 10] [--connections 1000]
+                    [--stall 30,180] [--faults 'RELAY-FLAGS'] [--transfer-timeout S]
                     [-- LISPM-CHECK-ARGS...]
 ```
 
@@ -52,11 +53,28 @@ but the control session's and no TIME-WAIT record (the client closes first);
 the stall's session answers 0.4 s after the machine goes on, after 30 s and
 after 180 s; the relay checked 15,642 frames from the band and found none bad.
 
+## T4: through the relay's faults
+
+`--faults 'FLAGS'` gives the fault relay its faults (`tools/fault-relay/`,
+"The faults"), through `LISPM_CHECK_RELAY_FLAGS`, with `--arm-on-signal`:
+the relay moves frames clean until the control session has read the band's
+totals, and `faults on` says when they start. Two parts are T4's, each run
+when named:
+
+| Part | It checks |
+|---|---|
+| `table` | after the parts before it, the band holds no connection but the control session's |
+| `totals` | since the faults started, the band's total of 241 `<15:9>`, the IPv4 checks, has risen by exactly the frames the relay corrupted toward it, and of `<7:4>`, the type filter, by exactly the frames it injected (a frame still in flight is waited for, up to 5 s) |
+
+T4's matrix is `--parts echo,table,totals --faults '--inject 100 --seed 1
+FAULT --direction D'` for each fault of section 9 (loss 1, 5 and 20%,
+duplicates 5%, reordering 5%, jitter 0-50 ms; each direction alone and both,
+and corruption of 1% toward the band), against one run with no fault, whose
+echo's time is the base of the bound of ten times. The relay's report
+(`relay.json`, kept with `--keep`) gives each direction's resends.
+
 ## Still to come
 
-- **T4** runs these parts through the relay's faults (`tools/fault-relay/`,
-  "Still to come"), with the criteria of section 9: the echo byte-exact, the
-  connection table empty after, the band's totals of 241's counters equal to
-  the relay's counts, and no session more than ten times its time with no
-  faults. The TELNET suite at 5% loss and 5% reorder is lispm-check's cases
-  through the relay.
+- **The TELNET suite at 5% loss and 5% reorder** gives G-TCP's pass/fail:
+  lispm-check's cases with `LISPM_CHECK_RELAY_FLAGS` set, against G-TCP's
+  own runs, once G-TCP's harness exists.

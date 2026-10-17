@@ -303,6 +303,7 @@ Each is overridden by its flag or an environment variable.
 | `--network` | `LISPM_CHECK_NETWORK` | `chaos` ([the network](#the-network)) |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
 | | `LISPM_CHECK_TAPS` | the tap indexes taken from on revision 16: the pool's host-only taps |
+| | `LISPM_CHECK_RELAY_FLAGS` | none: the fault relay's fault flags (`tools/fault-relay/README.md`), for T4 |
 
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check
 against, or a copy) and `run/check/ubin/` are set up once per clone:

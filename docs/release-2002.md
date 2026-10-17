@@ -2151,28 +2151,39 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   (QUUX's Ethernet contract, sections 3, 7 and 8 R1; `docs/lispm-check.md`,
   "The network"). On revision 16 every run takes a host-only tap of the pool
   through the fault relay, `LISPM_CHECK_TAPS` its range (`tap_range`,
-  `tools/lispm-check:425`; `TapLink`, `:474`), the indexes that have a
-  checkpoint for the key first (`:1591`), and gives the machine the tap's
+  `tools/lispm-check:427`; `TapLink`, `:476`), the indexes that have a
+  checkpoint for the key first (`:1596`), and gives the machine the tap's
   `--ethernet-socket`, `--ip-address` and `--ip-gateway` at the setup and at
-  every resume (`:516`). A checkpoint is made for each tap index, its key
+  every resume (`:521`). A checkpoint is made for each tap index, its key
   naming QUUX's address behind the tap and its setup version 3
-  (`SETUP_VERSION_TAP`, `:933`); revision 15's and the CADR's keys are as
+  (`SETUP_VERSION_TAP`, `:938`); revision 15's and the CADR's keys are as
   before. The revision is asked of the machine once a build
-  (`machine_revision`, `:531`). `--network tcp` carries the session over the
+  (`machine_revision`, `:536`). `--network tcp` carries the session over the
   build host's own TCP from a socket bound to the tap to the band's TELNET
-  server, with no Chaos cable and no ozd (`NETWORKS`, `:610`; `_open`,
-  `:702`), and closes the setup's session cleanly, to the band's EOF, so that
-  the checkpoint holds no connection (`close_session`, `:773`);
+  server, with no Chaos cable and no ozd (`NETWORKS`, `:615`; `_open`,
+  `:707`), and closes the setup's session cleanly, to the band's EOF, so that
+  the checkpoint holds no connection (`close_session`, `:778`);
   `--chaos-address` is given in both networks, so one checkpoint serves both.
-  `options` and `prepare` (`:1468`, `:1540`) split the command line and the
+  `options` and `prepare` (`:1473`, `:1545`) split the command line and the
   setup from `main`. Its self-test, `tools/lispm-check-test/network.sh`, is
   new.
 - **`tools/fault-relay/relay`** (new; its README): the Ethernet frame mover
   with counts and its own check of every Ethernet frame the band sends
-  (`check_frame`, `:198`), which takes host-only taps only; T4's faults come
-  later.
+  (`check_frame`, `:215`), which takes host-only taps only; and T4's faults,
+  seeded: loss, duplicates, reordering, a byte changed inside the IPv4
+  datagram toward the band, jitter, each direction or both, frames of other
+  types injected toward the band, held until SIGUSR2 with `--arm-on-signal`
+  (`Faults`, `:287`), and each direction's TCP resends counted (`:390`).
+  `tools/fault-relay/test` (new) checks the faults with no tap and no band.
+  `tools/lispm-check` passes it `LISPM_CHECK_RELAY_FLAGS` (`:493`).
 - **`tools/tcp-check/run`** (new; its README): T2, Linux's own TCP to the band
   through the relay and a tap: TELNET sessions, the test echo service at 1 B
   to 1 MiB by sha256, 1,000 connections in a row, 8 at once and a ninth
-  refused (`part_telnet` to `part_limit`, `:213`-`:268`); and M-tap's stall
-  test, by name (`part_stall`, `:306`).
+  refused (`part_telnet` to `part_limit`, `:218`-`:273`); M-tap's stall
+  test, by name (`part_stall`, `:311`); and T4's parts, by name, the
+  connection table empty after (`part_table`, `:364`) and the band's totals
+  of 241 `<15:9>` and `<7:4>` equal to the frames the relay corrupted and
+  injected (`part_totals`, `:391`), with `--faults` (`:431`).
+- **`tools/segment-check/measure`** (new; `tools/segment-check/README.md`,
+  "The measurements"): section 15's M-refill (`m_refill`, `:110`; the boards,
+  `BOARDS`, `:56`) and M-ack (`m_ack`, `:183`) on the clocked socket.

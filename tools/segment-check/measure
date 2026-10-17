@@ -1,0 +1,393 @@
+#!/usr/bin/env python3
+"""Measurements of QUUX's Ethernet contract (section 15) on muir in clocked
+mode, on the segment scripts' harness (clocked.py, session.py, scripts.py's
+control session): one machine, one configuration, one RESULT line.
+
+  measure m-refill --quux EXE --band PACK --prom PROM --file-root DIR \\
+          --board kria|arty|de25 --rate N --coherence sweep|line-clearing \\
+          --workload array|small [--iterations N]
+
+**M-refill** (section 2.5's rule): rtl at the board's period, cache size and
+memory timing (BOARDS); the band boots; on the control session the
+workload is defined and compiled, then timed by the band's own
+microsecond clock, which is machine time: (MR-TIME F N) sleeps 2 s, so that
+the session's own segments are all acknowledged before it starts, and
+returns the microseconds F took.  From the form's typing to its answer the
+peer delivers UDP datagrams of 1,514-byte Ethernet frames to the band's
+discard port at RATE a second of machine time: each passes the device's
+checks, is written into a receive buffer and moves 251, so that the cache
+is made coherent, by the sweep or by line clearing as
+MUIR_ETHERNET_COHERENCE says, and the stack drops it (counted in
+IP::IPV4-PROTOCOLS-DROPPED, read after, as the check that they arrived).
+The workloads conse nothing, so that no flip of the collector falls in one
+run and not in another:
+
+  array   a 16,384-word array summed ITERATIONS times: 2,048 lines, inside
+          the Kria's and the DE25's caches, four times the Arty's
+  small   a fixnum loop of ITERATIONS * 16,384 steps, its working set a few
+          lines of code and stack
+
+The line: RESULT measure board rate coherence workload us=MICROSECONDS
+frames=DELIVERED dropped=BAND'S-COUNT machine=SECONDS.  Exit 0 with a
+RESULT, 1 when the band failed, 2 when the harness did.  Python's standard
+library only.
+"""
+
+import argparse
+import os
+import random
+import re
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import clocked                      # noqa: E402
+import frames as F                  # noqa: E402
+import scripts as SC                # noqa: E402
+from session import Fail, Params, Session, MS, S, at   # noqa: E402
+
+# Each board's revision 15 fit (muir-fpga docs/fits.md, 15 Oct): its period,
+# its cache (words) and muir's memory timing preset for it.
+BOARDS = {
+    'kria': {'ns': '19', 'cache': 65536, 'timing': 'kria'},
+    'de25': {'ns': '22.5', 'cache': 16384, 'timing': 'de25'},
+    'arty': {'ns': '48', 'cache': 4096, 'timing': 'arty'},
+}
+
+# The workload's forms, typed on the control session.  Lisp in lower case,
+# read in base 10.  MR-TIME sleeps 2 s (120 sixtieths) first, then times F
+# by the processor's microsecond clock, as the network's timers do.
+DEFINE = ('(progn (defvar *mr-a* nil) (setq *mr-a* (let ((a (make-array 16384))) (dotimes (i 16384) (aset (logand i 255) a i)) a))'
+          ' (defun mr-array (n) (let ((s 0) (a *mr-a*)) (dotimes (k n) (dotimes (i 16384)'
+          ' (setq s (logand (+ s (aref a i)) 65535)))) s))'
+          ' (defun mr-small (n) (let ((s 0)) (dotimes (k n) (dotimes (i 16384)'
+          ' (setq s (logand (+ s i 3) 65535)))) s))'
+          ' (defun mr-time (f n) (process-sleep 120) (let ((t0 (ip::network-now))) (funcall f n)'
+          ' (ip::network-time-difference (ip::network-now) t0)))'
+          ' (compile (quote mr-array)) (compile (quote mr-small)) (compile (quote mr-time))'
+          ' (format t "~%{mr-~a}~%" "ready"))')
+READY = r'\{mr-ready\}'
+TIMED = ('(let ((us (mr-time (quote mr-%s) %d))) (ip::ether-update-totals)'
+         ' (format t "~%%{mr-t ~d ~d ~d}~%%" us ip::ipv4-protocols-dropped ip::ether-dropped-total))')
+TIMED_RE = r'\{mr-t (\d+) (\d+) (\d+)\}'
+
+DISCARD = 9
+UDP_PAYLOAD = 1472          # an IPv4 datagram of 1,500 bytes, a 1,514-byte frame
+
+
+def udp_frame(p, ident, sport=40100):
+    data = bytes((ident + i) & 255 for i in range(UDP_PAYLOAD))
+    length = 8 + len(data)
+    head = struct.pack('>HHHH', sport, DISCARD, length, 0)
+    c = F.checksum(head + data, F.pseudo_sum(p.peer_ip, p.band_ip, 17, length)) or 0xFFFF
+    udp = struct.pack('>HHHH', sport, DISCARD, length, c) + data
+    return F.ether(p.band_mac, p.peer_mac, F.ETH_IPV4, F.ipv4(p.peer_ip, p.band_ip, 17, udp, ident=ident & 0xFFFF))
+
+
+def type_form(s, c, form, marker, until, rate=0, step=10 * MS, feed=None, group=True):
+    """Type FORM on the control session and run, delivering FEED's frames,
+    until MARKER is in what the band sends after it; its groups."""
+    mark = len(c.received)
+    c.write(form.encode() + b'\r')
+    while s.now < until:
+        nxt = s.now + step
+        if feed:
+            feed(nxt)
+        s.run(nxt)
+        m = re.search(marker.encode(), c.received[mark:])
+        if m:
+            return [int(g) for g in m.groups()] if group else m.groups()
+        if c.rst is not None:
+            raise Fail('the control session was reset: %s' % c.rst)
+    raise Fail('no marker %s by %s' % (marker, at(s.now)))
+
+
+def m_refill(s, a):
+    p = s.p
+    if s.boot() is None:
+        raise Fail('no gratuitous ARP: the network did not start')
+    c = SC.control(s)
+    type_form(s, c, DEFINE, READY, s.now + 120 * S)
+    period = 1_000_000_000 // a.rate if a.rate else None
+    state = {'next': s.now + (period or 0), 'n': 0}
+
+    # the frames stop --feed-seconds of machine time after the form is
+    # typed: a band the frames saturate, its network process taking every
+    # cycle, would otherwise never end the workload.  A workload that ends
+    # after them is marked SATURATED, and its time is a lower bound.
+    stop = s.now + int(a.feed_seconds * S)
+
+    def feed(until):
+        while period and state['next'] <= min(until, stop):
+            s.send(udp_frame(p, state['n']), state['next'])
+            state['n'] += 1
+            state['next'] += period
+    try:
+        us, dropped, no_buffer = type_form(s, c, TIMED % (a.workload, a.iterations), TIMED_RE, s.now + 600 * S,
+                                           feed=feed)
+    finally:
+        if a.session_log:
+            with open(a.session_log, 'wb') as f:
+                f.write(c.received)
+    saturated = bool(period) and s.now > stop
+    return 'us=%d frames=%d dropped=%d no-buffer=%d machine=%.3f%s' % (
+        us, state['n'], dropped, no_buffer, s.now / S, ' SATURATED' if saturated else '')
+
+
+# M-ack (section 2.6): the compute-bound loops, at priority 0 in the control
+# session's listener.  MA-LOOP runs F until SECONDS of the microsecond clock
+# have passed and returns its iterations: MA-CONS conses a list of 20 (the
+# collector on), MA-FIX conses nothing (the collector off).  *MA-N* keeps
+# the idle check's count over the network's stop and start, which end the
+# session's connection.
+ACK_DEFINE = ('(progn (defvar *ma-n* nil) (defvar *ma-t* nil) (defvar *ma-sink* nil) (defvar *ma-flips* nil)'
+              ' (push (quote (push (ip::network-now) *ma-flips*)) si:gc-every-flip-list)'
+              ' (defun ma-cons () (setq *ma-sink* (make-list 20)))'
+              ' (defun ma-fix () (let ((s 0)) (dotimes (i 64) (setq s (logand (+ s i) 65535))) s))'
+              ' (defun ma-loop (f seconds) (let ((t0 (ip::network-now)) (n 0))'
+              ' (do () ((>= (ip::network-time-difference (ip::network-now) t0) (* seconds 1000000)) n)'
+              ' (funcall f) (setq n (1+ n)))))'
+              ' (compile (quote ma-cons)) (compile (quote ma-fix)) (compile (quote ma-loop))'
+              ' (format t "~%{ma-~a}~%" "ready"))')
+ACK_READY = r'\{ma-(ready)\}'
+ACK_RUN = ('(progn (%s) (process-sleep 60) (setq *ma-flips* nil) (let ((t0 (ip::network-now))'
+           ' (n (ma-loop (quote ma-%s) %d)))'
+           ' (format t "~%%{ma-done ~d ~d ~a}~%%" n t0 (reverse *ma-flips*))))')
+ACK_DONE = r'\{ma-done (\d+) (\d+) (\(.*?\)|NIL)\}'
+ACK_IDLE_DOWN = ('(progn (%s) (ip:network-stop) %s(setq *ma-n* (ma-loop (quote ma-%s) %d))'
+                 ' (setq *ma-t* (ip::network-now)) (ip:network-start))')
+# --idle-tick, an experiment: the stopped network's loop with the clock's
+# break still every tick, as the network asks while it is up (section 2.6),
+# so that the cost of the ticks and that of the network process part
+TICK = '(si:request-clock-rate :network 1) '
+ACK_READ = '(format t "~%{ma-n ~a ~a ~a}~%" *ma-n* *ma-t* (ip::network-now))'
+ACK_READ_RE = r'\{ma-n (\d+|NIL) (\d+|NIL) (\d+)\}'
+ECHO_SPORT = 40200
+
+
+def tcp_frame(p, c, seq, data):
+    seg = F.tcp(p.peer_ip, p.band_ip, c.sport, c.dport, seq, c.rcv_nxt or 0, F.ACK | F.PSH, c.window, data)
+    return F.ether(p.band_mac, p.peer_mac, F.ETH_IPV4, F.ipv4(p.peer_ip, p.band_ip, F.IP_TCP, seg))
+
+
+def percentile(xs, q):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(q * len(xs)))]
+
+
+def m_ack(s, a):
+    """Section 2.6's M-ack: with the compute-bound loop running, --segments
+    one-byte data segments on a connection to the test echo service at
+    random machine times (gaps uniform between --gap-min and --gap-max ms,
+    seeded), each delay the machine time from its delivery to the first
+    segment of the band's that acknowledges it.  With --idle-check, the
+    loop's iterations in --idle-seconds with the network up and idle, then
+    with it stopped, instead."""
+    p = s.p
+    if s.boot() is None:
+        raise Fail('no gratuitous ARP: the network did not start')
+    c = SC.control(s)
+    type_form(s, c, ACK_DEFINE, ACK_READY, s.now + 120 * S, group=False)
+    gc = 'si:gc-on t' if a.gc == 'on' else 'si:gc-off'
+    loop = 'cons' if a.gc == 'on' else 'fix'
+    if a.idle_check:
+        up = int(type_form(s, c, ACK_RUN % (gc, loop, a.idle_seconds), ACK_DONE, s.now + (a.idle_seconds + 120) * S,
+                           group=False)[0])
+        mark = len(c.received)
+        c.write((ACK_IDLE_DOWN % (gc, TICK if a.idle_tick else '', loop, a.idle_seconds)).encode() + b'\r')
+        # the peer sends what is written at the end of a step: short steps
+        # first, so that the form reaches the band before the long wait
+        for _ in range(100):
+            s.run(s.now + 10 * MS)
+        end = s.now + (a.idle_seconds + 60) * S
+        # the network stops: nothing answers; run past the loop, then
+        # open a new control session once the network is back
+        s.run(s.now + (a.idle_seconds + 5) * S)
+        c2 = None
+        while s.now < end and c2 is None:
+            try:
+                c2 = SC.open_connection(s, SC.CONTROL_PORT + 1, p.telnet_port, SC.ISN_B ^ 0x0F0F0F0F,
+                                        F.opt_mss(1460), 'the second control session')
+            except Fail:
+                s.run(s.now + 1 * S)
+        if c2 is None:
+            raise Fail('no second control session after the network\'s start')
+        SC.settled(s, c2, 'the second control session')
+        c2.auto_ack = True
+        # read until the loop's count is there: the stop's loop ends on
+        # the band's clock, which the harness does not see
+        down = None
+        while down is None and s.now < end + 120 * S:
+            got = type_form(s, c2, ACK_READ, ACK_READ_RE, s.now + 30 * S, group=False)
+            if got[0] != b'NIL':
+                down = int(got[0])
+            else:
+                s.run(s.now + 5 * S)
+        if down is None:
+            raise Fail('the loop with the network stopped gave no count')
+        slower = (down - up) / down * 100 if down else float('nan')
+        return 'gc=%s idle-check%s up=%d down=%d slower=%.3f%% machine=%.3f' % (
+            a.gc, ' (down with the tick)' if a.idle_tick else '', up, down, slower, s.now / S)
+    SC.ask(s, c, 'echo-on')
+    e = SC.open_connection(s, ECHO_SPORT, p.echo_port, SC.ISN_A, F.opt_mss(1460), 'the echo connection')
+    e.ack()
+    e.auto_ack = True
+    if a.echo_priority is not None:
+        # an experiment, not M-ack itself: the test echo service's process
+        # at another priority, to see whether a stall comes from it holding
+        # the network lock behind the compute-bound loop
+        type_form(s, c, '(progn (dolist (p si:all-processes) (when (string-equal (send p :name) "Test Echo Server")'
+                  ' (send p :set-priority %d))) (format t "~%%{ma-~a}~%%" "prio"))' % a.echo_priority,
+                  r'\{ma-(prio)\}', s.now + 30 * S, group=False)
+    rng = random.Random(a.seed)
+    gaps = [rng.uniform(a.gap_min, a.gap_max) * MS for _ in range(a.segments)]
+    seconds = int((sum(gaps) / S) + 3)
+    mark = len(c.received)
+    c.write((ACK_RUN % (gc, loop, seconds)).encode() + b'\r')
+    # the segments start once the loop has: after the form's 1 s sleep
+    t = s.now + 1500 * MS
+    sends = []
+    for g in gaps:
+        t += int(g)
+        sends.append(t)
+    queued = []
+    k = 0
+    done = None
+    end = s.now + (seconds + 120) * S
+    while s.now < end and done is None:
+        nxt = s.now + p.step
+        while k < len(sends) and sends[k] <= nxt:
+            seq = e.snd_nxt
+            # a run may stop a clock past the time asked: never deliver
+            # before the time reached
+            when = max(sends[k], s.now)
+            s.send(tcp_frame(p, e, seq, b'%c' % (65 + k % 26)), when)
+            e.snd_nxt = (seq + 1) & 0xFFFFFFFF
+            queued.append((when, e.snd_nxt))
+            k += 1
+        s.run(nxt)
+        m = re.search(ACK_DONE.encode(), c.received[mark:], re.S)
+        if m:
+            done = int(m.group(1))
+            flips = m.group(3).decode()
+        if c.rst is not None or e.rst is not None:
+            raise Fail('a session was reset: %s' % (c.rst or e.rst))
+    if done is None:
+        raise Fail('the loop did not end by %s' % at(s.now))
+    if k < len(sends):
+        raise Fail('the loop ended before the segments: %d of %d sent' % (k, len(sends)))
+    acks = [(x.t, x.tcp.ack) for x in e.segments if x.tcp.flags & F.ACK]
+    delays, j = [], 0
+    for when, edge in queued:
+        hit = next((t for t, ack in acks if t >= when and ((ack - edge) & 0xFFFFFFFF) < 0x80000000), None)
+        if hit is None:
+            raise Fail('no ACK of the segment delivered at %s' % at(when))
+        delays.append((hit - when) / MS)
+    worst, p99, mean = max(delays), percentile(delays, 0.99), sum(delays) / len(delays)
+    if a.delays:
+        with open(a.delays, 'w') as f:
+            f.write('# delivery (machine s) and delay (ms) of each segment; the flips during the loop, network clock: %s\n'
+                    % flips)
+            f.write('\n'.join('%.6f %.3f' % (w / S, d) for (w, _), d in zip(queued, delays)) + '\n')
+    verdict = 'within' if worst <= 200 and p99 <= 40 else 'OVER'
+    return 'gc=%s segments=%d max=%.3fms p99=%.3fms mean=%.3fms loop=%d %s machine=%.3f' % (
+        a.gc, len(delays), worst, p99, mean, done, verdict, s.now / S)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('measure', choices=('m-refill', 'm-ack'))
+    ap.add_argument('--quux', required=True)
+    ap.add_argument('--band', required=True)
+    ap.add_argument('--prom', required=True)
+    ap.add_argument('--file-root', required=True)
+    ap.add_argument('--engine', default='rtl', choices=('rtl', 'micro'))
+    ap.add_argument('--board', choices=sorted(BOARDS), default='kria')
+    ap.add_argument('--rate', type=int, default=0, help='Ethernet frames a second of machine time')
+    ap.add_argument('--coherence', choices=('sweep', 'line-clearing'), default='sweep')
+    ap.add_argument('--workload', choices=('array', 'small'), default='array')
+    ap.add_argument('--iterations', type=int, default=100)
+    ap.add_argument('--feed-seconds', type=float, default=30.0,
+                    help='m-refill: machine seconds after the form that the frames come for')
+    ap.add_argument('--gc', choices=('on', 'off'), default='on', help='m-ack: the collector, and the loop')
+    ap.add_argument('--segments', type=int, default=1000)
+    ap.add_argument('--gap-min', type=float, default=10.0, help='m-ack: ms')
+    ap.add_argument('--gap-max', type=float, default=90.0, help='m-ack: ms')
+    ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--idle-check', action='store_true', help='m-ack: the loop with the network up and idle, then down')
+    ap.add_argument('--idle-seconds', type=int, default=10)
+    ap.add_argument('--idle-tick', action='store_true',
+                    help='m-ack, an experiment: the stopped network\'s loop with the clock\'s break every tick')
+    ap.add_argument('--echo-priority', type=int, default=None,
+                    help="m-ack, an experiment: the test echo service's process at this priority")
+    ap.add_argument('--delays', default=None, help='m-ack: each delay in ms, a line each')
+    ap.add_argument('--frames', default=None, help='every frame the band sent, with the machine time')
+    ap.add_argument('--microcycle-ns', default=None, help="the board's period unless given")
+    ap.add_argument('--terminal', default=None, help="quux's --terminal, an address:port of the run's own")
+    ap.add_argument('--rtc', type=int, default=1700000000)
+    ap.add_argument('--log', default=None, help="the machine's output; default: discarded")
+    ap.add_argument('--session-log', default=None, help='what the band sent on the control session')
+    ap.add_argument('--wall-timeout', type=float, default=1800.0)
+    a = ap.parse_args()
+    b = BOARDS[a.board]
+    work = tempfile.mkdtemp(prefix='measure-')
+    sock = os.path.join(work, 's')
+    cmd = [a.quux, '-c', '/dev/null', '--' + a.engine, '--no-pace', '--rtc', str(a.rtc),
+           '--disk-pack', a.band + ',ro', '--prom', a.prom, '--file-root', a.file_root,
+           '--ethernet-socket', sock + ',clocked', '--ethernet-mac', '02:00:00:00:00:01',
+           '--microcycle-ns', a.microcycle_ns or b['ns']]
+    if a.engine == 'rtl':
+        cmd += ['--cache', str(b['cache']), '--memory-timing', b['timing']]
+    if a.terminal:
+        cmd += ['--terminal', a.terminal]
+    env = dict(os.environ, MUIR_QUUX_REVISION='16', MUIR_ETHERNET_COHERENCE=a.coherence)
+    log = open(a.log, 'wb') if a.log else subprocess.DEVNULL
+    if a.log:
+        log.write(('# MUIR_ETHERNET_COHERENCE=%s %s\n' % (a.coherence, ' '.join(cmd))).encode())
+        log.flush()
+    peer = clocked.Peer(sock, wall_timeout=a.wall_timeout)
+    m = subprocess.Popen(cmd, env=env, cwd=work, stdin=subprocess.PIPE, stdout=log, stderr=log,
+                         start_new_session=True)
+    t0 = time.time()
+    tag = ('%s %s %d %s %s' % (a.measure, a.board, a.rate, a.coherence, a.workload) if a.measure == 'm-refill'
+           else '%s %s %s %s' % (a.measure, a.engine, a.board, a.microcycle_ns or b['ns']))
+    status = 0
+    s = None
+    try:
+        peer.accept(wall_timeout=300, alive=lambda: None if m.poll() is None else 'exit %s' % m.returncode)
+        frames_log = open(a.frames, 'w') if a.frames else None
+        s = Session(peer, Params(), note=(lambda line: frames_log.write('%.6f %s\n' % (peer.now / S, line)))
+                    if frames_log else None)
+        line = m_refill(s, a) if a.measure == 'm-refill' else m_ack(s, a)
+        print('RESULT %s %s wall=%.0f' % (tag, line, time.time() - t0), flush=True)
+    except Fail as e:
+        print('FAIL %s: %s' % (tag, e), flush=True)
+        status = 1
+    except clocked.PeerError as e:
+        print('ERROR %s: harness: %s' % (tag, e), flush=True)
+        status = 2
+    finally:
+        if a.measure == 'm-ack' and a.session_log and s is not None:
+            # what the band sent on every connection, the control sessions'
+            with open(a.session_log, 'wb') as f:
+                f.write(b'\n===== connection\n'.join(x.received for x in s.conns))
+        peer.close()
+        if m.poll() is None:
+            try:
+                m.stdin.write(b'quit\n')
+                m.stdin.flush()
+                m.wait(30)
+            except (OSError, subprocess.TimeoutExpired):
+                m.kill()
+                m.wait()
+    return status
+
+
+if __name__ == '__main__':
+    sys.exit(main())

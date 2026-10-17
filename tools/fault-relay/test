@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""The fault relay's own check of its faults (QUUX's Ethernet contract,
+section 9, T4), with no tap and no band: each fault's rate over 20,000
+frames within a few standard deviations, its count equal to what it did,
+jitter keeping a direction's order, a changed byte inside the IPv4 datagram
+and nowhere else, the injected frames' types and count, the direction
+honoured, and one seed giving one plan.  Run from anywhere:
+
+  tools/fault-relay/test
+
+Exit status 0 when every check passes.  Python's standard library only.
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import struct
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+# loading the relay as a module would leave a __pycache__ beside it
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader('relay', os.path.join(HERE, 'relay'))
+spec = importlib.util.spec_from_loader('relay', loader)
+R = importlib.util.module_from_spec(spec)
+loader.exec_module(R)
+
+N = 20000
+fails = []
+
+
+def check(what, ok):
+    print('%s %s' % ('ok  ' if ok else 'FAIL', what))
+    if not ok:
+        fails.append(what)
+
+
+def ipv4_frame(k, length=100):
+    payload = bytes((k + i) & 255 for i in range(length - 34))
+    tl = 20 + len(payload)
+    head = struct.pack('!BBHHHBBH4s4s', 0x45, 0, tl, k & 0xFFFF, 0, 64, 17, 0, b'\xa9\xfe\x6c\x01', b'\xa9\xfe\x6c\x02')
+    return bytes.fromhex('020000000001020000000002') + b'\x08\x00' + head + payload
+
+
+def near(count, p, n=N):
+    """COUNT within five standard deviations of P of N."""
+    mean, sd = p * n, (n * p * (1 - p)) ** 0.5
+    return abs(count - mean) <= 5 * sd + 1
+
+
+def run(way, **kw):
+    f = R.Faults(**kw)
+    out = []
+    for k in range(N):
+        out.append(f.plan(way, ipv4_frame(k), k * 0.001))
+    return f, out
+
+
+for name, key in (('loss', 'lost'), ('duplicate', 'duplicated'), ('reorder', 'reordered'), ('corrupt', 'corrupted')):
+    for p in (1, 5, 20):
+        f, out = run('to_band', **{name: p})
+        c = f.counts['to_band'][key]
+        check('%s %d%%: %d of %d' % (name, p, c, N), near(c, p / 100))
+        if name == 'loss':
+            check('loss %d%%: the frames lost are the frames counted' % p, sum(1 for o in out if not o) == c)
+        if name == 'duplicate':
+            check('duplicate %d%%: the frames sent twice are the frames counted' % p,
+                  sum(1 for o in out if len(o) == 2) == c)
+
+# corrupt: exactly one byte changed, inside the IPv4 datagram, never the
+# Ethernet header or the padding past TL
+f = R.Faults(corrupt=100)
+good = True
+for k in range(2000):
+    frame = ipv4_frame(k, 60) + bytes(10)      # 10 bytes of padding past TL
+    (_, g), = f.plan('to_band', frame, 0.0)
+    diff = [i for i in range(len(frame)) if frame[i] != g[i]]
+    tl = struct.unpack('!H', frame[16:18])[0]
+    good = good and len(diff) == 1 and 14 <= diff[0] < 14 + tl
+check('corrupt: one byte changed, inside the datagram, in 2000 frames', good)
+arp = bytes(12) + b'\x08\x06' + bytes(28)
+check('corrupt: ARP left alone', R.Faults(corrupt=100).plan('to_band', arp, 0.0)[0][1] == arp)
+check('corrupt: not toward the machine\'s peer, from the band',
+      R.Faults(corrupt=100).counts['from_band']['corrupted'] == 0 and
+      R.Faults(corrupt=100).plan('from_band', ipv4_frame(1), 0.0)[0][1] == ipv4_frame(1))
+
+# jitter: delays from 0 to the bound, and a direction's order kept
+f, out = run('to_band', jitter=50)
+whens = [o[0][0] for o in out]
+late = [w - k * 0.001 for k, w in enumerate(whens)]
+check('jitter 50 ms: every delay within 0 to 50 ms of its frame, or behind the one before',
+      all(d >= 0 for d in late) and all(w2 >= w1 for w1, w2 in zip(whens, whens[1:])))
+check('jitter 50 ms: some frames delayed by more than 40 ms', sum(1 for d in late if d > 0.040) > 100)
+
+# direction
+f = R.Faults(loss=100, direction='from-band')
+check('direction from-band: nothing lost toward the band', f.plan('to_band', ipv4_frame(1), 0.0) != [])
+check('direction from-band: lost from the band', f.plan('from_band', ipv4_frame(1), 0.0) == [])
+f = R.Faults(loss=100, direction='to-band')
+check('direction to-band: lost toward the band', f.plan('to_band', ipv4_frame(1), 0.0) == [])
+check('direction to-band: nothing lost from the band', f.plan('from_band', ipv4_frame(1), 0.0) != [])
+
+# injection: N frames of the three types in turn, to the band's MAC, then none
+f = R.Faults(inject=100)
+band = bytes.fromhex('0200000000aa') + bytes.fromhex('020000000001') + b'\x08\x00' + bytes(46)
+got = [f.injected(band) for _ in range(120)]
+types = [struct.unpack('!H', g[12:14])[0] for g in got if g]
+check('inject 100: 100 frames, then none', len(types) == 100 and got[100] is None and f.counts['injected'] == 100)
+check('inject: 0x86DD, 0x0804 and 0x8100 in turn', types[:6] == [0x86DD, 0x0804, 0x8100] * 2)
+check('inject: to the MAC address the band sent from', all(g[:6] == band[6:12] for g in got if g))
+
+# one seed, one plan; another seed, another
+def plan(seed):
+    f = R.Faults(seed=seed, loss=5, duplicate=5, reorder=5, corrupt=1, jitter=50)
+    return [f.plan('to_band', ipv4_frame(k), k * 0.001) for k in range(2000)]
+a, b, c = plan(7), plan(7), plan(8)
+check('seed: the same seed gives the same plan, another another', a == b and a != c)
+
+print('fault-relay test: %s' % ('passed' if not fails else 'FAILED (%d)' % len(fails)))
+sys.exit(1 if fails else 0)

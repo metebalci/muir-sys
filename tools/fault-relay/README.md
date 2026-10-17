@@ -9,7 +9,11 @@ check of every Ethernet frame the band sends with its own code (section 9).
 Python's standard library only.
 
 ```
-tools/fault-relay/relay [--tap NAME[,NAME...]] [--report FILE] PATH
+tools/fault-relay/relay [--tap NAME[,NAME...]] [--report FILE]
+                        [--seed N] [--loss P] [--duplicate P] [--reorder P] [--corrupt P]
+                        [--jitter MS] [--direction to-band|from-band|both] [--inject N]
+                        [--arm-on-signal] PATH
+tools/fault-relay/test
 ```
 
 It takes a tap as the mover does, and prints the mover's line once it holds
@@ -46,15 +50,42 @@ checks every checksum again.
 **Who runs it.** `tools/lispm-check` on revision 16, for every run
 (`docs/lispm-check.md`, "The network"), and so `tools/tcp-check/run` (T2).
 
-## Still to come (E5's later slices)
+## The faults (T4)
 
-- **T4's faults** (section 9): loss of 1%, 5% and 20%, duplicates 5%,
-  reordering 5%, one changed byte inside the IPv4 datagram of 1% of the
-  frames toward the band, counted, and delay jitter of 0-50 ms, each
-  direction alone and both together, from a seed; and 100 Ethernet frames of
-  other types (0x86DD, 0x0804, 0x8100) injected toward the band, one after
-  each frame the band sends. They go in `Relay.to_band` and `Relay.to_tap`,
-  with flags named then (proposed: `--seed`, and one flag for each fault).
+Section 9's fault matrix, each fault drawn by one random generator seeded by
+`--seed` (1 by default), in the order the frames come:
+
+| Flag | What it does to a frame on a direction the faults take |
+|---|---|
+| `--loss P` | loses it, P percent of the time |
+| `--duplicate P` | sends it twice, the copy 1 ms after |
+| `--reorder P` | holds it 20 ms, so that the frames after it overtake it |
+| `--corrupt P` | toward the band only, as section 9 has it: changes one byte inside its IPv4 datagram, the bytes from the IPv4 header to its total length, never the Ethernet header or padding; ARP is left alone |
+| `--jitter MS` | delays it by a uniform 0 to MS ms, a direction's frames kept in their order (reordering is `--reorder`'s) |
+| `--direction D` | which directions the faults take: `to-band`, `from-band` or `both` (the default) |
+| `--inject N` | sends N Ethernet frames of other types toward the band, 0x86DD, 0x0804 and 0x8100 in turn, to the MAC address the band sends from, one after each frame the band sends; after the faults, so that none is lost |
+| `--arm-on-signal` | no fault and no injection until SIGUSR2: `tools/tcp-check/run` reads the band's totals first, and a setup's cold boot runs clean |
+
+The report's `faults` gives what was done each way (lost, duplicated,
+reordered, corrupted, delayed), the frames injected and the settings, and
+each direction's `resent`: the TCP segments with data, SYN or FIN that end at
+or before the furthest sequence number already seen on their connection that
+way, the band's resends from it and Linux's toward it (section 9: "resend
+counts are reported"). `tools/lispm-check` passes `LISPM_CHECK_RELAY_FLAGS`
+to the relay it starts, and `tools/tcp-check/run --faults` sets it.
+
+`tools/fault-relay/test` checks the faults with no tap and no band: each
+rate over 20,000 frames within five standard deviations, the frames lost and
+sent twice equal to the counts, the changed byte inside the datagram and
+nowhere else, ARP untouched, jitter within its bound and in order, the
+directions, the injected frames' count, types and address, and one seed one
+plan. Planted faults in the relay, each failing it: a byte changed anywhere
+in the frame, a lost frame counted and sent, the injected frames counted and
+not made, a corruption not counted (which also fails T4's `totals` against
+the band, `tools/tcp-check/`).
+
+## Still to come
+
 - **The check shown to catch a bad band**: run against a muir build with T5's
   end-to-end plant "the TCP checksum not filled in", the relay must count
   bad frames. On a good band it finds none (T2), which shows only that it

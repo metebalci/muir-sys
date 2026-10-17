@@ -91,6 +91,8 @@ Defaults, each overridden by its flag or an environment variable:
   LISPM_CHECK_TAPS          the tap indexes it picks from, as N, LO-HI or a
                             comma-separated list of them: the pool's host-only
                             taps, those with a /30 of their own
+  LISPM_CHECK_RELAY_FLAGS   the fault relay's fault flags (--loss and the
+                            rest, tools/fault-relay/README.md): none
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
@@ -488,8 +490,11 @@ class TapLink:
             if getattr(self, 'err', None):
                 self.err.close()
             self.err = open(os.path.join(self.sock_dir, 'relay.err'), 'w+')
-            self.proc = subprocess.Popen([sys.executable, RELAY, '--tap', names, '--report', self.report,
-                                          self.path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            # LISPM_CHECK_RELAY_FLAGS: the relay's faults, for T4 (section 9);
+            # none by default, so that the relay only moves and counts
+            faults = os.environ.get('LISPM_CHECK_RELAY_FLAGS', '').split()
+            self.proc = subprocess.Popen([sys.executable, RELAY, '--tap', names, '--report', self.report]
+                                         + faults + [self.path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                          stderr=self.err, start_new_session=True, text=True)
             line = self.proc.stdout.readline().strip()
             if line:
