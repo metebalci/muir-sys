@@ -43,7 +43,8 @@
 # and their checks, tools/cross-build/ (its README), and the Ethernet
 # segment scripts with their stand-in band, tools/segment-check/ (its README),
 # whose modules leave a __pycache__ too, and the fault relay,
-# tools/fault-relay/, and T2, tools/tcp-check/ (their READMEs).
+# tools/fault-relay/, T2, tools/tcp-check/, and the gate G-TCP, tools/gtcp/
+# (their READMEs).
 /tools/*
 !/tools/lispm-check
 !/tools/lispm-check-test/
@@ -61,6 +62,7 @@
 !/tools/segment-check/
 !/tools/fault-relay/
 !/tools/tcp-check/
+!/tools/gtcp/
 /tools/cross-check/__pycache__/
 /tools/segment-check/__pycache__/
 

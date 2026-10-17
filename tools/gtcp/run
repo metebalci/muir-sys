@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""G-TCP: the gate before the tools switch to TCP (QUUX's Ethernet contract,
+section 8 R2; amendment 2, 5.3).
+
+usage:
+  tools/gtcp/run --units FILE [--taps LIST] [--out DIR] [--faulty 'RELAY-FLAGS']
+                 [--order chaos,tcp,chaos] [-- LISPM-CHECK-ARGS...]
+  tools/gtcp/run --compare A B [--out DIR]       the soak's two runs, case by case
+
+Each unit of --units (below) runs three times, holding one tap: twice over
+Chaos and once over TCP (lispm-check's --network, through
+LISPM_CHECK_NETWORK, and LISPM_CHECK_TAPS naming the unit's tap, so each run
+resumes that index's checkpoint, made by the first run on it when there is
+none).  Units run in parallel, one on each tap of --taps (tap indexes, N,
+LO-HI or a comma-separated list; default 8-15).  Every case is a verdict line
+lispm-check prints (PASS, FAIL or ERROR, with its form), keyed by the unit,
+its place in the unit's output and its form; a unit with no such lines (an
+assembler-check check, a command) is one case, its verdict the run's exit
+status.  A case missing from a run (the run ended before it) is a fail.
+
+The verdict compared is pass or fail, PASS against anything else; printed
+values, and FAIL against ERROR, are not compared (they are reported).  Then:
+
+  flaky        the two Chaos runs differ: listed, reported and not gated
+  difference   the two Chaos runs agree and the TCP run does not
+  equal        all three agree
+
+With --faulty FLAGS a fourth run goes over TCP through the fault relay with
+those faults (LISPM_CHECK_RELAY_FLAGS; section 9 T4's TELNET suite at 5% loss
+and 5% reorder is '--loss 5 --reorder 5 --seed 1'), and is judged as the TCP
+run is, against the Chaos runs' pass/fail.
+
+The units file, one a line, # for comments:
+
+  lispm-check CASES [ARG...]      tools/lispm-check ARG... CASES
+  system-check CHECK [ARG...]     tools/system-check/run CHECK -- ... ARG...
+  microcode-check CHECK [ARG...]  tools/microcode-check/run CHECK -- ... ARG...
+                                  (ARG: the check's own lispm-check arguments,
+                                  its README's --compile, --files, --timeout,
+                                  after the gate's, so that they win)
+  assembler-check CHECK [ARG...]  tools/assembler-check/run ARG... CHECK
+  command NAME CMD [ARG...]       any command; it gets the run's environment,
+                                  GTCP_RUN (chaos1, tcp, chaos2, faulty) and
+                                  GTCP_LISPM_CHECK_ARGS (the arguments after --)
+
+Relative paths are the tree's.  The arguments after -- go to every run's
+lispm-check (--band, --quux, --ubin, --engine, --file-server ...; through the
+suites' own --).  A unit's runs write DIR/UNIT/RUN.out; the report is
+DIR/report.txt and DIR/report.json, and its last line counts the cases.
+
+--compare A B takes two runs of the soak matrix, each a directory of
+lispm-check outputs (*.out, by their path below A and below B), and lists the
+cases whose pass/fail differ, which section 8 R2 then runs again on one
+index both ways (as units of this tool) before they count.
+
+Exit status: 0 when no case is a difference, 1 when one is, 2 when the run
+itself failed.  Python's standard library only.
+"""
+
+import argparse
+import json
+import os
+import queue
+import re
+import shlex
+import subprocess
+import sys
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOLS = os.path.dirname(HERE)
+TREE = os.path.dirname(TOOLS)
+# the suites' runners are this tree's; GTCP_TOOLS names others, for the
+# self-test's stand-ins
+SUITES = os.environ.get('GTCP_TOOLS') or TOOLS
+VERDICT = re.compile(r'^(PASS|FAIL|ERROR)  (.*?)  -> ', re.M)
+
+
+class Usage(Exception):
+    pass
+
+
+def tap_list(spec):
+    out = []
+    for part in spec.split(','):
+        m = re.fullmatch(r'\s*(\d+)\s*(?:-\s*(\d+)\s*)?', part)
+        if not m:
+            raise Usage('--taps: %r is not N, LO-HI or a list of them' % spec)
+        lo = int(m.group(1))
+        hi = int(m.group(2)) if m.group(2) else lo
+        out.extend(range(lo, hi + 1))
+    return out
+
+
+def tree_path(p):
+    return p if os.path.isabs(p) else os.path.join(TREE, p)
+
+
+def read_units(path):
+    """[(name, argv, takes_lispm_check_args_after_dashdash)]"""
+    units, seen = [], set()
+    for n, line in enumerate(open(path), 1):
+        line = line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        w = shlex.split(line)
+        kind, rest = w[0], w[1:]
+        if kind == 'lispm-check' and rest:
+            cases, args = tree_path(rest[0]), rest[1:]
+            name = 'lispm-check:' + os.path.splitext(os.path.basename(cases))[0]
+            argv = [sys.executable, os.path.join(TOOLS, 'lispm-check')] + args
+            unit = (name, argv, 'tail', [cases])
+        elif kind in ('system-check', 'microcode-check') and rest:
+            # a check's own lispm-check arguments (its README's: --compile,
+            # --files, --timeout) follow the gate's, so that they win
+            name = '%s:%s' % (kind, rest[0])
+            unit = (name, [os.path.join(SUITES, kind, 'run'), rest[0]], 'dashdash', rest[1:])
+        elif kind == 'assembler-check' and rest:
+            name = 'assembler-check:%s' % rest[0]
+            unit = (name, [sys.executable, os.path.join(SUITES, 'assembler-check', 'run')] + rest[1:] + [rest[0]],
+                    'dashdash', [])
+        elif kind == 'command' and len(rest) >= 2:
+            name = 'command:' + rest[0]
+            unit = (name, [tree_path(rest[1]) if os.path.exists(tree_path(rest[1])) else rest[1]] + rest[2:],
+                    'none', [])
+        else:
+            raise Usage('%s:%d: not a unit: %s' % (path, n, line))
+        k, base = 2, unit[0]
+        while unit[0] in seen:
+            unit = ('%s#%d' % (base, k),) + unit[1:]
+            k += 1
+        seen.add(unit[0])
+        units.append(unit)
+    if not units:
+        raise Usage('%s: no unit' % path)
+    return units
+
+
+def cases_of(text, status):
+    """[(key, verdict)] of one run's output: its verdict lines, each keyed by
+    its form and its place among the lines of that form; or, with none, the
+    run as one case."""
+    found = VERDICT.findall(text)
+    if not found:
+        return [(('(the run)', 1), 'PASS' if status == 0 else 'FAIL status %d' % status)]
+    out, count = [], {}
+    for verdict, form in found:
+        count[form] = count.get(form, 0) + 1
+        out.append(((form, count[form]), verdict))
+    return out
+
+
+def passed(v):
+    return v == 'PASS'
+
+
+def judge(runs):
+    """RUNS: {run name: [(key, verdict)]}, run names chaos1, chaos2, tcp and
+    faulty.  The cases in order, each (key, {run: verdict}, kind, detail)."""
+    keys = []
+    for r in runs.values():
+        for k, _ in r:
+            if k not in keys:
+                keys.append(k)
+    table = []
+    for k in keys:
+        v = {name: dict(r).get(k, 'MISSING') for name, r in runs.items()}
+        c1, c2 = passed(v['chaos1']), passed(v['chaos2'])
+        detail = []
+        if c1 != c2:
+            kind = 'flaky'
+        else:
+            off = [n for n in ('tcp', 'faulty') if n in v and passed(v[n]) != c1]
+            kind = 'difference' if off else 'equal'
+            detail = off
+        table.append((k, v, kind, detail))
+    return table
+
+
+def run_unit(unit, tap, order, a, rest, out_dir):
+    name, argv, mode, tail = unit
+    d = os.path.join(out_dir, re.sub(r'[^A-Za-z0-9_.#:-]', '_', name).replace(':', '-'))
+    os.makedirs(d, exist_ok=True)
+    runs, info = {}, {}
+    seq = list(order) + (['faulty'] if a.faulty else [])
+    counter = {}
+    for r in seq:
+        net = 'chaos' if r == 'chaos' else 'tcp'
+        counter[r] = counter.get(r, 0) + 1
+        label = 'chaos%d' % counter[r] if r == 'chaos' else r
+        # a command unit finds the run in GTCP_RUN and lispm-check's
+        # arguments, shell-quoted, in GTCP_LISPM_CHECK_ARGS
+        env = dict(os.environ, LISPM_CHECK_NETWORK=net, LISPM_CHECK_TAPS=str(tap), GTCP_RUN=label,
+                   GTCP_LISPM_CHECK_ARGS=' '.join(shlex.quote(x) for x in rest))
+        env.pop('LISPM_CHECK_RELAY_FLAGS', None)
+        if r == 'faulty':
+            env['LISPM_CHECK_RELAY_FLAGS'] = a.faulty
+        if mode == 'tail':
+            cmd = argv + rest + tail
+        elif mode == 'dashdash':
+            cmd = argv + (['--'] + rest + tail if rest or tail else [])
+        else:
+            cmd = argv
+        t0 = time.time()
+        with open(os.path.join(d, label + '.out'), 'w') as f:
+            f.write('# %s %s\n# tap %d, network %s\n' % (
+                ' '.join('%s=%s' % (k, env[k]) for k in ('LISPM_CHECK_NETWORK', 'LISPM_CHECK_TAPS', 'GTCP_RUN')
+                         + (('LISPM_CHECK_RELAY_FLAGS',) if r == 'faulty' else ())),
+                ' '.join(shlex.quote(x) for x in cmd), tap, net))
+            f.flush()
+            p = subprocess.run(cmd, env=env, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
+                               cwd=TREE)
+        text = open(os.path.join(d, label + '.out')).read()
+        runs[label] = cases_of(text, p.returncode)
+        info[label] = {'status': p.returncode, 'seconds': round(time.time() - t0, 1), 'cases': len(runs[label])}
+    return runs, info
+
+
+def report(results, out_dir, a):
+    lines, data = [], []
+    n = {'equal': 0, 'flaky': 0, 'difference': 0}
+    for name, tap, runs, info in results:
+        table = judge(runs)
+        statuses = ', '.join('%s exit %d in %.0f s' % (r, i['status'], i['seconds']) for r, i in info.items())
+        lines.append('== %s (tap %d): %s' % (name, tap, statuses))
+        # a check that fails in every run is equal, and gates nothing: said,
+        # so that a check run without its own flags (README) is seen
+        failing = [k for k, v, kind, _ in table if not any(passed(x) for x in v.values())]
+        if failing:
+            lines.append('FAILS-EVERYWHERE  %d of %d cases fail in every run (equal, not gated): are the check\'s own'
+                         ' flags given?' % (len(failing), len(table)))
+            n['fails-everywhere'] = n.get('fails-everywhere', 0) + len(failing)
+        for key, v, kind, detail in table:
+            n[kind] += 1
+            if kind != 'equal' or any(x != v['chaos1'] for x in v.values()):
+                lines.append('%-10s %s  [%s]%s' % (kind.upper() if kind != 'equal' else 'equal', key[0][:120],
+                                                    ', '.join('%s %s' % (r, x) for r, x in v.items()),
+                                                    ' off: ' + ','.join(detail) if detail else ''))
+            data.append({'unit': name, 'tap': tap, 'case': key[0], 'nth': key[1], 'kind': kind, 'verdicts': v})
+        data.append({'unit': name, 'tap': tap, 'runs': info})
+    total = n['equal'] + n['flaky'] + n['difference']
+    last = ('gtcp: %d cases: %d equal, %d flaky (listed, not gated), %d differences%s; %d fail in every run'
+            % (total, n['equal'], n['flaky'], n['difference'], ' (gated)' if n['difference'] else '',
+               n.get('fails-everywhere', 0)))
+    lines.append(last)
+    with open(os.path.join(out_dir, 'report.txt'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    with open(os.path.join(out_dir, 'report.json'), 'w') as f:
+        json.dump(data, f, indent=1)
+    print('\n'.join(lines), flush=True)
+    return n
+
+
+def compare(a):
+    """The soak's two runs, A and B, case by case."""
+    def collect(root):
+        out = {}
+        for dirpath, _, files in os.walk(root):
+            for fn in sorted(files):
+                if fn.endswith('.out'):
+                    p = os.path.join(dirpath, fn)
+                    rel = os.path.relpath(p, root)
+                    for key, v in cases_of(open(p, errors='replace').read(), 0):
+                        if key[0] != '(the run)':
+                            out[(rel,) + key] = v
+        return out
+    A, B = collect(a.compare[0]), collect(a.compare[1])
+    diff = [k for k in sorted(set(A) | set(B)) if passed(A.get(k, 'MISSING')) != passed(B.get(k, 'MISSING'))]
+    lines = ['DIFFERS  %s: %s  [A %s, B %s]' % (k[0], k[1][:120], A.get(k, 'MISSING'), B.get(k, 'MISSING'))
+             for k in diff]
+    lines.append('gtcp compare: %d cases, %d differ; each is run again on one index, both ways, before it counts'
+                 % (len(set(A) | set(B)), len(diff)))
+    os.makedirs(a.out, exist_ok=True)
+    with open(os.path.join(a.out, 'compare.txt'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+    print('\n'.join(lines))
+    return 1 if diff else 0
+
+
+def main():
+    argv = sys.argv[1:]
+    rest = []
+    if '--' in argv:
+        i = argv.index('--')
+        argv, rest = argv[:i], argv[i + 1:]
+    p = argparse.ArgumentParser(description='G-TCP (section 8 R2).')
+    p.add_argument('--units')
+    p.add_argument('--taps', default='8-15')
+    p.add_argument('--out', default=None)
+    p.add_argument('--faulty', default=None, help="a fourth run over TCP with these fault relay flags")
+    p.add_argument('--order', default='chaos,tcp,chaos', help='the three runs, in their order')
+    p.add_argument('--compare', nargs=2, metavar=('A', 'B'))
+    a = p.parse_args(argv)
+    a.out = os.path.abspath(a.out or os.path.join(TREE, 'run', 'gtcp', time.strftime('%Y%m%d-%H%M%S')))
+    try:
+        if a.compare:
+            return compare(a)
+        if not a.units:
+            raise Usage('--units FILE, or --compare A B')
+        order = a.order.split(',')
+        if sorted(order) != ['chaos', 'chaos', 'tcp']:
+            raise Usage('--order: two chaos and one tcp, in any order')
+        units = read_units(a.units)
+        taps = tap_list(a.taps)
+        os.makedirs(a.out, exist_ok=True)
+    except Usage as e:
+        print('gtcp: %s' % e, file=sys.stderr)
+        return 2
+    print('gtcp: %d units on taps %s, runs %s%s; output in %s' % (
+        len(units), ','.join(map(str, taps)), a.order, ' + faulty' if a.faulty else '', a.out), flush=True)
+    work = queue.Queue()
+    for u in units:
+        work.put(u)
+    results, lock, errors = {}, threading.Lock(), []
+
+    def worker(tap):
+        while True:
+            try:
+                u = work.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                runs, info = run_unit(u, tap, order, a, rest, a.out)
+                with lock:
+                    results[u[0]] = (u[0], tap, runs, info)
+                    print('gtcp: %s done on tap %d: %s' % (u[0], tap, ', '.join(
+                        '%s %d cases exit %d' % (r, i['cases'], i['status']) for r, i in info.items())), flush=True)
+            except Exception as e:
+                with lock:
+                    errors.append('%s: %s' % (u[0], e))
+    threads = [threading.Thread(target=worker, args=(t,)) for t in taps[:len(units)]]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    n = report([results[u[0]] for u in units if u[0] in results], a.out, a)
+    for e in errors:
+        print('gtcp: ERROR %s' % e, file=sys.stderr)
+    if errors:
+        return 2
+    return 1 if n['difference'] else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

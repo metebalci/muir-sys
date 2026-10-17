@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""The self-test of tools/gtcp/run, with no band: stand-in suites (command
+units) print lispm-check's verdict lines as each run's environment says, and
+the report must call each planted case what it is.
+
+  tools/gtcp/test
+
+  stable       every case passes in every run                 equal
+  transport    one case fails over TCP alone                  a difference, gated (exit 1)
+  flaky        one case fails in the second Chaos run alone   flaky, listed, not gated
+  cut          the TCP run ends after its first case          its missing cases differences
+  whole        no verdict lines; exit 1 over TCP              a difference
+  kinds        FAIL over Chaos, ERROR over TCP                equal (printed kinds not gated), and said
+               to fail in every run
+  faulty       one case fails in the faulty run alone         a difference, off: faulty
+  only-flaky   a units file with the flaky unit alone         exit 0: flaky is not gated
+  compare      two soak runs: the case whose pass/fail differs listed, exit 1
+  own-flags    a check's own lispm-check flags reach each of its runs, after the gate's
+
+Exit status 0 when every check passes.  Python's standard library only.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RUN = os.path.join(HERE, 'run')
+
+SUITE = r'''#!/bin/sh
+# a stand-in suite: SHAPE, the network and the run (GTCP_RUN) choose its lines
+net=$LISPM_CHECK_NETWORK run=$GTCP_RUN
+v() { echo "$1  $2  -> x"; }
+case $1 in
+stable) v PASS "(a)"; v PASS "(b)"; v PASS "(a)" ;;
+transport) v PASS "(a)"; if [ $net = tcp ]; then v FAIL "(t)"; else v PASS "(t)"; fi ;;
+flaky) v PASS "(a)"; if [ $run = chaos2 ]; then v FAIL "(f)"; else v PASS "(f)"; fi ;;
+cut) v PASS "(a)"; [ $net = tcp ] && exit 2; v PASS "(b)"; v PASS "(c)" ;;
+whole) echo "no verdict lines"; [ $net = tcp ] && exit 1; exit 0 ;;
+kinds) if [ $net = tcp ]; then v ERROR "(k)"; else v FAIL "(k)"; fi ;;
+faulty) v PASS "(a)"; if [ $run = faulty ]; then v FAIL "(q)"; else v PASS "(q)"; fi ;;
+esac
+'''
+
+fails = []
+
+
+def check(what, ok):
+    print('%s %s' % ('ok  ' if ok else 'FAIL', what))
+    if not ok:
+        fails.append(what)
+
+
+def gtcp(d, shapes, *extra):
+    units = os.path.join(d, 'units-%s' % '-'.join(shapes))
+    with open(units, 'w') as f:
+        for s in shapes:
+            f.write('command %s %s %s\n' % (s, os.path.join(d, 'suite'), s))
+    out = os.path.join(d, 'out-%s' % '-'.join(shapes))
+    p = subprocess.run([sys.executable, RUN, '--units', units, '--taps', '8-9', '--out', out] + list(extra),
+                       capture_output=True, text=True)
+    data = json.load(open(os.path.join(out, 'report.json')))
+    kinds = {}
+    for r in data:
+        if 'kind' in r:
+            kinds.setdefault(r['unit'].split(':', 1)[1], []).append((r['case'], r['kind']))
+    return p.returncode, kinds, p.stdout
+
+
+d = tempfile.mkdtemp(prefix='gtcp-test-')
+with open(os.path.join(d, 'suite'), 'w') as f:
+    f.write(SUITE)
+os.chmod(os.path.join(d, 'suite'), 0o755)
+
+status, k, text = gtcp(d, ['stable', 'transport', 'flaky', 'cut', 'whole', 'kinds'])
+check('stable: every case equal', {x for _, x in k['stable']} == {'equal'} and len(k['stable']) == 3)
+check('transport: the TCP-only failure a difference, the rest equal',
+      dict(k['transport']) == {'(a)': 'equal', '(t)': 'difference'})
+check('flaky: the second Chaos run\'s failure flaky', dict(k['flaky']) == {'(a)': 'equal', '(f)': 'flaky'})
+check('cut: the cases missing over TCP differences',
+      dict(k['cut']) == {'(a)': 'equal', '(b)': 'difference', '(c)': 'difference'})
+check('whole: a run with no verdict lines one case, a difference', dict(k['whole']) == {'(the run)': 'difference'})
+check('kinds: FAIL against ERROR equal, and reported', dict(k['kinds']) == {'(k)': 'equal'}
+      and 'chaos1 FAIL' in text and 'tcp ERROR' in text)
+check('exit 1 with differences', status == 1)
+check('the count line', 'gtcp: 12 cases: 7 equal, 1 flaky (listed, not gated), 4 differences (gated); 1 fail in every run' in text)
+check('a case failing in every run is said (kinds)', 'FAILS-EVERYWHERE  1 of 1 cases' in text)
+
+status, k, text = gtcp(d, ['flaky'])
+check('only-flaky: exit 0, flaky not gated', status == 0 and dict(k['flaky'])['(f)'] == 'flaky')
+
+status, k, text = gtcp(d, ['faulty'], '--faulty', '--loss 5 --reorder 5 --seed 1')
+check('faulty: the faulty run\'s failure a difference, off faulty',
+      dict(k['faulty']) == {'(a)': 'equal', '(q)': 'difference'} and 'off: faulty' in text and status == 1)
+status, k, text = gtcp(d, ['faulty'])
+check('faulty: no fourth run without --faulty', dict(k['faulty']) == {'(a)': 'equal', '(q)': 'equal'} and status == 0)
+
+out = os.path.join(d, 'out-stable-transport-flaky-cut-whole-kinds')
+heads = {r: open(os.path.join(out, 'command-transport', r + '.out')).readline() for r in ('chaos1', 'tcp', 'chaos2')}
+taps = {h.split('LISPM_CHECK_TAPS=')[1].split()[0] for h in heads.values()}
+check('a unit\'s three runs hold one tap, each naming its network',
+      len(taps) == 1 and taps <= {'8', '9'} and 'LISPM_CHECK_NETWORK=tcp' in heads['tcp']
+      and 'LISPM_CHECK_NETWORK=chaos' in heads['chaos1'] and 'LISPM_CHECK_NETWORK=chaos' in heads['chaos2'])
+
+# a check's own arguments reach every run of it: stand-in runners pass only
+# when --compile and --timeout 7200 come after the gate's arguments
+STANDIN = r'''#!/bin/sh
+# a stand-in suite runner: CHECK -- ARGS; passes with the check's own flags last
+check=$1; shift; [ "$1" = -- ] && shift
+args=" $* "
+case "$args" in *" --engine micro "*" --compile --timeout 7200 "*) v=PASS ;; *) v=FAIL ;; esac
+echo "$v  ($check own-flags)  -> x"
+'''
+tools = os.path.join(d, 'tools')
+for suite in ('system-check', 'microcode-check'):
+    os.makedirs(os.path.join(tools, suite), exist_ok=True)
+    with open(os.path.join(tools, suite, 'run'), 'w') as f:
+        f.write(STANDIN)
+    os.chmod(os.path.join(tools, suite, 'run'), 0o755)
+units = os.path.join(d, 'units-own')
+with open(units, 'w') as f:
+    f.write('system-check fef --compile --timeout 7200\nmicrocode-check m --compile --timeout 7200\n')
+out = os.path.join(d, 'out-own')
+p = subprocess.run([sys.executable, RUN, '--units', units, '--taps', '8-9', '--out', out, '--', '--engine', 'micro',
+                    '--timeout', '120'], capture_output=True, text=True, env=dict(os.environ, GTCP_TOOLS=tools))
+rows = [r for r in json.load(open(os.path.join(out, 'report.json'))) if 'kind' in r]
+check('a check\'s own flags reach its runs, after the gate\'s',
+      p.returncode == 0 and len(rows) == 2 and all(set(r['verdicts'].values()) == {'PASS'} for r in rows))
+
+# --compare: two soak runs, case by case
+for side, lines in (('A', ['PASS  (a)  -> 1', 'PASS  (b)  -> 2', 'FAIL  (c)  -> 3']),
+                    ('B', ['PASS  (a)  -> 1', 'FAIL  (b)  -> 9', 'ERROR  (c)  -> 3'])):
+    os.makedirs(os.path.join(d, 'soak', side, 'lane1'), exist_ok=True)
+    with open(os.path.join(d, 'soak', side, 'lane1', 'x.out'), 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+p = subprocess.run([sys.executable, RUN, '--compare', os.path.join(d, 'soak', 'A'), os.path.join(d, 'soak', 'B'),
+                    '--out', os.path.join(d, 'soak', 'out')], capture_output=True, text=True)
+check('compare: the one case whose pass/fail differs listed, exit 1',
+      p.returncode == 1 and 'DIFFERS  lane1/x.out: (b)' in p.stdout and '(c)' not in p.stdout.split('gtcp compare')[0]
+      and '3 cases, 1 differ' in p.stdout)
+
+print('gtcp test: %s (%s)' % ('passed' if not fails else 'FAILED (%d)' % len(fails), d))
+sys.exit(1 if fails else 0)

@@ -2187,3 +2187,15 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
 - **`tools/segment-check/measure`** (new; `tools/segment-check/README.md`,
   "The measurements"): section 15's M-refill (`m_refill`, `:110`; the boards,
   `BOARDS`, `:56`) and M-ack (`m_ack`, `:183`) on the clocked socket.
+- **`tools/gtcp/run`** (new; its README): the gate G-TCP (QUUX's Ethernet
+  contract, section 8 R2). Each unit of a units file (`read_units`,
+  `tools/gtcp/run:100`), a lispm-check case file or a check of system-check,
+  microcode-check or assembler-check with its own flags, runs over Chaos, TCP
+  and Chaos again on one tap, resuming that index's checkpoint (`run_unit`,
+  `:181`), and with `--faulty` once more over TCP through the fault relay.
+  Each verdict line is a case (`cases_of`, `:140`), and its pass/fail is
+  compared (`judge`, `:158`): the two Chaos runs differing make it flaky,
+  listed and not gated; the TCP run alone differing makes it a difference,
+  gated; a case failing in every run is said (`report`, `:220`). `--compare`
+  lists the cases two soak runs differ on (`compare`, `:255`).
+  `tools/gtcp/test` (new) checks it on stand-in suites.
