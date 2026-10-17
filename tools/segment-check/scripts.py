@@ -260,9 +260,8 @@ def handshake(s):
 # marker is built by FORMAT from its pieces, so the listener's echo of the
 # typed form never contains it.
 #
-# PLACEHOLDERS: the Lisp names below are not the band's.  muir-sys names the
-# test switch and the driver's totals at E4, here and nowhere else; the
-# stand-in band answers these forms by this table.
+# The Lisp names below are the band's (package INTERNET, SYS: NETWORK; IP;),
+# here and nowhere else; the stand-in band answers these forms by this table.
 #
 # Each form is a %-template: its %d are the arguments ask() gives, and a
 # literal % is written %%.
@@ -270,48 +269,48 @@ def handshake(s):
 # only the names are placeholders.
 CONTROL = {
     # The test echo service's switch (section 7): port 7 opens.
-    'echo-on': ('(progn (setq net:*test-echo-service* t) (format t "~%%{sc-~a}~%%" "echo-on"))',
+    'echo-on': ('(progn (setq ip:*test-echo-service* t) (format t "~%%{sc-~a}~%%" "echo-on"))',
                 r'\{sc-echo-on\}'),
     # The driver's totals of status 241 <7:4>, the type filter, and <15:9>,
     # the IPv4 checks (section 5.1).
-    'totals': ('(format t "~%%{sc-totals ~d ~d}~%%" (net:type-filter-total) (net:ipv4-checks-total))',
+    'totals': ('(format t "~%%{sc-totals ~d ~d}~%%" (ip:type-filter-total) (ip:ipv4-checks-total))',
                r'\{sc-totals (\d+) (\d+)\}'),
     # The last condition the test echo service's stream signalled (section
     # 7), by name; NIL for none.
-    'condition': ('(format t "~%%{sc-~a ~a}~%%" "condition" (net:test-echo-service-condition))',
+    'condition': ('(format t "~%%{sc-~a ~a}~%%" "condition" (ip:test-echo-service-condition))',
                   r'\{sc-condition (\S+)\}'),
     # A close by the band of the connection whose foreign port is the
     # argument: the application's own close, the stream's :CLOSE without
     # abort, not :EOF.  The band then sends on it only what TCP sends: a
     # later close of that stream by its server, with abort or without,
     # sends nothing (section 9, T1, Close; F36).
-    'close': ('(progn (net:close-connection-from-port %d) (format t "~%%{sc-~a ~d}~%%" "closed" %d))',
+    'close': ('(progn (ip:close-connection-from-port %d) (format t "~%%{sc-~a ~d}~%%" "closed" %d))',
               r'\{sc-closed (\d+)\}'),
     # The ISN hook: NIL, or an ISN as on the wire, 0 to 2^32 - 1 (a bignum
     # above QUUX's largest fixnum; the band converts it once).  The next SYN
     # the band answers with a SYN-ACK takes it, and it is then NIL; a SYN
     # dropped or refused leaves it set (section 9, T1, Sequence wrap; F6,
     # F36).
-    'isn-next': ('(progn (setq net:*isn-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "isn-set"))',
+    'isn-next': ('(progn (setq ip:*isn-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "isn-set"))',
                  r'\{sc-isn-set\}'),
     # The R2 hook: NIL, or a number of seconds.  The next connection the
     # test echo service accepts gets it as its R2, through section 5.5's
     # keyword (MUST-21), and it is then NIL (F41).
-    'r2-next': ('(progn (setq net:*r2-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "r2-set"))',
+    'r2-next': ('(progn (setq ip:*r2-of-next-connection* %d) (format t "~%%{sc-~a}~%%" "r2-set"))',
                 r'\{sc-r2-set\}'),
     # The urgent state of the connection whose foreign port is the
     # argument: two numbers, 1 or 0 for urgent data waiting or not, and how
     # much, the octets from the next one the server reads up to the urgent
     # pointer, those not yet received included; "0 0" when it has no urgent
     # pointer or the server has read up to it (section 5.5; F32, F36).
-    'urgent': ('(multiple-value-bind (w n) (net:urgent-state-of-port %d) '
+    'urgent': ('(multiple-value-bind (w n) (ip:urgent-state-of-port %d) '
                '(format t "~%%{sc-~a ~d ~d}~%%" "urgent" (if w 1 0) (or n 0)))',
                r'\{sc-urgent (\d+) (\d+)\}'),
     # The band's ping of a dotted address: one echo request.  It waits at
     # least 1 s for the reply that matches it by identifier and sequence,
     # ignores any other, and reports that reply's identifier and sequence,
     # or nothing (NIL NIL) (section 5.4; F5, F36).
-    'ping': ('(multiple-value-bind (id seq) (net:ping "%d.%d.%d.%d") '
+    'ping': ('(multiple-value-bind (id seq) (ip:ping "%d.%d.%d.%d") '
              '(format t "~%%{sc-~a ~a ~a}~%%" "pinged" id seq))',
              r'\{sc-pinged (\S+) (\S+)\}'),
 }
@@ -777,8 +776,9 @@ TICK = -(-S // 60)      # 1/60 s, rounded up to the nanosecond
 # ended goes a tick and this after its end is due, since the record ends in
 # the pass at the first tick at or after that, and the pass takes every
 # waiting Ethernet frame before it runs the timers (section 5.1).  A T1
-# parameter, 1 ms until E4 measures it; this is its one place.
-PASS_LATENCY = 1 * MS
+# parameter, 7 ms from E4's measurement (README.md, the pass latency); this
+# is its one place.
+PASS_LATENCY = 7 * MS
 
 # The latency sweep's log (README, "The latency sweep"): run --margins FILE
 # sets it, and every timer check then writes its margin there instead of
@@ -1066,7 +1066,23 @@ def close(s):
     after_fin(d, f3, 'CLOSING')
     if probe(s, d, 'CLOSING, then TIME-WAIT') != 'ACK':
         raise Fail('CLOSING: no TIME-WAIT after both FINs were acknowledged')
-    return 'peer first to CLOSED; band first to TIME-WAIT; CLOSING to TIME-WAIT'
+    # The test echo service at the peer's EOF: it writes back what it has
+    # read, then closes its side with FIN (section 7, F22), as the TELNET
+    # server does above.
+    ask(s, c, 'echo-on')
+    e = settled_conn(s, 40064, p.echo_port, ISN_B ^ 0x5555, 'the echo service at EOF')
+    text = b'echoed before the close'
+    e.write(text)
+    settled(s, e, 'the echo service at EOF')
+    fe = our_fin(s, e)
+    fin_acked(s, e, fe, 'the echo service at EOF')
+    f4 = band_fin(s, e, 'the echo service at EOF')
+    if f4 is None or not f4.tcp.flags & F.FIN:
+        raise Fail('the echo service at EOF: no FIN from the band by %s' % at(s.now))
+    s.run(s.now + 100 * MS)
+    if e.received != text:
+        raise Fail('the echo service at EOF: %r echoed before its FIN, not %r' % (e.received, text))
+    return 'peer first to CLOSED; band first to TIME-WAIT; CLOSING to TIME-WAIT; the echo service closes at EOF'
 
 
 def time_wait(s):
@@ -2045,7 +2061,26 @@ def wrap(s):
     other = open_connection(s, 40121, p.echo_port, ISN_A, F.opt_mss(1460), 'a connection after the hook')
     if other.irs == hook:
         raise Fail('the ISN hook used twice: the next connection\'s ISN is %d again' % hook)
-    return '1 MB echoed across both wraps (band ISN %d, peer ISN %d)' % (hook, 0xFFFFF800)
+    # Across 2^31 too: a band that holds sequence numbers as signed 32-bit
+    # numbers and compares them plainly is right across 2^32 and wrong here
+    # (E4's plant seq-no-wrap on the Lisp, whose numbers are fixnums).
+    hook2 = 0x7FFFF000
+    ask(s, c, 'isn-next', hook2)
+    h = open_connection(s, 40122, p.echo_port, 0x7FFFF800, F.opt_mss(1460), 'the connection across 2^31')
+    if h.irs != hook2:
+        raise Fail('the ISN hook set again was not used: the SYN-ACK\'s ISN is %d, not %d' % (h.irs, hook2))
+    h.ack()
+    h.auto_ack = True
+    half = data[:WRAP_BYTES // 16]
+    h.write(half)
+    deadline = s.now + WRAP_DEADLINE // 4
+    while s.now < deadline and len(h.received) < len(half) and h.rst is None:
+        s.run(s.now + p.step)
+    quiet_on(s, h, 'the echo across 2^31')
+    if h.received != half:
+        raise Fail('across 2^31: %d of %d bytes echoed%s' % (
+            len(h.received), len(half), '' if len(h.received) != len(half) else ', differing'))
+    return '1 MB echoed across both wraps (band ISN %d, peer ISN %d); 64 KB across 2^31' % (hook, 0xFFFFF800)
 
 
 def off_subnet(p):
@@ -2139,8 +2174,23 @@ def ping(s):
     if got2 != (m2.ident, m2.seq):
         raise Fail('the band\'s ping of %s reported %s, not id %d seq %d' % (
             F.ip_text(far), report_text(got2), m2.ident, m2.seq))
+    # The subnet's broadcast: the echo request goes to the Ethernet broadcast
+    # address, with no ARP request for the address (RFC 1122 section 3.3.6).
+    bc = subnet_broadcast(p)
+    s.peer_macs = (p.peer_mac, F.BROADCAST)
+    req3, mark = ping_request(s, c, bc, 'the subnet\'s broadcast %s' % F.ip_text(bc))
+    s.peer_macs = None
+    if req3.eth.dst != F.BROADCAST:
+        raise Fail('the band\'s ping of the subnet\'s broadcast %s went to Ethernet %s, not the broadcast address'
+                   % (F.ip_text(bc), F.mac_text(req3.eth.dst)))
+    m3 = req3.icmp
+    s.ipv4_to_band(F.IP_ICMP, F.icmp(F.ICMP_ECHO_REPLY, 0, m3.ident, m3.seq, m3.data))
+    got3 = ping_report(s, c, mark, s.now + 2 * S)
+    if got3 != (m3.ident, m3.seq):
+        raise Fail('the band\'s ping of the subnet\'s broadcast reported %s, not id %d seq %d' % (
+            report_text(got3), m3.ident, m3.seq))
     return 'the ping of the peer ignored two wrong replies and reported the right one (id %d seq %d); %s through ' \
-           'the gateway' % (got + (F.ip_text(far),))
+           'the gateway; the subnet\'s broadcast to the Ethernet broadcast' % (got + (F.ip_text(far),))
 
 
 ARP_LIFE = 600 * S      # section 5.2: each entry kept 10 minutes

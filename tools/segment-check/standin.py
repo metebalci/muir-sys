@@ -95,6 +95,8 @@ PLANTS = {
     'ooo-queued': ('a segment beyond RCV.NXT is kept and taken once the gap fills', 'data', 'ACK +12'),
     'ooo-silent': ('a segment beyond RCV.NXT is dropped without an ACK', 'data', 'out of order'),
     'overlap-whole': ('an overlapping segment is taken whole, its old part again', 'data', 'ACK +20'),
+    'seq-signed-no-wrap': ('sequence numbers held signed and compared plainly, wrong across 2^31', 'wrap',
+                           'across 2^31'),
     'seq-no-wrap': ('T5: sequence numbers compared without wrap', 'data', 'ACK'),
     'length-from-frame': ('the stack takes the datagram to the Ethernet frame\'s end, not to TL', 'data',
                           'control form'),
@@ -138,7 +140,10 @@ PLANTS = {
     'rst-no-signal': ('the echo service sees EOF, not the error, after an RST', 'rst',
                       'not SYS:CONNECTION-LOST'),
     'syn-estab-reset': ('a SYN in ESTABLISHED resets the connection', 'syn', 'not a challenge ACK'),
-    'syn-from-broadcast': ('T5: a SYN accepted from a broadcast source', 'syn', 'SYN from 255.255.255.255 answered'),
+    # its answer to 255.255.255.255 now goes to the Ethernet broadcast address
+    # (RFC 1122 3.3.6), which every frame's check refuses first: either
+    # reason names the address
+    'syn-from-broadcast': ('T5: a SYN accepted from a broadcast source', 'syn', '255.255.255.255'),
     'closed-port-silent': ('a closed port answers nothing', 'syn', 'closed port 9'),
     'table-9': ('a table of 9 connections', 'syn', 'ninth connection'),
     'backlog-5': ('a backlog of 5', 'syn', 'fifth half-open'),
@@ -223,6 +228,8 @@ PLANTS = {
     'ping-seq-only': ('the band\'s ping matches replies by sequence only', 'ping', 'before the reply matching'),
     'ping-reports-request': ('the band\'s ping takes any reply and reports its own request\'s fields', 'ping',
                              'before the reply matching'),
+    'broadcast-ping-arp': ('a datagram to the subnet\'s broadcast resolved by ARP, not sent to the Ethernet broadcast',
+                           'ping', 'asked ARP for'),
     'no-gateway-route': ('a datagram off the subnet sent directly, not through the gateway (section 5.3)', 'ping',
                          'not the gateway'),
     'urgent-last-octet': ('the urgent pointer taken as the last urgent octet (RFC 1122; MUST-62)', 'urgent',
@@ -435,6 +442,10 @@ class Band:
 
     def lt(self, a, b):
         """A before B modulo 2^32; the seq-no-wrap plant compares plainly."""
+        if self.plant == 'seq-signed-no-wrap':
+            # signed 32-bit numbers compared plainly: right across 2^32, wrong
+            # across 2^31
+            return (a ^ 0x80000000) < (b ^ 0x80000000)
         return a < b if self.plant == 'seq-no-wrap' else seq_lt(a, b)
 
     # ---- timers ------------------------------------------------------------
@@ -648,6 +659,12 @@ class Band:
         # Routing (section 5.3): on the subnet directly, any other through the
         # gateway; the no-gateway-route plant sends every datagram directly.
         hop = dst if self.same_subnet(dst) or self.plant == 'no-gateway-route' else self.gw
+        bcast = (int.from_bytes(self.ip, 'big') & self.mask) | (~self.mask & 0xFFFFFFFF)
+        if int.from_bytes(dst, 'big') in (bcast, 0xFFFFFFFF) and self.plant != 'broadcast-ping-arp':
+            # A broadcast goes to the Ethernet broadcast address, with no ARP
+            # (RFC 1122 section 3.3.6).
+            self.out(t, BCAST + self.mac + struct.pack('>H', ETH_IPV4) + d)
+            return
         if hop in self.arp:
             if self.plant == 'arp-cache-refresh-on-use':
                 self.learn(t, hop, self.arp[hop])

@@ -137,6 +137,36 @@ second (GC-ON; GC-OFF gives back the microcode's 60, once a second).  The schedu
 only at a sequence break or when the running process waits, so at once a second the GC
 process, whatever its priority, waited up to a second after eden filled.")
 
+;;; quux revision 16 (QUUX's Ethernet contract, 2.6): the clock's rate,
+;;; %tv-clock-rate, has one owner.  gc-on wrote 6 and gc-off 60 into it
+;;; directly, so gc-off undid the network's rate of every tick, and the
+;;; network process, at priority 25, waited up to a second behind a computing
+;;; listener.  now each user asks for a rate by name and the meter holds the
+;;; smallest asked for, 60, once a second, when nobody asks.
+(defvar clock-rate-requests nil
+  "Elements (USER . TICKS): the clock's sequence break every TICKS 60ths of a second, as
+USER (:GC, :NETWORK) asked for it through REQUEST-CLOCK-RATE.")
+
+(defun request-clock-rate (user ticks)
+  "Ask for the clock's sequence break every TICKS 60ths of a second on USER's behalf, or
+with TICKS NIL withdraw USER's request; the clock then runs at the smallest rate asked for,
+or the microcode's 60 if none."
+  (without-interrupts
+    (setq clock-rate-requests (delq (assq user clock-rate-requests) clock-rate-requests))
+    (when ticks (push (cons user ticks) clock-rate-requests))
+    (write-meter '%tv-clock-rate
+		 (do ((l clock-rate-requests (cdr l))
+		      (rate 60. (min rate (cdar l))))
+		     ((null l) rate))))
+  ticks)
+
+;; a boot starts with nobody asking: the users that want a rate ask again from
+;; their warm initializations (gc-boot's gc-on, the network's start), which
+;; run after the system list.
+(add-initialization "Clock rate" '(progn (setq clock-rate-requests nil)
+					  (write-meter '%tv-clock-rate 60.))
+		    '(:system :normal))
+
 (defvar gc-pretenure-threshold 32768.
   "A cons of more words than this in an ephemeral area is made in the tenured generation
 at once, never copied by young collections.")
@@ -1094,7 +1124,10 @@ is possible only if there is a lot of garbage; but it has a better chance.")
     ;; a-tv-clock-rate), every gc-sequence-break-ticks 60ths.  with the
     ;; priority alone the young flips still came 4 m words consed apart at eden
     ;; 2 m (contract g3 step 2, t1, clarification 18)
-    (write-meter '%tv-clock-rate gc-sequence-break-ticks)
+;    (write-meter '%tv-clock-rate gc-sequence-break-ticks)
+    ;; quux revision 16: through the rate's owner, so that the network's
+    ;; rate stands (QUUX's Ethernet contract, 2.6)
+    (request-clock-rate :gc gc-sequence-break-ticks)
     (SETQ GC-ON T)
     (PROCESS-ENABLE GC-PROCESS)			;Start flipper process
     (SETQ INHIBIT-SCAVENGING-FLAG NIL)		;Enable scavenging during cons
@@ -1120,7 +1153,10 @@ is possible only if there is a lot of garbage; but it has a better chance.")
     ;; again, the microcode's default (uc-parameters, a-tv-clock-rate), and
     ;; the gc process's priority the default, 0, both of which gc-on raised
     ;; (contract g3 step 2, clarification 18)
-    (write-meter '%tv-clock-rate 60.)
+;    (write-meter '%tv-clock-rate 60.)
+    ;; quux revision 16: the gc's request withdrawn, the network's left
+    ;; standing (QUUX's Ethernet contract, 2.6)
+    (request-clock-rate :gc nil)
     (send gc-process :set-priority 0)
     (SETQ GC-ON NIL)))
 

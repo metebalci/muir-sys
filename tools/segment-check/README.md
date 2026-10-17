@@ -99,8 +99,12 @@ delivers it.
 script's own to port 23, on which it types fixed forms at fixed machine times
 and waits for a marker the form prints, never for the listener's echo
 (contract section 9, T1, "The way in"). The forms are in one table,
-`scripts.CONTROL`; **their Lisp names are placeholders**, which muir-sys
-names when the stack exists, and the stand-in answers by the same table.
+`scripts.CONTROL`, with the band's names (package INTERNET, nickname IP:
+`IP:*TEST-ECHO-SERVICE*`, `IP:TYPE-FILTER-TOTAL`, `IP:IPV4-CHECKS-TOTAL`,
+`IP:TEST-ECHO-SERVICE-CONDITION`, `IP:CLOSE-CONNECTION-FROM-PORT`,
+`IP:*ISN-OF-NEXT-CONNECTION*`, `IP:*R2-OF-NEXT-CONNECTION*`,
+`IP:URGENT-STATE-OF-PORT` and `IP:PING`), and the stand-in answers by the
+same table.
 What each form does is fixed (F36): the close is the application's own,
 `:CLOSE` without abort, after which a later close by the server sends
 nothing; the ISN hook takes an ISN as on the wire, 0 to 2^32 - 1, and the
@@ -113,8 +117,8 @@ reply's fields or nothing.
 
 **The pass latency** (section 9, T1, Latency; F45): the most the band's
 network process starts its pass after a tick, or posts a timer's segment
-after its due time, 1 ms until E4 measures it (`scripts.PASS_LATENCY`, its
-one place). A timer checked within a tick may be up to a tick early and up to
+after its due time: 7 ms (`scripts.PASS_LATENCY`, its one place), from E4's
+measurement on the band (below, "The pass latency measured"). A timer checked within a tick may be up to a tick early and up to
 a tick and the pass latency late (`near()`); a probe that a record has ended
 goes a tick and the pass latency after its end is due, since the record ends
 in the pass at the first tick at or after that and the pass takes the waiting
@@ -124,6 +128,18 @@ peer's later than it arrives: `zero-window` brings the zero window on one
 octet, so that the band's answer times the first probe's late side, and
 `rto` and `synack-r2` let the band resolve the peer first, so that the first
 SYN-ACK is not held for ARP.
+
+**The pass latency measured** (E4, on the band with the stack, revision 16,
+GC on, the Lisp's timers on the microsecond clock rather than on ticks): with
+`--pass-latency-ms 0 --margins`, how late each timer's segment came after the
+time its check wants, by the clocked socket's times. On micro at 8.5 ns
+(`rto`, `rto-restart`, `must-38`, `isn`, `arp-hold`, `r2-hook`, `rule-5-7`,
+`cwnd-reset`, `arp`) at most 3.8 ms (Karn's resend; the RTOs 1.9-2.2 ms, the
+5.7 RTO 3.4 ms); on micro at 63.5 ns at most 6.6 ms (the 5.7 RTO; the RTOs
+3.1-5.3 ms); ARP's requests 1.0009-1.0029 s apart. `must-38`'s override, timed
+from the script's ACK, came 2.2 ms late at 8.5 ns and 18.5 ms at 63.5 ns,
+inside its two ticks. So 7 ms, below a tick: no amendment. Before TCP, ARP
+alone gave 0.8-1.5 ms at 8.5 ns, 1.1 ms at 63.5 ns and 0.075 ms on rtl.
 
 The pass model is three measurement variants (`standin.MEASURES`), run by
 the latency sweep (below) rather than by `--plants`. All three follow section
@@ -161,6 +177,50 @@ band at 169.254.1NN.2. The defaults are quux0's, muir's own defaults: the
 band 02:00:00:00:00:01 at 169.254.100.2/30, the peer 02:00:00:00:00:02 at
 169.254.100.1. Every other address a script uses (the subnet's broadcast,
 an address off the subnet) is derived from these.
+
+## The band's plants (E4)
+
+Planted faults in the band's own stack (contract section 9, T5), each a copy
+of one file of `sys/network/ip/` with one change, loaded over the stack and
+saved in a band of its own, and the script meant to catch it run once on
+micro (the long ones at 63.5 ns). Every one fails its script:
+
+| Plant | Script | Its failure |
+|---|---|---|
+| ARP answering every request | `arp` | an ARP reply for another address |
+| four ARP requests before the drop | `arp-hold` | a fourth ARP request |
+| the oldest held datagram kept | `arp` | the older of two answered |
+| the merge not restarting an entry's 10 minutes | `arp-cache` | the entry gone 600 s after it was learned |
+| every datagram sent directly, no gateway | the ping through lispm-check | no reply off the subnet |
+| sequence numbers compared without wrap (signed) | `wrap` | across 2^31: the echo stops |
+| the window edge off by one | `mss` | data past the right edge |
+| the sender ignoring the peer's window | `mss` | data past the right edge |
+| FIN consuming no sequence number | `close` | no answer after both FINs |
+| an RST accepted out of the window | `rst` | an out-of-window RST aborted |
+| option parsing stopping at an unknown kind | `mss` | MSS 65480 behind an unknown option not taken |
+| TIME-WAIT skipped | `close` | no TIME-WAIT |
+| the RTO not doubled | `rto` | the second RTO 1 s |
+| Karn's rule not applied | `rto` | Z resent late |
+| the retransmit timer not restarted on an ACK | `rto-restart` | resent 100 ms after the ACK |
+| the congestion window not reset on a timeout | `cwnd-reset` | 2 more segments after the timeout |
+| a zero window never probed | `zero-window` | 0 probes in 200 s |
+| receiver silly window avoidance off | `own-zero-window` | the window opened by 1,000 bytes |
+| the override timer off | `must-38` | rule 4: nothing |
+| a constant ISN | `isn` | ISNs 1 s apart differ by 0 |
+| a SYN accepted from a broadcast source | `syn` | a SYN-ACK to the Ethernet broadcast |
+| a default MSS of 1460 | `mss` | 1,460 data bytes with no MSS |
+| fragments accepted | `ip-options` | a first fragment answered |
+| IHL ignored | `ip-options` | an echo with options unanswered |
+| a segment beyond RCV.NXT taken | `data` | ACK past the gap |
+| the echo service not closing at EOF | `close` | no FIN at EOF |
+| R2 never closing | `r2` | sent after 100 s |
+
+The signed plant survived the first form of `wrap`, whose numbers cross only
+2^32: the band holds sequence numbers as signed fixnums, whose plain order
+breaks at 2^31, so `wrap` also echoes 64 KB across 2^31 (the stand-in's
+`seq-signed-no-wrap`). The echo service's plant survived `close`, whose
+peer-first case was the TELNET server's, so `close` also checks the echo
+service at EOF.
 
 ## The stand-in band
 

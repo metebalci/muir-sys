@@ -18,6 +18,9 @@
 		      SYSTEM-INTERNALS
 		      FORMAT		;a NO-OP if loading for first time
 		      CHAOS		;likewise
+		      ;; quux revision 16: the ethernet device's driver, arp, ipv4
+		      ;; and icmp (QUUX's Ethernet contract, section 5)
+		      internet
 		      COMPILER
 		      FILE-SYSTEM
 		      QFASL-REL
@@ -138,6 +141,24 @@
   ;; no EFTP module.  EFTP spoke PUP to Xerox Altos and the Dover printer, and is deleted.
   (:COMPILE-LOAD (NCP AUX TEST))
   (:COMPILE-LOAD (:GENERATE-HOST-TABLE (("SYS: SITE; HOSTS" "SYS: SITE; HSTTBL")))))
+
+;;; quux revision 16 (QUUX's Ethernet contract, sections 5 and 7): the
+;;; ethernet device's driver and the network process, then arp, ipv4, icmp
+;;; echo and ping, tcp, and tcp's streams and servers (telnet, the test echo
+;;; service), in the internet package (SYS: NETWORK; PACKAGE).  the network
+;;; starts at boot on a machine with the device; elsewhere the files only
+;;; load.  the servers use chaos's telnet body, so chaos comes first.
+(defsystem internet
+  (:package internet)
+  (:pathname-default "SYS: NETWORK; IP;")
+  (:module driver "ETHER")
+  (:module ipv4 "IPV4")
+  (:module tcp "TCP")
+  (:module servers "SERVERS")
+  (:compile-load driver)
+  (:compile-load ipv4 (:fasload driver))
+  (:compile-load tcp (:fasload driver ipv4))
+  (:compile-load servers (:fasload driver ipv4 tcp)))
 
 (DEFSYSTEM SITE
   (:PACKAGE SYSTEM-INTERNALS)

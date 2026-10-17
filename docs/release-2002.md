@@ -2032,3 +2032,118 @@ tree assembles for revision 14 too, which the boards run until then.
     console's "Reset it?" when the boot lands while a process runs.
   - `tools/lispm-check-test/run.sh:37` refuses `--engine rtl`: its question
     cases are bounded at 20 s of host time.
+
+## Revision 16: the Ethernet device
+
+QUUX's revision 16 adds the Ethernet device on the register page, words
+240-257 (QUUX's Ethernet contract, sections 2 and 10). Its stack's first part
+is here: the driver, the network process, ARP, IPv4 and ICMP echo, `PING`,
+TCP, and TELNET and the test echo service over TCP (the contract's sections 5
+and 7). Chaos stays beside it until the checks run over TCP (section 8).
+
+### The Lisp side
+
+- **The Ethernet device's driver and the network process**
+  (`sys/network/ip/ether.lisp`, new, package INTERNET). Its rings share one
+  wired page, 16 transmit entries and 32 receive entries; its buffers are
+  1,536 bytes, two to a wired page, so that none crosses a page
+  (`ETHER-RESET`, `:200`). The reset disables the device, waits for it to be
+  quiet, writes the bases and sizes, enables it with its interrupt off and
+  gives every receive buffer. The network process, at priority 25, waits on a
+  predicate that reads register 251 and the earliest timer and conses nothing;
+  each pass takes every received frame, writes 252, gives the buffers back
+  through 250 and runs the timers (`NETWORK-PASS`, `:436`;
+  `ETHER-TAKE-FRAMES`, `:274`). The driver keeps a total of each of status
+  241's four counters (`TYPE-FILTER-TOTAL`, `IPV4-CHECKS-TOTAL`). The network
+  starts at every boot on a machine whose feature word 15 `<2>` is set and
+  whose register 255 is not 0, and stops before a disk save. Its timers run
+  on the processor's microsecond clock: `TIME` counts 16,384 us, and a
+  second of it is 0.983 s, under the contract's 1 s less a tick.
+- **ARP, IPv4, ICMP echo and `PING`** (`sys/network/ip/ipv4.lisp`, new).
+  ARP replies only to a request for the band's own address, learns by RFC
+  826's merge, keeps 16 entries 10 minutes from the last ARP packet from
+  their address, sends at most one request a second for an address, holds
+  the newest datagram waiting and drops it once the third request has gone a
+  second unanswered (`ARP-RECEIVE`, `:275`; `ARP-HOLD`, `:198`;
+  `ARP-TIMERS`, `:230`), and sends one gratuitous ARP as the network starts.
+  IPv4 takes datagrams for the band's address, skips options, drops source
+  routes, fragments and protocols other than ICMP, and counts them; it sends
+  IHL 5, TTL 64 and a new identification for each datagram, on the subnet
+  directly and through the gateway otherwise (`IPV4-RECEIVE`, `:380`;
+  `IPV4-SEND`, `:329`). Every echo request for the band is answered.
+  `(IP:PING "a.b.c.d")` sends one echo request, waits at least a second for
+  the reply with its identifier and sequence, prints the round trip and
+  returns them (`:462`). No checksum is computed: the device fills them in
+  and checks them (section 2.4).
+- **TCP** (`sys/network/ip/tcp.lisp`, new; QUUX's Ethernet contract, 5.5
+  and 6): passive open only; MSS 1460 offered on the SYN-ACK, the send MSS
+  min(the peer's, 1,460), 536 with none; options parsed anywhere, an illegal
+  length dropping the segment; 8,192-byte buffers each way; in-order delivery
+  only, every segment answered once for its batch (`TCP-BATCH-END`); sender
+  silly window avoidance by MUST-38's four rules with the 200 ms override,
+  receiver silly window avoidance by the effective send MSS
+  (`TCP-OUTPUT`, `:400`; `TCP-WINDOW`, `:313`); RFC 6298's RTO (1 s first,
+  200 ms floor, 60 s cap, doubling, Karn's rule), RFC 5681's slow start and
+  congestion avoidance, back to SND.UNA with one segment after a timeout
+  (`TCP-EXPIRE`, `:797`); R1 (3, then the next hop's ARP entry goes), R2 (100 s
+  for data, 180 s for a SYN-ACK, each from the first sending of the oldest
+  unacknowledged segment); the persist timer; RST in the window, challenge
+  ACKs, MUST-63's sources refused; 8 connections and a backlog of 4; TIME-WAIT
+  60 s in 64 records apart from the connections (`TCP-TIME-WAIT-SEGMENT`,
+  `:765`); FIN-WAIT-2's 60 s; the urgent pointer kept; RFC 6528's ISN, the
+  4 us clock and a keyed xorshift hash (`TCP-ISN`, `:264`). Sequence numbers
+  are 32-bit fixnums added and compared through `%POINTER-PLUS` and
+  `%POINTER-DIFFERENCE`: 10^6 additions and comparisons across the wrap cons
+  0 words (measured). A connection, as ARP's resolution in `ipv4.lisp`, is an
+  array read and set through substs (`TCB-STATE`, `ARP-RESOLUTION-HELD` and
+  the rest): the cross build refuses a new structure, which it cannot give the
+  compile for the target without changing the builder's world
+  (`sys/cold/cross.lisp`, CROSS-DECLARE-DEFINITIONS).
+- **TCP's streams, the servers and the band's own host**
+  (`sys/network/ip/servers.lisp`, new; QUUX's Ethernet contract, 5.6 and 7):
+  stream flavors composed as Chaos's (`chuse.lisp`), the ASCII-translating one
+  over `SI:BUFFERED-TYI-TYO-STREAM`, `MAKE-TCP-STREAM` with `:R2` (MUST-21);
+  a dispatch from port to server; the TELNET server on port 23, MIT's body
+  (`chsaux.lisp`, the herald, the IAC flush, `CHAOS:ECHOING-STREAM` and its
+  close at EOF) over a TCP stream (`TELNET-SERVER-FUNCTION`, `:143`); the
+  test echo service on port 7 while `IP:*TEST-ECHO-SERVICE*` is T
+  (`:186`); the functions the segment scripts' control session calls; and
+  `SI:LOCAL-HOST` from the band's address, else the Chaos host, else an
+  unnamed host (`:249`). A stream's errors signal `SYS:CONNECTION-LOST` and
+  `SYS:HOST-STOPPED-RESPONDING` with the foreign host given.
+- **Senders give the network process its turn** (`sys/network/ip/ether.lisp`,
+  `NETWORK-YIELD`, `WITH-NETWORK-LOCK`): a TELNET session echoing a typed form
+  one character a segment held the network lock at each clock tick, and the
+  network process, at priority 25, found it held each time and took no frame
+  for 120 ms, so the receive ring overflowed (measured: entries 87-126 waiting,
+  then drops). The network's start is its process's first act, so that at
+  boot the gratuitous ARP comes once the boot's initializations have ended.
+- **A broadcast goes to the Ethernet broadcast address** (`IPV4-SEND`): a
+  datagram to the subnet's broadcast, or to 255.255.255.255, is sent with no
+  ARP.
+- **The clock's rate has one owner** (`sys/sys2/gc.lisp:150`,
+  `REQUEST-CLOCK-RATE`). GC-ON wrote 6 into `%TV-CLOCK-RATE` and GC-OFF 60,
+  so GC-OFF would undo the network's rate of every tick (section 2.6). Each
+  user now asks for a rate by name, GC-ON and GC-OFF among them (`:1130`,
+  `:1159`), and the meter holds the smallest asked for, or 60.
+- **The INTERNET system** (`sys/sys/sysdcl.lisp`), a component of SYSTEM
+  after CHAOS, compiles and loads the four files.
+- **`sys/cold/crossdefs.lisp`** lists the four files' compile-time definitions
+  and specials, and `SI:CLOCK-RATE-REQUESTS`.
+
+### The checks
+
+- **`tools/segment-check`**: the control forms name the stack's functions
+  and variables (`scripts.py`, `CONTROL`); the pass latency is 7 ms, from the
+  band's measured timers (`PASS_LATENCY`; `README.md`); `ping` also pings the
+  subnet's broadcast, which must go to the Ethernet broadcast address with no
+  ARP request, and the stand-in's plant `broadcast-ping-arp` fails it; `wrap`
+  also echoes 64 KB across 2^31, where sequence numbers held signed and
+  compared plainly go wrong (the stand-in's `seq-signed-no-wrap`, and the
+  band's own plant, which passed the 2^32 wrap alone); `close` also checks
+  that the test echo service closes with FIN at the peer's EOF. The band's 27
+  planted faults, each failing its script, are in `README.md`, "The band's
+  plants".
+- **`tools/system-check/cases/generational-tuning.cases`**: the clock's rate
+  after GC-ON and GC-OFF is the smallest any user asks for, 6 and 60 unless the
+  network is up, when it is every tick (`:45`, `:69`).
