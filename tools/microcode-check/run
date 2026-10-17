@@ -9,6 +9,8 @@
 # instead.  The checks of
 # cases-2mw/ want a machine of 2 M words of main memory and run only when
 # named (README.md).
+# The checks of cases-16/ want revision 16, with ethernet-peer behind its
+# Ethernet device, and also run only when named (README.md).
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
 checks=() args=()
@@ -23,6 +25,7 @@ status=0
 for c in "${checks[@]}"; do
     cases=$here/cases/$c.cases
     [ -f "$cases" ] || cases=$here/cases-2mw/$c.cases
+    [ -f "$cases" ] || cases=$here/cases-16/$c.cases
     [ -f "$cases" ] || { echo "microcode-check: no $here/cases/$c.cases" >&2; exit 2; }
     files=()
     [ -f "$here/lisp/$c.lisp" ] && files=(--files "$here/lisp/$c.lisp")

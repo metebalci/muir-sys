@@ -99,6 +99,28 @@ reset-machine-quiet
 	(jump-less-than m-tem (a-constant 2000000.) reset-machine-quiet)
 	(jump file-device-not-quiet)
 reset-machine-quiet-done
+	;; quux revision 16 (quux's ethernet contract, section 2.7): then wait in
+	;; the same way for the ethernet device to be quiet (word 241 <1>): on the
+	;; boards a received ethernet frame's write into memory that the reset
+	;; overtook may still be in flight until the program drops its claim.  on
+	;; muir it is quiet at once, one read.  the wait is gated on feature word
+	;; 15 <2>, the device's bit, because this microcode runs on revision 15
+	;; too, where 241 is reserved and reads 0: an ungated wait would halt every
+	;; boot there.  2 seconds, as the file device's; past it, halt at
+	;; ethernet-device-not-quiet.
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-optional-devices-physical-address))
+	(jump-if-bit-clear (byte-field 1 2) md reset-machine-ethernet-quiet-done)
+	((m-1) microsecond-clock)
+reset-machine-ethernet-quiet
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-ethernet-device-status-physical-address))
+	(jump-if-bit-set (byte-field 1 1) md reset-machine-ethernet-quiet-done)
+	((m-tem) microsecond-clock)
+	((m-tem) sub m-tem a-1)
+	(jump-less-than m-tem (a-constant 2000000.) reset-machine-ethernet-quiet)
+	(jump ethernet-device-not-quiet)
+reset-machine-ethernet-quiet-done
 	((INTERRUPT-CONTROL) DPB (M-CONSTANT -1)	;Clear RESET, set halfword-mode,
 ;; quux revision 13 (appendix a1.6): lc's and interrupt-control's flags moved
 ;; up by 8: sequence.break is bit 34, int.enable bit 35.
@@ -581,6 +603,14 @@ machine-not-quux-13
 ;; to hold.  on a board, the file device's program holding its claim (busy)
 ;; does this; its restart lets the claim go.  the halt shows this location.
 file-device-not-quiet
+	(call illop)
+
+;; quux revision 16 (quux's ethernet contract, section 2.7): reset-machine
+;; comes here when the ethernet device is not quiet 2 seconds after reset
+;; devices: a received ethernet frame's write still in flight would land in
+;; memory the band is about to hold.  on a board, the device's program holding
+;; its claim (busy) does this.  the halt shows this location.
+ethernet-device-not-quiet
 	(call illop)
 
 ;; disk-restore-1 comes here when the band is not one of 1024-word pages

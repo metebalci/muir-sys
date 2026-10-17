@@ -621,6 +621,65 @@ file carries a comment in that file saying why.
   it all pass; with only LESSP changed 23 fail, without the change to `<=`
   and `>=` 10, with `<`'s optimizer unchanged 3, with ARITHEXP unchanged 2,
   and without the functions' check of one argument 18.
+- **The microcode takes revision 16's Ethernet device: its interrupt as a
+  stray, and a wait for it to be quiet at reset** (QUUX's Ethernet
+  contract, sections 2.6, 2.7 and 10; step E3). One microcode runs on
+  revisions 15 and 16: revision 16 is revision 15 with the Ethernet device at
+  register-page words 240-257, its interrupt word 100 `<8>` and feature word
+  15 `<2>`, and boots revision 15's `.mcr` and PROM.
+  - **The stray** (`INTR-ETHERNET-DEVICE-STRAY`,
+    `sys/ucadr/uc-interrupt.lisp:99`, `:442-459`). Word 100 `<8>` is up
+    while word 240's `<8>`, the interrupt enable, is on and an Ethernet frame
+    waits. The driver polls and never sets it, so by the register page's
+    rule the bit is a stray: the handler writes 240 back with `<8>` clear and
+    `<0>`, the enable, as it was, so that the device runs on and the frame
+    stays for the driver, and dismisses the interrupt. Before, `INTR`
+    dismissed it untouched, and the level, never cleared, interrupted again
+    at once for as long as the frame waited: on muir-sim's revision 16, micro,
+    `INTR` was entered more than 524,288 times in 64 M microcycles, the
+    listener still answering between them, against fewer than 2,048 with the
+    stray. A microcode path for received Ethernet frames, the contract's
+    fallback, is built only if polling misses its ACK bound (M-ack).
+  - **The quiet wait** (`RESET-MACHINE-ETHERNET-QUIET`,
+    `ETHERNET-DEVICE-NOT-QUIET`, `sys/ucadr/uc-cold-disk.lisp:102-123`,
+    `:608-614`). After reset devices and the file device's wait, the reset
+    waits for the Ethernet device to be quiet (word 241 `<1>`), 2 seconds as
+    the file device's, then halts at `ETHERNET-DEVICE-NOT-QUIET`: on a board
+    a received frame's write that the reset overtook may still be in flight
+    until the device's program drops its claim. The wait is gated on feature
+    word 15 `<2>`, because on revision 15 word 241 is reserved and reads 0:
+    an ungated wait halts every boot there. The register names are
+    `sys/ucadr/uc-cadr.lisp:181-189`.
+  - **The checks.** `tools/microcode-check`'s new `ethernet-stray`
+    (`cases-16/`, run only when named on revision 16, with the new
+    `ethernet-peer` behind the device; its README): 11 cases pass on micro
+    and rtl; on microcode 2002 before the change 5 of them fail on both, and
+    with a stray planted that writes 240 with 0 6 fail on micro. On micro a
+    scratch count of the handler's address found it run three times, once each time
+    `<8>` went up with a frame waiting. The wait, measured by booting on
+    micro with a scratch plant in muir-sim that holds 241 `<1>` low: on
+    revision 16 the boot stops at `ETHERNET-DEVICE-NOT-QUIET`, which
+    microcode 2002 before the change boots past; without the plant the wait
+    reads 241 once a reset and the boot goes on. On revision 15 the wait is
+    never entered, and a copy with the gate removed halts at
+    `ETHERNET-DEVICE-NOT-QUIET` there. System 2002's band on the new
+    microcode passes `tools/microcode-check`'s 22 case files on revisions 15
+    and 16, on micro and rtl, 622 cases, as the microcode before did on
+    revision 15 in the soak of System 2002; `tools/assembler-check` passes
+    all 30 checks, its revision-15 counts unchanged (359 hints, 140 predicted targets, every execution of
+    the profile covered).
+  Microcode 2002's files changed again, 19 instructions more: at revision 14
+  `ucadr.mcr`
+  `068511118b1794abcea9b80f605a00500ecf07e0e9cb7eb479c2be5367b33b49`, at
+  revision 15 `ucadr.mcr`
+  `45ff6277b552970569f40aa7fa074eb9720787167e69970f643b7927d70f5767` with
+  `.tbl` `0c57992d7f27cbc1d41e9ad537e691fdc67199509122ee18d3805c2ffa6f7240`,
+  `.locs` `798fadee546184ec9e747987144c6fc9dde8c9af5aab5bece518550662ad3d67`
+  and `.sym` `c37c7621bdcbcffccc2c62cdc4cb36eed2ac06d46059286235abb345dc20d9fa`,
+  revision 14's `.sym` the same (before, at revision 15 `ucadr.mcr`
+  `7dc213f7e82d5761c0a0a40ea03a0dee7cad9be10e2c7ec2fe37c5eab1c3e73e`);
+  `promh.mcr` is unchanged,
+  `3d93319a8e851f5f14a2fcd66cd1ed21abb33049c355edf8cc893c791fb4b124`.
 
 ## Revision 14
 

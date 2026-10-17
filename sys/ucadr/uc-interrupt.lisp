@@ -62,7 +62,8 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	;; comes back when this one is dismissed.
 	;; quux revision 11 (contract q13): the bits are <0>-<2> timers 0-2,
 	;; <3> block-disk, <4> the keyboard, <5> the mouse, <6> the network and
-	;; <7> the file device (the stale list here named q2's bits, with the
+	;; <7> the file device, and from revision 16 <8> the ethernet device (the
+	;; stale list here named q2's bits, with the
 	;; keyboard and the chaosnet still on the unibus).  the tests keep
 	;; revision 10's priority, the tick, the disk, the keyboard, the network,
 	;; then the strays.  every bit has a handler that clears its level or a
@@ -93,6 +94,9 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	(jump-if-bit-set (byte-field 1 2) md intr-timer-2-stray)
 	(jump-if-bit-set (byte-field 1 5) md intr-mouse-stray)
 	(jump-if-bit-set (byte-field 1 7) md intr-file-device-stray)
+	;; quux revision 16 (quux's ethernet contract, section 2.6): word 100 <8>,
+	;; the ethernet device, which the system polls, has a stray too.
+	(jump-if-bit-set (byte-field 1 8) md intr-ethernet-device-stray)
 	;; quux (contract q5): word 100 covers every source quux has, and any unibus
 	;; address is an nxm, so an interrupt it does not explain is dismissed
 	;; (after the disk's own check) rather than looked up in unibus 766040.
@@ -432,6 +436,25 @@ intr-file-device-stray
 	(check-page-read-no-interrupt)
 	((md) (byte-field 1 0) read-memory-data)	;<0> kept, <8> and the rest 0
 	((vma-start-write) (a-constant quux-file-device-control-virtual-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
+;; quux revision 16 (quux's ethernet contract, section 2.6): the ethernet
+;; device, word 100 <8>, is up while an ethernet frame waits (word 251 not
+;; equal to 252) and word 240's <8>, its interrupt enable, is set.  the driver
+;; polls and never sets <8>; a microcode path for received ethernet frames is
+;; built only if polling misses its ack bound.  until then <8> is a stray, by
+;; the register page's rule: write 240 back with <8> clear and <0>, enable, as
+;; it was, so that the device keeps running and the ethernet frame stays
+;; waiting for the driver.  without this an enable set by mistake would
+;; interrupt for ever, the level never cleared.  the write also clears 241's
+;; <2> and <3>, as any write of 240 does.  below revision 16 word 100 <8> is
+;; reserved and reads 0.
+intr-ethernet-device-stray
+	((vma-start-read) (a-constant quux-ethernet-device-control-virtual-address))
+	(check-page-read-no-interrupt)
+	((md) (byte-field 1 0) read-memory-data)	;<0> kept, <8> and the rest 0
+	((vma-start-write) (a-constant quux-ethernet-device-control-virtual-address))
 	(check-page-write-no-interrupt)
 	(jump intrx1)
 

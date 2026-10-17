@@ -126,7 +126,8 @@
 ;; mode, is error stop.  they replace unibus 766040, 766044 and 766012.
 ;; quux revision 11 (contract q13): word 100's bits are <0>-<2> timers 0-2,
 ;; <3> block-disk, <4> the keyboard, <5> the mouse, <6> the network and <7>
-;; the file device; before, <0> was the tick, <1> timer 1, <2> block-disk,
+;; the file device (and, from revision 16, <8> the ethernet device); before,
+;; <0> was the tick, <1> timer 1, <2> block-disk,
 ;; <3> the keyboard, <5> the network and <7> timer 2 (intr, sys: ucadr;
 ;; uc-interrupt).
 ;(ASSIGN QUUX-INTERRUPT-STATUS-VIRTUAL-ADDRESS 77377100)
@@ -177,6 +178,15 @@
 ;; quux (contract q13): word 160, the file device's control, <0> enable and
 ;; <8> interrupt enable; intr-file-device-stray clears <8>.
 (assign quux-file-device-control-virtual-address (plus quux-register-page-virtual-address 160))
+;; quux revision 16 (quux's ethernet contract, sections 2.1, 2.6 and 2.7): the
+;; ethernet device is words 240-257, its interrupt word 100 <8>, and feature
+;; word 15 <2> says it is there; below revision 16 the three read 0.  word 240
+;; is its control, <0> enable and <8> interrupt enable, which
+;; intr-ethernet-device-stray clears; word 241 its status, <1> quiet, which
+;; reset-machine waits for when word 15 <2> is set.
+(assign quux-optional-devices-physical-address (plus quux-register-page-physical-address 15))
+(assign quux-ethernet-device-control-virtual-address (plus quux-register-page-virtual-address 240))
+(assign quux-ethernet-device-status-physical-address (plus quux-register-page-physical-address 241))
 (ASSIGN INTERRUPT-STATUS-HARDWARE-VIRTUAL-ADDRESS 77773020)
 		;Unibus address 766040 (interrupt status)
 (ASSIGN CLEAR-INTERRUPT-HARDWARE-VIRTUAL-ADDRESS  77773021) ;Unibus address 766042

@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/ethernet-peer: a peer for revision 16's Ethernet
+device, for the checks of cases-16/ (tools/microcode-check/README.md).
+
+Usage:
+  tools/microcode-check/ethernet-peer SOCKET [--interval SECONDS]
+
+Listens on the UNIX stream socket SOCKET, which quux's `--ethernet-socket
+SOCKET` connects to in plain mode (each Ethernet frame a 32-bit big-endian
+length and its bytes; QUUX's Ethernet contract, section 3), and sends every
+connection a broadcast ARP request every SECONDS of host time (0.02 by
+default), as long as it stays connected; what quux sends is read and dropped.
+Any number of connections, one after another or at once: lispm-check's setup
+boots one machine and each check resumes another.  The device discards what
+arrives while it is disabled, so a band that never enables it holds nothing,
+and a check that gives it a buffer finds an Ethernet frame in it soon after.
+Runs until killed.
+"""
+import os
+import socket
+import struct
+import sys
+import threading
+import time
+
+# a broadcast ARP request from the link's other end, muir's default gateway,
+# for QUUX's default address (muir-sim's --ip-address and --ip-gateway
+# defaults), padded to Ethernet's 60 bytes: a type the device's type filter
+# passes (QUUX's Ethernet contract, section 2.4)
+SOURCE = bytes([0x02, 0, 0, 0, 0, 0x02])
+FRAME = (b'\xff' * 6 + SOURCE + struct.pack('>H', 0x0806)
+         + struct.pack('>HHBBH', 1, 0x0800, 6, 4, 1)
+         + SOURCE + bytes([169, 254, 100, 1]) + bytes(6) + bytes([169, 254, 100, 2]))
+FRAME += bytes(60 - len(FRAME))
+RECORD = struct.pack('>I', len(FRAME)) + FRAME
+
+
+def serve(conn, n, interval):
+    stop = threading.Event()
+
+    def drain():
+        try:
+            while conn.recv(65536):
+                pass
+        except OSError:
+            pass
+        stop.set()
+
+    threading.Thread(target=drain, daemon=True).start()
+    sent = 0
+    try:
+        while not stop.is_set():
+            conn.sendall(RECORD)
+            sent += 1
+            time.sleep(interval)
+    except OSError:
+        pass
+    print('ethernet-peer: connection %d closed after %d Ethernet frames' % (n, sent), flush=True)
+
+
+def main(argv):
+    if not argv or argv[0].startswith('-'):
+        raise SystemExit(__doc__)
+    path, interval = argv[0], 0.02
+    rest = argv[1:]
+    while rest:
+        a = rest.pop(0)
+        if a == '--interval' and rest:
+            interval = float(rest.pop(0))
+        else:
+            raise SystemExit(__doc__)
+    if os.path.exists(path):
+        os.unlink(path)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.bind(path)
+    s.listen(8)
+    print('ethernet-peer: listening on %s, an Ethernet frame every %g s' % (path, interval), flush=True)
+    n = 0
+    while True:
+        conn, _ = s.accept()
+        n += 1
+        print('ethernet-peer: connection %d' % n, flush=True)
+        threading.Thread(target=serve, args=(conn, n, interval), daemon=True).start()
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])

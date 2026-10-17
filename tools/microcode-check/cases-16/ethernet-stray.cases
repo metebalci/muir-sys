@@ -1,0 +1,33 @@
+; Revision 16's Ethernet device interrupt, word 100 <8>, is taken as a stray
+; (sys/ucadr/uc-interrupt.lisp, INTR-ETHERNET-DEVICE-STRAY; QUUX's Ethernet
+; contract, section 2.6).  Load lisp/ethernet-stray.lisp first; it needs
+; revision 16 and the peer, tools/microcode-check/ethernet-peer, behind the
+; device (README.md).  Microcode without the stray dismisses the interrupt
+; untouched, and the level, never cleared, interrupts again at once for as
+; long as the frame waits: 240 still reads 401 and word 100 <8> stays up, so
+; the five cases after the frame's length fail, while the listener goes on
+; between the interrupts.
+;
+; Preconditions: the device is there, and takes its rings.
+(ets-present) => 7
+(ets-setup) => (1 1 0 0)
+; The control: given a buffer, the device fills it with the peer's ARP
+; request, 60 bytes to broadcast, and it waits (241 <8>); word 100 <8> is
+; down while 240 <8> is off.  ETS-STATE is 240, 241 <8>, word 100 <8>, 251
+; and 252.
+(ets-give 1) => (1 1 0 1 0)
+(ets-frame-length) => (60 4294967295)
+; The stray: 240 <8> set with the Ethernet frame waiting interrupts, and the
+; stray turns 240 <8> off, keeps the device enabled and leaves the frame
+; waiting.  Twice.
+(ets-interrupt-enable) => (1 1 0 1 0)
+(ets-interrupt-enable) => (1 1 0 1 0)
+; The frame taken back, nothing waits: 240 <8> stays on, no interrupt.
+(ets-take 1) => (1 0 0 1 1)
+(ets-interrupt-enable) => (257 0 0 1 1)
+; A buffer given with 240 <8> on: the next Ethernet frame interrupts as it
+; arrives, and the stray turns <8> off.
+(ets-give 2) => (1 1 0 2 1)
+(ets-take 2) => (1 0 0 2 2)
+; Disabled, the device is quiet.
+(ets-cleanup) => (0 1)
