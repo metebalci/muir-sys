@@ -6,7 +6,8 @@ Usage:
                     [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
                     [--compile] [--file-server auto|device|ozd]
                     [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
-                    [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
+                    [--ozd-file-dates mit|utc] [--ozd-timezone N]
+                    [--network chaos|tcp] CASES
 
 The band runs on the simulator's executable for this line's system, MACHINE
 below: quux on main, QUUX's system (--quux), and cadr on the cadr branch, the
@@ -85,7 +86,11 @@ Defaults, each overridden by its flag or an environment variable:
                             --micro or --rtl; any other value is refused
   --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
   --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
+  --network LISPM_CHECK_NETWORK  chaos: what carries the TELNET session, below
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
+  LISPM_CHECK_TAPS          the tap indexes it picks from, as N, LO-HI or a
+                            comma-separated list of them: the pool's host-only
+                            taps, those with a /30 of their own
   cache                     $XDG_CACHE_HOME/muir-sys-check (~/.cache/...)
 The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
@@ -121,6 +126,37 @@ release band, 5 for System 100's site), or every file date it reads is off by
 the zone's offset.  ozd refuses a zone under utc, and so does this tool.  The
 flags change only what ozd serves, not the checkpoint, whose setup reads no
 file.
+
+The network (QUUX's Ethernet contract, sections 3, 7 and 8 R1).  On QUUX's
+revision 16, which has the Ethernet device, every run takes a tap of the
+pool (muir-sim's tools/quux-taps) through the fault relay
+(tools/fault-relay/relay) and gives the machine its addresses, so that the
+band always has its link: --ethernet-socket, --ip-address and --ip-gateway,
+at the setup and at every resume.  The taps tried are those of
+LISPM_CHECK_TAPS whose index already has a checkpoint for this key, lowest
+first, then the rest, lowest first; a tap held by another run is passed for
+the next, and when all are held it waits for one, up to --setup-limit.  The
+tap is the lock: a band uses index N's address only while its run holds tap
+N.  A checkpoint is made for each tap index on its first use, and its key
+names QUUX's address behind that tap, since muir refuses a resume under other
+addresses.  Revision 15 and the CADR take no tap, and their keys are as
+before.  The revision is asked of the machine once for each build (and
+MUIR_QUUX_REVISION), and remembered under the cache.
+  --network chaos   the default: ozd's TCP gateway carries the session to the
+                    band's Chaos TELNET server, the band's cable being
+                    --chaos-udp to ozd
+  --network tcp     the session is the build host's own TCP, from a socket
+                    bound to the tap, to the band's TELNET server on port 23
+                    at QUUX's address; the machine is given no Chaos peer at
+                    all, and ozd is not started.  It needs revision 16, and a
+                    band whose SYS: is on HOST (--file-server device; auto
+                    then means device).  At the end of a setup it half-closes
+                    the session and reads to the band's EOF, which the band's
+                    server sends at the client's EOF, then waits 0.5 s for
+                    the last ACK, so that the checkpoint holds no connection;
+                    a setup whose band does not close is a failed run
+One checkpoint serves both networks: --chaos-address is given in both, as
+the checkpoint holds the Chaosnet interface's switches.
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
@@ -345,6 +381,188 @@ def listener_owned_by(port, pid):
     return False
 
 
+# --------------------------------------------------------------------------
+# Taps: revision 16's link, a tap of the pool held through the fault relay
+# (QUUX's Ethernet contract, section 3).  The tap is the lock: the kernel
+# lets one holder open it, so two runs never hold one tap, and the band uses
+# index N's address only while its run holds tap N.
+
+RELAY = os.path.join(TOOL_DIR, 'fault-relay', 'relay')
+TAP_POOL, TAP_POOL_MAX = 'quux', 64     # quux-taps makes quux0 to quux<N-1>
+RELAY_TAKEN = 75                        # the relay's status: every tap tried was held
+SIOCGIFADDR, SIOCGIFNETMASK = 0x8915, 0x891B
+SO_BINDTODEVICE = getattr(socket, 'SO_BINDTODEVICE', 25)
+
+
+def tap_addresses(name):
+    """(host side, QUUX's address) of a host-only tap, dotted, read from the
+    kernel, or None when NAME is no tap or not host-only: a host-only tap has
+    a /30 of its own, and QUUX's address is the /30's other host address."""
+    if not os.path.exists('/sys/class/net/%s/tun_flags' % name):
+        return None
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        got = []
+        for request in (SIOCGIFADDR, SIOCGIFNETMASK):
+            r = fcntl.ioctl(s.fileno(), request, struct_ifreq(name))
+            got.append(int.from_bytes(r[20:24], 'big'))
+    except OSError:
+        return None
+    finally:
+        s.close()
+    host, mask = got
+    net = host & mask
+    if mask != 0xFFFFFFFC or host not in (net + 1, net + 2):
+        return None
+    quux = net + 2 if host == net + 1 else net + 1
+    return tuple(socket.inet_ntoa(x.to_bytes(4, 'big')) for x in (host, quux))
+
+
+def struct_ifreq(name):
+    return name.encode().ljust(16, b'\0') + b'\0' * 24
+
+
+def tap_range():
+    """The taps a run may take, as (index, name, QUUX's address), lowest index
+    first: LISPM_CHECK_TAPS's indexes (N, LO-HI, or a comma-separated list of
+    them), by default the whole pool; of them the host-only taps alone, since
+    a LAN tap's address is a real one (the contract, amendment 3)."""
+    spec = os.environ.get('LISPM_CHECK_TAPS')
+    if spec:
+        indexes = set()
+        for part in spec.split(','):
+            m = re.fullmatch(r'\s*(\d+)\s*(?:-\s*(\d+)\s*)?', part)
+            if not m:
+                raise RunFailed('LISPM_CHECK_TAPS: %r is not N, LO-HI or a list of them' % spec)
+            lo = int(m.group(1))
+            hi = int(m.group(2)) if m.group(2) is not None else lo
+            if hi < lo or hi >= TAP_POOL_MAX:
+                raise RunFailed('LISPM_CHECK_TAPS: %r: indexes run from 0 to %d' % (spec, TAP_POOL_MAX - 1))
+            indexes.update(range(lo, hi + 1))
+    else:
+        indexes = set(range(TAP_POOL_MAX))
+    taps = []
+    for i in sorted(indexes):
+        name = '%s%d' % (TAP_POOL, i)
+        if not os.path.exists('/sys/class/net/' + name):
+            if spec:
+                print('lispm-check: %s, of LISPM_CHECK_TAPS, does not exist: not taken' % name)
+            continue
+        addresses = tap_addresses(name)
+        if addresses is None:
+            print('lispm-check: %s is not a host-only tap (no /30 of its own): not taken' % name)
+            continue
+        taps.append((i, name, addresses[1]))
+    if not taps:
+        raise RunFailed('no host-only tap of the pool in %s (muir-sim\'s tools/quux-taps installs the pool)'
+                        % ('LISPM_CHECK_TAPS=' + spec if spec else 'quux0-quux%d' % (TAP_POOL_MAX - 1)))
+    return taps
+
+
+def socket_dir():
+    """A directory of its own for the relay's UNIX socket, whose path must
+    stay under the kernel's 108 bytes: under the cache when that is short
+    enough, else under the system's temporary directory."""
+    d = os.path.join(cache_dir(), 'sockets')
+    os.makedirs(d, exist_ok=True)
+    if len(d) > 70:
+        d = None
+    import tempfile
+    return tempfile.mkdtemp(prefix='lc-', dir=d)
+
+
+class TapLink:
+    """Revision 16's link for one run of this tool: the fault relay holding a
+    tap, its socket for the machine's --ethernet-socket, and the addresses
+    the relay's line names.  One relay serves the setup's machine and then
+    the check's, one after the other, so a run holds one tap throughout."""
+    def __init__(self, taps, end):
+        self.sock_dir = socket_dir()
+        self.path = os.path.join(self.sock_dir, 'relay.sock')
+        self.report = os.path.join(self.sock_dir, 'relay.json')
+        self.proc = None
+        names = ','.join(name for _, name, _ in taps)
+        waited = False
+        while True:
+            # the relay's log, one handle at a time while it waits for a tap
+            if getattr(self, 'err', None):
+                self.err.close()
+            self.err = open(os.path.join(self.sock_dir, 'relay.err'), 'w+')
+            self.proc = subprocess.Popen([sys.executable, RELAY, '--tap', names, '--report', self.report,
+                                          self.path], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                         stderr=self.err, start_new_session=True, text=True)
+            line = self.proc.stdout.readline().strip()
+            if line:
+                break
+            rc = self.proc.wait()
+            self.err.seek(0)
+            why = self.err.read().strip()
+            if rc != RELAY_TAKEN:
+                raise RunFailed('the fault relay took no tap (exit %d): %s' % (rc, why))
+            if now() > end:
+                raise RunFailed('no free tap in --setup-limit: %s' % why)
+            if not waited:
+                print('lispm-check: every tap of %s is held; waiting for one' % names, flush=True)
+                waited = True
+            time.sleep(1)
+        # the line: TAP --ip-address A.B.C.D/30 --ip-gateway A.B.C.D
+        m = re.fullmatch(r'(\S+) --ip-address (\S+)/(\d+) --ip-gateway (\S+)', line)
+        if not m:
+            self.stop()
+            raise RunFailed('the fault relay\'s line is not one this tool reads: %r' % line)
+        self.tap, self.quux, self.prefix, self.gateway = m.group(1), m.group(2), m.group(3), m.group(4)
+        self.index = int(self.tap[len(TAP_POOL):])
+
+    def machine_flags(self):
+        return ['--ethernet-socket', self.path, '--ip-address', '%s/%s' % (self.quux, self.prefix),
+                '--ip-gateway', self.gateway]
+
+    def stop(self, keep_in=None):
+        """Stop the relay, the machine having stopped first; with KEEP_IN, a
+        run directory kept, its report and its log go there."""
+        stop_process(self.proc)
+        if keep_in:
+            for f in ('relay.json', 'relay.err'):
+                if os.path.exists(os.path.join(self.sock_dir, f)):
+                    shutil.copyfile(os.path.join(self.sock_dir, f), os.path.join(keep_in, f))
+        shutil.rmtree(self.sock_dir, ignore_errors=True)
+
+
+def machine_revision(a, exe_sha):
+    """QUUX's revision the machine runs, asked of it once for each build and
+    MUIR_QUUX_REVISION (a wrapper may set it), and remembered under the cache:
+    its start names it ("machine: quux, revision 16"), or its refusal to run
+    without a boot PROM does.  None for the CADR."""
+    if MACHINE != 'quux':
+        return None
+    pair = '%s-%s' % (exe_sha[:16], os.environ.get('MUIR_QUUX_REVISION', ''))
+    db = os.path.join(cache_dir(), 'revisions.json')
+    try:
+        with open(db) as f:
+            known = json.load(f)
+    except (OSError, ValueError):
+        known = {}
+    if pair in known:
+        return known[pair]
+    ports_lock, ports = take_ports()
+    try:
+        p = subprocess.run([a.exe, '-c', '/dev/null', '--micro', '--stop-after', '1',
+                            '--terminal', '127.0.0.1:%d' % ports[3]],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+    finally:
+        ports_lock.release()
+    m = re.search(r'machine: quux, revision (\d+)|QUUX revision (\d+) has', p.stdout + p.stderr)
+    if not m:
+        raise RunFailed('%s did not say which revision it runs (%s -c /dev/null --micro --stop-after 1)'
+                        % (MACHINE, a.exe))
+    known[pair] = int(m.group(1) or m.group(2))
+    tmp = '%s.%d' % (db, os.getpid())
+    with open(tmp, 'w') as f:
+        json.dump(known, f, indent=1)
+    os.replace(tmp, db)
+    return known[pair]
+
+
 def stop_process(p, stdin_command=None, wait=10):
     """Stop a process started in its own session, and all of its group."""
     if p is None or p.poll() is not None:
@@ -378,14 +596,30 @@ def stop_process(p, stdin_command=None, wait=10):
 # for served files, the TELNET listener ozd carries to the band in either
 # mode, and the machine's flags that plug the band into them.  OzdFileServer serves
 # the copy by ozd, DeviceFileServer by quux's file device; a third way is a
-# class with the same methods, named in FILE_SERVERS.
+# class with the same methods, named in FILE_SERVERS.  The TELNET session is
+# carried by the network, --network (NETWORKS): over Chaos through ozd, or
+# over the build host's TCP to the band behind its tap, with no ozd at all
+# when the device serves the files.  LINK is revision 16's tap (TapLink), or
+# None, and its flags are the machine's in either network.
+
+# The networks that carry the TELNET session (--network), each with whether
+# it needs ozd as the gateway.  A third, host (a HOST: files transport, the
+# session through quux's file device, for a band without its network), is to
+# come, as another entry here and another branch in connect_listener,
+# network_flags and close_session.
+NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}}
+TELNET_PORT = 23
+# The clean close's wait for the band's FIN after ours, and then for the last
+# ACK (the contract, section 7): wall seconds.
+CLOSE_WAIT, LAST_ACK_WAIT = 60, 0.5
+
 
 class OzdFileServer:
     # the --file-server name, and the host the setup logs in to: the band's
     # files and the login's home are on OZ
     mode, login_host = 'ozd', 'OZ'
 
-    def __init__(self, ozd, run_dir, ports, log, ozd_flags=()):
+    def __init__(self, ozd, run_dir, ports, log, ozd_flags=(), network='chaos', link=None):
         self.ozd, self.run_dir, self.log = ozd, run_dir, log
         # --file-dates and --timezone for ozd, as --ozd-file-dates and
         # --ozd-timezone give them; none, ozd's defaults
@@ -393,6 +627,9 @@ class OzdFileServer:
         self.udp, self.machine_udp, self.telnet = ports[0], ports[1], ports[2]
         self.root = os.path.join(run_dir, 'served')
         self.proc = None
+        self.network, self.link = network, link
+        if network == 'tcp' and link is None:
+            raise RunFailed('--network tcp needs a tap, and so revision 16')
 
     def login(self):
         return '(login "LISPM" "%s" t)' % self.login_host
@@ -431,6 +668,11 @@ class OzdFileServer:
                 '--root', 'lispm=%s/lispm' % self.root]
 
     def start(self):
+        """Start ozd, when the network needs it as the TELNET gateway or the
+        server serves the files by it; else nothing (--network tcp with the
+        files on the device: the machine is given no Chaos peer at all)."""
+        if not NETWORKS[self.network]['ozd'] and self.mode == 'device':
+            return None
         self.logfile = open(os.path.join(self.run_dir, 'ozd.log'), 'wb')
         cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
                '--listen', '127.0.0.1:%d' % self.udp] + self.ozd_roots() + [
@@ -444,14 +686,54 @@ class OzdFileServer:
         return self.proc.pid
 
     def machine_flags(self):
-        return ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
-                '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
-                '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
+        """The network's flags, and revision 16's link's.  --chaos-address is
+        given in both networks until the NCP leaves the band (the contract's
+        R3): the checkpoint holds the Chaosnet interface's switches, and muir
+        refuses a resume under others, so one checkpoint serves both.  Over
+        TCP the machine has no Chaos cable: no --chaos-udp and no peer."""
+        if self.network == 'tcp':
+            flags = ['--chaos-address', CHAOS_LISPM]
+        else:
+            flags = ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
+                     '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
+                     '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
+        return flags + (self.link.machine_flags() if self.link else [])
+
+    def _open(self, machine_alive):
+        """One attempt at the band's TELNET listener: a socket, or None to try
+        again.  Over Chaos, a TCP connection to ozd's gateway once ozd itself
+        holds the listening port (so that it reaches this run's ozd and no
+        other); over TCP, a connection from a socket bound to this run's tap
+        to QUUX's address, port 23, which reaches this run's band alone, the
+        run holding the tap."""
+        if self.network == 'tcp':
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, SO_BINDTODEVICE, self.link.tap.encode())
+                s.settimeout(5)
+                s.connect((self.link.quux, TELNET_PORT))
+                return s
+            except OSError:
+                # before the band's network is up: no ARP answer (EHOSTUNREACH
+                # after Linux's 3 s), or an RST from a band not yet listening
+                s.close()
+                time.sleep(0.5)
+                return None
+        if self.proc.poll() is not None:
+            raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
+        if not listener_owned_by(self.telnet, self.proc.pid):
+            time.sleep(0.05)
+            return None
+        try:
+            return socket.create_connection(('127.0.0.1', self.telnet), timeout=5)
+        except OSError:
+            time.sleep(0.1)
+            return None
 
     def connect_listener(self, machine_alive, deadline, progress=None):
-        """Connect to the band's TELNET listener through ozd and return the
-        socket and the text read up to its banner.  With PROGRESS (the
-        setup's cold boot), its check() ends the wait, not DEADLINE."""
+        """Connect to the band's TELNET listener, through the network, and
+        return the socket and the text read up to its banner.  With PROGRESS
+        (the setup's cold boot), its check() ends the wait, not DEADLINE."""
         if progress:
             deadline = progress.end
         while now() < deadline:
@@ -459,15 +741,8 @@ class OzdFileServer:
                 progress.check()
             if not machine_alive():
                 raise RunFailed('%s exited before the TELNET banner' % MACHINE)
-            if self.proc.poll() is not None:
-                raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
-            if not listener_owned_by(self.telnet, self.proc.pid):
-                time.sleep(0.05)
-                continue
-            try:
-                s = socket.create_connection(('127.0.0.1', self.telnet), timeout=5)
-            except OSError:
-                time.sleep(0.1)
+            s = self._open(machine_alive)
+            if s is None:
                 continue
             s.settimeout(0.2)
             # A connection that stays silent is given up after 30 s and made
@@ -481,6 +756,8 @@ class OzdFileServer:
                     d = s.recv(4096)
                 except socket.timeout:
                     continue
+                except OSError:
+                    break
                 if not d:
                     break
                 text += d.decode('latin-1')
@@ -492,6 +769,42 @@ class OzdFileServer:
         if progress:
             raise RunHung('no TELNET banner within the setup\'s limit, --setup-limit')
         raise RunFailed('no TELNET banner in time')
+
+    def close_session(self, sock, strict, progress=None):
+        """End the TELNET session.  Over TCP, cleanly (the contract, section
+        7): half-close, read to the band's EOF, which its server sends at the
+        client's EOF, then wait LAST_ACK_WAIT s for the band's last ACK, so
+        that a checkpoint written after it holds no open connection and, in
+        the normal case, no TIME-WAIT.  STRICT (the setup): a band that sends
+        no EOF within CLOSE_WAIT s, or resets the connection, fails the run.
+        Over Chaos the socket to ozd is closed, as before."""
+        if self.network != 'tcp':
+            sock.close()
+            return
+        why = None
+        try:
+            sock.shutdown(socket.SHUT_WR)
+            end = now() + CLOSE_WAIT
+            while True:
+                if progress:
+                    progress.check()
+                if now() > end:
+                    why = 'no EOF from the band within %d s of ours' % CLOSE_WAIT
+                    break
+                try:
+                    d = sock.recv(4096)
+                except socket.timeout:
+                    continue
+                if not d:
+                    break
+                self.log.write(d.decode('latin-1'))
+        except OSError as e:
+            why = 'the session ended with %s, not the band\'s EOF' % (e.strerror or e)
+        self.log.write('\n=== %.2f the session closed: %s\n' % (now(), why or 'the band\'s EOF after ours'))
+        time.sleep(LAST_ACK_WAIT)
+        sock.close()
+        if why and strict:
+            raise RunFailed('the clean close: %s (section 7: the server closes its side at EOF)' % why)
 
     def stop(self):
         stop_process(self.proc)
@@ -615,6 +928,9 @@ CASE_FORM = ('(condition-case (e) (format t "~%%{~D{~S}~D}~%%" %(k)s %(form)s %(
 HELPER = '(defun lispm-check-case (k form) %s)' % (CASE_FORM % {'k': 'k', 'form': '(eval form)'})
 # 2: the FQUERY clause
 SETUP_VERSION = '2'
+# 3: revision 16's setup gives the machine its tap's addresses, and over TCP
+# closes cleanly (the contract, amendment 2, 5.1); revision 15's key keeps 2
+SETUP_VERSION_TAP = '3'
 
 ERROR_RE = re.compile(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)')
 # The second line of defence, for a question the FQUERY clause does not see
@@ -844,8 +1160,12 @@ def run_dir_new(kind):
     return d
 
 
-def ensure_checkpoint(a, key):
-    chk = os.path.join(cache_dir(), 'checkpoints', key + '.chk')
+def checkpoint_path(key):
+    return os.path.join(cache_dir(), 'checkpoints', key + '.chk')
+
+
+def ensure_checkpoint(a, key, link=None):
+    chk = checkpoint_path(key)
     if os.path.exists(chk):
         return chk, None
     os.makedirs(os.path.dirname(chk), exist_ok=True)
@@ -857,12 +1177,14 @@ def ensure_checkpoint(a, key):
             raise RunFailed('no ucadr.tbl in %s (--ubin): the cold boot reads it' % a.ubin)
         t0 = now()
         print('lispm-check: setting up a checkpoint for this band and %s, files served by %s,'
-              ' engine %s (cold boot)' % (MACHINE, a.file_server, a.engine), flush=True)
+              ' engine %s%s (cold boot)' % (MACHINE, a.file_server, a.engine,
+                                         ', tap index %d, over %s' % (link.index, a.network) if link else ''),
+              flush=True)
         run_dir = run_dir_new('setup')
         end = now() + a.setup_limit
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
+        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
         machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
@@ -881,11 +1203,16 @@ def ensure_checkpoint(a, key):
                 # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
                 # on quux revision 11 and later, which moved block-disk off
                 # 17377774, and so gives no sign but this.
+                # Over TCP a band without the network, or one whose
+                # address is not its tap's, gives the same sign.
                 raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
-                              ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s'
+                              ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
                               % (e, a.file_server, server.login_host, MACHINE,
                                  ' (a System 1002 band does not run on quux revision 11 and later)'
-                                 if MACHINE == 'quux' else ''))
+                                 if MACHINE == 'quux' else '',
+                                 ' Over TCP: does the band start its network, and answer at %s, port %d,'
+                                 ' behind %s? (--network chaos needs no network)'
+                                 % (link.quux, TELNET_PORT, link.tap) if a.network == 'tcp' else ''))
             sock.settimeout(0.2)
             sess = Session(sock, log, helper=False)
             # The server must be the one the band reads SYS: from: a band
@@ -905,18 +1232,27 @@ def ensure_checkpoint(a, key):
                 r = sess.run(form, None, Progress(machine, oneline(form), end))
                 if r[0] != 'value':
                     raise RunFailed('setup: %s: %s' % (form, r[1]))
-            sock.close()
+            # over TCP a clean close, so that the checkpoint holds no
+            # connection (the contract, sections 2.9 and 7)
+            server.close_session(sock, True, Progress(machine, 'the clean close', end))
             machine.stop(wait=120)
             if machine.proc.returncode != 0 or not os.path.exists(tmp):
                 raise RunFailed('%s wrote no checkpoint (see %s/%s.log)' % (MACHINE, run_dir, MACHINE))
             os.replace(tmp, chk)
             with open(chk[:-4] + '.json', 'w') as f:
-                json.dump({'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
-                           MACHINE: a.exe, MACHINE + '_sha256': a.exe_sha,
-                           MACHINE + '_version': a.exe_version, 'file_server': a.file_server,
-                           'engine': a.engine,
-                           'sys_host': sys_host, 'made': time.strftime('%Y-%m-%d %H:%M:%S')},
-                          f, indent=1)
+                made = {'band': os.path.abspath(a.band), 'band_sha256': a.band_sha,
+                        MACHINE: a.exe, MACHINE + '_sha256': a.exe_sha,
+                        MACHINE + '_version': a.exe_version, 'file_server': a.file_server,
+                        'engine': a.engine,
+                        'sys_host': sys_host, 'made': time.strftime('%Y-%m-%d %H:%M:%S')}
+                if link:
+                    # the tap it was made on and both addresses (the
+                    # contract, amendment 2, 5.1), and the network that
+                    # carried the setup's session; either resumes it
+                    made.update(revision=a.revision, tap=link.tap, tap_index=link.index,
+                                ip_address='%s/%s' % (link.quux, link.prefix), ip_gateway=link.gateway,
+                                network=a.network)
+                json.dump(made, f, indent=1)
         finally:
             machine.stop(wait=5)
             server.stop()
@@ -925,7 +1261,10 @@ def ensure_checkpoint(a, key):
                 os.unlink(tmp)
             if not os.path.exists(chk):
                 print('lispm-check: setup files kept in %s' % run_dir, file=sys.stderr)
-        shutil.rmtree(run_dir, ignore_errors=True)
+        if a.keep:
+            print('lispm-check: setup files kept in %s' % run_dir, file=sys.stderr)
+        else:
+            shutil.rmtree(run_dir, ignore_errors=True)
         return chk, now() - t0
     finally:
         lock.release()
@@ -934,11 +1273,11 @@ def ensure_checkpoint(a, key):
 # --------------------------------------------------------------------------
 # A check.
 
-def check(a, chk, cases):
+def check(a, chk, cases, link=None):
     run_dir = run_dir_new('check')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags)
+    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
     machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
     results, t0 = [], now()
     ok_run = False
@@ -1007,7 +1346,8 @@ def check(a, chk, cases):
                     verdict, why = 'ERROR', msg
             results.append(verdict)
             print('%s  %s  -> %s' % (verdict, shown, why), flush=True)
-        sock.close()
+        # over TCP the clean close here too, not checked: nothing is saved
+        server.close_session(sock, False)
         ok_run = True
     finally:
         log.write('\n=== %.2f stop\n' % now())
@@ -1019,6 +1359,9 @@ def check(a, chk, cases):
         if ok_run and not a.keep:
             shutil.rmtree(run_dir, ignore_errors=True)
         else:
+            # the relay's report and log join the run's files when the run
+            # ends (main stops the relay after the machine)
+            a.kept_run_dir = run_dir
             print('lispm-check: run files kept in %s' % run_dir, file=sys.stderr)
     return results, t_banner, now() - t0
 
@@ -1077,6 +1420,11 @@ def choose_file_server(a):
     if not has_device:
         print('lispm-check: files served by ozd: %s has no file device (auto)' % MACHINE)
         return 'ozd'
+    if a.network == 'tcp':
+        # ozd serves its files over Chaos, which a TCP session does without;
+        # a band whose SYS: is on OZ is refused by the setup's check
+        print('lispm-check: files served by device: the session is over TCP (auto)')
+        return 'device'
     pair = '%s-%s' % (a.band_sha[:16], a.exe_sha[:16])
     sys_host, source = None, None
     for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
@@ -1117,7 +1465,10 @@ def choose_file_server(a):
     return mode
 
 
-def main():
+def options(argv=None):
+    """The command line (ARGV, or the process's), parsed, with every default
+    resolved and every path made absolute.  tools/tcp-check/run takes this
+    tool's flags through it."""
     tree_default = os.environ.get('LISPM_CHECK_TREE') or os.path.dirname(TOOL_DIR)
     p = argparse.ArgumentParser(description='Check a Lisp change on a band.',
                                 epilog='See the header of this file for the CASES syntax.')
@@ -1154,13 +1505,21 @@ def main():
                    default=os.environ.get('LISPM_CHECK_OZD_FILE_DATES') or None,
                    help="ozd's --file-dates: FILE's dates in UTC (ozd's default), or at"
                         " --ozd-timezone as Systems 100 to 1001 read them (mit)")
+    # Which network carries the TELNET session (the contract, section 8 R1):
+    # checked below rather than by choices=, as --engine is.
+    p.add_argument('--network', metavar='{%s}' % ','.join(NETWORKS),
+                   default=os.environ.get('LISPM_CHECK_NETWORK') or 'chaos',
+                   help="what carries the TELNET session: chaos, through ozd (the default), or tcp,"
+                        " the build host's TCP to the band behind its tap (revision 16)")
     p.add_argument('--ozd-timezone', type=int,
                    default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
                    help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
                         " hours west of Greenwich")
-    a = p.parse_args()
+    a = p.parse_args(argv)
     if a.engine not in ('micro', 'rtl'):
         p.error("--engine (or LISPM_CHECK_ENGINE): %r is neither micro nor rtl" % a.engine)
+    if a.network not in NETWORKS:
+        p.error("--network (or LISPM_CHECK_NETWORK): %r is not one of %s" % (a.network, ', '.join(NETWORKS)))
     a.tree = os.path.abspath(a.tree)
     up = os.path.dirname(a.tree)
     a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
@@ -1175,14 +1534,21 @@ def main():
         a.ozd_flags += ['--file-dates', a.ozd_file_dates]
     if a.ozd_timezone is not None:
         a.ozd_flags += ['--timezone', str(a.ozd_timezone)]
+    return a
 
-    def on_signal(sig, frame):
-        raise SystemExit(128 + sig)
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, on_signal)
 
+def prepare(a):
+    """Everything before the check itself: the paths checked, the machine's
+    revision asked, the file server chosen, on revision 16 a tap taken, and
+    the checkpoint for this key made when there is none.  Returns (the tap's
+    TapLink or None, the checkpoint, the setup's time or None); the caller
+    stops the link after its machine.  RunFailed or RunHung otherwise, with
+    the link stopped."""
+    link = None
     try:
-        for what, path in (('band', a.band), (MACHINE, a.exe), ('ozd', a.ozd), ('cases', a.cases)):
+        for what, path in (('band', a.band), (MACHINE, a.exe), ('ozd', a.ozd)):
+            if what == 'ozd' and a.network == 'tcp':
+                continue                # started only for an OZ band, which TCP refuses
             if not os.path.isfile(path):
                 raise RunFailed('no %s at %s' % (what, path))
         for f in a.files:
@@ -1193,11 +1559,18 @@ def main():
         if a.ozd_timezone is not None and a.ozd_file_dates != 'mit':
             raise RunFailed('--ozd-timezone needs --ozd-file-dates mit: ozd refuses a zone'
                             ' under utc, its default')
-        cases = parse_cases(a.cases)
         a.band_sha = sha256_cached(a.band)
         a.exe_sha = sha256_cached(a.exe)
         a.exe_version = subprocess.run([a.exe, '-V'], capture_output=True, text=True).stdout.strip()
+        # revision 16 has the Ethernet device, and every run on it takes a tap
+        a.revision = machine_revision(a, a.exe_sha)
+        if a.network == 'tcp' and (a.revision is None or a.revision < 16):
+            raise RunFailed('--network tcp: %s runs %s, which has no Ethernet device; revision 16 has'
+                            % (MACHINE, 'revision %d' % a.revision if a.revision else 'the CADR'))
         a.file_server = choose_file_server(a)
+        if a.network == 'tcp' and a.file_server != 'device':
+            raise RunFailed('--network tcp: ozd serves the files over Chaos; a band whose SYS: is on OZ'
+                            ' wants --network chaos')
         # The key names the file server, since the setup logs in to that
         # server's host.  The device's folders are not in it: a checkpoint
         # carries none, quux mounting each check's own copy from its flags.
@@ -1205,17 +1578,56 @@ def main():
         # engine is in it too, since the machine resumes a checkpoint only on the
         # engine that wrote it: one made on micro must not be taken for a
         # check on rtl (so the checkpoints made before it are made again).
-        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION, a.engine)
-        chk, t_setup = ensure_checkpoint(a, key if a.file_server == 'ozd' else key + '-' + a.file_server)
+        tapped = a.revision is not None and a.revision >= 16
+        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION_TAP if tapped else SETUP_VERSION,
+                               a.engine)
+        key = key if a.file_server == 'ozd' else key + '-' + a.file_server
+        if tapped:
+            # A checkpoint for each tap index, keyed by QUUX's address behind
+            # it (the contract, amendment 2, 5.1); the taps tried are those
+            # whose index has one for this key, lowest first, then the rest,
+            # so that a key's runs keep to as few indexes as run at once.
+            taps = tap_range()
+            taps = ([t for t in taps if os.path.exists(checkpoint_path(key + '-' + t[2]))]
+                    + [t for t in taps if not os.path.exists(checkpoint_path(key + '-' + t[2]))])
+            link = TapLink(taps, now() + a.setup_limit)
+            key += '-' + link.quux
+            print('lispm-check: tap %s, QUUX at %s, TELNET over %s' % (link.tap, link.quux, a.network))
+        chk, t_setup = ensure_checkpoint(a, key, link)
+        return link, chk, t_setup
+    except BaseException:
+        if link:
+            link.stop()
+        raise
+
+
+def main():
+    a = options()
+
+    def on_signal(sig, frame):
+        raise SystemExit(128 + sig)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, on_signal)
+
+    link = None
+    try:
+        if not os.path.isfile(a.cases):
+            raise RunFailed('no cases at %s' % a.cases)
+        cases = parse_cases(a.cases)
+        link, chk, t_setup = prepare(a)
         if t_setup is not None:
             print('lispm-check: checkpoint made in %.1f s' % t_setup)
-        results, t_banner, t_all = check(a, chk, cases)
+        results, t_banner, t_all = check(a, chk, cases, link)
     except RunHung as e:
         print('lispm-check: HANG: %s' % e, file=sys.stderr)
         return 3
     except RunFailed as e:
         print('lispm-check: %s' % e, file=sys.stderr)
         return 2
+    finally:
+        # the relay last, after every machine it served has stopped
+        if link:
+            link.stop(getattr(a, 'kept_run_dir', None))
     passed = results.count('PASS')
     print('lispm-check: %d passed, %d failed, %d errors, of %d (banner %.2f s, all %.2f s)'
           % (passed, results.count('FAIL'), results.count('ERROR'), len(results), t_banner, t_all))

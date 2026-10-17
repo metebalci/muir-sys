@@ -1,0 +1,475 @@
+#!/usr/bin/env python3
+"""T2 of QUUX's Ethernet contract (section 9): the build host's own TCP, its
+sockets as clients, to the band through the fault relay and a pooled tap.
+
+usage:
+  tools/tcp-check/run [--parts telnet,echo,churn,limit,stall] [--echo-sizes 1,1024,65536,1048576]
+                      [--echo-times 10] [--connections 1000] [--stall 30,180]
+                      [--transfer-timeout S]
+                      [-- LISPM-CHECK-ARGS...]
+
+It takes a tap and resumes that index's checkpoint as tools/lispm-check does
+(it is lispm-check's own code, loaded from beside it, so the flags after --
+are lispm-check's: --band, --quux, --ubin, --tree, --engine, --file-server,
+--network and the rest, LISPM_CHECK_TAPS and LISPM_CHECK_PORTS too).  The
+machine must be revision 16 and the band one with the network.  It then
+opens the control session, a TELNET session of its own over lispm-check's
+--network (tcp by default here), and turns the test echo service on.  Each
+part connects from sockets bound to the run's tap to QUUX's address behind
+it, as Linux's own TCP:
+
+  telnet   three TELNET sessions to port 23 one after another and two at
+           once: each gets the banner, answers a form, and at the client's
+           EOF closes its side, with FIN (section 7)
+  echo     the test echo service, port 7, both ways at once: each size sent
+           --echo-times times while its echo is read, the echo equal to what
+           was sent by sha256 (1 B, 1 KiB, 64 KiB and 1 MiB, ten times each)
+  churn    --connections connections to port 7 opened and closed in a row,
+           each echoing one byte; after them the band holds no connection
+           but the control session's, and 64 TIME-WAIT records or fewer
+  limit    with the control session closed first (it is one of the 8): 8
+           connections at once, each echoing one byte, and a ninth refused
+           with RST; after them the band holds none but a new control
+           session's
+  stall    M-tap's stall test (section 15, Q8), run only when named: the
+           machine stopped for each of --stall's seconds (30 and 180) with a
+           form in flight on a TELNET session over TCP; the session is kept
+           and the form answered once the machine goes on
+
+and at the end the fault relay, which checks every Ethernet frame the band
+sends with its own code, must have found none bad.  The test switch, each
+part and the relay's finding each say PASS or
+FAIL with the reason and its figures; the exit status is 0 when every part
+passes, 1 when one fails, and 2 when the run itself failed (lispm-check's
+statuses).  --keep keeps the run's files (the control session's TELNET log,
+the machine's log, the relay's report) and says where.  The wall clock
+bounds a transfer (--transfer-timeout, 900 s) and nothing else: T2 asserts
+outcomes, not timers (section 9, "How the wall-clocked lanes are judged").
+Python's standard library only.
+"""
+
+import argparse
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import random
+import select
+import shutil
+import signal
+import socket
+import sys
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOLS = os.path.dirname(HERE)
+
+
+def load_lispm_check():
+    path = os.path.join(TOOLS, 'lispm-check')
+    loader = importlib.machinery.SourceFileLoader('lispm_check', path)
+    spec = importlib.util.spec_from_loader('lispm_check', loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m
+
+
+lc = load_lispm_check()
+ECHO_PORT, TELNET_PORT = 7, 23
+CONNECT_TIMEOUT = 10
+
+
+class PartFailed(Exception):
+    pass
+
+
+class Band:
+    """The band behind the run's tap, from the build host's side."""
+    def __init__(self, link, transfer_timeout):
+        self.tap, self.address, self.timeout = link.tap, link.quux, transfer_timeout
+
+    def connect(self, port, timeout=CONNECT_TIMEOUT):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, lc.SO_BINDTODEVICE, self.tap.encode())
+        s.settimeout(timeout)
+        try:
+            s.connect((self.address, port))
+        except OSError:
+            s.close()
+            raise
+        return s
+
+    def read_to_eof(self, s, deadline):
+        """What the band sends until its EOF, by DEADLINE (a monotonic time).
+        The socket is left blocking and each read waits in select, since a
+        sender thread may be in sendall on it: Python's socket timeout bounds
+        a whole sendall (since 3.5), so a timeout set for the reads would cut
+        a long send short."""
+        got = []
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0 or not select.select([s], [], [], left)[0]:
+                raise PartFailed('no EOF from the band within the transfer timeout (%d bytes read)'
+                                 % sum(len(x) for x in got))
+            d = s.recv(65536)
+            if not d:
+                return b''.join(got)
+            got.append(d)
+
+    def echo(self, data):
+        """DATA sent to the test echo service while its echo is read, then
+        our EOF: the echo, read to the band's EOF."""
+        s = self.connect(ECHO_PORT)
+        s.settimeout(None)
+        deadline = time.monotonic() + self.timeout
+        failed = []
+
+        def send():
+            try:
+                s.sendall(data)
+                s.shutdown(socket.SHUT_WR)
+            except OSError as e:
+                failed.append(e)
+        t = threading.Thread(target=send, daemon=True)
+        t.start()
+        try:
+            echo = self.read_to_eof(s, deadline)
+        finally:
+            t.join(max(0.1, deadline - time.monotonic()))
+            s.close()
+        if failed:
+            raise PartFailed('sending: %s' % failed[0])
+        return echo
+
+
+def telnet_session(band, form, want, log):
+    """One TELNET session over the build host's TCP: the banner, FORM's
+    answer, then our EOF and the band's: its server closes at EOF."""
+    s = band.connect(TELNET_PORT)
+    s.settimeout(0.2)
+    text, end = '', time.monotonic() + 120
+    while 'Telnet server here' not in text:
+        if time.monotonic() > end:
+            raise PartFailed('no banner in 120 s')
+        try:
+            d = s.recv(4096)
+        except socket.timeout:
+            continue
+        if not d:
+            raise PartFailed('the band closed before its banner')
+        text += d.decode('latin-1')
+    log.write(text)
+    sess = lc.Session(s, log, helper=True)
+    r = sess.run(form, 120)
+    if r[0] != 'value' or lc.normal(r[1]) != want:
+        raise PartFailed('%s gave %s, wanted %s' % (form, r, want))
+    s.settimeout(None)
+    s.shutdown(socket.SHUT_WR)
+    band.read_to_eof(s, time.monotonic() + 60)
+    s.close()
+
+
+class Control:
+    """The control session: lispm-check's session over its --network, and
+    the forms T2 needs of the band (section 9, T1, the way in)."""
+    def __init__(self, a, server, machine, log):
+        self.a, self.server, self.machine, self.log = a, server, machine, log
+        self.sess = None
+
+    def open(self):
+        sock, _ = self.server.connect_listener(self.machine.alive, lc.now() + 120)
+        sock.settimeout(0.2)
+        self.sock = sock
+        self.port = sock.getsockname()[1]
+        self.sess = lc.Session(sock, self.log, helper=True)
+
+    def close(self):
+        self.server.close_session(self.sock, False)
+        self.sess = None
+
+    def value(self, form):
+        r = self.sess.run(form, 120)
+        if r[0] != 'value':
+            raise PartFailed('%s: %s %s' % (lc.oneline(form), r[0], lc.normal(r[1])))
+        return lc.normal(r[1])
+
+    def others(self):
+        """The band's connections other than this control session's: over TCP
+        the control session is one of them, by its local port; over Chaos it
+        is none of them."""
+        if self.a.network == 'tcp':
+            form = ('(let ((n 0)) (dolist (c ip::tcp-connections n)'
+                    ' (unless (= (ip::tcb-rport c) %d) (setq n (1+ n)))))' % self.port)
+        else:
+            form = '(length ip::tcp-connections)'
+        return int(self.value(form))
+
+    def time_wait(self):
+        return int(self.value('(let ((n 0)) (dotimes (i 64 n) (when (aref ip::tcp-tw-remote i) (setq n (1+ n)))))'))
+
+
+def part_telnet(band, control, opts, log):
+    for i in range(3):
+        telnet_session(band, '(+ %d 2)' % i, str(i + 2), log)
+    out = []
+    ts = [threading.Thread(target=lambda k=k: out.append(_catch(telnet_session, band, '(* %d 3)' % k, str(3 * k), log)))
+          for k in (5, 7)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(300)
+    bad = [x for x in out if x]
+    if len(out) != 2 or bad:
+        raise PartFailed('two sessions at once: %s' % (bad or 'one did not end'))
+    return '3 sessions in a row and 2 at once, each closed by the band at EOF'
+
+
+def _catch(f, *args):
+    try:
+        f(*args)
+        return None
+    except (OSError, PartFailed, lc.RunFailed) as e:
+        return str(e)
+
+
+def part_echo(band, control, opts, log):
+    rng = random.Random(2)
+    figures = []
+    for size in opts.echo_sizes:
+        t0 = time.monotonic()
+        for k in range(opts.echo_times):
+            data = rng.randbytes(size)
+            echo = band.echo(data)
+            if hashlib.sha256(echo).digest() != hashlib.sha256(data).digest():
+                raise PartFailed('%d bytes, time %d: the echo\'s %d bytes differ by sha256' % (size, k + 1, len(echo)))
+        figures.append('%d B x%d in %.1f s' % (size, opts.echo_times, time.monotonic() - t0))
+    return 'byte for byte by sha256: ' + ', '.join(figures)
+
+
+def part_churn(band, control, opts, log):
+    t0 = time.monotonic()
+    for k in range(opts.connections):
+        try:
+            if band.echo(b'%c' % (k & 0xFF)) != b'%c' % (k & 0xFF):
+                raise PartFailed('connection %d: the echo differs' % (k + 1))
+        except OSError as e:
+            raise PartFailed('connection %d: %s' % (k + 1, e))
+    took = time.monotonic() - t0
+    others, tw = control.others(), control.time_wait()
+    if others != 0 or tw > 64:
+        raise PartFailed('after %d connections: %d connections besides the control session, %d TIME-WAIT records'
+                         % (opts.connections, others, tw))
+    return '%d connections in %.1f s; then 0 connections besides the control session, %d TIME-WAIT records' % (
+        opts.connections, took, tw)
+
+
+def part_limit(band, control, opts, log):
+    if control.a.network == 'tcp':
+        control.close()        # the control session is one of the 8
+    held = []
+    try:
+        for k in range(8):
+            s = band.connect(ECHO_PORT)
+            held.append(s)
+            s.sendall(b'x')
+            s.settimeout(30)
+            if s.recv(1) != b'x':
+                raise PartFailed('connection %d of 8: no echo' % (k + 1))
+        try:
+            ninth = band.connect(ECHO_PORT)
+        except ConnectionRefusedError:
+            ninth = None
+        except OSError as e:
+            raise PartFailed('the ninth: %s, not refused with RST' % e)
+        if ninth is not None:
+            ninth.close()
+            raise PartFailed('a ninth connection was taken')
+    finally:
+        for s in held:
+            try:
+                s.settimeout(None)
+                s.shutdown(socket.SHUT_WR)
+                band.read_to_eof(s, time.monotonic() + 60)
+            except (OSError, PartFailed):
+                pass
+            s.close()
+    if control.sess is None:
+        control.open()
+    others = control.others()
+    if others != 0:
+        raise PartFailed('after the 8 closed: %d connections besides the control session' % others)
+    return '8 at once, the ninth refused with RST; then none besides the control session'
+
+
+def part_stall(band, control, opts, log):
+    """M-tap's stall test (section 15, Q8): the machine stopped (SIGSTOP to
+    its process group) with a form in flight on a TELNET session over the
+    build host's TCP, for each of --stall's seconds, then let go: the
+    session is kept, Linux's TCP resending until the band answers, and the
+    form's answer comes."""
+    figures = []
+    for seconds in opts.stall:
+        s = band.connect(TELNET_PORT)
+        s.settimeout(0.2)
+        text, end = '', time.monotonic() + 120
+        while 'Telnet server here' not in text:
+            if time.monotonic() > end:
+                raise PartFailed('no banner in 120 s')
+            try:
+                d = s.recv(4096)
+            except socket.timeout:
+                continue
+            if not d:
+                raise PartFailed('the band closed before its banner')
+            text += d.decode('latin-1')
+        sess = lc.Session(s, log, helper=True)
+        r = sess.run('(+ 40 2)', 120)
+        if r[0] != 'value' or lc.normal(r[1]) != '42':
+            raise PartFailed('before the stall: %s' % (r,))
+        os.killpg(control.machine.proc.pid, signal.SIGSTOP)
+        try:
+            # the form goes out while the band cannot take it: data in flight
+            s.sendall(b"(lispm-check-case 777001 '(* 6 7))\r\n")
+            time.sleep(seconds)
+        finally:
+            os.killpg(control.machine.proc.pid, signal.SIGCONT)
+        t0 = time.monotonic()
+        buf, end = '', time.monotonic() + 300
+        while '{777001{42}777001}' not in buf:
+            if time.monotonic() > end:
+                raise PartFailed('after a stall of %d s: no answer in 300 s' % seconds)
+            try:
+                d = s.recv(4096)
+            except socket.timeout:
+                continue
+            if not d:
+                raise PartFailed('after a stall of %d s: the session closed' % seconds)
+            buf += d.decode('latin-1')
+            log.write(d.decode('latin-1'))
+        figures.append('%d s: answered %.1f s after' % (seconds, time.monotonic() - t0))
+        s.settimeout(None)
+        s.shutdown(socket.SHUT_WR)
+        band.read_to_eof(s, time.monotonic() + 60)
+        s.close()
+    return 'the session kept through each stall: ' + ', '.join(figures)
+
+
+# The parts run by default are T2's; stall is M-tap's, run when named.
+PARTS = {'telnet': part_telnet, 'echo': part_echo, 'churn': part_churn, 'limit': part_limit,
+         'stall': part_stall}
+T2_PARTS = ('telnet', 'echo', 'churn', 'limit')
+
+
+def main():
+    argv = sys.argv[1:]
+    rest = []
+    if '--' in argv:
+        i = argv.index('--')
+        argv, rest = argv[:i], argv[i + 1:]
+    p = argparse.ArgumentParser(description='T2: the build host\'s TCP to the band.')
+    p.add_argument('--parts', default=','.join(T2_PARTS))
+    p.add_argument('--stall', default='30,180', help="stall's seconds, comma-separated")
+    p.add_argument('--echo-sizes', default='1,1024,65536,1048576')
+    p.add_argument('--echo-times', type=int, default=10)
+    p.add_argument('--connections', type=int, default=1000)
+    p.add_argument('--transfer-timeout', type=float, default=900)
+    opts = p.parse_args(argv)
+
+    def on_signal(sig, frame):
+        raise SystemExit(128 + sig)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, on_signal)
+    opts.echo_sizes = [int(x) for x in opts.echo_sizes.split(',') if x]
+    opts.stall = [int(x) for x in opts.stall.split(',') if x]
+    parts = [x for x in opts.parts.split(',') if x]
+    for x in parts:
+        if x not in PARTS:
+            p.error('--parts: %s is not one of %s' % (x, ', '.join(PARTS)))
+    if not any(x == '--network' or x.startswith('--network=') for x in rest):
+        rest = ['--network', 'tcp'] + rest
+    a = lc.options(rest + [os.devnull])
+    link, results, kept = None, [], None
+    try:
+        link, chk, t_setup = lc.prepare(a)
+        if link is None:
+            raise lc.RunFailed('T2 wants revision 16, which takes a tap')
+        if t_setup is not None:
+            print('tcp-check: checkpoint made in %.1f s' % t_setup, flush=True)
+        run_dir = lc.run_dir_new('t2')
+        ports_lock, ports = lc.take_ports()
+        log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+        server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+        machine = lc.Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
+        ok_run = False
+        try:
+            server.lay_out(a.tree)
+            server.start()
+            machine.start(resume=chk)
+            control = Control(a, server, machine, log)
+            control.open()
+            band = Band(link, opts.transfer_timeout)
+            # the test switch is a line of its own; the parts run whatever
+            # it gave, so that on a band without the stack each fails for
+            # its own reason
+            try:
+                control.value('(setq ip:*test-echo-service* t)')
+                results.append('PASS')
+                print('%-6s %-5s the test echo service on' % ('switch', 'PASS'), flush=True)
+            except PartFailed as e:
+                results.append('FAIL')
+                print('%-6s %-5s %s' % ('switch', 'FAIL', e), flush=True)
+            for name in parts:
+                t0 = time.monotonic()
+                try:
+                    why = PARTS[name](band, control, opts, log)
+                    verdict = 'PASS'
+                except (OSError, PartFailed, lc.RunFailed) as e:
+                    verdict, why = 'FAIL', str(e) or type(e).__name__
+                    if control.sess is None:
+                        try:
+                            control.open()
+                        except lc.RunFailed:
+                            pass
+                results.append(verdict)
+                print('%-6s %-5s %s (%.1f s)' % (name, verdict, why, time.monotonic() - t0), flush=True)
+            if control.sess is not None:
+                control.close()
+            ok_run = True
+        finally:
+            machine.stop()
+            server.stop()
+            ports_lock.release()
+            link.stop(run_dir)
+            report = os.path.join(run_dir, 'relay.json')
+            if os.path.exists(report):
+                with open(report) as f:
+                    r = json.load(f)
+                verdict = 'PASS' if r['bad_from_band'] == 0 and r['from_band']['frames'] else 'FAIL'
+                results.append(verdict)
+                print('%-6s %-5s the fault relay: %d Ethernet frames from the band, %d bad; %d to it'
+                      % ('relay', verdict, r['from_band']['frames'], r['bad_from_band'], r['to_band']['frames']))
+            link = None
+            if ok_run and not a.keep:
+                shutil.rmtree(run_dir, ignore_errors=True)
+            else:
+                kept = run_dir
+    except lc.RunHung as e:
+        print('tcp-check: HANG: %s' % e, file=sys.stderr)
+        return 3
+    except lc.RunFailed as e:
+        print('tcp-check: %s' % e, file=sys.stderr)
+        return 2
+    finally:
+        if link:
+            link.stop()
+        if kept:
+            print('tcp-check: run files kept in %s' % kept, file=sys.stderr)
+    passed = results.count('PASS')
+    print('tcp-check: %d of %d passed' % (passed, len(results)))
+    return 0 if passed == len(results) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

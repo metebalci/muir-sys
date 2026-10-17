@@ -10,7 +10,8 @@ tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
                   [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
                   [--compile] [--file-server auto|device|ozd]
                   [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
-                  [--ozd-file-dates mit|utc] [--ozd-timezone N] CASES
+                  [--ozd-file-dates mit|utc] [--ozd-timezone N]
+                  [--network chaos|tcp] CASES
 ```
 
 ## The machine
@@ -125,6 +126,71 @@ with `--keep`):
 tools/lispm-check --engine rtl --keep ... CASES
 ```
 
+## The network
+
+QUUX's revision 16 has the Ethernet device (QUUX's Ethernet contract,
+sections 3, 7 and 8 R1). On it every run takes a tap of the pool that
+muir-sim's `tools/quux-taps` installs, through the fault relay
+(`tools/fault-relay/`), so that the band always has its link, and gives the
+machine the tap's addresses at the setup and at every resume:
+`--ethernet-socket` (the relay's socket), `--ip-address` and `--ip-gateway`,
+as the relay's line names them. Revision 15 and the CADR take no tap. The
+tool asks the machine which revision it runs once for each build and value of
+`MUIR_QUUX_REVISION` (a wrapper may set it), and remembers the answer in
+`revisions.json` under the cache.
+
+`--network chaos|tcp` (or `LISPM_CHECK_NETWORK`) says what carries the TELNET
+session:
+
+| `--network` | The session | The machine's Chaos | ozd |
+|---|---|---|---|
+| `chaos` (the default) | ozd's TCP gateway to the band's Chaos TELNET server | `--chaos-address 177201` and its cable, `--chaos-udp` to ozd | started |
+| `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | `--chaos-address 177201` only: no cable and no peer | not started |
+
+`tcp` needs revision 16 and a band whose `SYS:` is on HOST, its files on the
+file device: ozd would serve OZ's files over Chaos. So `--file-server auto`
+means `device` under `tcp`, and the setup's check refuses a band whose `SYS:`
+is on OZ. `--chaos-address` is given in both until the NCP leaves the band
+(the contract's R3), since the checkpoint holds the Chaosnet interface's
+switches and muir refuses a resume under others; so one checkpoint serves
+both networks. At the end of a setup over TCP the tool closes cleanly
+(section 7): it half-closes the session, reads to the band's EOF, which the
+band's server sends at the client's EOF, and waits 0.5 s for the last ACK, so
+that the checkpoint holds no connection; a band that sends no EOF within 60
+s, or resets the session, fails the setup. A check closes the same way, but
+does not fail on it.
+
+**The taps, and a checkpoint for each tap index.** The range is
+`LISPM_CHECK_TAPS`, tap indexes as `N`, `LO-HI` or a comma-separated list of
+them, by default the whole pool; of them the host-only taps alone, those with
+a /30 of their own, since a LAN tap's address is a real one (the contract,
+amendment 3). A checkpoint is made for each tap index on its first use, by
+the run that holds that tap, and its key names QUUX's address behind the tap,
+since muir refuses a resume under other addresses; on revision 16 the key's
+setup version is 3:
+
+```
+<band sha256>-<quux sha256>-3-micro-device-169.254.101.2.chk   (each sha256 its first 16 digits)
+```
+
+The JSON beside it records the tap, both addresses, and the network that made
+it. The taps tried are those of the range whose index already has a
+checkpoint for this key, lowest first, then the rest, lowest first, so that a
+key's runs keep to as few indexes as run at once. A tap another run holds is
+passed for the next; when every one is held the run waits for one, up to
+`--setup-limit`. The tap is the lock: the kernel lets one program hold it, so
+a band uses index N's address only while its run holds tap N. The relay
+serves the setup's machine and then the check's, and stops after the last
+machine; with `--keep` its report, `relay.json`, and its log join the run's
+files. Every run says which tap it took:
+
+```
+lispm-check: tap quux1, QUUX at 169.254.101.2, TELNET over tcp
+```
+
+The relay's socket is under the cache (`sockets/`), or under the system's
+temporary directory when the cache's path is too long for a UNIX socket.
+
 ## ozd's dates
 
 `--ozd-file-dates mit|utc` and `--ozd-timezone N` are passed to ozd as its
@@ -234,7 +300,9 @@ Each is overridden by its flag or an environment variable.
 | `--setup-limit` | `LISPM_CHECK_SETUP_LIMIT` | 1800: the hard limit in seconds on the setup's and the probe's wall clock |
 | `--ozd-file-dates` | `LISPM_CHECK_OZD_FILE_DATES` | none: ozd's own, `utc` ([ozd's dates](#ozds-dates)) |
 | `--ozd-timezone` | `LISPM_CHECK_OZD_TIMEZONE` | none: ozd's own |
+| `--network` | `LISPM_CHECK_NETWORK` | `chaos` ([the network](#the-network)) |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
+| | `LISPM_CHECK_TAPS` | the tap indexes taken from on revision 16: the pool's host-only taps |
 
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check
 against, or a copy) and `run/check/ubin/` are set up once per clone:
@@ -277,7 +345,13 @@ Everything that knows how the tree is served (ozd's flags, the copy of the
 tree and its layout, the pathnames of served files, the TELNET listener ozd
 carries and the machine's flags that plug the band into them) is in the classes
 `OzdFileServer` and `DeviceFileServer` in the tool; a third way of serving the
-tree is a class with the same methods, named in `FILE_SERVERS`.
+tree is a class with the same methods, named in `FILE_SERVERS`. The network
+that carries the session is a key of `NETWORKS`, which the same classes
+branch on (`machine_flags`, `_open`, `close_session`); the third, `host`, a
+session through quux's file device for a band without its network, is to
+come there. `options` and `prepare` are the command line and everything
+before the check (the revision, the file server, the tap, the checkpoint),
+which `tools/tcp-check/run` takes from the tool.
 
 ## Self-test
 
@@ -302,3 +376,20 @@ that band. `LISPM_CHECK_TEST_MODES` picks the modes, each run with the
 It passes its arguments on to every run (`--quux`, `--cadr`, `--engine` and
 so on), so `tools/lispm-check-test/run.sh --engine rtl` is the self-test on
 rtl.
+
+`tools/lispm-check-test/network.sh` is the self-test of [the
+network](#the-network), on a revision 16 machine and a band with the network,
+with `LISPM_CHECK_TAPS` naming two host-only taps at least, A and B, and a
+cache of its own, so that its first run sets up over TCP: `tcp` (A held by
+another program, the run takes B, sets up over TCP and resumes; the machine
+has B's addresses and no Chaos peer, ozd is not started, the relay found no
+bad frame, the key names B's address, and the resumed band holds only the
+session's connection), `order` (both free, B alone with a checkpoint: the run
+takes B over Chaos with no setup, one checkpoint serving both networks),
+`index` (B held: A, with a setup of its own), `order-both` (both free: A, no
+setup), `wait` (A alone and held for 5 s: the run waits, then takes it),
+`no-tap` (a range with no tap: status 2), and with
+`LISPM_CHECK_TEST_QUUX15` naming a revision 15 machine, `rev15-tcp` (refused)
+and `rev15-chaos` (no tap, the key as before). `LISPM_CHECK_TEST_TOOL` names
+another copy of the tool to test, a planted one say. About 5 minutes on
+micro.

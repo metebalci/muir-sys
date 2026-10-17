@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""The fault relay: a pooled tap at one end, muir's --ethernet-socket at the
+other, with counts and its own check of every Ethernet frame the band sends
+(QUUX's Ethernet contract, sections 3 and 9).
+
+usage:
+  relay [--tap NAME[,NAME...]] [--report FILE] PATH
+  relay --help
+
+It is the Ethernet frame mover (muir-sim's tools/ethernet-frame-mover) with
+the fault relay's additions, and takes a tap the same way, so that a caller
+treats the two alike:
+
+  --tap NAME[,NAME...]  the taps to try, in order.  A tap another program
+                        holds is passed for the next; a named tap that is
+                        missing, not a tap, not the user's or not host-only
+                        is refused with that reason.  [default: the pool
+                        from quux0 up, as far as it goes]
+  --report FILE         where the counts and the check's findings are
+                        written, as JSON: when the relay ends (SIGTERM, ^C)
+                        and on SIGUSR1.  [default: none]
+
+It listens at PATH, a UNIX stream socket muir's --ethernet-socket connects
+to in its plain mode (each Ethernet frame a 32-bit big-endian length and its
+bytes), and once it holds a tap prints one line on stdout, the mover's:
+
+  quux1 --ip-address 169.254.101.2/30 --ip-gateway 169.254.101.1
+
+the tap, and the two flags quux wants behind it, read from the kernel: the
+tap's own address and prefix are the host side and the band's gateway, and
+the band's address is the /30's other host address.  It takes host-only taps
+only, each with a /30 of its own (the contract's section 3, amendment 3): a
+LAN tap, which has no address of its own, is refused.
+
+One machine is connected at a time.  A machine that closes leaves the relay
+holding its tap for the next, so that one run of lispm-check, its setup's
+machine and then its check's, holds one tap throughout.  While none is
+connected, what the tap gives is dropped and counted.
+
+**The counts:** Ethernet frames and bytes each way, by Ethernet type, and
+those dropped with no machine connected.  **The check** (section 9, T4: "the
+fault relay checks, with its own code, every Ethernet frame the band sends"):
+an ARP frame is 42 bytes; an IPv4 one is version 4 with IHL 5 or more, its
+length 14 + TL, its header checksum good, and a TCP, UDP or ICMP payload's
+checksum good (RFC 791, 768, 792, 9293, the sum of RFC 1071, written out
+here); any other type is bad.  A bad frame is moved all the same: the
+relay reports, it does not filter, and Linux behind the tap checks again.
+
+Faults (section 9, T4: loss, duplicates, reordering, a changed byte, delay
+jitter, the injected Ethernet frames of other types) come at E5's later
+slices; the two places they go are Relay.to_band and Relay.to_tap.
+
+Exit status: 0 at the end, 2 for a usage error, 75 when every tap tried was
+taken (sysexits.h's EX_TEMPFAIL, the mover's), so that a caller may wait and
+try again, and 1 otherwise.  Python's standard library only.
+"""
+
+import errno
+import fcntl
+import json
+import os
+import select
+import signal
+import socket
+import stat
+import struct
+import sys
+
+PROGRAM = 'relay'
+
+# <linux/if_tun.h>: TUNSETIFF is _IOW('T', 202, int).
+TUNSETIFF = 0x400454CA
+IFF_TAP = 0x0002
+IFF_NO_PI = 0x1000
+# <linux/sockios.h>
+SIOCGIFADDR = 0x8915
+SIOCGIFNETMASK = 0x891B
+IFNAMSIZ = 16
+
+POOL, POOL_MAX = 'quux', 64     # quux-taps makes quux0 to quux<N-1>, N at most 64
+TAKEN = 75                      # every tap tried was taken
+
+ETH_IPV4, ETH_ARP = 0x0800, 0x0806
+PROTO_ICMP, PROTO_TCP, PROTO_UDP = 1, 6, 17
+# How many bad frames the report describes one by one; the rest are counted.
+BAD_SHOWN = 50
+
+
+class Refused(Exception):
+    def __init__(self, message, status=1):
+        Exception.__init__(self, message)
+        self.status = status
+
+
+def dotted(a):
+    return socket.inet_ntoa(struct.pack('!I', a))
+
+
+def ifreq(name, rest=b''):
+    return struct.pack('%ds' % IFNAMSIZ, name.encode()) + rest.ljust(24, b'\0')
+
+
+def host_only_addresses(name):
+    """The tap's own IPv4 address and the band's, (host, quux), from the
+    kernel; a tap with no /30 of its own (a LAN tap, or none) is refused."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        got = []
+        for request in (SIOCGIFADDR, SIOCGIFNETMASK):
+            try:
+                r = fcntl.ioctl(s.fileno(), request, ifreq(name))
+            except OSError as e:
+                if e.errno == errno.EADDRNOTAVAIL:
+                    raise Refused('%s: no IPv4 address of its own, so not a host-only tap' % name)
+                raise Refused('%s: its IPv4 address cannot be read: %s' % (name, e.strerror))
+            got.append(struct.unpack('!I', r[20:24])[0])
+    finally:
+        s.close()
+    host, mask = got
+    if mask != 0xFFFFFFFC:
+        raise Refused('%s: %s is not on a /30, so not a host-only tap' % (name, dotted(host)))
+    net = host & mask
+    if host == net + 1:
+        return host, net + 2
+    if host == net + 2:
+        return host, net + 1
+    raise Refused('%s: %s is not one of its /30\'s two host addresses' % (name, dotted(host)))
+
+
+def open_tap(name):
+    """A descriptor for the tap's Ethernet frames, or OSError (EBUSY: held)."""
+    fd = os.open('/dev/net/tun', os.O_RDWR | os.O_CLOEXEC)
+    try:
+        fcntl.ioctl(fd, TUNSETIFF, ifreq(name, struct.pack('H', IFF_TAP | IFF_NO_PI)))
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
+
+
+def take(names, named):
+    """The first of NAMES that can be taken: (name, fd, host, quux)."""
+    why = []
+    for name in names:
+        if not name or '/' in name or len(name.encode()) >= IFNAMSIZ:
+            why.append('%s: not a network interface\'s name' % name)
+            continue
+        if not os.path.exists('/sys/class/net/%s' % name):
+            why.append('%s: no such tap' % name)
+            continue
+        if not os.path.exists('/sys/class/net/%s/tun_flags' % name):
+            why.append('%s: not a tap' % name)
+            continue
+        try:
+            host, quux = host_only_addresses(name)
+        except Refused as e:
+            why.append(str(e))
+            continue
+        try:
+            return name, open_tap(name), host, quux
+        except OSError as e:
+            if e.errno == errno.EBUSY:
+                why.append('%s: taken: another program holds it' % name)
+            elif e.errno == errno.EPERM:
+                why.append('%s: not this user\'s: quux-taps --user names the taps\' owner' % name)
+            else:
+                why.append('%s: %s' % (name, e.strerror))
+    every_taken = bool(why) and all(': taken: ' in w for w in why)
+    raise Refused('no tap of %s could be taken: %s' % ('the taps named' if named else 'the pool',
+                                                       '; '.join(why)), TAKEN if every_taken else 1)
+
+
+def pool():
+    names = []
+    for k in range(POOL_MAX):
+        if not os.path.exists('/sys/class/net/%s%d' % (POOL, k)):
+            break
+        names.append('%s%d' % (POOL, k))
+    if not names:
+        raise Refused('no tap %s0: the pool is not installed (muir-sim\'s tools/quux-taps)' % POOL)
+    return names
+
+
+# --------------------------------------------------------------------------
+# The check: the relay's own code, from the RFCs.
+
+def ones_sum(data):
+    """RFC 1071's one's-complement sum of DATA as 16-bit words, an odd last
+    byte padded with a zero byte on its right."""
+    if len(data) % 2:
+        data = data + b'\0'
+    total = sum(struct.unpack('!%dH' % (len(data) // 2), data))
+    while total >> 16:
+        total = (total & 0xFFFF) + (total >> 16)
+    return total
+
+
+def check_frame(f):
+    """None when the Ethernet frame F the band sent is well formed with
+    every checksum good, else what is wrong."""
+    if len(f) < 14:
+        return 'a frame of %d bytes, shorter than an Ethernet header' % len(f)
+    t = struct.unpack('!H', f[12:14])[0]
+    if t == ETH_ARP:
+        if len(f) != 42:
+            return 'ARP in %d bytes, not 42' % len(f)
+        if f[14:22] != b'\x00\x01\x08\x00\x06\x04\x00\x01' and f[14:22] != b'\x00\x01\x08\x00\x06\x04\x00\x02':
+            return 'ARP not for Ethernet and IPv4, or neither a request nor a reply'
+        return None
+    if t != ETH_IPV4:
+        return 'Ethernet type 0x%04x, neither IPv4 nor ARP' % t
+    if len(f) < 34:
+        return 'IPv4 in %d bytes, shorter than its header' % len(f)
+    if f[14] >> 4 != 4:
+        return 'IPv4 version %d' % (f[14] >> 4)
+    ihl = (f[14] & 15) * 4
+    tl = struct.unpack('!H', f[16:18])[0]
+    if ihl < 20:
+        return 'IHL %d' % (ihl // 4)
+    if 14 + tl != len(f):
+        return 'a frame of %d bytes for TL %d: not 14 + TL' % (len(f), tl)
+    if tl < ihl:
+        return 'TL %d below the header\'s %d bytes' % (tl, ihl)
+    if ones_sum(f[14:14 + ihl]) != 0xFFFF:
+        return 'a bad IPv4 header checksum'
+    frag = struct.unpack('!H', f[20:22])[0]
+    if frag & 0x3FFF:
+        return 'a fragment (MF or an offset)'
+    proto, src, dst = f[23], f[26:30], f[30:34]
+    p = f[14 + ihl:14 + tl]
+    if proto == PROTO_TCP:
+        if len(p) < 20 or (p[12] >> 4) * 4 < 20 or (p[12] >> 4) * 4 > len(p):
+            return 'TCP in %d bytes, or a bad data offset' % len(p)
+        if ones_sum(src + dst + struct.pack('!BBH', 0, PROTO_TCP, len(p)) + p) != 0xFFFF:
+            return 'a bad TCP checksum'
+    elif proto == PROTO_UDP:
+        if len(p) < 8 or struct.unpack('!H', p[4:6])[0] != len(p):
+            return 'UDP whose length is not its own'
+        if p[6:8] != b'\0\0' and ones_sum(src + dst + struct.pack('!BBH', 0, PROTO_UDP, len(p)) + p) != 0xFFFF:
+            return 'a bad UDP checksum'
+    elif proto == PROTO_ICMP:
+        if len(p) < 8:
+            return 'ICMP in %d bytes' % len(p)
+        if ones_sum(p) != 0xFFFF:
+            return 'a bad ICMP checksum'
+    return None
+
+
+def sender(f):
+    """The IPv4 sender an ARP or IPv4 frame names, or None."""
+    if len(f) < 14:
+        return None
+    t = struct.unpack('!H', f[12:14])[0]
+    if t == ETH_ARP and len(f) >= 42:
+        return struct.unpack('!I', f[28:32])[0]
+    if t == ETH_IPV4 and len(f) >= 34 and f[14] >> 4 == 4:
+        return struct.unpack('!I', f[26:30])[0]
+    return None
+
+
+# --------------------------------------------------------------------------
+# The relay.
+
+class Relay:
+    def __init__(self, tap_fd, name, host, quux, report=None, err=sys.stderr):
+        self.tap_fd, self.name, self.host, self.quux = tap_fd, name, host, quux
+        self.report, self.err = report, err
+        self.line = '%s --ip-address %s/30 --ip-gateway %s' % (name, dotted(quux), dotted(host))
+        self.counts = {'connections': 0,
+                       'to_band': {'frames': 0, 'bytes': 0, 'types': {}},
+                       'from_band': {'frames': 0, 'bytes': 0, 'types': {}},
+                       'dropped_unconnected': 0, 'tap_write_failed': 0,
+                       'bad_from_band': 0, 'bad': []}
+
+    def say(self, what):
+        print('%s: %s' % (PROGRAM, what), file=self.err, flush=True)
+
+    def count(self, way, f):
+        c = self.counts[way]
+        c['frames'] += 1
+        c['bytes'] += len(f)
+        t = '0x%04x' % struct.unpack('!H', f[12:14])[0] if len(f) >= 14 else 'short'
+        c['types'][t] = c['types'].get(t, 0) + 1
+
+    def write_report(self):
+        if not self.report:
+            return
+        out = dict(self.counts, tap=self.name, line=self.line)
+        tmp = '%s.%d.tmp' % (self.report, os.getpid())
+        with open(tmp, 'w') as f:
+            json.dump(out, f, indent=1, sort_keys=True)
+        os.replace(tmp, self.report)
+
+    def to_band(self, conn, f):
+        """An Ethernet frame from the tap, to the machine (T4's faults go here)."""
+        self.count('to_band', f)
+        conn.sendall(struct.pack('!I', len(f)) + f)
+
+    def to_tap(self, f, warned):
+        """An Ethernet frame the machine sent: checked, counted and written to
+        the tap (T4's faults go here).  Returns whether the warning about the
+        band's address has been given on this connection."""
+        self.count('from_band', f)
+        bad = check_frame(f)
+        if bad:
+            self.counts['bad_from_band'] += 1
+            if len(self.counts['bad']) < BAD_SHOWN:
+                self.counts['bad'].append({'n': self.counts['from_band']['frames'], 'why': bad,
+                                           'frame': f[:64].hex()})
+        s = sender(f)
+        if not warned and s not in (None, 0, self.quux):
+            self.say('warning: the band sends from %s, and %s\'s QUUX address is %s: run quux with %s;'
+                     ' its Ethernet frames are moved all the same'
+                     % (dotted(s), self.name, dotted(self.quux), self.line.split(' ', 1)[1]))
+            warned = True
+        try:
+            os.write(self.tap_fd, f)
+        except OSError as e:
+            self.counts['tap_write_failed'] += 1
+            self.say('%s: an Ethernet frame of %d bytes not taken: %s' % (self.name, len(f), e.strerror))
+        return warned
+
+    def pump(self, conn):
+        held, warned = b'', False
+        while True:
+            ready, _, _ = select.select([self.tap_fd, conn], [], [])
+            if self.tap_fd in ready:
+                self.to_band(conn, os.read(self.tap_fd, 65536))
+            if conn in ready:
+                got = conn.recv(65536)
+                if not got:
+                    return
+                held += got
+                while len(held) >= 4:
+                    n = struct.unpack('!I', held[:4])[0]
+                    if len(held) < 4 + n:
+                        break
+                    f, held = held[4:4 + n], held[4 + n:]
+                    if n:
+                        warned = self.to_tap(f, warned)
+
+    def serve(self, listener):
+        while True:
+            ready, _, _ = select.select([self.tap_fd, listener], [], [])
+            if self.tap_fd in ready:
+                os.read(self.tap_fd, 65536)
+                self.counts['dropped_unconnected'] += 1
+            if listener in ready:
+                conn, _ = listener.accept()
+                self.counts['connections'] += 1
+                self.say('%s: a machine connected' % self.name)
+                try:
+                    self.pump(conn)
+                except OSError as e:
+                    self.say('%s: the connection failed: %s' % (self.name, e.strerror))
+                finally:
+                    conn.close()
+                self.say('%s: the machine closed; waiting for the next' % self.name)
+                self.write_report()
+
+
+def listen(path):
+    """A UNIX stream socket at PATH; a stale socket file is replaced."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        st = None
+    if st is not None:
+        if not stat.S_ISSOCK(st.st_mode):
+            raise Refused('%s: exists and is not a socket' % path)
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(path)
+        except ConnectionRefusedError:
+            os.unlink(path)
+        except OSError as e:
+            raise Refused('%s: %s' % (path, e.strerror))
+        else:
+            raise Refused('%s: another program listens there' % path)
+        finally:
+            probe.close()
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.bind(path)
+    except OSError as e:
+        s.close()
+        raise Refused('%s: %s' % (path, e.strerror))
+    s.listen(1)
+    return s
+
+
+def usage(message=None):
+    if message:
+        print('%s: %s' % (PROGRAM, message), file=sys.stderr)
+    print('usage: relay [--tap NAME[,NAME...]] [--report FILE] PATH', file=sys.stderr)
+    sys.exit(2)
+
+
+def parse(argv):
+    names, report, path = None, None, None
+    args = list(argv)
+    while args:
+        a = args.pop(0)
+        if a in ('-h', '--help'):
+            print(__doc__.strip())
+            sys.exit(0)
+        elif a in ('--tap', '--report'):
+            if not args or not args[0] or args[0].startswith('-'):
+                usage('%s wants a value' % a)
+            v = args.pop(0)
+            if a == '--tap':
+                names = v.split(',')
+                if not all(names):
+                    usage('--tap wants NAME[,NAME...]')
+            else:
+                report = v
+        elif a.startswith('-'):
+            usage('%s is not a flag of %s' % (a, PROGRAM))
+        elif path is None:
+            path = a
+        else:
+            usage('%s: one PATH only' % a)
+    if path is None:
+        usage('PATH wanted: the socket muir\'s --ethernet-socket names')
+    return names, report, path
+
+
+def main(argv):
+    names, report, path = parse(argv)
+    listener, relay = None, None
+
+    def end(*_):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, end)
+    try:
+        name, fd, host, quux = take(names if names is not None else pool(), names is not None)
+        relay = Relay(fd, name, host, quux, report)
+        signal.signal(signal.SIGUSR1, lambda *_: relay.write_report())
+        listener = listen(path)
+        print(relay.line, flush=True)
+        relay.serve(listener)
+    except Refused as e:
+        print('%s: %s' % (PROGRAM, e), file=sys.stderr)
+        return e.status
+    except (KeyboardInterrupt, SystemExit):
+        return 0
+    finally:
+        if relay is not None:
+            relay.write_report()
+        if listener is not None:
+            listener.close()
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

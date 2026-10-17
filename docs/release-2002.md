@@ -2147,3 +2147,32 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
 - **`tools/system-check/cases/generational-tuning.cases`**: the clock's rate
   after GC-ON and GC-OFF is the smallest any user asks for, 6 and 60 unless the
   network is up, when it is every tick (`:45`, `:69`).
+- **`tools/lispm-check` takes a tap on revision 16, and `--network tcp`**
+  (QUUX's Ethernet contract, sections 3, 7 and 8 R1; `docs/lispm-check.md`,
+  "The network"). On revision 16 every run takes a host-only tap of the pool
+  through the fault relay, `LISPM_CHECK_TAPS` its range (`tap_range`,
+  `tools/lispm-check:425`; `TapLink`, `:474`), the indexes that have a
+  checkpoint for the key first (`:1591`), and gives the machine the tap's
+  `--ethernet-socket`, `--ip-address` and `--ip-gateway` at the setup and at
+  every resume (`:516`). A checkpoint is made for each tap index, its key
+  naming QUUX's address behind the tap and its setup version 3
+  (`SETUP_VERSION_TAP`, `:933`); revision 15's and the CADR's keys are as
+  before. The revision is asked of the machine once a build
+  (`machine_revision`, `:531`). `--network tcp` carries the session over the
+  build host's own TCP from a socket bound to the tap to the band's TELNET
+  server, with no Chaos cable and no ozd (`NETWORKS`, `:610`; `_open`,
+  `:702`), and closes the setup's session cleanly, to the band's EOF, so that
+  the checkpoint holds no connection (`close_session`, `:773`);
+  `--chaos-address` is given in both networks, so one checkpoint serves both.
+  `options` and `prepare` (`:1468`, `:1540`) split the command line and the
+  setup from `main`. Its self-test, `tools/lispm-check-test/network.sh`, is
+  new.
+- **`tools/fault-relay/relay`** (new; its README): the Ethernet frame mover
+  with counts and its own check of every Ethernet frame the band sends
+  (`check_frame`, `:198`), which takes host-only taps only; T4's faults come
+  later.
+- **`tools/tcp-check/run`** (new; its README): T2, Linux's own TCP to the band
+  through the relay and a tap: TELNET sessions, the test echo service at 1 B
+  to 1 MiB by sha256, 1,000 connections in a row, 8 at once and a ninth
+  refused (`part_telnet` to `part_limit`, `:213`-`:268`); and M-tap's stall
+  test, by name (`part_stall`, `:306`).
