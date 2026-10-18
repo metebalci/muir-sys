@@ -311,7 +311,28 @@ SGENT1	(CALL PDL-BUFFER-REFILL)		;REFILL PDL-BUFFER WITH GOOD STUFF
 
 	((A-QLARYH) C-PDL-BUFFER-POINTER-POP)
 	((A-QLARYL) C-PDL-BUFFER-POINTER-POP)
+	;; the deferred sequence break is the machine's, not the stack group's.
+	;; a break that came while scheduling was inhibited set
+	;; m-deferred-sequence-break-flag in m-flags, which sglv saves with the
+	;; stack group left and the pop below restored from the one entered: a
+	;; break deferred while the scheduler ran (its whole pass is inside
+	;; without-interrupts) was dropped when it resumed a process, and a frame
+	;; that <8> announced then waited for the clock's next break, up to a
+	;; second (m-ack on micro at 48 ns, gc off: 1035 ms; with the flag the
+	;; machine's, 20.4 ms).  so the flag of the group left is carried into
+	;; the group entered, where sb-reinstate below asks for the break again,
+	;; and the entered group's saved copy is dropped (the scheduler's, set
+	;; for good once a break was deferred in it, would come back on every
+	;; entry).  before:
+;	((M-FLAGS) C-PDL-BUFFER-POINTER-POP)
+	(jump-if-bit-clear m-deferred-sequence-break-flag sgent-no-deferred-sb)
 	((M-FLAGS) C-PDL-BUFFER-POINTER-POP)
+	(jump-xct-next sgent-flags-restored)
+       ((m-deferred-sequence-break-flag) dpb (m-constant -1) a-flags)
+sgent-no-deferred-sb
+	((M-FLAGS) C-PDL-BUFFER-POINTER-POP)
+	((m-deferred-sequence-break-flag) dpb m-zero a-flags)	;the flag is the machine's, not the stack group's
+sgent-flags-restored
 
 	((M-1) A-SG-STATE)
 	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%SG-ST-IN-SWAPPED-STATE) M-1 

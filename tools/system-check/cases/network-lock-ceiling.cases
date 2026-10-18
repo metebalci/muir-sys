@@ -1,0 +1,34 @@
+; The network lock's priority ceiling (sys/network/ip/ether.lisp,
+; WITH-NETWORK-LOCK; QUUX's Ethernet contract, section 5.1, senders;
+; lisp/network-lock-ceiling.lisp): a sender runs at the network process's
+; priority, 25, while it holds the lock, raised before it takes it and
+; restored after it releases it, at the outermost hold only, in an
+; UNWIND-PROTECT.  The cases run in the TELNET server's listener, at priority
+; 0, the sections in the check's compiled functions.  On a band built before
+; the change, compile ether.lisp first (README.md).  Without the ceiling the
+; priority inside is the listener's own, 0; a ceiling that never restores
+; leaves the listener at 25 after the first section.
+
+; the listener's own priority, raised inside and restored after: (BEFORE INSIDE AFTER)
+(list (send current-process :priority) (nlc-inside) (send current-process :priority)) => (0 25 0)
+; the lock the listener's inside, free after
+(list (nlc-holder) ip::network-lock) => (T NIL)
+; nested holds: raised once, restored once, at the outermost
+(list (nlc-nested) (send current-process :priority)) => (25 0)
+(nlc-nested-around) => (25 INNER 25)
+; a throw and an error out of the section: the lock released, the priority restored
+(progn (nlc-throw) (list (send current-process :priority) ip::network-lock)) => (0 NIL)
+(progn (nlc-error) (list (send current-process :priority) ip::network-lock)) => (0 NIL)
+; a process above the ceiling keeps its own priority throughout
+(nlc-above 30) => (30 30 30)
+; the section's values come back
+(nlc-values) => (1 2 3)
+; the holder's entry in si:active-processes, moved by the raise and the
+; restore themselves: the list stays in priority order (before, inside, after a
+; section); inside, the entry is where :set-priority to 25 puts it; after, it
+; is back at its place before
+(nlc-order) => (T T T)
+(nlc-places) => (T T)
+; a section that moves its own entry (:set-priority 30 inside): the restore
+; walks instead, and the priority and the order come back
+(nlc-fallback) => (0 T)

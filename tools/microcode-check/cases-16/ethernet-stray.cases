@@ -1,6 +1,7 @@
-; Revision 16's Ethernet device interrupt, word 100 <8>, is taken as a stray
-; (sys/ucadr/uc-interrupt.lisp, INTR-ETHERNET-DEVICE-STRAY; QUUX's Ethernet
-; contract, section 2.6).  Load lisp/ethernet-stray.lisp first; it needs
+; Revision 16's Ethernet device interrupt, word 100 <8>: the microcode writes
+; 240 back with <8> clear, as for a stray, and asks for a sequence break
+; (sys/ucadr/uc-interrupt.lisp, INTR-ETHERNET-DEVICE; QUUX's Ethernet
+; contract, section 2.6's fallback).  Load lisp/ethernet-stray.lisp first; it needs
 ; revision 16 and the peer, tools/microcode-check/ethernet-peer, behind the
 ; device (README.md).  Microcode without the stray dismisses the interrupt
 ; untouched, and the level, never cleared, interrupts again at once for as

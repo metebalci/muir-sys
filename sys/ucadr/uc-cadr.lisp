@@ -182,7 +182,8 @@
 ;; ethernet device is words 240-257, its interrupt word 100 <8>, and feature
 ;; word 15 <2> says it is there; below revision 16 the three read 0.  word 240
 ;; is its control, <0> enable and <8> interrupt enable, which
-;; intr-ethernet-device-stray clears; word 241 its status, <1> quiet, which
+;; intr-ethernet-device clears as it asks for a sequence break; word 241 its
+;; status, <1> quiet, which
 ;; reset-machine waits for when word 15 <2> is set.
 (assign quux-optional-devices-physical-address (plus quux-register-page-physical-address 15))
 (assign quux-ethernet-device-control-virtual-address (plus quux-register-page-virtual-address 240))

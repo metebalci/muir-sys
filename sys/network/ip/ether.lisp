@@ -15,13 +15,21 @@
 ;;; 2.4), so nothing here or in ipv4 computes one: a field the stack leaves 0
 ;;; goes out filled in, and a frame with a wrong one never arrives.
 ;;;
-;;; the driver polls.  the device's interrupt enable, register 240 <8>, stays
-;;; off: the microcode takes word 100 <8> as a stray (the contract's section
-;;; 2.6).  the network process waits on a predicate that reads register 251,
-;;; the receive consumer, and the earliest timer, and conses nothing; the
-;;; clock's sequence break comes every tick while the network is up, so that
-;;; the process, at priority 25 as chaos background, runs within a tick of a
-;;; frame or a timer even when another process computes.
+;;; the network process waits on a predicate that reads register 251, the
+;;; receive consumer, and the earliest timer, and conses nothing.  a received
+;;; frame wakes it through the device's interrupt (section 2.6's fallback,
+;;; built since m-ack's idle bound failed with the clock's break every tick):
+;;; before it waits the process sets register 240 <8>, the interrupt enable,
+;;; and the microcode, taking word 100 <8>, clears <8> again and asks for a
+;;; sequence break, as mit's microcode can take a chaos packet as one (:chaos;
+;;; the band enables only :clock), so the scheduler runs the
+;;; process, at priority 25 as chaos background, at once even when another
+;;; process computes.  the clock's sequence break comes every tick only while
+;;; a timer of the network's own is due within 2 s (network-clock-rule), so
+;;; that an idle band pays only the collector's rate or the clock's default.
+;;; a sender runs at the network process's priority while it holds the
+;;; network lock (with-network-lock), so that a sender preempted in its
+;;; section resumes before any process at a user's priority (m-ack).
 ;;;
 ;;; the rings share one wired page: 16 transmit entries of 8 words, then 32
 ;;; receive entries.  every buffer is 384 words, 1,536 bytes, two to a wired
@@ -64,6 +72,7 @@ dropped mod 256, <31:24> transmit entries refused mod 256.")
 
 ;; feature word 15 <2> says the device is there; it reads 3 on revision 15.
 (defconst %%ether-feature #o0201)
+(defconst %ether-control-armed #o401 "Register 240: enabled, <0>, with the interrupt enable, <8>.")
 
 (defconst %ether-entry-words 8)
 (defconst %ether-transmit-log2 4)
@@ -245,7 +254,8 @@ bases and sizes, enable, check the status.  Returns NIL, or a message."
     (ether-set-register %ether-transmit-size %ether-transmit-log2)
     (ether-set-register %ether-receive-base (+ ether-ring-address %ether-receive-ring-offset))
     (ether-set-register %ether-receive-size %ether-receive-log2)
-    ;; enabled, interrupt enable off: the network process polls.
+    ;; enabled, interrupt enable off: the network process sets it before it
+    ;; waits (ether-arm-interrupt).
     (ether-set-register %ether-control 1)
     (let ((status (ether-register %ether-status)))
       (unless (and (ldb-test %%ether-status-enabled status)
@@ -393,6 +403,12 @@ ETHER-POST before taking another."
   "The network process: it takes every received Ethernet frame and runs the timers.")
 (defvar network-lock nil "Held while the stack's state changes: the network process's pass, and senders.")
 (defvar network-up nil "T while the network is started.")
+(defconst %network-priority 25. "The network process's priority, and a sender's while it holds the lock.")
+(defconst %network-fast-lead 2000000.
+  "Microseconds: the clock's break comes every tick while a timer of the network's is due
+within this (section 2.6).  2 s covers the slowest break, once a second, between the wait
+predicate's look and the timer's due time.")
+(defvar network-fast-clock nil "T while the network asks for the clock's break every tick.")
 (defvar network-next-timer nil "The network clock's time the earliest timer is due, or NIL.")
 (defvar network-passes 0 "The network process's passes since the band was built.")
 (defvar network-receive-function nil "Called on each received Ethernet frame (SYS: NETWORK; IP; IPV4).")
@@ -415,10 +431,170 @@ receive ring for 120 ms, and the ring overflowed."
   (when (and (not (eq current-process network-process)) (network-wakeup-p))
     (process-allow-schedule)))
 
+;; the ceiling's raise and restore by :set-priority cost 0.78 ms a pair at
+;; 19 ns on every lock section, half of it in process-reinsert-aentry and the
+;; rest in the message, its check-type, process-active-entry's assq, the
+;; pushnew on all-processes and set-process-wait (each measured apart, 10,000
+;; times at the listener).  only the entry's place in si:active-processes
+;; matters to the scheduler, so the raise moves the entry itself: the
+;; microcoded assq and find-position-in-list find it, a walk over the
+;; entries at 25 and above (a few) finds its new place, and %blt shifts the
+;; ones between, as process-reinsert-aentry does.  the restore puts it back
+;; where it was, which keeps the order if the entries around that place
+;; still bracket its priority, and otherwise walks (network-move-entry).
+;; before:
+;(defun network-raise-priority ()
+;  "Raise the current process to the network process's priority, if it is lower, and
+;return the priority it had then, or NIL if it was not raised."
+;  (let ((priority (send current-process :priority)))
+;    (when (< priority %network-priority)
+;      (send current-process :set-priority %network-priority)
+;      priority)))
+;
+;(defun network-restore-priority (priority)
+;  (send current-process :set-priority priority))
+
+(defun network-shift-entry (entry from to)
+  "Move ENTRY, at index FROM of SI:ACTIVE-PROCESSES, to index TO, the ones between moving
+a place, as SI:PROCESS-REINSERT-AENTRY moves them: the list is cdr-coded and contiguous.
+Called with interrupts off."
+  (let ((ap si:active-processes))
+    (cond ((= from to))
+	  ((< from to)
+	   (si:%blt (si:%make-pointer-offset si:dtp-list ap (1+ from))
+		    (si:%make-pointer-offset si:dtp-list ap from)
+		    (- to from) 1)
+	   (si:%p-dpb-offset si:cdr-next si:%%q-cdr-code ap (1- to))
+	   (setf (car (si:%make-pointer-offset si:dtp-list ap to)) entry))
+	  (t
+	   (let ((cdr-code (si:%p-ldb-offset si:%%q-cdr-code ap from)))
+	     (si:%blt (si:%make-pointer-offset si:dtp-list ap (1- from))
+		      (si:%make-pointer-offset si:dtp-list ap from)
+		      (- from to) -1)
+	     (si:%p-dpb-offset cdr-code si:%%q-cdr-code ap from))
+	   (setf (car (si:%make-pointer-offset si:dtp-list ap to)) entry)))))
+
+(defun network-move-entry (priority)
+  "The restore's fallback: set the current process's priority to PRIORITY, other than its
+own, and put its entry in SI:ACTIVE-PROCESSES where :SET-PRIORITY puts it: after every
+entry of PRIORITY or above, before those below.  The list is in priority order, highest
+first, free entries last; a process not on it only has its priority set, as :SET-PRIORITY
+does."
+  (without-interrupts
+    (let ((old (si:process-priority current-process)))
+      (setf (si:process-priority current-process) priority)
+      (if (> priority old)
+	  ;; raised, it moves forward: find the first entry below PRIORITY and the
+	  ;; process's own, then shift those from the first up to its own back a place.
+	  (do ((tail si:active-processes (cdr tail)) (start nil))
+	      ((null tail))
+	    (let ((e (car tail)))
+	      (when (and (null start) (first e) (< (fourth e) priority)
+			 (not (eq (first e) current-process)))
+		(setq start tail))
+	      (when (eq (first e) current-process)
+		(setf (fourth e) priority)
+		(when start
+		  (do ((l start (cdr l)) (carry e))
+		      ((eq l tail) (setf (car l) carry))
+		    (psetf (car l) carry carry (car l))))
+		(return))))
+	;; lowered, it moves back: each entry after it of PRIORITY or above moves forward
+	;; a place, into the hole, and the process's goes into the last hole.
+	(do ((tail si:active-processes (cdr tail)) (hole nil) (entry nil))
+	    ((null tail) (when entry (setf (car hole) entry)))
+	  (let ((e (car tail)))
+	    (cond (entry
+		   (cond ((and (first e) (>= (fourth e) priority))
+			  (setf (car hole) e)
+			  (setq hole tail))
+			 (t (setf (car hole) entry)
+			    (return))))
+		  ((eq (first e) current-process)
+		   (setf (fourth e) priority)
+		   (setq entry e hole tail)))))))))
+
+(defun network-raise-priority ()
+  "Raise the current process to the network process's priority, if it is lower.  Return
+the priority it had then and its entry's index in SI:ACTIVE-PROCESSES before and after
+the raise (NIL if it has none), or NIL if it was not raised."
+  (without-interrupts
+    (let ((priority (si:process-priority current-process)))
+      (when (< priority %network-priority)
+	(setf (si:process-priority current-process) %network-priority)
+	(let* ((ap si:active-processes) (entry (assq current-process ap)))
+	  (if (null entry)
+	      (values priority nil nil)
+	    ;; its new place: after every entry at 25 or above, all ahead of it,
+	    ;; since it is below 25 and the list is in order; the walk stops at
+	    ;; the first entry below 25, its own at the latest.  each step of a
+	    ;; compiled walk costs about what the microcoded assq costs for the
+	    ;; whole list, so the walk is over those few only.
+	    (let ((from (find-position-in-list entry ap))
+		  (to (do ((l ap (cdr l)) (i 0 (1+ i)))
+			  ((< (fourth (car l)) %network-priority) i))))
+	      (setf (fourth entry) %network-priority)
+	      (network-shift-entry entry from to)
+	      (values priority from to))))))))
+
+(defun network-restore-priority (priority from to)
+  "Undo NETWORK-RAISE-PRIORITY: back to PRIORITY and the entry from index TO back to index
+FROM, if it is still at TO and the entries around FROM then bracket PRIORITY; else
+NETWORK-MOVE-ENTRY puts it where :SET-PRIORITY would."
+  (without-interrupts
+    (let* ((tail (and to (nthcdr to si:active-processes))) (entry (car tail)))
+      (if (not (and entry (eq (first entry) current-process)))
+	  (network-move-entry priority)
+	;; after the move the entry at FROM - 1 is the one now at FROM, and the
+	;; one at FROM + 1 stays: the first must be a process's at PRIORITY or
+	;; above, the second at PRIORITY or below, or free, or none.  with no
+	;; move (FROM = TO) the one above is at 25 or above.  the rest of the list
+	;; is in order, as every move keeps it.
+	(let* ((ftail (nthcdr (- from to) tail))
+	       (above (and (/= from to) (car ftail)))
+	       (below (cadr ftail)))
+	  (if (and ftail
+		   (or (null above) (and (first above) (>= (fourth above) priority)))
+		   (or (null below) (null (first below)) (<= (fourth below) priority)))
+	      (progn (setf (si:process-priority current-process) priority)
+		     (setf (fourth entry) priority)
+		     (network-shift-entry entry to from))
+	    (network-move-entry priority)))))))
+
+;; the priority ceiling (m-ack; the contract's section 5.1, senders): a sender
+;; at a user's priority, preempted by the clock's break while it held the lock,
+;; waited behind a compute-bound process of its own priority for that
+;; process's whole quantum, a second, and the network process, at 25, waited
+;; on the lock with it: no ack went out for a second.  so a sender is raised
+;; to the network process's priority before it takes the lock and restored
+;; after it releases it, at the outermost hold only (with-lock recurses), in
+;; an unwind-protect; a holder that waits inside the lock waits at 25 too.
+;; the yield comes after the restore, at the outermost hold.  before:
+;(defmacro with-network-lock (&body body)
+;  "BODY with the network lock held, for a sender, then NETWORK-YIELD."
+;  `(multiple-value-prog1 (with-lock (network-lock) . ,body)
+;			 (network-yield)))
 (defmacro with-network-lock (&body body)
-  "BODY with the network lock held, for a sender, then NETWORK-YIELD."
-  `(multiple-value-prog1 (with-lock (network-lock) . ,body)
-			 (network-yield)))
+  "BODY with the network lock held, for a sender, at the network process's priority;
+then, at the outermost hold, the priority restored and NETWORK-YIELD."
+  ;; the raise's three values (the priority, the entry's index before and
+  ;; after) go back to the restore, which undoes the move.  before:
+  ;(let ((outer (gensym)) (priority (gensym)))
+  ;  `(let ((,outer (not (eq network-lock current-process))) (,priority nil))
+  ;     (multiple-value-prog1
+  ;	 (unwind-protect
+  ;	     (progn (when ,outer (setq ,priority (network-raise-priority)))
+  ;		    (with-lock (network-lock) . ,body))
+  ;	   (when ,priority (network-restore-priority ,priority)))
+  ;	 (when ,outer (network-yield))))))
+  (let ((outer (gensym)) (priority (gensym)) (from (gensym)) (to (gensym)))
+    `(let ((,outer (not (eq network-lock current-process))) (,priority nil) (,from nil) (,to nil))
+       (multiple-value-prog1
+	 (unwind-protect
+	     (progn (when ,outer (multiple-value-setq (,priority ,from ,to) (network-raise-priority)))
+		    (with-lock (network-lock) . ,body))
+	   (when ,priority (network-restore-priority ,priority ,from ,to)))
+	 (when ,outer (network-yield))))))
 
 (defun network-note-timer (time)
   "A timer is due at TIME: wake the network process then, if not earlier."
@@ -427,11 +603,39 @@ receive ring for 120 ms, and the ring overflowed."
 	      (minusp (network-time-difference time network-next-timer)))
       (setq network-next-timer time))))
 
+;; before the fallback (section 2.6) the predicate was a frame waiting or a
+;; timer due:
+;(defun network-wakeup-p ()
+;  "The network process's wait predicate: a frame waiting or a timer due."
+;  (or (ether-frame-waiting-p)
+;      (let ((due network-next-timer))
+;	(and due (network-time-reached-p due)))))
 (defun network-wakeup-p ()
-  "The network process's wait predicate: a frame waiting or a timer due."
+  "The network process's wait predicate: a frame waiting, a timer due, or a timer due
+within %NETWORK-FAST-LEAD while the clock's break is not every tick."
   (or (ether-frame-waiting-p)
       (let ((due network-next-timer))
-	(and due (network-time-reached-p due)))))
+	(and due (or (network-time-reached-p due)
+		     (and (not network-fast-clock)
+			  (< (network-time-difference due (network-now)) %network-fast-lead)))))))
+
+(defun network-clock-rule ()
+  "Ask for the clock's break every tick while a timer of the network's is due within
+%NETWORK-FAST-LEAD, and withdraw the request otherwise; only when that changes, since a
+request conses (section 2.6)."
+  (let ((fast (let ((due network-next-timer))
+		(and due (< (network-time-difference due (network-now)) %network-fast-lead)))))
+    (unless (eq (not fast) (not network-fast-clock))
+      (setq network-fast-clock (not (null fast)))
+      (si:request-clock-rate :network (and fast 1)))))
+
+(defun ether-arm-interrupt ()
+  "Set register 240 <8>, the interrupt enable, with the device enabled: the next frame
+waiting, or one waiting now, interrupts, and the microcode clears <8> and asks for a
+sequence break (section 2.6).  Writing 240 also clears 241 <2> and <3>, which only the
+reset reads."
+  (when ether-enabled
+    (ether-set-register %ether-control %ether-control-armed)))
 
 (defun network-pass ()
   "One pass of the network process: every frame waiting, then the timers (section 5.1)."
@@ -458,7 +662,12 @@ receive ring for 120 ms, and the ring overflowed."
       (setq network-next-timer nil)
       (dolist (f network-start-functions) (funcall f)))
     (setq network-up t))
+  ;; before each wait: the clock's rate by its rule, then the interrupt armed,
+  ;; so that a frame arriving at any time after the pass wakes the process.
   (do-forever
+;   (process-wait "Network" #'network-wakeup-p)	;before the fallback (2.6)
+    (network-clock-rule)
+    (ether-arm-interrupt)
     (process-wait "Network" #'network-wakeup-p)
     (network-pass)))
 
@@ -468,6 +677,7 @@ receive ring for 120 ms, and the ring overflowed."
   (process-disable network-process)
   (ether-disable)
   (si:request-clock-rate :network nil)
+  (setq network-fast-clock nil)
   nil)
 
 (defun network-start ()
@@ -481,8 +691,11 @@ and start the network process (section 5.1).  Returns T, or NIL and a message."
       (when message (return-from start (values nil message))))
     (send network-process :preset 'network-top-level t)
     (process-enable network-process)
-    ;; the clock's sequence break every tick while the network is up (2.6).
-    (si:request-clock-rate :network 1)
+    ;; the clock's sequence break every tick only while a timer of the
+    ;; network's is due within 2 s: the process asks, by network-clock-rule,
+    ;; before each wait (2.6).  until the fallback it came every tick while
+    ;; the network was up, which cost an idle band 12-13% (m-ack):
+;   (si:request-clock-rate :network 1)
     t))
 
 (defun network-boot-start ()

@@ -95,8 +95,9 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	(jump-if-bit-set (byte-field 1 5) md intr-mouse-stray)
 	(jump-if-bit-set (byte-field 1 7) md intr-file-device-stray)
 	;; quux revision 16 (quux's ethernet contract, section 2.6): word 100 <8>,
-	;; the ethernet device, which the system polls, has a stray too.
-	(jump-if-bit-set (byte-field 1 8) md intr-ethernet-device-stray)
+	;; the ethernet device: a received ethernet frame asks for a sequence
+	;; break, as the chaosnet's receive does.
+	(jump-if-bit-set (byte-field 1 8) md intr-ethernet-device)
 	;; quux (contract q5): word 100 covers every source quux has, and any unibus
 	;; address is an nxm, so an interrupt it does not explain is dismissed
 	;; (after the disk's own check) rather than looked up in unibus 766040.
@@ -439,23 +440,32 @@ intr-file-device-stray
 	(check-page-write-no-interrupt)
 	(jump intrx1)
 
-;; quux revision 16 (quux's ethernet contract, section 2.6): the ethernet
-;; device, word 100 <8>, is up while an ethernet frame waits (word 251 not
-;; equal to 252) and word 240's <8>, its interrupt enable, is set.  the driver
-;; polls and never sets <8>; a microcode path for received ethernet frames is
-;; built only if polling misses its ack bound.  until then <8> is a stray, by
-;; the register page's rule: write 240 back with <8> clear and <0>, enable, as
-;; it was, so that the device keeps running and the ethernet frame stays
-;; waiting for the driver.  without this an enable set by mistake would
-;; interrupt for ever, the level never cleared.  the write also clears 241's
-;; <2> and <3>, as any write of 240 does.  below revision 16 word 100 <8> is
-;; reserved and reads 0.
-intr-ethernet-device-stray
+;; quux revision 16 (quux's ethernet contract, section 2.6, the fallback): the
+;; ethernet device, word 100 <8>, is up while an ethernet frame waits (word 251
+;; not equal to 252) and word 240's <8>, its interrupt enable, is set.  the
+;; network process sets <8> before it waits; here 240 is written back with <8>
+;; clear and <0>, enable, as it was, so that the device keeps running, the
+;; ethernet frame stays waiting for the driver and the level goes down, one
+;; interrupt for each wait; then a sequence break is asked for, as mit's
+;; microcode can for a received chaos packet (chaos-intr-quux, the :chaos
+;; source; the band enables only :clock, sys2/proces.lisp:1028,
+;; man/proces.text:336-338), so that the scheduler runs the network process at
+;; once rather than at the clock's next break.  this request is not gated by
+;; %sequence-break-source-enable, so sb-on does not govern it: the network's
+;; arming of 240 <8> before each wait is its gate (a band that never arms it
+;; never gets this break).
+;; until m-ack's idle bound failed, <8> was a stray: the driver polled and the
+;; clock's break came every tick, which cost an idle band 12-13%.  the write
+;; also clears 241's <2> and <3>, as any write of 240 does.  below revision 16
+;; word 100 <8> is reserved and reads 0, and this is never reached.
+intr-ethernet-device
 	((vma-start-read) (a-constant quux-ethernet-device-control-virtual-address))
 	(check-page-read-no-interrupt)
 	((md) (byte-field 1 0) read-memory-data)	;<0> kept, <8> and the rest 0
 	((vma-start-write) (a-constant quux-ethernet-device-control-virtual-address))
 	(check-page-write-no-interrupt)
+;; quux revision 13 (appendix a1.6): interrupt-control's sequence.break is bit 34.
+	((interrupt-control) ior location-counter (a-constant 1_34.))
 	(jump intrx1)
 
 ;;; XBUS interrupts

@@ -627,19 +627,65 @@ file carries a comment in that file saying why.
   revisions 15 and 16: revision 16 is revision 15 with the Ethernet device at
   register-page words 240-257, its interrupt word 100 `<8>` and feature word
   15 `<2>`, and boots revision 15's `.mcr` and PROM.
-  - **The stray** (`INTR-ETHERNET-DEVICE-STRAY`,
-    `sys/ucadr/uc-interrupt.lisp:99`, `:442-459`). Word 100 `<8>` is up
+  - **The interrupt** (`INTR-ETHERNET-DEVICE`,
+    `sys/ucadr/uc-interrupt.lisp:100`, `:443-469`). Word 100 `<8>` is up
     while word 240's `<8>`, the interrupt enable, is on and an Ethernet frame
-    waits. The driver polls and never sets it, so by the register page's
-    rule the bit is a stray: the handler writes 240 back with `<8>` clear and
-    `<0>`, the enable, as it was, so that the device runs on and the frame
-    stays for the driver, and dismisses the interrupt. Before, `INTR`
-    dismissed it untouched, and the level, never cleared, interrupted again
-    at once for as long as the frame waited: on muir-sim's revision 16, micro,
-    `INTR` was entered more than 524,288 times in 64 M microcycles, the
-    listener still answering between them, against fewer than 2,048 with the
-    stray. A microcode path for received Ethernet frames, the contract's
-    fallback, is built only if polling misses its ACK bound (M-ack).
+    waits. The handler writes 240 back with `<8>` clear and `<0>`, the
+    enable, as it was, so that the device runs on, the frame stays for the
+    driver and the level goes down, and dismisses the interrupt. Before,
+    `INTR` dismissed it untouched, and the level, never cleared, interrupted
+    again at once for as long as the frame waited: on muir-sim's revision 16,
+    micro, `INTR` was entered more than 524,288 times in 64 M microcycles,
+    the listener still answering between them, against fewer than 2,048 with
+    the write. With the write alone the bit was a stray while the driver
+    polled; since M-ack's idle bound failed with the clock's break every tick
+    (12-13% on micro at 19 ns), the contract's fallback is built: the handler
+    also asks for a sequence break, as MIT's microcode can for a received
+    Chaos packet (`:chaos`; the band enables only `:clock`,
+    `sys/sys2/proces.lisp:1028`), and the network process sets `<8>` before
+    each wait (the Lisp side, below). `%SEQUENCE-BREAK-SOURCE-ENABLE` does
+    not gate this request, so `SB-ON` does not govern it: the network's
+    arming of 240 `<8>` before each wait is its gate, and a band that never
+    arms it never gets the break.
+  - **The deferred sequence break is the machine's, not the stack group's**
+    (`SGENT`, `sys/ucadr/uc-stack-groups.lisp:314-335`; section 2.6). A
+    break that comes while scheduling is inhibited is deferred in
+    `M-DEFERRED-SEQUENCE-BREAK-FLAG`, a bit of `M-FLAGS`, which `SGLV` saves
+    with the stack group it leaves; `SGENT` restored the bit from the group
+    it entered. The scheduler's whole pass is inside a `WITHOUT-INTERRUPTS`,
+    so a break that came during it, the `<8>` of a frame that arrived after
+    the network process's predicate was read, was dropped when the scheduler
+    resumed a process, and the frame waited for the clock's next break: up to
+    a second with the collector off (M-ack on micro at 48 ns, GC off: max
+    1035.5 ms, p99 659.6, over its bounds; at 19 ns, GC on, max 105.4, p99
+    39.8), and the scheduler's own saved bit stayed 1 for good once a break
+    had been deferred in it. MIT's code, harmless with the clock's break
+    alone. `SGENT` now carries the bit of the group it leaves into the group
+    it enters, where `SB-REINSTATE` asks for the break again when
+    scheduling is allowed there, and drops the entered group's saved copy.
+    A break that lands inside a `WITHOUT-INTERRUPTS` is deferred again, as
+    before; one carried into a coroutine that swaps its bindings is taken
+    there, where MIT kept it for the caller's section's end. M-ack with it,
+    max and p99 in ms (bounds 200 and 40): micro at 19 ns 29.1 / 10.1 GC on
+    and 11.4 / 9.1 GC off, at 22.5 ns 33.6 / 10.3 and 12.3 / 9.9, at 48 ns
+    45.3 / 13.6 and 14.7 / 11.3; rtl at 19 ns 9.9 / 3.1 and 3.9 / 3.1; idle,
+    the loop 0.009% slower at 48 ns GC off, and on rtl -1.11% and 0.005%.
+    The cost is one pass for each break carried into a group that may be
+    scheduled: 0-1 a second under M-ack and T2's 1 MiB echoes, none idle,
+    the longest pass 9.7 ms at 63.5 ns against the fastest clock's 16.7 ms
+    (scratch counters); and each frame now wakes the network process at
+    once rather than in a batch at the clock's next break: M-refill on micro
+    at 19 ns, 100 frames a second, the workload 5.93 s against 4.32 s with
+    MIT's `SGENT` (2.89 s with no frames).
+    The CADR's line has the same code, but its only break is the clock's.
+    With the interrupt's break and this, the microcode's `ucadr.mcr` for
+    revisions 15 and 16 is
+    `9a922c9c6476a1ce3e379a7230a22d62f28b6eb263b0ee4749291b2ab7d99717`, with
+    `.tbl` `71b0bffbfb531751723e90d793acb50632dca7bac5eb1dccec337c706c58be0b`,
+    `.locs` `4a60063c839da57ae32cf373e5ec4a60d2f9488d1419c0ec0ffff4dc162eb8b8`
+    and `.sym` `ee7424f68551af799709921d7488db72f7d5d104c4ac2dc1b8b7eaf6c63f6a85`
+    (it was `dc031be9...` with the interrupt's break alone and `45ff6277...`
+    with the stray); the boot PROM is unchanged.
   - **The quiet wait** (`RESET-MACHINE-ETHERNET-QUIET`,
     `ETHERNET-DEVICE-NOT-QUIET`, `sys/ucadr/uc-cold-disk.lisp:102-123`,
     `:608-614`). After reset devices and the file device's wait, the reset
@@ -667,7 +713,15 @@ file carries a comment in that file saying why.
     and 16, on micro and rtl, 622 cases, as the microcode before did on
     revision 15 in the soak of System 2002; `tools/assembler-check` passes
     all 30 checks, its revision-15 counts unchanged (359 hints, 140 predicted targets, every execution of
-    the profile covered).
+    the profile covered). `tools/microcode-check`'s new `sg-deferred-entry` (6 cases) enters a
+    stack group in each of `D-SG-ENTER`'s resume states with a deferred break
+    carried and scheduling allowed: the group breaks before its first form
+    and returns its own value; MIT's `SGENT` fails the 4 entries. On the
+    microcode with the deferred break the machine's, micro, revision 15
+    passes the 23 case files, 628 cases, and revision 16 those and
+    `ethernet-stray`, 639. `tools/system-check`'s new `sb-deferral` (below,
+    the Lisp side's checks) times the pass after a break deferred in the
+    scheduler's own.
   Microcode 2002's files changed again, 19 instructions more: at revision 14
   `ucadr.mcr`
   `068511118b1794abcea9b80f605a00500ecf07e0e9cb7eb479c2be5367b33b49`, at
@@ -2143,6 +2197,40 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   for 120 ms, so the receive ring overflowed (measured: entries 87-126 waiting,
   then drops). The network's start is its process's first act, so that at
   boot the gratuitous ARP comes once the boot's initializations have ended.
+- **A sender runs at the network process's priority while it holds the
+  network lock** (`WITH-NETWORK-LOCK`, `sys/network/ip/ether.lisp:577`;
+  `NETWORK-RAISE-PRIORITY`, `:517`, `NETWORK-RESTORE-PRIORITY`, `:540`,
+  `NETWORK-SHIFT-ENTRY`, `:457`, `NETWORK-MOVE-ENTRY`, `:477`; QUUX's Ethernet contract, section 5.1,
+  senders; M-ack). A sender at a user's priority, preempted by the clock's
+  break while it held the lock, waited behind a compute-bound process of its
+  own priority for that process's quantum, a second, and the network
+  process, at 25, waited on the lock with it: no ACK went out for a second
+  (M-ack on micro at 19 ns: one stall of about a second in each run, max
+  940-1029 ms). The holder is now raised to 25, or kept at its own priority
+  if that is higher, before it takes the lock, and restored after it releases
+  it, at the outermost hold only, in an `UNWIND-PROTECT`; the yield comes
+  after the restore. The raise and the restore move the holder's entry in
+  `SI:ACTIVE-PROCESSES` themselves rather than by `:SET-PRIORITY`, whose pair
+  cost 0.83 ms on micro at 19 ns, on every section: the raise puts the entry
+  after every entry at 25 or above, where `:SET-PRIORITY` puts it, and the
+  restore puts it back at its place before the section when the entries
+  around that place still bracket its priority, and otherwise where
+  `:SET-PRIORITY` would. The pair now costs 0.29 ms (10,000 pairs at the
+  listener, measured).
+- **A received frame wakes the network process through the device's
+  interrupt, and the clock's break comes every tick only while a timer of the
+  network's is due within 2 s** (section 2.6's fallback; `NETWORK-TOP-LEVEL`,
+  `ETHER-ARM-INTERRUPT`, `NETWORK-CLOCK-RULE`, `NETWORK-WAKEUP-P`,
+  `:613-672`). Before each wait the network process sets register 240 `<8>`;
+  the microcode clears it and asks for a sequence break (above), a break that
+  the scheduler no longer drops when it comes during its pass (`SGENT`,
+  above). `SB-ON` does not govern this break: the arming is its gate. The network
+  no longer asks for the break every tick while it is up, which cost an idle
+  band 12-13% on micro at 19 ns: its wait predicate also wakes it once a
+  timer of its own is due within 2 s while the break is slower, and it asks
+  for the break every tick until no timer is due within 2 s. Idle, the
+  loop of M-ack's idle check is now 0.01-0.08% slower with the network up
+  than with it stopped, on micro at 19 and 48 ns and on rtl at 19 ns.
 - **A broadcast goes to the Ethernet broadcast address** (`IPV4-SEND`): a
   datagram to the subnet's broadcast, or to 255.255.255.255, is sent with no
   ARP.
@@ -2169,9 +2257,26 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   that the test echo service closes with FIN at the peer's EOF. The band's 27
   planted faults, each failing its script, are in `README.md`, "The band's
   plants".
+- **`tools/system-check/cases/network-lock-ceiling.cases`** (new, with
+  `lisp/network-lock-ceiling.lisp`): the ceiling's priorities inside and after
+  a section, nested holds, a throw and an error out of one, a process above the
+  ceiling; the order of `SI:ACTIVE-PROCESSES` and the holder's place in it
+  inside and after a section, and a section that moves its own entry; 3 of the
+  first 8 fail without the change; of all 11, 5 fail with a ceiling that never
+  restores and 2 with one that sets the priority but never moves the entry
+  (`tools/system-check/README.md`).
+- **`tools/system-check/cases/sb-deferral.cases`** (new, with
+  `lisp/sb-deferral.lisp`): a clock break deferred in the scheduler's pass,
+  with a compute process to resume, brings the next pass within 100 ms:
+  6-13 ms on micro at 19 ns with the deferred break the machine's, about
+  1,005 ms with MIT's `SGENT` (microcode `dc031be9`), in all three trials; a
+  coroutine called inside a `WITHOUT-INTERRUPTS` after a break was deferred
+  there takes the break, the caller's bit 0 after the return (1 with MIT's).
+  MIT's `SGENT` fails 2 of its 5 cases (`tools/system-check/README.md`).
 - **`tools/system-check/cases/generational-tuning.cases`**: the clock's rate
   after GC-ON and GC-OFF is the smallest any user asks for, 6 and 60 unless the
-  network is up, when it is every tick (`:45`, `:69`).
+  network asks for every tick, as it does while a timer of its own is due
+  within 2 s (`:45`, `:69`).
 - **`tools/lispm-check` takes a tap on revision 16, and `--network tcp`**
   (QUUX's Ethernet contract, sections 3, 7 and 8 R1; `docs/lispm-check.md`,
   "The network"). On revision 16 every run takes a host-only tap of the pool

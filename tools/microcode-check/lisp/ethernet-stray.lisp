@@ -4,11 +4,14 @@
 ;;; (tools/microcode-check/README.md, cases-16/ethernet-stray.cases; QUUX's
 ;;; Ethernet contract, sections 2.6 and 10).  Word 100 <8> is up while word
 ;;; 240's <8>, the interrupt enable, is on and an Ethernet frame waits (251
-;;; not equal to 252): a level.  The system polls the device and never sets
-;;; <8>, so the microcode takes the bit as a stray (INTR-ETHERNET-DEVICE-STRAY,
-;;; sys/ucadr/uc-interrupt.lisp): it writes 240 back with <8> clear and <0> as
-;;; it was, and dismisses the interrupt.  Microcode without the stray dismisses
-;;; it untouched, and the level interrupts again at once, for ever.
+;;; not equal to 252): a level.  The microcode (INTR-ETHERNET-DEVICE,
+;;; sys/ucadr/uc-interrupt.lisp) writes 240 back with <8> clear and <0> as it
+;;; was, asks for a sequence break, and dismisses the interrupt; the network
+;;; process sets <8> again before each wait (section 2.6's fallback; until it,
+;;; the bit was a stray, the same write without the break).  Microcode without
+;;; the write dismisses it untouched, and the level interrupts again at once,
+;;; for ever.  It wants a band without the network, whose process would take
+;;; the device's frames itself.
 ;;;
 ;;; ETS-SETUP points the device at one wired page: the receive ring's one
 ;;; entry at its word 0, the transmit ring's at word 8, and a buffer of 1,536

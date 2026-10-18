@@ -1,0 +1,20 @@
+; A sequence break deferred while the scheduler runs is the machine's, not the
+; scheduler stack group's (sys/ucadr/uc-stack-groups.lisp, sgent; QUUX's
+; Ethernet contract, section 2.6; lisp/sb-deferral.lisp).  Each trial defers
+; a clock break in the scheduler's pass and times the next pass: a pass or two
+; with the flag the machine's (6-13 ms on micro at 19 ns), about a second with
+; MIT's sgent, which dropped the break when the scheduler resumed a compute
+; process.  The bound is 100 ms, six ticks.  Run at the clock's default rate,
+; 60 ticks.
+
+; the bit's position and size, from qcom's m-flags fields: <18>
+(list (lsh si:%%m-flags-deferred-sequence-break -6) (logand si:%%m-flags-deferred-sequence-break 63)) => (18 1)
+; three trials, each gap under 100 ms
+(sbd-trials 3) => (T T T)
+; their gaps in microseconds, for the record
+sbd-gaps
+; a coroutine called inside a without-interrupts after a break was deferred
+; there: the callee takes it, so the caller's bit after the return is 0 (mit's
+; sgent gave back the caller's 1)
+(second (sbd-coroutine)) => 0
+(sbd-coroutine)

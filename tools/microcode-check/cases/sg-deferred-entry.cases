@@ -1,0 +1,23 @@
+; SGENT carries the deferred sequence break's flag into the stack group it
+; enters, where SB-REINSTATE asks for the break again (sys/ucadr/
+; uc-stack-groups.lisp; QUUX's Ethernet contract, section 2.6).  Load
+; lisp/sg-deferred-entry.lisp first.  Each case defers a clock break inside a
+; WITHOUT-INTERRUPTS and enters a stack group in one of D-SG-ENTER's resume
+; states with scheduling allowed there: (BROKE VALUE), BROKE T when the
+; scheduler ran a pass between the entry and the group's first form, VALUE
+; the group's own result, intact.  With MIT's SGENT, which restored the
+; entered group's own flag, BROKE is NIL in each.
+
+; the pass counter runs
+(sgd-start) => T
+; awaiting initial call (SG-ENTER-CALL)
+(sgd-initial) => (T 3)
+; awaiting call (R-BIT)
+(sgd-call) => (T AGAIN)
+; awaiting return (QMDDR0): the caller, entered from inside its callee's section
+(sgd-return) => (T RETURNED)
+; resumable (R-BIT): a preempted process resumed by the scheduler, after the
+; listener deferred a break and waited inside its section: two passes before
+; the process's first form, one with MIT's SGENT
+(sgd-resume) => (T 2)
+(sgd-stop) => T
