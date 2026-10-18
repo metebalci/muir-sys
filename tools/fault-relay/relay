@@ -4,7 +4,7 @@ other, with counts and its own check of every Ethernet frame the band sends
 (QUUX's Ethernet contract, sections 3 and 9).
 
 usage:
-  relay [--tap NAME[,NAME...]] [--report FILE] [FAULTS] PATH
+  relay [--tap NAME[,NAME...]] [--report FILE] [--trace FILE] [FAULTS] PATH
   relay --help
 
 It is the Ethernet frame mover (muir-sim's tools/ethernet-frame-mover) with
@@ -19,6 +19,13 @@ treats the two alike:
   --report FILE         where the counts and the check's findings are
                         written, as JSON: when the relay ends (SIGTERM, ^C)
                         and on SIGUSR1.  [default: none]
+  --trace FILE          a line for every Ethernet frame, at its arrival
+                        ("in", or "LOST" when the faults lose it) and at its
+                        sending ("out"): the host's monotonic time, the
+                        direction, and for TCP its ports, flags, sequence and
+                        acknowledgment numbers, window and data length, so
+                        that a caller can tell a loss's runs and its ACKs
+                        (T4's wall bound, M-loss).  [default: none]
 
 It listens at PATH, a UNIX stream socket muir's --ethernet-socket connects
 to in its plain mode (each Ethernet frame a 32-bit big-endian length and its
@@ -367,12 +374,48 @@ class Faults:
 
 
 # --------------------------------------------------------------------------
+# The trace (--trace): one line a frame at each of its events.
+
+def describe(f):
+    """A frame for the trace: for TCP 'SPORT>DPORT FLAGS seq S ack A win W
+    len N', else its type and length."""
+    if len(f) < 14:
+        return 'short %d' % len(f)
+    t = struct.unpack('!H', f[12:14])[0]
+    if t != ETH_IPV4 or len(f) < 34:
+        return 'type 0x%04x len %d' % (t, len(f))
+    ihl = (f[14] & 15) * 4
+    tl = struct.unpack('!H', f[16:18])[0]
+    if f[23] != PROTO_TCP:
+        return 'ip proto %d len %d' % (f[23], tl)
+    p = f[14 + ihl:14 + tl]
+    if len(p) < 20:
+        return 'tcp short'
+    sp, dp, seq, ack = struct.unpack('!HHII', p[:12])
+    off = (p[12] >> 4) * 4
+    fl = p[13]
+    win = struct.unpack('!H', p[14:16])[0]
+    names = ''.join(c for c, b in zip('FSRPAU', (1, 2, 4, 8, 16, 32)) if fl & b) or '-'
+    return '%d>%d %s seq %d ack %d win %d len %d' % (sp, dp, names, seq, ack, win, len(p) - off)
+
+
+class Trace:
+    def __init__(self, path):
+        self.f = open(path, 'w', buffering=1) if path else None
+
+    def __call__(self, what, way, f):
+        if self.f:
+            self.f.write('%.6f %s %s %s\n' % (time.monotonic(), way, what, describe(f)))
+
+
+# --------------------------------------------------------------------------
 # The relay.
 
 class Relay:
-    def __init__(self, tap_fd, name, host, quux, report=None, err=sys.stderr, faults=None):
+    def __init__(self, tap_fd, name, host, quux, report=None, err=sys.stderr, faults=None, trace=None):
         self.tap_fd, self.name, self.host, self.quux = tap_fd, name, host, quux
         self.report, self.err = report, err
+        self.trace = Trace(trace)
         self.faults = faults or Faults()
         self.due = []           # (when, n, way, frame): the frames the faults hold
         self.n = 0
@@ -424,7 +467,9 @@ class Relay:
 
     def hold(self, way, f):
         """F, arrived on WAY, through the faults: sent now or held."""
-        for when, g in self.faults.plan(way, f, time.monotonic()):
+        plan = self.faults.plan(way, f, time.monotonic())
+        self.trace('in' if plan else 'LOST', way, f)
+        for when, g in plan:
             self.n += 1
             heapq.heappush(self.due, (when, self.n, way, g))
 
@@ -433,6 +478,7 @@ class Relay:
         now = time.monotonic()
         while self.due and self.due[0][0] <= now:
             _, _, way, f = heapq.heappop(self.due)
+            self.trace('out', way, f)
             if way == 'to_band':
                 conn.sendall(struct.pack('!I', len(f)) + f)
             else:
@@ -565,7 +611,7 @@ FAULT_SWITCHES = {'--arm-on-signal': 'arm_on_signal'}
 
 
 def parse(argv):
-    names, report, path = None, None, None
+    names, report, path, trace = None, None, None, None
     faults = {}
     args = list(argv)
     while args:
@@ -589,7 +635,7 @@ def parse(argv):
                 usage('%s is a percentage, 0 to 100' % a)
             if key in ('jitter', 'inject') and faults[key] < 0:
                 usage('%s is 0 or more' % a)
-        elif a in ('--tap', '--report'):
+        elif a in ('--tap', '--report', '--trace'):
             if not args or not args[0] or args[0].startswith('-'):
                 usage('%s wants a value' % a)
             v = args.pop(0)
@@ -597,6 +643,8 @@ def parse(argv):
                 names = v.split(',')
                 if not all(names):
                     usage('--tap wants NAME[,NAME...]')
+            elif a == '--trace':
+                trace = v
             else:
                 report = v
         elif a.startswith('-'):
@@ -607,11 +655,11 @@ def parse(argv):
             usage('%s: one PATH only' % a)
     if path is None:
         usage('PATH wanted: the socket muir\'s --ethernet-socket names')
-    return names, report, path, faults
+    return names, report, path, faults, trace
 
 
 def main(argv):
-    names, report, path, faults = parse(argv)
+    names, report, path, faults, trace = parse(argv)
     listener, relay = None, None
 
     def end(*_):
@@ -619,7 +667,7 @@ def main(argv):
     signal.signal(signal.SIGTERM, end)
     try:
         name, fd, host, quux = take(names if names is not None else pool(), names is not None)
-        relay = Relay(fd, name, host, quux, report, faults=Faults(**faults))
+        relay = Relay(fd, name, host, quux, report, faults=Faults(**faults), trace=trace)
         signal.signal(signal.SIGUSR1, lambda *_: relay.write_report())
         signal.signal(signal.SIGUSR2, lambda *_: setattr(relay.faults, 'armed', True))
         listener = listen(path)

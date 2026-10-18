@@ -304,10 +304,23 @@ def parse_tcp(src, dst, payload):
     else:
         s.options = o
     s.mss = None
+    s.tsval = s.tsecr = None      # the timestamps option's (RFC 7323 3.2), if it has one
+    s.ts_bad = False              # a timestamps option of a length other than 10
     for kind, body in s.options:
         if kind == 2:
             s.mss = struct.unpack('>H', body)[0] if len(body) == 2 else -1
+        if kind == 8:
+            if len(body) == 8:
+                s.tsval, s.tsecr = struct.unpack('>II', body)
+            else:
+                s.ts_bad = True
     return s
+
+
+def has_timestamps(raw_options):
+    """Whether raw TCP options hold a timestamps option of length 10."""
+    o = parse_tcp_options(raw_options)
+    return not isinstance(o, str) and any(k == 8 and len(b) == 8 for k, b in o)
 
 
 def flags_text(f):
@@ -347,5 +360,6 @@ def describe(frame):
             return head + s.error
         return head + 'TCP %d>%d %s seq %d ack %d win %d len %d%s' % (
             s.sport, s.dport, flags_text(s.flags), s.seq, s.ack, s.window, len(s.data),
-            ' mss %d' % s.mss if s.mss is not None else '')
+            ' mss %d' % s.mss if s.mss is not None else '') + (
+            ' ts %d/%d' % (s.tsval, s.tsecr) if s.tsval is not None else '')
     return head + 'protocol %d' % p.proto

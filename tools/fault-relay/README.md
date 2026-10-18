@@ -9,7 +9,7 @@ check of every Ethernet frame the band sends with its own code (section 9).
 Python's standard library only.
 
 ```
-tools/fault-relay/relay [--tap NAME[,NAME...]] [--report FILE]
+tools/fault-relay/relay [--tap NAME[,NAME...]] [--report FILE] [--trace FILE]
                         [--seed N] [--loss P] [--duplicate P] [--reorder P] [--corrupt P]
                         [--jitter MS] [--direction to-band|from-band|both] [--inject N]
                         [--arm-on-signal] PATH
@@ -33,6 +33,13 @@ quux1 --ip-address 169.254.101.2/30 --ip-gateway 169.254.101.1
   way by Ethernet type, the frames the tap gave while no machine was
   connected, the connections, and each bad frame from the band (its number,
   what is wrong, its first 64 bytes; the first 50, the rest counted).
+- `--trace FILE` gets a line for every Ethernet frame at each of its events:
+  at its arrival, `in`, or `LOST` when the faults lose it, and at its
+  sending, `out`; each with the host's monotonic time, the direction
+  (`to_band`, `from_band`) and, for TCP, `SPORT>DPORT FLAGS seq S ack A win W
+  len N`. `tools/tcp-check/run --trace` passes it, for T4's wall bound and
+  M-loss, which tell from it each segment's transmissions, which were lost,
+  and which ACKs reached the sender.
 
 One machine is connected at a time, and a machine that closes leaves the
 relay holding its tap for the next: one run of `tools/lispm-check` starts one

@@ -24,7 +24,12 @@ slice 0 reach:
   RCV.NXT dropped and acknowledged, an overlap's new part taken, an old
   duplicate acknowledged), segments sent by MUST-38's first two rules,
   an initial window of three segments, acknowledgment of every segment, and
-  a retransmission at 1 s, doubling.
+  a retransmission at 1 s, doubling;
+- RFC 7323's timestamps for RTT measurement only (amendment 4): a SYN with
+  the option makes a timestamped connection, which sends it on every
+  segment (TSval machine time in ms, TSecr TS.Recent by RFC 7323 section
+  4.3), gives up 12 bytes of its MSS to it and drops a segment without it
+  but an RST; its TIME-WAIT record does the same.
 
 Its checksums are its own code (`csum` below), written apart from the
 scripts' (frames.py) so that one fault in both cannot hide itself.
@@ -266,6 +271,30 @@ PLANTS = {
                             'arp-hold', 'a fourth ARP request'),
     'arp-late-reply-sends': ('the held datagram kept after the third request and sent on a late reply (F43)',
                              'arp-hold', 'the held datagram is dropped by then'),
+    # Timestamps (amendment 4), the first three T5's.
+    'ts-recent-stuck': ('T5: TS.Recent not updated after the SYN', 'ts-echo', 'TSecr'),
+    'ts-missing-on-resend': ('T5: the timestamps option missing on a retransmission', 'ts-missing',
+                             'without the timestamps option on a timestamped connection'),
+    'tsval-backwards': ('T5: TSval going backwards (a resent segment carrying its first sending\'s TSval)',
+                        'ts-negotiation', 'TSval went back'),
+    'ts-unasked': ('the timestamps option on every SYN-ACK, offered or not', 'ts-negotiation',
+                   'whose SYN offered none'),
+    'ts-never': ('the timestamps option never sent: a SYN with it answered as one without', 'ts-negotiation',
+                 'SYN-ACK without it'),
+    'ts-no-drop': ('a segment without the option taken on a timestamped connection', 'ts-missing',
+                   'answered on a timestamped connection'),
+    'ts-abort-missing': ('a segment without the option answered with RST, aborting the connection',
+                         'ts-missing', 'answered on a timestamped connection'),
+    'ts-rst-needs-option': ('an RST without the option dropped too', 'ts-missing', 'RST without the timestamps'),
+    'ts-mss-full': ('the effective send MSS not 12 bytes less on a timestamped connection', 'ts-mss',
+                    'data bytes, over'),
+    'ts-recent-any-seq': ('TS.Recent taken from any segment, Last.ACK.sent not checked', 'ts-echo',
+                          'beyond the hole'),
+    'ts-recent-latest': ('TS.Recent taken from any TSval, an older one too', 'ts-echo', 'an older TSval'),
+    'ts-recent-unsigned': ('TSvals compared as plain numbers, not modulo 2^32', 'ts-echo', 'across 2^32'),
+    'tsval-ticks': ('TSval counting ticks of 1/60 s, not milliseconds', 'ts-negotiation', 'millisecond clock'),
+    'ts-tw-plain': ('the TIME-WAIT record of a timestamped connection answering without the option',
+                    'ts-negotiation', 'without the timestamps option on a timestamped connection'),
 }
 
 # Measurement variants: right behaviours run by the pass-latency sweep, not
@@ -389,6 +418,8 @@ class Conn:
         self.close_req = False  # the server closes: a FIN once the data is out
         self.fin_seq = None     # our FIN's sequence number, once sent
         self.gen = 0
+        self.ts_recent = None   # TS.Recent on a timestamped connection, else None
+        self.last_ack = self.rcv_nxt    # Last.ACK.sent (RFC 7323 4.3)
 
 
 class Band:
@@ -770,6 +801,7 @@ class Band:
             return
         opts, data = seg[20:4 * off], seg[4 * off:]
         peer_mss, i = None, 0
+        tsval = None            # the timestamps option's TSval (RFC 7323 3.2)
         while i < len(opts):
             k = opts[i]
             if k == 0:
@@ -794,10 +826,12 @@ class Band:
                 break
             if k == 2 and opts[i + 1] == 4:
                 peer_mss = struct.unpack('>H', opts[i + 2:i + 4])[0]
+            if k == 8 and opts[i + 1] == 10:
+                tsval = struct.unpack('>I', opts[i + 2:i + 6])[0]
             i += opts[i + 1]
         key = (src, sport, dport)
         tw = self.timewait.get(key)
-        if tw is not None and self.timewait_segment(t, key, tw, seq, flags, data):
+        if tw is not None and self.timewait_segment(t, key, tw, seq, flags, data, tsval):
             return
         c = self.conns.get(key)
         if c is None:
@@ -826,7 +860,14 @@ class Band:
                 mss = min(peer_mss if peer_mss is not None else
                           (1460 if self.plant == 'send-mss-default' else 536),
                           1400 if self.plant == 'send-mss-1400' else 1460)
+                ts = tsval is not None and self.plant != 'ts-never'
+                if ts and self.plant != 'ts-mss-full':
+                    mss -= 12       # the option's 12 bytes in every segment (section 5.5)
                 c = Conn(key, seq, self.isn(t, key), mss, win, dport)
+                # TS.Recent, None on a connection without timestamps; and
+                # Last.ACK.sent (RFC 7323 4.3).
+                c.ts_recent = tsval if ts else None
+                c.last_ack = c.rcv_nxt
                 if dport == self.a.echo_port and self.next_r2 is not None and self.plant != 'r2-hook-ignored':
                     # The R2 hook: this connection's R2, through section 5.5's
                     # keyword, used once (F41; the r2-hook-sticky plant keeps it).
@@ -856,6 +897,17 @@ class Band:
                 self.raw_tcp(t, src, dport, sport, 0, (seq + len(data) + (1 if flags & SYN else 0)) & 0xFFFFFFFF,
                              RST | ACK, 0)
             return
+        if c.ts_recent is not None and (not flags & RST or self.plant == 'ts-rst-needs-option'):
+            if tsval is None:
+                # RFC 7323 3.2: dropped silently, the connection kept.
+                if self.plant == 'ts-abort-missing':
+                    self.send_tcp(t, c, RST | ACK, b'', c.snd_nxt)
+                    del self.conns[key]
+                    return
+                if self.plant not in ('ts-no-drop', 'ts-abort-missing'):
+                    return
+            elif self.plant != 'ts-recent-stuck':
+                self.ts_update(c, seq, tsval)
         if flags & RST:
             if self.rst_acceptable(c, seq):
                 if self.plant == 'rst-synrcvd-ignored' and c.state == 'SYN-RECEIVED':
@@ -999,6 +1051,28 @@ class Band:
         if not self.output(t, c) and need_ack:
             self.send_tcp(t, c, ACK, b'', c.snd_nxt)
 
+    def ts_newer(self, recent, tsval):
+        """TSVAL not older than RECENT, modulo 2^32 (the ts-recent-latest
+        plant takes any; ts-recent-unsigned compares plainly)."""
+        if self.plant == 'ts-recent-latest':
+            return True
+        if self.plant == 'ts-recent-unsigned':
+            return tsval >= recent
+        return ((tsval - recent) & 0xFFFFFFFF) < 0x80000000
+
+    def ts_update(self, c, seq, tsval):
+        """RFC 7323 4.3 (2): TS.Recent takes SEG.TSval when it is not older
+        and SEG.SEQ is at or before Last.ACK.sent."""
+        if self.ts_newer(c.ts_recent, tsval) and \
+                (self.plant == 'ts-recent-any-seq' or not self.lt(c.last_ack, seq)):
+            c.ts_recent = tsval
+
+    def ts_option(self, t, recent):
+        """Two NOPs and the timestamps option: TSval the millisecond clock
+        (the tsval-ticks plant's counts ticks), TSecr RECENT."""
+        val = t * 60 // S if self.plant == 'tsval-ticks' else t // MS
+        return b'\x01\x01' + struct.pack('>BBII', 8, 10, val & 0xFFFFFFFF, recent & 0xFFFFFFFF)
+
     # ---- RST, SYN and close (section 5.5) ---------------------------------
     def refuse(self, t, src, dport, sport, seq):
         """RFC 9293 section 3.10.7.1's RST to a SYN: <SEQ=0><ACK=SEG.SEQ+1>
@@ -1041,7 +1115,7 @@ class Band:
         del self.conns[c.key]
         if self.plant == 'time-wait-skipped':
             return
-        tw = {'rcv_nxt': c.rcv_nxt, 'snd_nxt': c.snd_nxt, 'gen': 0}
+        tw = {'rcv_nxt': c.rcv_nxt, 'snd_nxt': c.snd_nxt, 'gen': 0, 'ts_recent': c.ts_recent}
         self.timewait[c.key] = tw
         self.timewait_arm(t, c.key, tw)
 
@@ -1055,10 +1129,17 @@ class Band:
                 del self.timewait[key]
         self.at(t + length, end)
 
-    def timewait_segment(self, t, key, tw, seq, flags, data):
+    def timewait_segment(self, t, key, tw, seq, flags, data, tsval=None):
         """A segment to a TIME-WAIT record; False to go on as with no
-        connection (a SYN above its final RCV.NXT opens a new one)."""
+        connection (a SYN above its final RCV.NXT opens a new one).  A
+        timestamped connection's record answers with the option and drops
+        a segment without it, but a SYN."""
         src, sport, dport = key
+        recent = tw.get('ts_recent')
+
+        def answer():
+            opts = self.ts_option(t, tw['ts_recent']) if recent is not None and self.plant != 'ts-tw-plain' else b''
+            self.raw_tcp(t, src, dport, sport, tw['snd_nxt'], tw['rcv_nxt'], ACK, 8192, b'', opts)
         if flags & RST:
             return True
         if flags & SYN and not flags & ACK:
@@ -1066,19 +1147,24 @@ class Band:
                     self.plant == 'tw-syn-low-accepted':
                 del self.timewait[key]
                 return False
-            self.raw_tcp(t, src, dport, sport, tw['snd_nxt'], tw['rcv_nxt'], ACK, 8192)
+            answer()
             return True
+        if recent is not None:
+            if tsval is None:
+                return True     # RFC 7323 3.2: dropped silently
+            if self.ts_newer(recent, tsval) and not self.lt(tw['rcv_nxt'], seq):
+                tw['ts_recent'] = tsval
         if flags & FIN:
             # The peer's FIN again: acknowledged, and TIME-WAIT restarts.
             if self.plant != 'tw-fin-unacked':
-                self.raw_tcp(t, src, dport, sport, tw['snd_nxt'], tw['rcv_nxt'], ACK, 8192)
+                answer()
                 self.timewait_arm(t, key, tw)
             return True
         # Any other segment that is not acceptable gets an ACK of the final
         # RCV.NXT (RFC 9293 section 3.10.7.4; F23); an acceptable bare ACK,
         # at RCV.NXT with nothing in it, gets nothing.
         if data or seq != tw['rcv_nxt']:
-            self.raw_tcp(t, src, dport, sport, tw['snd_nxt'], tw['rcv_nxt'], ACK, 8192)
+            answer()
         return True
 
     def deliver(self, t, c, data):
@@ -1550,6 +1636,8 @@ class Band:
 
     def send_synack(self, t, c):
         opts = struct.pack('>BBH', 2, 4, 1400 if self.plant == 'synack-mss' else 1460)
+        if self.plant == 'ts-unasked' and c.ts_recent is None:
+            opts += self.ts_option(t, 0)
         if self.plant == 'synack-wscale':
             opts += bytes([1, 3, 3, 0])
         self.send_tcp(t, c, SYN | ACK, b'', c.iss, opts)
@@ -1574,6 +1662,17 @@ class Band:
         src, sport, dport = c.key
         if self.plant == 'data-without-ack' and data:
             flags &= ~ACK
+        if c.ts_recent is not None:
+            # A resend: data before the furthest byte sent, or the SYN-ACK
+            # again (the T5 plants: the option left out, or its first TSval).
+            resend = (data and self.lt(seq, c.max_sent)) or (flags & SYN and c.synack_tx is not None)
+            if not (resend and self.plant == 'ts-missing-on-resend'):
+                tt = t
+                if resend and self.plant == 'tsval-backwards' and data:
+                    tt = next((when for end, when in c.first_tx if self.lt(seq, end)), t)
+                opts += self.ts_option(tt, c.ts_recent)
+            if flags & ACK:
+                c.last_ack = c.rcv_nxt
         win = 8192 if flags & SYN else self.window(c)
         self.raw_tcp(t, src, dport, sport, seq, c.rcv_nxt, flags, 4096 if self.plant == 'window' else win,
                      data, opts)

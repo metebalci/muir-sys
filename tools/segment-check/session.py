@@ -12,6 +12,14 @@ the band's IPv4 datagrams share a destination, protocol and identification
 (section 5.3), and no data goes past the largest right edge the peer has
 offered on its connection.  The first problem fails the script.
 
+The timestamps option (RFC 7323; section 5.5, amendment 4) is checked by
+connection, keyed by the four-tuple of the peer's latest SYN on it: a SYN-ACK
+carries it only if that SYN did; once a SYN-ACK has carried it, every segment
+on the connection but an RST carries it, a resent one too; without it, none
+does; and the band's TSval on a connection never goes back, modulo 2^32.  The
+peer's side (PeerConn) answers a timestamped connection as Linux does: the
+option on every segment it sends, and 12 bytes less data in each.
+
 Every Ethernet frame the scripts send shorter than 60 bytes is padded to 60
 with nonzero bytes, as a NIC delivers it, so that a stack taking a length
 from the Ethernet frame rather than from the IPv4 total length fails.
@@ -93,6 +101,10 @@ class Session:
         self.started = None     # the gratuitous ARP, once seen
         self.idents = {}        # (destination, protocol, identification) -> Seen
         self.peer_macs = None   # check.problems's; None for the peer's own
+        # The timestamps option by four-tuple (peer address, peer port, band
+        # port): whether the peer's latest SYN offered it, whether the band's
+        # SYN-ACK carried it, and the band's latest segment with it.
+        self.ts_syn, self.ts_conn, self.ts_last = {}, {}, {}
 
     @property
     def now(self):
@@ -100,9 +112,53 @@ class Session:
 
     # ----------------------------------------------------------------------
     def send(self, frame, at_=None):
+        self.note_syn(frame)
         if self.p.pad and len(frame) < 60:
             frame = frame + bytes(0xA5 ^ i for i in range(60 - len(frame)))
         self.peer.deliver(frame, at_)
+
+    def note_syn(self, frame):
+        """A SYN the peer sends starts its four-tuple's timestamps afresh."""
+        e = F.parse_ether(frame)
+        if e.error or e.type != F.ETH_IPV4:
+            return
+        ip = F.parse_ipv4(e.payload)
+        if ip.error or ip.proto != F.IP_TCP:
+            return
+        t = F.parse_tcp(ip.src, ip.dst, ip.payload)
+        if t.error or not t.flags & F.SYN or t.flags & F.ACK:
+            return
+        key = (ip.src, t.sport, t.dport)
+        self.ts_syn[key] = t.tsval is not None
+        self.ts_conn.pop(key, None)
+        self.ts_last.pop(key, None)
+
+    def ts_problem(self, s):
+        """What is wrong with band segment S's timestamps option, or None
+        (RFC 7323 3.2; section 5.5)."""
+        t = s.tcp
+        key = (s.ip.dst, t.dport, t.sport)
+        has = t.tsval is not None
+        on = self.ts_conn.get(key)
+        if t.flags & F.SYN:
+            if has and not self.ts_syn.get(key):
+                return 'the timestamps option on a SYN-ACK whose SYN offered none'
+            if on and not has:
+                return 'a SYN-ACK without the timestamps option on a timestamped connection'
+            self.ts_conn[key] = has
+        elif t.flags & F.RST:
+            if has and not on:
+                return 'the timestamps option on an RST of a connection without timestamps'
+        elif on and not has:
+            return 'a segment without the timestamps option on a timestamped connection'
+        elif has and not on:
+            return 'the timestamps option on a connection without timestamps'
+        if has:
+            last = self.ts_last.get(key)
+            if last is not None and ((t.tsval - last.tcp.tsval) & 0xFFFFFFFF) >= 0x80000000:
+                return 'TSval went back from %d (%s) to %d' % (last.tcp.tsval, last, t.tsval)
+            self.ts_last[key] = s
+        return None
 
     def ether_to_band(self, type_, payload, dst=None):
         self.send(F.ether(dst or self.p.band_mac, self.p.peer_mac, type_, payload))
@@ -119,6 +175,10 @@ class Session:
             bad = check.problems(s.raw, self.p, self.peer_macs)
             if bad:
                 raise Fail('a bad Ethernet frame from the band (%s): %s' % ('; '.join(bad), s))
+            if s.tcp is not None and not s.tcp.error:
+                bad = self.ts_problem(s)
+                if bad:
+                    raise Fail('a bad Ethernet frame from the band (%s): %s' % (bad, s))
             if s.ip is not None:
                 key = (s.ip.dst, s.ip.proto, s.ip.ident)
                 if key in self.idents:
@@ -176,11 +236,20 @@ class Session:
         return c
 
 
+# The peer's TSval on a timestamped connection: its own millisecond clock,
+# machine time from this base, unless a script sets PeerConn.ts_val.
+PEER_TS_BASE = 1000
+
+
 class PeerConn:
     """The peer's side of one TCP connection: an active open, data sent in
     order within the band's window, and the band's data acknowledged at the
     end of each step.  The link is the clocked socket, which loses nothing, so
-    the peer never retransmits."""
+    the peer never retransmits.  When its SYN offered the timestamps option
+    and the band's SYN-ACK carried it, every segment the peer sends carries
+    it (TSval its clock, or ts_val when a script sets one; TSecr the band's
+    latest TSval), unless a script leaves it out (ts_send, or segment's ts),
+    and its segments hold 12 bytes less data, as Linux's do."""
 
     def __init__(self, s, sport, dport, iss, window):
         self.s, self.sport, self.dport = s, sport, dport
@@ -204,13 +273,26 @@ class PeerConn:
         self.ack_quiet = 0              # hold an ACK until the band is this long quiet
         self.probes = []                # one-octet zero-window probes
         self.last_band = None           # the time of the band's last segment here
+        self.ts_offered = False         # the SYN carried the timestamps option
+        self.ts_ok = False              # and the band's SYN-ACK did too
+        self.ts_val = None              # a fixed TSval a script sets; None for the clock
+        self.ts_base = PEER_TS_BASE     # the clock's TSval at machine time 0
+        self.ts_recent = 0              # the band's latest TSval, echoed
+        self.ts_send = True
 
     def ours(self, s):
         t = s.tcp
         return t is not None and t.sport == self.dport and t.dport == self.sport
 
-    def segment(self, flags, data=b'', seq=None, options=b'', ack=True):
+    def tsval_now(self):
+        if self.ts_val is not None:
+            return self.ts_val & 0xFFFFFFFF
+        return (self.ts_base + self.s.now // MS) & 0xFFFFFFFF
+
+    def segment(self, flags, data=b'', seq=None, options=b'', ack=True, ts=None):
         p = self.s.p
+        if self.ts_ok and (self.ts_send if ts is None else ts) and not F.has_timestamps(options):
+            options = options + F.OPT_NOP + F.OPT_NOP + F.opt_timestamps(self.tsval_now(), self.ts_recent)
         a = self.rcv_nxt if (ack and self.rcv_nxt is not None) else 0
         if ack and self.rcv_nxt is not None:
             flags |= F.ACK
@@ -244,6 +326,7 @@ class PeerConn:
         return None
 
     def syn(self, options):
+        self.ts_offered = F.has_timestamps(options)
         self.segment(F.SYN, options=options, ack=False)
         self.snd_nxt = (self.iss + 1) & 0xFFFFFFFF
         self.snd_una = self.snd_nxt
@@ -258,6 +341,8 @@ class PeerConn:
         t = s.tcp
         self.segments.append(s)
         self.last_band = s.t
+        if t.tsval is not None:
+            self.ts_recent = t.tsval
         if t.flags & F.RST:
             self.rst = s
             return
@@ -267,6 +352,7 @@ class PeerConn:
                 self.irs = t.seq
                 self.rcv_nxt = (t.seq + 1) & 0xFFFFFFFF
                 self.band_mss = t.mss
+                self.ts_ok = self.ts_offered and t.tsval is not None
             self.band_window = t.window
             return
         if t.flags & F.ACK and self.irs is not None:
@@ -310,7 +396,7 @@ class PeerConn:
         segment, and acknowledge what came in this step."""
         sent = False
         if self.irs is not None and self.rst is None:
-            mss = self.band_mss or 536
+            mss = (self.band_mss or 536) - (12 if self.ts_ok else 0)
             while self.pending:
                 in_flight = (self.snd_nxt - self.snd_una) & 0xFFFFFFFF
                 room = (self.band_window or 0) - in_flight

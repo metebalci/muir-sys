@@ -2378,6 +2378,277 @@ def r2_hook(s):
     return 'connection A closed at its R2 of 10 s (%s); B kept the default' % cond
 
 
+# --------------------------------------------------------------------------
+# Timestamps (RFC 7323, for RTT measurement only; section 5.5, amendment 4).
+# A SYN with the timestamps option makes a timestamped connection, one
+# without makes one as before.  What every script checks holds the option to
+# its connection (session.py); these scripts check the rest: the
+# negotiation, TSval as a millisecond clock, TSecr as RFC 7323 section 4.3
+# keeps TS.Recent, the effective send MSS 12 bytes less, and a segment
+# without the option dropped while the connection stays.
+
+def ts_slack_ms():
+    """TSval against machine time over 2 s: a tick and the pass latency,
+    since a band may read its clock as it builds a segment and send it later
+    in its pass (section 9, T1, Latency).  A clock of ticks (120 for 2,000)
+    or of 1.024 ms (1,953) is far outside it."""
+    return (tick_tolerance() + PASS_LATENCY) / MS
+
+
+def ts_open(s, sport, dport, iss, tsval, what, options=None):
+    """A timestamped connection: a SYN with Linux's options, its TSval
+    TSVAL, answered by a SYN-ACK with the option whose TSecr is TSVAL; the
+    peer's TSval then stays TSVAL until a script moves it."""
+    c = open_connection(s, sport, dport, iss, options or F.linux_syn_options(ts=tsval), what)
+    t = c.synack.tcp
+    if t.tsval is None:
+        raise Fail('%s: a SYN with the timestamps option answered by a SYN-ACK without it: %s' % (what, c.synack))
+    if t.tsecr != tsval & 0xFFFFFFFF:
+        raise Fail('%s: the SYN-ACK\'s TSecr is %d, not the SYN\'s TSval %d' % (what, t.tsecr, tsval))
+    c.ts_val = tsval
+    return c
+
+
+def ts_negotiation(s):
+    """A SYN with the timestamps option gets a SYN-ACK with it, echoing the
+    SYN's TSval, and its connection carries it on every segment, through the
+    band's close and its TIME-WAIT record; a SYN without it gets a SYN-ACK
+    without it and a connection as before; TSval counts milliseconds of
+    machine time (section 5.5; RFC 7323 3.2, 5.4)."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    a = ts_open(s, 40081, p.echo_port, ISN_A, 0x2468ACE0, 'a SYN with the timestamps option')
+    if a.synack.tcp.mss != 1460 or a.synack.tcp.window != 8192:
+        raise Fail('the timestamped SYN-ACK has MSS %s window %d, not 1460 and 8192' % (
+            a.synack.tcp.mss, a.synack.tcp.window))
+    # The peer's own clock from here, going on from the SYN's TSval.
+    a.ts_base, a.ts_val = 0x2468ACE0 - s.now // MS, None
+    a.auto_ack = True
+    a.ack()
+    text = stream(300)
+    a.write(text)
+    quiet_on(s, a, 'the timestamped echo')
+    if a.received != text:
+        raise Fail('the timestamped connection echoed %d bytes for %d' % (len(a.received), len(text)))
+    # TSval a millisecond clock: two answers 2 s of machine time apart.
+    answers = []
+    for k in range(2):
+        if k:
+            s.run(s.now + 2 * S)
+        t = s.now
+        a.write(b'%d' % k)
+        r = s.wait_for(t + p.answer, lambda x: x.t > t and a.ours(x))
+        if r is None:
+            raise Fail('no answer to one byte on the timestamped connection by %s' % at(s.now))
+        answers.append(r)
+        quiet_on(s, a, 'the timestamped echo')
+    for r in answers:
+        if not 0 <= (r.tcp.tsecr - 0x2468ACE0) & 0xFFFFFFFF <= 0x10000000:
+            raise Fail('TSecr %d on %s: not a TSval the peer sent after its SYN\'s' % (r.tcp.tsecr, r))
+    if answers[1].tcp.tsecr == answers[0].tcp.tsecr:
+        raise Fail('TSecr %d unchanged over 2 s of the peer\'s TSvals: %s' % (answers[1].tcp.tsecr, answers[1]))
+    dts = (answers[1].tcp.tsval - answers[0].tcp.tsval) & 0xFFFFFFFF
+    dms = (answers[1].t - answers[0].t) / MS
+    if abs(dts - dms) > ts_slack_ms():
+        raise Fail('TSval moved %d in %.3f ms of machine time between %s and %s: not a millisecond clock'
+                   % (dts, dms, answers[0], answers[1]))
+    # A resend: X and then Y echoed and not acknowledged, so X is resent at
+    # the RTO after Y went, with the option and a TSval not older than Y's
+    # (what every script checks).
+    a.auto_ack = False
+    x_seq = (a.irs + 1 + len(a.received)) & 0xFFFFFFFF
+    t = s.now
+    a.write(b'X' * 10)
+    first = s.wait_for(t + p.answer, lambda x: x.t > t and a.ours(x) and x.tcp.data and x.tcp.seq == x_seq)
+    if first is None:
+        raise Fail('no echo of 10 bytes on the timestamped connection by %s' % at(s.now))
+    # Y goes with an ACK short of X's echo, so that X stays unacknowledged.
+    a.rcv_nxt, a.received = x_seq, a.received[:-10]
+    s.run(s.now + 20 * MS)
+    a.write(b'Y' * 10)
+    resent = s.wait_for(s.now + 5 * S, lambda x: x.t > first.t and a.ours(x) and x.tcp.data and x.tcp.seq == x_seq)
+    if resent is None:
+        raise Fail('the unacknowledged echo at %d not resent by %s' % (x_seq, at(s.now)))
+    a.auto_ack = True
+    a.ack()
+    quiet_on(s, a, 'the timestamped echo')
+    if a.received[-20:] != b'X' * 10 + b'Y' * 10:
+        raise Fail('the timestamped echo ends %r, not X and Y' % a.received[-20:])
+    # Without the option: as before.
+    b = open_connection(s, 40082, p.echo_port, ISN_B, F.opt_mss(1460), 'a SYN without the timestamps option')
+    if b.synack.tcp.tsval is not None:
+        raise Fail('a SYN without the timestamps option answered with it: %s' % b.synack)
+    b.auto_ack = True
+    b.ack()
+    b.write(text)
+    quiet_on(s, b, 'the echo without timestamps')
+    if b.received != text:
+        raise Fail('the connection without timestamps echoed %d bytes for %d' % (len(b.received), len(text)))
+    # The band closes the timestamped one first: its FIN, ours, and the
+    # TIME-WAIT record's answer to an old duplicate, each with the option.
+    ask(s, c, 'close', a.sport, a.sport)
+    fin = band_fin(s, a, 'the timestamped close')
+    s.run(s.now + 50 * MS)
+    seq = a.snd_nxt
+    a.segment(F.FIN)
+    a.snd_nxt = (a.snd_nxt + 1) & 0xFFFFFFFF
+    fin_acked(s, a, seq, 'the timestamped close')
+    s.run(s.now + 100 * MS)
+    if probe(s, a, 'the timestamped connection in TIME-WAIT') != 'ACK':
+        raise Fail('the timestamped connection: no TIME-WAIT after both FINs')
+    return 'SYN-ACK with TSecr %d; TSval moved %d in %.3f ms; none without the option; the FIN %s and TIME-WAIT ' \
+           'with it' % (a.synack.tcp.tsecr, dts, dms, at(fin.t))
+
+
+def ts_echo(s):
+    """TSecr is TS.Recent, kept by RFC 7323 section 4.3: a segment's TSval
+    is taken when it is not older (modulo 2^32, across 2^31 and 2^32) and
+    the segment starts at or before Last.ACK.sent; so an older TSval is not
+    taken, a segment beyond a hole is not echoed, the one that fills the hole
+    is (4.3 (C)), a bare ACK at RCV.NXT is, and of two segments acknowledged
+    by one ACK the earlier's is (4.3 (A))."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    e = ts_open(s, 40083, p.echo_port, ISN_A, 0x7FFFFF00, 'the TSecr connection')
+    e.ack()
+    quiet_on(s, e, 'the TSecr connection')
+    e.auto_ack = True
+
+    def step(offset, n, tsval, ack_to, ecr, what):
+        e.ts_val = tsval
+        last = expect_ack(s, e, send_data(s, e, offset, n), ack_to, what)
+        if last.tcp.tsecr != ecr:
+            raise Fail('%s: TSecr %d (0x%08x), not %d (0x%08x): %s' % (what, last.tcp.tsecr, last.tcp.tsecr,
+                                                                     ecr, ecr, last))
+        return last
+
+    step(0, 4, 0x80000100, 4, 0x80000100, 'in order, a TSval across 2^31')
+    step(4, 4, 0x7FFFFF10, 8, 0x80000100, 'in order, an older TSval (not taken)')
+    step(12, 4, 0xC0000000, 8, 0x80000100, 'out of order, bytes 12-15 (beyond the hole: not echoed)')
+    step(8, 4, 0xFFFFFF00, 12, 0xFFFFFF00, 'the hole, bytes 8-11, filled (4.3 (C): echoed)')
+    step(12, 4, 0x00000100, 16, 0x00000100, 'bytes 12-15 resent, a TSval across 2^32')
+    # Two segments at one machine time, acknowledged together: the earlier's
+    # TSval (4.3 (A)), unless the band acknowledged the first alone first.
+    t = s.now
+    e.ts_val = 0x200
+    send_data(s, e, 16, 4)
+    e.ts_val = 0x300
+    send_data(s, e, 20, 4)
+    last = expect_ack(s, e, t, 24, 'bytes 16-19 and 20-23 at once')
+    alone = any(x.t > t and e.ours(x) and rel(e, x.tcp.ack) == 20 for x in s.seen)
+    want = 0x300 if alone else 0x200
+    if last.tcp.tsecr != want:
+        raise Fail('two segments at once%s: TSecr %d, not %d' % (
+            ' (the first acknowledged alone first)' if alone else ' (acknowledged together, 4.3 (A))',
+            last.tcp.tsecr, want))
+    # A bare ACK at RCV.NXT is taken, then a segment beyond RCV.NXT is not.
+    quiet_on(s, e, 'the TSecr connection')
+    e.ts_val = 0x400
+    t = s.now
+    e.ack()
+    s.quiet(t + QUIET, lambda x: x.t > t and e.ours(x), 'an answer to a bare ACK')
+    step(28, 4, 0x500, 24, 0x400, 'after a bare ACK, bytes 28-31 out of order')
+    step(24, 4, 0x600, 28, 0x600, 'the hole, bytes 24-27, filled')
+    step(28, 4, 0x700, 32, 0x700, 'bytes 28-31 resent')
+    delivered(s, e, 32, 'the TSecr connection')
+    return 'TSecr by RFC 7323 4.3 across 2^31 and 2^32: an older TSval and one beyond a hole not taken, the ' \
+           'hole\'s filler taken, %s, a bare ACK taken; 32 bytes echoed once' % (
+               'the first of two acknowledged alone' if alone else 'two at once echo the earlier')
+
+
+def ts_mss(s):
+    """A timestamped connection's effective send MSS is 12 bytes less: the
+    band sends at most 1,448 data bytes a segment, and exactly that at
+    largest, with MSS 1460 and with MSS 65480, and at most 524 when the SYN
+    offers no MSS (section 5.5)."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    a = echo_through(s, 40084, ISN_A, F.linux_syn_options(), 1448, 'MSS 1460 with timestamps')
+    b = echo_through(s, 40085, ISN_B, F.linux_syn_options(mss=65480), 1448, 'MSS 65480 with timestamps')
+    d = echo_through(s, 40086, ISN_A ^ 0x7777, F.opt_timestamps(5, 0), 524, 'timestamps with no MSS')
+    for x in s.seen:
+        if x.tcp is not None and x.tcp.dport in (40084, 40085, 40086) and x.tcp.tsval is None and \
+                not x.tcp.flags & F.RST:
+            raise Fail('a segment without the timestamps option: %s' % x)
+    return 'largest segments %d, %d and %d bytes with timestamps (MSS 1460, 65480, none)' % (a, b, d)
+
+
+def ts_missing(s):
+    """On a timestamped connection a segment without the option is dropped
+    silently, and the connection is never aborted for it: data, an ACK of the
+    band's data and the handshake's ACK without it are not taken, and taken
+    with it; an RST without it is still taken (section 5.5; RFC 7323 3.2)."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    e = ts_open(s, 40087, p.echo_port, ISN_A, 0x01000000, 'the dropping connection')
+    e.ack()
+    quiet_on(s, e, 'the dropping connection')
+    e.auto_ack = True
+    expect_ack(s, e, send_data(s, e, 0, 4), 4, 'bytes 0-3 with the option')
+    # Data without the option: no answer at all, nothing delivered.
+    t = s.now
+    base = (e.iss + 1) & 0xFFFFFFFF
+    e.segment(F.PSH, stream(8)[4:], seq=(base + 4) & 0xFFFFFFFF, ts=False)
+    e.snd_nxt = (base + 8) & 0xFFFFFFFF
+    s.quiet(t + p.answer, lambda x: x.t > t and e.ours(x),
+            'data without the timestamps option answered on a timestamped connection (RFC 7323 3.2: dropped '
+            'silently)')
+    expect_ack(s, e, send_data(s, e, 4, 4), 8, 'bytes 4-7 again, with the option')
+    quiet_on(s, e, 'the dropping connection')
+    # An ACK of the band's data without the option is not taken: the band
+    # resends the data at its RTO, with the option.
+    e.auto_ack = False
+    t = send_data(s, e, 8, 4)
+    echo_seq = (e.irs + 1 + 8) & 0xFFFFFFFF
+    first = s.wait_for(t + p.answer, lambda x: x.t > t and e.ours(x) and x.tcp.data and x.tcp.seq == echo_seq)
+    if first is None:
+        raise Fail('bytes 8-11 not echoed by %s' % at(s.now))
+    s.run(s.now + 10 * MS)
+    e.segment(0, ts=False)
+    t_ack = s.now
+    again = s.wait_for(t_ack + 3 * S, lambda x: x.t > t_ack and e.ours(x) and x.tcp.data and x.tcp.seq == echo_seq)
+    if again is None:
+        raise Fail('an ACK without the timestamps option taken: the echo of bytes 8-11 not resent by %s' % at(s.now))
+    e.ack()
+    e.auto_ack = True
+    delivered(s, e, 12, 'the dropping connection')
+    # The handshake's ACK without the option: the connection stays half open,
+    # its SYN-ACK resent; the ACK with it opens it, and the banner follows.
+    h = ts_open(s, 40088, p.telnet_port, ISN_B, 0x00ABCDEF, 'the dropped handshake')
+    t = s.now
+    h.segment(0, ts=False)
+    r = s.wait_for(t + 2 * S, lambda x: x.t > t and h.ours(x))
+    if r is None or not r.tcp.flags & F.SYN or r.tcp.data:
+        raise Fail('the handshake\'s ACK without the timestamps option taken: %s by %s, not the SYN-ACK resent' % (
+            r or 'nothing', at(s.now)))
+    h.ack()
+    t = s.now
+    h.auto_ack = True
+    d = s.wait_for(t + 2 * p.answer, lambda x: x.t > t and h.ours(x) and x.tcp.data)
+    if d is None:
+        raise Fail('no banner after the handshake\'s ACK with the option, by %s' % at(s.now))
+    # An RST without the option is taken: the echo service sees the reset.
+    quiet_on(s, e, 'the dropping connection')
+    raw_segment(s, e, F.RST, e.snd_nxt, 0)
+    s.quiet(s.now + p.answer, lambda x: e.ours(x), 'an answer to an RST')
+    cond = ask(s, c, 'condition')[0]
+    if 'CONNECTION-LOST' not in cond.upper():
+        raise Fail('an RST without the timestamps option not taken: the echo service saw %s' % cond)
+    for x in s.seen:
+        if x.tcp is not None and x.tcp.dport in (40087, 40088) and x.tcp.flags & F.RST:
+            raise Fail('the band reset a timestamped connection: %s' % x)
+    return 'data, an ACK and the handshake\'s ACK without the option dropped, taken with it (resent %s after); ' \
+           'an RST without it taken' % at(again.t - first.t)
+
+
 SCRIPTS = {
     'arp': arp,
     'arp-cache': arp_cache,
@@ -2410,4 +2681,8 @@ SCRIPTS = {
     'fin-wait-2': fin_wait_2,
     'wrap': wrap,
     'ping': ping,
+    'ts-negotiation': ts_negotiation,
+    'ts-echo': ts_echo,
+    'ts-mss': ts_mss,
+    'ts-missing': ts_missing,
 }

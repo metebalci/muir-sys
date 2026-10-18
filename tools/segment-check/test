@@ -50,6 +50,15 @@ def vectors():
     for raw in (b'\x02\x00', b'\x02\x01', b'\x02\x09\x05\xb4', b'\xfe'):
         if not isinstance(F.parse_tcp_options(raw), str):
             bad.append('options %s accepted' % raw.hex())
+    # The timestamps option (RFC 7323 3.2): parsed behind two NOPs, its
+    # TSval and TSecr read; one of another length marked, not read.
+    ts = F.OPT_NOP + F.OPT_NOP + F.opt_timestamps(0x89ABCDEF, 0x01234567)
+    t = F.parse_tcp(b'\0' * 4, b'\0' * 4, F.tcp(b'\0' * 4, b'\0' * 4, 1, 2, 3, 4, F.ACK, 8192, b'x', ts))
+    if (t.tsval, t.tsecr, t.ts_bad) != (0x89ABCDEF, 0x01234567, False) or not F.has_timestamps(ts):
+        bad.append('the timestamps option')
+    t = F.parse_tcp(b'\0' * 4, b'\0' * 4, F.tcp(b'\0' * 4, b'\0' * 4, 1, 2, 3, 4, F.ACK, 8192, b'', b'\x08\x06\0\0\0\0'))
+    if t.tsval is not None or not t.ts_bad or F.has_timestamps(b'\x08\x06\0\0\0\0'):
+        bad.append('a timestamps option of length 6')
     return bad
 
 

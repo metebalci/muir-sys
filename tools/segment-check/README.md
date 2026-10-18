@@ -84,6 +84,10 @@ machine time (1 by default).
 | `rule-5-7` | A SYN-ACK resent once and then acknowledged, with no RTT sample: of a 1,072-byte echo, two segments of 536, one goes and the other waits for its ACK (an initial window of one segment, RFC 5681 section 3.1; F34); the first is resent after 3 s within a tick (RFC 6298 (5.7); F31); the echo then completes exactly. | the control session: no SYN-ACK from port 23 by T |
 | `fin-wait-2` | Long, about 62 s. Two connections closed by the band first, the application's own close (F36), the peer acknowledging the band's FIN 50 ms after it and sending none back: FIN-WAIT-2 is still there 60 s less a tick after the band's FIN on one, and gone 60 s, a tick and the pass latency after it on the other, each probed once; the origin is the FIN, so a band timing from the ACK fails (F35). No RST comes on either before its end: a later close by its server sends nothing (F36). (5.5; F31.) | the control session: no SYN-ACK from port 23 by T |
 | `wrap` | The control session sets the ISN hook to 0xFFFFF000; a SYN to a closed port, refused, leaves it set, and the next connection's SYN-ACK has that ISN (the next SYN answered takes it, F36); the peer's is 0xFFFFF800, and 1 MB echoed crosses both wraps exactly within 60 s of machine time (an assumed rate, which E4 measures on the Lisp); the connection after has another ISN, the hook used once (section 9, T1, Sequence wrap; F6). | the control session: no SYN-ACK from port 23 by T |
+| `ts-negotiation` | Timestamps (5.5, amendment 4; RFC 7323). On the test echo service, a SYN with Linux's options, the timestamps option among them, gets a SYN-ACK with the option, its TSecr the SYN's TSval, MSS 1460 and window 8192; 300 bytes are echoed exactly; the band's TSecr then follows the peer's later TSvals; two answers 2 s of machine time apart differ in TSval by their time in milliseconds, within a tick and the pass latency (`ts_slack_ms`: a millisecond clock, where one of ticks or of 1.024 ms is far outside); a segment echoed and not acknowledged, while a later one goes, is resent at the RTO (so that a resend's TSval is checked against the later one's); a SYN with MSS alone gets a SYN-ACK without the option and a connection without it; the band then closes the timestamped connection first, and its FIN, its ACK of ours and its TIME-WAIT record's answer to an old duplicate carry the option. | a SYN with the timestamps option answered by a SYN-ACK without it |
+| `ts-echo` | TSecr is TS.Recent, kept by RFC 7323 section 4.3: in order, a TSval across 2^31 is echoed; an older TSval is not taken; a segment beyond RCV.NXT is not echoed, the one that fills the hole is (4.3 (C)), a TSval across 2^32 too; of two segments at one machine time the earlier's TSval is echoed when one ACK covers both (4.3 (A)), the later's if the band acknowledged the first alone first; a bare ACK at RCV.NXT is taken; each TSecr read where the band's segments settle; 32 bytes echoed once. | a SYN with the timestamps option answered by a SYN-ACK without it |
+| `ts-mss` | A timestamped connection's effective send MSS is 12 bytes less (5.5): 4,000 bytes echoed in segments of at most 1,448 data bytes, the largest exactly that, with MSS 1460 and with MSS 65480, and of 524 when the SYN offers the timestamps option and no MSS. | a segment of 1460 data bytes, over 1448 |
+| `ts-missing` | On a timestamped connection a segment without the option is dropped silently and the connection is never aborted for it (5.5; RFC 7323 3.2): data without it gets no answer and is not delivered, and is taken again with it; an ACK of the band's data without it is not taken, so the data is resent at the RTO, with the option; the handshake's ACK without it leaves the connection half open, its SYN-ACK resent, and with it the banner follows; an RST without the option is taken (SYS:CONNECTION-LOST); the band sends no RST on either connection. | a SYN with the timestamps option answered by a SYN-ACK without it |
 | `ping` | The band's ping, called on the control session (5.4; F5, F36). Of the peer: its echo request goes to the peer's address and passes every check of a sent Ethernet frame; the peer answers with the wrong sequence and then the wrong identifier, nothing is reported in the 300 ms after, and after the right reply the ping reports it. Of an address off the subnet: its echo request goes through the gateway, to the gateway's MAC address with no ARP request for the address (5.3, Routing), and the reply is reported. | the control session: no SYN-ACK from port 23 by T |
 
 **What every script checks** besides its own case, in every Ethernet frame
@@ -91,8 +95,19 @@ the band sends (`check.py`, `session.py`): its type, addresses and every
 checksum; its length, 42 bytes for ARP and 14 + TL for IPv4, since padding is
 the host side's; IPv4's sent fields; TCP's ACK flag on every segment but an
 RST, options, urgent pointer, segment size and window; that no two of the band's IPv4 datagrams in a run share a
-destination, protocol and identification; and that no data goes past the
-largest right edge the peer has offered. Every Ethernet frame the scripts
+destination, protocol and identification; that no data goes past the
+largest right edge the peer has offered; and the timestamps option by
+connection, keyed by the four-tuple of the peer's latest SYN on it: a
+SYN-ACK carries it only if that SYN did, once a SYN-ACK has carried it
+every segment on the connection but an RST carries it, a resent one and a
+TIME-WAIT record's answer too, without it none does, and the band's TSval
+on a connection never goes back, modulo 2^32 (RFC 7323 3.2; 5.5,
+amendment 4). The peer's side answers a timestamped connection as Linux
+does: the option on every segment it sends (TSval its own millisecond
+clock, or a value the script sets; TSecr the band's latest TSval), and 12
+bytes less data in each. Of the scripts before the Timestamps group only
+`handshake` offers the option, in Linux's SYN; its expectations are
+unchanged. Every Ethernet frame the scripts
 send shorter than 60 bytes is padded to 60 with nonzero bytes, as a NIC
 delivers it.
 
@@ -215,6 +230,16 @@ micro (the long ones at 63.5 ns). Every one fails its script:
 | a segment beyond RCV.NXT taken | `data` | ACK past the gap |
 | the echo service not closing at EOF | `close` | no FIN at EOF |
 | R2 never closing | `r2` | sent after 100 s |
+| TS.Recent not updated after the SYN (amendment 4) | `ts-echo` | TSecr the SYN's TSval, not the next segment's |
+| the timestamps option missing on a retransmission (amendment 4) | `ts-missing` | the resent echo without the option |
+| TSval going backwards: a resent segment carrying its first sending's TSval (amendment 4) | `ts-negotiation` | TSval back from 15788 to 15759 |
+
+The three timestamp plants (contract section 9, T5, amendment 4) were each
+built as a band of its own from the final `tcp.lisp` with one change and run
+under the four Timestamps scripts once on micro at 19 ns: each failed its own
+script, and `ts-recent-stuck` and `ts-missing-on-resend` failed
+`ts-negotiation` too; the stand-in holds each of them, and eleven more of the
+option's faults, under the same scripts (`standin.PLANTS`).
 
 The signed plant survived the first form of `wrap`, whose numbers cross only
 2^32: the band holds sequence numbers as signed fixnums, whose plain order
@@ -241,6 +266,10 @@ and dropped after three), IPv4 (routing through the gateway off the subnet; opti
 other addresses and other protocols dropped; the device's checksum checks),
 ICMP echo, and TCP's passive open on the TELNET and echo ports with MSS,
 window, options parsed anywhere and an illegal length dropping the segment,
+RFC 7323's timestamps for RTT measurement only (the option on every segment
+of a connection whose SYN offered it, TSval machine time in milliseconds,
+TSecr TS.Recent by section 4.3, 12 bytes less MSS, a segment without the
+option dropped but an RST),
 in-order delivery only, MUST-38's first two rules, three
 segments of initial window, an ACK for every segment and a retransmission at
 1 s. Its checksum code is its own, apart from the scripts', so that one

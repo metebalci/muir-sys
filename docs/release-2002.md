@@ -2099,6 +2099,31 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   the rest): the cross build refuses a new structure, which it cannot give the
   compile for the target without changing the builder's world
   (`sys/cold/cross.lisp`, CROSS-DECLARE-DEFINITIONS).
+- **TCP timestamps, for RTT measurement only** (`sys/network/ip/tcp.lisp`;
+  QUUX's Ethernet contract, 5.5, amendment 4; RFC 7323). Behind 20% loss
+  toward the band a 1 MiB echo from Linux did not finish in 900 s: with
+  in-order delivery and no timestamps every ACK after a timeout covers
+  retransmitted data, so Linux took no RTT sample and its backoff grew to
+  9-13, its RTO to 120 s. A SYN with the timestamps option now makes a
+  timestamped connection (`TCP-RECEIVE-CLOSED`, `:659`), whose every segment,
+  a resent one and an RST too, carries TSval, a millisecond clock counted
+  exactly from the network clock and its wraps as the ISN's (`TCP-CLOCK-TRACK`,
+  `:261`; `TCP-TS-NOW`, `:280`), and TSecr, TS.Recent (`TCP-SEND`, `:371`;
+  the option laid out by `TCP-RAW-SEND`, `:318`). TS.Recent and
+  Last.ACK.sent (`TCB-TS-RECENT`, `:134`) follow RFC 7323 4.3: a TSval is
+  taken when it is not older, modulo 2^32, and its segment starts at or before
+  Last.ACK.sent, so a segment beyond a hole is not echoed and the one that
+  fills it is (`TCP-TS-RECENT-UPDATE`, `:595`). Options give MSS and TSval
+  (`TCP-OPTIONS`, `:574`, which replaces `TCP-OPTION-MSS`). On a timestamped
+  connection a segment but an RST without the option is dropped silently, and
+  the connection is never aborted for it (`TCP-RECEIVE-ON`, `:692`); its
+  effective send MSS is 12 bytes less (`%TCP-TIMESTAMPS-LENGTH`); its
+  TIME-WAIT record answers with the option and drops a segment without it but
+  a SYN (`TCP-TIME-WAIT-SEGMENT`, `:844`). A SYN without the option makes a
+  connection as before. No PAWS, no window scaling, no SACK; in-order
+  delivery stays; the band takes no RTT sample from TSecr. A connection is
+  56 words. `sys/cold/crossdefs.lisp` gains the two substs and the new
+  specials.
 - **TCP's streams, the servers and the band's own host**
   (`sys/network/ip/servers.lisp`, new; QUUX's Ethernet contract, 5.6 and 7):
   stream flavors composed as Chaos's (`chuse.lisp`), the ASCII-translating one
@@ -2184,6 +2209,33 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   connection table empty after (`part_table`, `:364`) and the band's totals
   of 241 `<15:9>` and `<7:4>` equal to the frames the relay corrupted and
   injected (`part_totals`, `:391`), with `--faults` (`:431`).
+- **T1's Timestamps group** (`tools/segment-check/scripts.py`, `ts_open` to
+  `ts_missing`, `:2398`-`:2582`; its README; QUUX's Ethernet contract, 9,
+  amendment 4): `ts-negotiation`, `ts-echo`, `ts-mss` and `ts-missing`. What
+  every script checks holds the timestamps option to its connection, keyed
+  by the four-tuple of the peer's latest SYN (`Session.ts_problem`,
+  `tools/segment-check/session.py:136`): on a SYN-ACK only if the SYN offered
+  it, then on every segment but an RST, a resent one and a TIME-WAIT record's
+  answer too, none without it, and TSval never going back; and the peer's side
+  answers a timestamped connection as Linux does (`PeerConn`, `:244`).
+  `check.py` takes a timestamps option of length 10. The stand-in band has the
+  timestamps and fourteen plants of them (`tools/segment-check/standin.py`,
+  `ts_update`, `:1063`), and `test` checks the option's parsing. No script
+  before the group changed its expectations; `handshake`, whose SYN is
+  Linux's, now makes a timestamped connection on the band.
+- **`tools/fault-relay/relay --trace FILE`**: a line for every frame at its
+  arrival (`in`, `LOST`) and its sending (`out`), with TCP's ports, flags,
+  numbers and length (`Trace`, `:402`).
+- **T4's wall bound and M-loss in `tools/tcp-check/run`** (its README, "The
+  wall bound", "M-loss"; QUUX's Ethernet contract, 9 and 15, amendment 4):
+  every echo session judged against max(M x T0, T0 + 60 s), M 10 and at 20%
+  loss `--wall-m-high`, T0 from a run with no faults (`--wall-base-out`),
+  runs of four or more failed transmissions of one segment not counted, and
+  at 20% loss an early ending passes when the relay's trace explains it
+  (`Way`, `:515`; `judge_session`, `:627`; `wall_judge`, `:655`); the echo
+  part keeps every session and what it read (`Band.echo_session`, `:148`);
+  `--parts mloss`, one 1 MiB echo with Linux's backoff read by `ss -tnio`
+  every 2 s (`part_mloss`, `:722`).
 - **`tools/segment-check/measure`** (new; `tools/segment-check/README.md`,
   "The measurements"): section 15's M-refill (`m_refill`, `:110`; the boards,
   `BOARDS`, `:56`) and M-ack (`m_ack`, `:183`) on the clocked socket.

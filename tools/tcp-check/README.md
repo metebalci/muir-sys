@@ -8,6 +8,8 @@ own TCP, its sockets as clients, to the band through the fault relay
 tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals]
                     [--echo-sizes 1,1024,65536,1048576] [--echo-times 10] [--connections 1000]
                     [--stall 30,180] [--faults 'RELAY-FLAGS'] [--transfer-timeout S]
+                    [--trace FILE] [--wall-base FILE] [--wall-m 10] [--wall-m-high 14]
+                    [--wall-base-out FILE] [--wall-log FILE] [--mloss-size N] [--ss-log FILE]
                     [-- LISPM-CHECK-ARGS...]
 ```
 
@@ -72,6 +74,68 @@ duplicates 5%, reordering 5%, jitter 0-50 ms; each direction alone and both,
 and corruption of 1% toward the band), against one run with no fault, whose
 echo's time is the base of the bound of ten times. The relay's report
 (`relay.json`, kept with `--keep`) gives each direction's resends.
+
+### The wall bound
+
+T4's wall bound (section 9, "How the wall-clocked lanes are judged",
+amendment 4) is per session: one echo of one size. `--wall-base FILE` turns
+it on, FILE giving T0 of each size, the median of its sessions with no
+faults, which `--wall-base-out FILE` writes from a run with none. Each
+session must end within max(M x T0, T0 + 60 s): M is `--wall-m`, 10, and at
+20% loss `--wall-m-high`, 14: about twice M-loss's worst seed, 6.9 x T0
+(below, "Measured"). Not counted is the time inside a run of four or
+more failed transmissions of one segment, from the run's first to the
+segment's next transmission, a transmission failing when the relay lost it
+or when no ACK covering it reached its sender before the next. At 20% loss a
+session may also end early, by the band's R2 or by Linux's abort: such an
+ending passes when, in the relay's record's last 100 s, every transmission
+of the oldest unacknowledged segment, one way or the other, failed, and what
+was echoed before the end is exact. The record is the relay's trace
+(`--trace FILE`, the relay's `--trace`). The `wall` line judges every echo
+session of the run; `--wall-log` keeps each session's figures (its time, the
+time counted, the runs excused, the bound).
+
+```
+tools/tcp-check/run --parts echo,table --wall-base-out base.json --trace none.trace -- ...
+tools/tcp-check/run --parts echo,table,totals --faults '--inject 100 --seed 1 --loss 5 --direction both' \
+    --trace loss5.trace --wall-base base.json --wall-log loss5.wall -- ...
+```
+
+### M-loss
+
+`--parts mloss` is section 15's M-loss (amendment 4): one echo of
+`--mloss-size` (1 MiB), with Linux's state of the connection read by
+`ss -tnio` every 2 s (`--ss-log` keeps the samples). It passes when the echo
+ends as T4 allows, byte-exact or by the endings clause above, and at every
+sample whose `bytes_acked` rose by at least one MSS since the one before,
+Linux's backoff is 3 or less. Its line gives the echo's time against T0 (with
+`--wall-base`) and Linux's largest backoff, overall and at a sample after
+progress. The runs are 20% loss toward the band and both ways, seeds 1 to 3:
+
+```
+tools/tcp-check/run --parts mloss,table --faults '--seed 1 --loss 20 --direction to-band' \
+    --trace to-band-s1.trace --ss-log to-band-s1.ss --wall-base base.json -- ...
+```
+
+### Measured (amendment 4)
+
+On micro at 19 ns, revision 16, band4 with E3's microcode: T0 of 1 MiB 32.5 s
+on the stack without timestamps and 30.2 s with them (`--wall-base-out`,
+loaded host). M-loss:
+
+| Run | Without timestamps | With them |
+|---|---|---|
+| to band, seed 1 | FAIL: no EOF in 900 s, 197,748 bytes; backoff 11 | PASS: 88.6 s, 2.9 x T0; backoff at most 2 |
+| to band, seed 2 | FAIL: 900 s, 598,272 bytes; backoff 11 | PASS: 80.1 s, 2.7 x; 3 |
+| to band, seed 3 | FAIL: 900 s, 435,320 bytes; backoff 10 | PASS: 95.4 s, 3.2 x; 4 (2 after progress) |
+| both, seed 1 | FAIL: 900 s, 206,508 bytes; backoff 8 | PASS: 177.2 s, 5.9 x; 2 |
+| both, seed 2 | FAIL: 900 s, 394,684 bytes; backoff 13 | PASS: 208.2 s, 6.9 x; 4 (3 after progress) |
+| both, seed 3 | FAIL: 900 s, 316,576 bytes; backoff 9 | PASS: 195.1 s, 6.5 x; 5 (3 after progress) |
+
+T4's matrix of 20 runs with the timestamps and the wall bound (M 10, 14 at
+20% loss): every line of every run passes, the 800 sessions all within
+their bounds; the slowest 1 MiB session at 5% loss took 2.1 x T0, and at
+20% loss both ways 8.1 x (6.8 x counted).
 
 ## Still to come
 

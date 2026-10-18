@@ -17,9 +17,10 @@ What a sent Ethernet frame must be, from the contract:
   (section 5.3, "Sent datagrams");
 - ICMP: a right checksum;
 - TCP: a right checksum; ACK set on every segment but an RST; options that
-  parse; MSS only on a SYN; no window
-  scaling, SACK or timestamps; no urgent data; at most 1,460 data bytes and
-  a window of at most 8,192 (section 5.5).
+  parse; MSS only on a SYN; no window scaling or SACK; a timestamps option
+  only of length 10 (whether one belongs on a segment is the connection's
+  question, session.py's); no urgent data; at most 1,460 data bytes and a
+  window of at most 8,192 (section 5.5).
 
 `problems(frame, params)` returns a list of what is wrong, empty when
 nothing is.
@@ -105,8 +106,10 @@ def problems(frame, p, peer_macs=None):
     if s.mss == -1:
         out.append('an MSS option of the wrong length')
     for k in kinds:
-        if k != 2:
-            out.append('TCP option %d offered (no window scaling, SACK or timestamps)' % k)
+        if k not in (2, 8):
+            out.append('TCP option %d offered (no window scaling or SACK)' % k)
+    if s.ts_bad:
+        out.append('a timestamps option of a length other than 10')
     if s.flags & F.URG or s.urg:
         out.append('urgent data sent (URG %d, pointer %d)' % (bool(s.flags & F.URG), s.urg))
     if len(s.data) > 1460:

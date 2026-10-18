@@ -3,9 +3,11 @@
 sockets as clients, to the band through the fault relay and a pooled tap.
 
 usage:
-  tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals] [--echo-sizes 1,1024,65536,1048576]
+  tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals,mloss] [--echo-sizes 1,1024,65536,1048576]
                       [--echo-times 10] [--connections 1000] [--stall 30,180]
-                      [--faults 'RELAY-FLAGS'] [--transfer-timeout S]
+                      [--faults 'RELAY-FLAGS'] [--transfer-timeout S] [--trace FILE]
+                      [--wall-base FILE] [--wall-m 10] [--wall-m-high 14] [--wall-base-out FILE]
+                      [--wall-log FILE] [--mloss-size N] [--ss-log FILE]
                       [-- LISPM-CHECK-ARGS...]
 
 It takes a tap and resumes that index's checkpoint as tools/lispm-check does
@@ -36,10 +38,20 @@ it, as Linux's own TCP:
   totals   T4, run when named: since the faults started, the band's totals
            of 241 <15:9> and <7:4> risen by exactly the frames the relay
            corrupted and injected
+  mloss    M-loss (section 15, amendment 4), run only when named: one echo
+           of --mloss-size with Linux's state read by ss -tnio every 2 s;
+           it ends as T4 allows, and at every sample after progress of an
+           MSS Linux's backoff is 3 or less
   stall    M-tap's stall test (section 15, Q8), run only when named: the
            machine stopped for each of --stall's seconds (30 and 180) with a
            form in flight on a TELNET session over TCP; the session is kept
            and the form answered once the machine goes on
+
+With --wall-base, T4's wall bound judges every echo session (the wall
+line): max(M x T0, T0 + 60 s), M 10 and at 20% loss --wall-m-high, runs of
+four or more failed transmissions of one segment not counted, and at 20%
+loss an early ending explained by the relay's --trace passes; README.md,
+"The wall bound".
 
 and at the end the fault relay, which checks every Ethernet frame the band
 sends with its own code, must have found none bad.  The test switch, each
@@ -64,6 +76,7 @@ import select
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -94,6 +107,7 @@ class Band:
     """The band behind the run's tap, from the build host's side."""
     def __init__(self, link, transfer_timeout):
         self.tap, self.address, self.timeout = link.tap, link.quux, transfer_timeout
+        self.current = None     # the session in progress, for M-loss's sampler
 
     def connect(self, port, timeout=CONNECT_TIMEOUT):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -126,9 +140,27 @@ class Band:
     def echo(self, data):
         """DATA sent to the test echo service while its echo is read, then
         our EOF: the echo, read to the band's EOF."""
-        s = self.connect(ECHO_PORT)
+        r = self.echo_session(data)
+        if r['error']:
+            raise PartFailed(r['error'])
+        return r['echo']
+
+    def echo_session(self, data):
+        """As echo, as one session of T4's wall bound: a dict of its local
+        port, its start and end (monotonic), the echo read so far and the
+        error that ended it, or None, so that a session that ends early can
+        be judged by what it echoed before (section 9, T4)."""
+        r = {'size': len(data), 'port': None, 't0': time.monotonic(), 't1': None, 'echo': b'', 'error': None,
+             'timed_out': False}
+        try:
+            s = self.connect(ECHO_PORT)
+        except OSError as e:
+            r['t1'], r['error'] = time.monotonic(), 'connecting: %s' % e
+            return r
+        r['port'] = s.getsockname()[1]
+        self.current = r
         s.settimeout(None)
-        deadline = time.monotonic() + self.timeout
+        deadline = r['t0'] + self.timeout
         failed = []
 
         def send():
@@ -139,14 +171,30 @@ class Band:
                 failed.append(e)
         t = threading.Thread(target=send, daemon=True)
         t.start()
+        got = []
         try:
-            echo = self.read_to_eof(s, deadline)
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([s], [], [], left)[0]:
+                    r['error'] = ('no EOF from the band within the transfer timeout (%d bytes read)'
+                                  % sum(len(x) for x in got))
+                    r['timed_out'] = True
+                    break
+                d = s.recv(65536)
+                if not d:
+                    break
+                got.append(d)
+        except OSError as e:
+            r['error'] = 'reading: %s (%d bytes read)' % (e, sum(len(x) for x in got))
         finally:
+            r['t1'] = time.monotonic()
             t.join(max(0.1, deadline - time.monotonic()))
             s.close()
-        if failed:
-            raise PartFailed('sending: %s' % failed[0])
-        return echo
+            self.current = None
+        r['echo'] = b''.join(got)
+        if failed and not r['error']:
+            r['error'] = 'sending: %s' % failed[0]
+        return r
 
 
 def telnet_session(band, form, want, log):
@@ -182,6 +230,7 @@ class Control:
     def __init__(self, a, server, machine, log):
         self.a, self.server, self.machine, self.log = a, server, machine, log
         self.sess = None
+        self.sessions = []      # every echo session, for the wall bound
 
     def open(self):
         sock, _ = self.server.connect_listener(self.machine.alive, lc.now() + 120)
@@ -242,15 +291,29 @@ def _catch(f, *args):
 def part_echo(band, control, opts, log):
     rng = random.Random(2)
     figures = []
+    ended = []
     for size in opts.echo_sizes:
         t0 = time.monotonic()
         for k in range(opts.echo_times):
             data = rng.randbytes(size)
-            echo = band.echo(data)
+            r = band.echo_session(data)
+            r['k'] = k + 1
+            control.sessions.append(r)
+            echo = r['echo']
+            if r['error']:
+                # Ended early: with the wall bound on, the endings clause
+                # judges it after the part (wall_judge); else it fails here.
+                if not opts.wall_base or echo != data[:len(echo)]:
+                    raise PartFailed('%d bytes, time %d: %s%s' % (
+                        size, k + 1, r['error'], '' if echo == data[:len(echo)] else
+                        '; what was echoed differs from what was sent'))
+                ended.append('%d B #%d' % (size, k + 1))
+                continue
             if hashlib.sha256(echo).digest() != hashlib.sha256(data).digest():
                 raise PartFailed('%d bytes, time %d: the echo\'s %d bytes differ by sha256' % (size, k + 1, len(echo)))
         figures.append('%d B x%d in %.1f s' % (size, opts.echo_times, time.monotonic() - t0))
-    return 'byte for byte by sha256: ' + ', '.join(figures)
+    return 'byte for byte by sha256: ' + ', '.join(figures) + (
+        '; ended early, exact so far, for the wall line to judge: %s' % ', '.join(ended) if ended else '')
 
 
 def part_churn(band, control, opts, log):
@@ -408,10 +471,352 @@ def part_totals(band, control, opts, log):
         c1 - c0, corrupted, t1 - t0, injected))
 
 
+# --------------------------------------------------------------------------
+# T4's wall bound and M-loss (section 9, "How the wall-clocked lanes are
+# judged"; section 15, M-loss; amendment 4), from the fault relay's trace
+# (its --trace): every frame at its arrival, "in" or "LOST", and at its
+# sending, "out", on the host's monotonic clock, which this program's
+# time.monotonic() shares.
+
+RUN_EXCUSED = 4         # a run of this many failed transmissions of one segment, or more, is not counted
+ENDING_WINDOW = 100.0   # the endings clause looks at the relay's record's last 100 s
+WALL_FLOOR = 60.0       # each session's bound is max(M x T0, T0 + 60 s)
+
+
+def read_trace(path, ports, t_lo, t_hi):
+    """{port: [(t, way, status, sport, dport, flags, seq, ack, n)]} of the
+    trace's TCP lines between T_LO and T_HI for the local PORTS (Linux's
+    side of each session; the band's port is the echo service's)."""
+    out = {p: [] for p in ports}
+    if not path or not os.path.exists(path):
+        return out
+    with open(path) as f:
+        for line in f:
+            w = line.split()
+            # TIME WAY STATUS SP>DP FLAGS seq S ack A win W len N
+            if len(w) != 13 or '>' not in w[3]:
+                continue
+            t = float(w[0])
+            if t < t_lo or t > t_hi:
+                continue
+            sp, dp = (int(x) for x in w[3].split('>'))
+            port = dp if w[1] == 'from_band' else sp
+            if port not in out:
+                continue
+            out[port].append((t, w[1], w[2], sp, dp, w[4], int(w[6]), int(w[8]), int(w[12])))
+    return out
+
+
+def unwrap(base, x):
+    d = (x - base) & 0xFFFFFFFF
+    return d - (1 << 32) if d >= 1 << 31 else d
+
+
+class Way:
+    """One direction of one session in the trace: its transmissions and the
+    other side's ACKs of them.  A segment is followed by the sequence number
+    it starts at: its transmissions are every one holding that number, so
+    that a resend of other bounds counts.  A transmission failed when the
+    relay lost it, or when it arrived and an ACK covering it was lost by the
+    relay, with none delivered before the next transmission (section 9, T4:
+    "losses, by the fault relay, of one segment's transmissions or of the
+    acknowledgments that would have covered them").  One that arrived and
+    drew no ACK, as a segment beyond a hole that the band drops, is no
+    relay's loss."""
+
+    def __init__(self, events, way, end):
+        import bisect
+        self.bisect = bisect
+        self.way, self.end = way, end
+        other = 'from_band' if way == 'to_band' else 'to_band'
+        mine = [e for e in events if e[1] == way and e[2] in ('in', 'LOST')]
+        syn = next((e for e in mine if 'S' in e[5]), None)
+        first = next((e for e in events if e[1] == way), None)
+        self.base = (syn or first)[6] if (syn or first) else 0
+        self.tx = []            # (t, start, end, lost), in time order
+        for e in mine:
+            n = e[8] + ('S' in e[5]) + ('F' in e[5])
+            if n <= 0 or 'R' in e[5]:
+                continue
+            start = unwrap(self.base, e[6])
+            self.tx.append((e[0], start, start + n, e[2] == 'LOST'))
+        # the other side's ACKs of this way: delivered, a running maximum;
+        # and those the relay lost
+        self.ack_t, self.ack_max, self.lost_acks = [], [], []
+        best = None
+        for e in events:
+            if e[1] == other and 'A' in e[5]:
+                a = unwrap(self.base, e[7])
+                if e[2] == 'out':
+                    best = a if best is None or a > best else best
+                    self.ack_t.append(e[0])
+                    self.ack_max.append(best)
+                elif e[2] == 'LOST':
+                    self.lost_acks.append((e[0], a))
+
+    def acked_by(self, t):
+        """The furthest ACK of this way delivered by time T, or None."""
+        i = self.bisect.bisect_right(self.ack_t, t)
+        return self.ack_max[i - 1] if i else None
+
+    def acked_at(self, s, t):
+        """The first time after T an ACK past S was delivered, or None."""
+        i = max(self.bisect.bisect_right(self.ack_t, t), self.bisect.bisect_right(self.ack_max, s))
+        return self.ack_t[i] if i < len(self.ack_t) else None
+
+    def holding(self, s):
+        """The transmissions holding sequence number S, in time order."""
+        return [x for x in self.tx if x[1] <= s < x[2]]
+
+    def failed(self, s, row, i):
+        t, _, _, lost = row[i]
+        if lost:
+            return True
+        nxt = row[i + 1][0] if i + 1 < len(row) else self.end
+        a = self.acked_by(nxt)
+        if a is not None and a > s:
+            return False
+        return any(t < ta <= nxt and aa > s for ta, aa in self.lost_acks)
+
+    def excused(self):
+        """The intervals not counted: from the first failed transmission of
+        a run of RUN_EXCUSED or more of one segment to its next transmission,
+        or to its acknowledgment if that came first, when an earlier
+        transmission had reached the receiver (the session's end if
+        neither)."""
+        out = []
+        for s in sorted({x[1] for x in self.tx}):
+            row = self.holding(s)
+            f = [self.failed(s, row, i) for i in range(len(row))]
+            i = 0
+            while i < len(row):
+                if not f[i]:
+                    i += 1
+                    continue
+                j = i
+                while j < len(row) and f[j]:
+                    j += 1
+                if j - i >= RUN_EXCUSED:
+                    ends = [row[j][0]] if j < len(row) else [self.end]
+                    acked = self.acked_at(s, row[j - 1][0])
+                    if acked is not None:
+                        ends.append(acked)
+                    out.append((row[i][0], min(ends), s, j - i))
+                i = j
+        return out
+
+    def ending_explained(self):
+        """The endings clause: in the record's last ENDING_WINDOW seconds,
+        every transmission of the oldest unacknowledged segment failed, and
+        there was one.  Returns a description, or None."""
+        a = self.acked_by(self.end)
+        open_ = sorted(x[1] for x in self.tx if a is None or x[2] > a)
+        if not open_:
+            return None
+        oldest = max(open_[0], a) if a is not None else open_[0]
+        row = self.holding(oldest)
+        f = [(row[i][0], self.failed(oldest, row, i)) for i in range(len(row))]
+        f = [(t, x) for t, x in f if t >= self.end - ENDING_WINDOW]
+        if f and all(x for _, x in f):
+            return '%s: its oldest unacknowledged segment, +%d, sent %d times in the last %d s, each lost or ' \
+                   'its ACK lost' % (self.way.replace('_', ' '), oldest, len(f), ENDING_WINDOW)
+        return None
+
+
+def merge(intervals, lo, hi):
+    """The length of the union of INTERVALS clipped to [LO, HI]."""
+    xs = sorted((max(a, lo), min(b, hi)) for a, b in intervals if min(b, hi) > max(a, lo))
+    total, cur = 0.0, None
+    for a, b in xs:
+        if cur is None or a > cur[1]:
+            if cur:
+                total += cur[1] - cur[0]
+            cur = [a, b]
+        else:
+            cur[1] = max(cur[1], b)
+    if cur:
+        total += cur[1] - cur[0]
+    return total
+
+
+def fault_loss(faults):
+    """The --loss percentage in the relay's fault flags, or 0."""
+    w = (faults or '').split()
+    return float(w[w.index('--loss') + 1]) if '--loss' in w and w.index('--loss') + 1 < len(w) else 0.0
+
+
+def wall_m(opts):
+    """M of the bound: M at 20% loss and above, else 10 (section 9, T4)."""
+    return opts.wall_m_high if fault_loss(opts.faults) >= 20 else opts.wall_m
+
+
+def judge_session(r, events, opts, base):
+    """One session against the bound: (verdict, line)."""
+    t0 = base[str(r['size'])]
+    m = wall_m(opts)
+    bound = max(m * t0, t0 + WALL_FLOOR)
+    end = r['t1']
+    ways = [Way(events, w, end) for w in ('to_band', 'from_band')]
+    runs = [x for w in ways for x in w.excused()]
+    took = end - r['t0']
+    counted = took - merge([(a, b) for a, b, _, _ in runs], r['t0'], end)
+    what = '%d B #%d port %s: %.1f s, %.1f s counted (%d runs of %d+ excused), bound %.1f s' % (
+        r['size'], r.get('k', 0), r['port'], took, counted, len(runs), RUN_EXCUSED, bound)
+    if r['error']:
+        # The endings clause, at 20% loss only: the band's R2 or Linux's
+        # abort, explained by the relay's record.
+        why = None
+        if fault_loss(opts.faults) >= 20 and not r['timed_out']:
+            # the band's R2 or Linux's abort ends a session with an error on
+            # its socket; the transfer timeout is this program's, never one
+            why = next((x for x in (w.ending_explained() for w in ways) if x), None)
+        if why:
+            return 'PASS', what + '; ended (%s), explained: %s' % (r['error'], why)
+        return 'FAIL', what + '; ended (%s), not explained by the relay\'s record' % r['error']
+    if counted > bound:
+        return 'FAIL', what + ': over the bound'
+    return 'PASS', what
+
+
+def wall_judge(control, opts):
+    """Every recorded session against max(M x T0, T0 + 60 s) (section 9, T4;
+    amendment 4)."""
+    base = json.load(open(opts.wall_base))
+    rs = control.sessions
+    if not rs:
+        raise PartFailed('no session to judge')
+    trace = read_trace(opts.trace, [r['port'] for r in rs if r['port']],
+                       min(r['t0'] for r in rs) - 1, max(r['t1'] for r in rs) + 1)
+    lines, bad = [], []
+    for r in rs:
+        ev = [e for e in trace.get(r['port'], []) if r['t0'] - 1 <= e[0] <= r['t1'] + 1]
+        v, line = judge_session(r, ev, opts, base)
+        # the session's start and end on the monotonic clock, so that it can
+        # be judged again from the trace
+        lines.append('%s %s [%.6f %.6f]' % (v, line, r['t0'], r['t1']))
+        if v != 'PASS':
+            bad.append(line)
+    if opts.wall_log:
+        with open(opts.wall_log, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+    m = wall_m(opts)
+    worst = max(rs, key=lambda r: (r['t1'] - r['t0']) / base[str(r['size'])])
+    summary = '%d sessions, M = %g; slowest %d B #%d at %.1f x T0' % (
+        len(rs), m, worst['size'], worst.get('k', 0), (worst['t1'] - worst['t0']) / base[str(worst['size'])])
+    if bad:
+        raise PartFailed('%s; %d over: %s' % (summary, len(bad), '; '.join(bad[:3])))
+    return summary
+
+
+def write_wall_base(control, path):
+    """T0 of each size: the median of this run's sessions, which must have
+    had no faults and no failure (section 9, T4)."""
+    by = {}
+    for r in control.sessions:
+        if r['error']:
+            raise PartFailed('a session failed: no base written')
+        by.setdefault(str(r['size']), []).append(r['t1'] - r['t0'])
+    out = {k: sorted(v)[len(v) // 2] if len(v) % 2 else sum(sorted(v)[len(v) // 2 - 1:len(v) // 2 + 1]) / 2
+           for k, v in by.items()}
+    with open(path, 'w') as f:
+        json.dump(out, f, indent=1, sort_keys=True)
+    return 'T0 by size: ' + ', '.join('%s B %.3f s' % (k, v) for k, v in sorted(out.items(), key=lambda x: int(x[0])))
+
+
+SS_FIELDS = ('rto', 'backoff', 'bytes_acked', 'mss', 'cwnd', 'rtt', 'bytes_retrans', 'lost')
+
+
+def ss_sample(band, port):
+    """Linux's state of the session from local PORT, from ss -tnio, as a dict."""
+    try:
+        out = subprocess.run(['ss', '-tnio', 'dst', band.address], capture_output=True, text=True,
+                             timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = out.splitlines()
+    for i, line in enumerate(lines):
+        w = line.split()
+        if len(w) >= 4 and w[3].endswith(':%d' % port) and i + 1 < len(lines):
+            d = {'line': lines[i + 1].strip()}
+            for item in lines[i + 1].split():
+                if ':' in item:
+                    k, v = item.split(':', 1)
+                    if k in SS_FIELDS:
+                        d[k] = v
+            return d
+    return None
+
+
+def part_mloss(band, control, opts, log):
+    """M-loss (section 15, amendment 4): one echo of --mloss-size with
+    Linux's state read by ss -tnio every 2 s.  It passes when the echo ends
+    as T4 allows (byte-exact, or by the endings clause), and at every sample
+    whose bytes_acked rose by at least one MSS since the one before, Linux's
+    backoff is 3 or less."""
+    rng = random.Random(7)
+    data = rng.randbytes(opts.mloss_size)
+    samples, stop = [], threading.Event()
+
+    def sampler():
+        while not stop.wait(2.0):
+            r = band.current
+            if r and r.get('port'):
+                d = ss_sample(band, r['port'])
+                if d is not None:
+                    d['t'] = time.monotonic()
+                    samples.append(d)
+    th = threading.Thread(target=sampler, daemon=True)
+    band.current = None
+    th.start()
+    try:
+        r = band.echo_session(data)
+    finally:
+        stop.set()
+        th.join(10)
+    r['k'] = 1
+    control.sessions.append(r)
+    if opts.ss_log:
+        with open(opts.ss_log, 'w') as f:
+            for d in samples:
+                f.write('%.6f %s\n' % (d['t'], d['line']))
+    took = r['t1'] - r['t0']
+    base = json.load(open(opts.wall_base)) if opts.wall_base else {}
+    t0 = base.get(str(opts.mloss_size))
+    backoff_max, at_progress, last_acked, bad = 0, 0, None, []
+    for d in samples:
+        b = int(d.get('backoff', 0))
+        acked = int(d.get('bytes_acked', 0))
+        mss = int(d.get('mss', 1448))
+        backoff_max = max(backoff_max, b)
+        if last_acked is not None and acked - last_acked >= mss:
+            at_progress = max(at_progress, b)
+            if b > 3:
+                bad.append('backoff %d at +%.0f s after %d bytes acked' % (b, d['t'] - r['t0'], acked - last_acked))
+        last_acked = acked
+    figures = '%.1f s%s; Linux\'s backoff at most %d, %d at a sample after progress; %d samples' % (
+        took, ' = %.2f x T0 (%.3f s)' % (took / t0, t0) if t0 else '', backoff_max, at_progress, len(samples))
+    ending = 'byte-exact'
+    if r['error'] or r['echo'] != data:
+        if r['error'] and not r['timed_out'] and r['echo'] == data[:len(r['echo'])] and \
+                fault_loss(opts.faults) >= 20:
+            trace = read_trace(opts.trace, [r['port']], r['t0'] - 1, r['t1'] + 1)
+            ways = [Way(trace[r['port']], w, r['t1']) for w in ('to_band', 'from_band')]
+            why = next((x for x in (w.ending_explained() for w in ways) if x), None)
+            if not why:
+                raise PartFailed('%s; ended (%s), not explained by the relay\'s record' % (figures, r['error']))
+            ending = 'ended (%s), explained: %s' % (r['error'], why)
+        else:
+            raise PartFailed('%s; the echo: %s' % (figures, r['error'] or 'differs from what was sent'))
+    if bad:
+        raise PartFailed('%s; %s; %d samples after progress with backoff over 3: %s' % (
+            figures, ending, len(bad), '; '.join(bad[:4])))
+    return '%s; %s' % (figures, ending)
+
+
 # The parts run by default are T2's; stall is M-tap's, and table and totals
 # T4's, each run when named.
 PARTS = {'telnet': part_telnet, 'echo': part_echo, 'churn': part_churn, 'limit': part_limit,
-         'stall': part_stall, 'table': part_table, 'totals': part_totals}
+         'stall': part_stall, 'table': part_table, 'totals': part_totals, 'mloss': part_mloss}
 T2_PARTS = ('telnet', 'echo', 'churn', 'limit')
 
 
@@ -430,11 +835,28 @@ def main():
     p.add_argument('--transfer-timeout', type=float, default=900)
     p.add_argument('--faults', default=None,
                    help="T4: the fault relay's fault flags, as one string (LISPM_CHECK_RELAY_FLAGS)")
+    p.add_argument('--trace', default=None,
+                   help="the fault relay's trace of every frame (its --trace), for the wall bound and M-loss")
+    p.add_argument('--wall-base', default=None,
+                   help="T4's wall bound, on: a JSON file of T0, each size's median session time with no "
+                        "faults (--wall-base-out of such a run); every echo session is then judged against "
+                        "max(M x T0, T0 + 60 s), its runs of 4 or more failed transmissions not counted")
+    p.add_argument('--wall-m', type=float, default=10, help="M below 20%% loss [default: 10]")
+    # M at 20% loss: M-loss's worst seed took 6.9 x T0 (both ways, seed 2),
+    # and T4's 20% rows at most 6.8 x counted (8.1 x in all); about twice it
+    p.add_argument('--wall-m-high', type=float, default=14, help="M at 20%% loss [default: 14]")
+    p.add_argument('--wall-base-out', default=None,
+                   help="write each size's median session time here, as T0 for --wall-base")
+    p.add_argument('--wall-log', default=None, help="each session's figures against the bound")
+    p.add_argument('--mloss-size', type=int, default=1048576, help="M-loss's echo [default: 1 MiB]")
+    p.add_argument('--ss-log', default=None, help="M-loss's ss -tnio samples")
     opts = p.parse_args(argv)
-    if opts.faults is not None:
+    if opts.faults is not None or opts.trace:
         # armed once the control session has read the band's totals, so
         # that the setup, the resume and the snapshot run without faults
-        os.environ['LISPM_CHECK_RELAY_FLAGS'] = opts.faults + ' --arm-on-signal'
+        os.environ['LISPM_CHECK_RELAY_FLAGS'] = ' '.join(
+            ([opts.faults, '--arm-on-signal'] if opts.faults is not None else []) +
+            (['--trace', os.path.abspath(opts.trace)] if opts.trace else []))
 
     def on_signal(sig, frame):
         raise SystemExit(128 + sig)
@@ -499,6 +921,18 @@ def main():
                             pass
                 results.append(verdict)
                 print('%-6s %-5s %s (%.1f s)' % (name, verdict, why, time.monotonic() - t0), flush=True)
+            # T4's wall bound, on every echo session the parts made, and
+            # T0's base from a run with no faults.
+            for name, on, f in (('wall', opts.wall_base and 'echo' in parts, lambda: wall_judge(control, opts)),
+                                ('base', opts.wall_base_out, lambda: write_wall_base(control, opts.wall_base_out))):
+                if not on:
+                    continue
+                try:
+                    why, verdict = f(), 'PASS'
+                except (OSError, ValueError, KeyError, PartFailed) as e:
+                    verdict, why = 'FAIL', str(e) or type(e).__name__
+                results.append(verdict)
+                print('%-6s %-5s %s' % (name, verdict, why), flush=True)
             if control.sess is not None:
                 control.close()
             ok_run = True

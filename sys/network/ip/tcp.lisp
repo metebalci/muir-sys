@@ -6,9 +6,10 @@
 ;;; sections 5.5 and 6): passive open only, MSS 1460, an 8,192-byte buffer each
 ;;; way for each connection, in-order delivery only, RFC 6298's retransmission,
 ;;; RFC 5681's congestion control, sender and receiver silly window avoidance,
-;;; a persist timer, TIME-WAIT records apart from the connections, and RFC
-;;; 6528's ISN.  the streams, the servers and the control session's functions
-;;; are in SYS: NETWORK; IP; SERVERS.
+;;; a persist timer, TIME-WAIT records apart from the connections, RFC
+;;; 6528's ISN, and RFC 7323's timestamps for RTT measurement only (no PAWS,
+;;; no window scaling, no SACK).  the streams, the servers and the control
+;;; session's functions are in SYS: NETWORK; IP; SERVERS.
 ;;;
 ;;; everything here runs under the network lock: received segments in the
 ;;; network process's pass, the timers after them, and a server's reads and
@@ -53,6 +54,9 @@
 (defconst %tcp-synack-r2 (* 180. 1000000.) "R2 for a SYN-ACK: 180 s (MUST-23).")
 (defconst %tcp-override (* 200. 1000.) "MUST-38's override timer, 200 ms.")
 (defconst %tcp-first-tx-slots 32 "Segments in flight a connection keeps the first sending of.")
+(defconst %tcp-timestamps-length 12
+  "The bytes the timestamps option takes in a segment, two NOPs and its 10 (RFC 7323 3.2):
+a timestamped connection's effective send MSS is that much less (section 5.5).")
 
 (defconst %tcp-fin #o1)
 (defconst %tcp-syn #o2)
@@ -63,7 +67,7 @@
 
 ;;;; Connections
 
-;; a connection is an array of 54 words, read and set through these substs.
+;; a connection is an array of 56 words, read and set through these substs.
 ;; no defstruct: the cross build cannot give a new structure to the compile
 ;; for the target without changing the builder's world (sys/cold/cross.lisp,
 ;; cross-declare-definitions), and a subst it gives.
@@ -124,10 +128,15 @@
 (defsubst tcb-application-closed (c) (aref c 51))		;the application's own close has been made
 (defsubst tcb-stream (c) (aref c 52))
 (defsubst tcb-server-process (c) (aref c 53))
+;; RFC 7323's timestamps, when the peer's SYN offered them (section 5.5): TS.Recent,
+;; the TSval to echo, or NIL on a connection without timestamps (Snd.TS.OK off);
+;; and Last.ACK.sent, the ACK field of the last segment sent (RFC 7323 4.3).
+(defsubst tcb-ts-recent (c) (aref c 54))
+(defsubst tcb-last-ack-sent (c) (aref c 55))
 
-(defconst %tcb-words 54)
+(defconst %tcb-words 56)
 
-(defun make-tcb-internal (&key remote rport lport (state :syn-received) irs iss rcv-nxt snd-una snd-nxt max-sent mss peer-window max-window cwnd ssthresh)
+(defun make-tcb-internal (&key remote rport lport (state :syn-received) irs iss rcv-nxt snd-una snd-nxt max-sent mss peer-window max-window cwnd ssthresh ts-recent)
   "A connection, its other words at their initial values."
   (let ((c (make-array %tcb-words)))
     (setf (aref c 0) remote)
@@ -184,6 +193,8 @@
     (setf (aref c 51) nil)
     (setf (aref c 52) nil)
     (setf (aref c 53) nil)
+    (setf (aref c 54) ts-recent)
+    (setf (aref c 55) rcv-nxt)
     c))
 
 (defvar tcp-connections nil "Every connection from SYN-RECEIVED to LAST-ACK.")
@@ -206,6 +217,9 @@ ESTABLISHED FUNCTION runs on it in a process of its own (SYS: NETWORK; IP; SERVE
 (defvar tcp-tw-snd-nxt (make-array %tcp-time-wait-records))
 (defvar tcp-tw-end (make-array %tcp-time-wait-records))
 (defvar tcp-tw-started (make-array %tcp-time-wait-records) "For the oldest's early end.")
+(defvar tcp-tw-ts-recent (make-array %tcp-time-wait-records)
+  "TS.Recent of a timestamped connection's record, else NIL: the record's answers carry
+the timestamps option too (RFC 7323 3.2).")
 
 ;; the test hooks of the control session (section 9, T1, the way in)
 (defvar *isn-of-next-connection* nil
@@ -217,7 +231,9 @@ as its R2 (MUST-21's keyword, :R2), and it is then NIL (a test hook; section 9, 
 
 (defvar tcp-segments-received 0)
 (defvar tcp-segments-sent 0)
-(defvar tcp-segments-dropped 0 "Segments dropped for an illegal option length or a bad offset.")
+(defvar tcp-segments-dropped 0
+  "Segments dropped for an illegal option length or a bad offset, or for a missing
+timestamps option on a timestamped connection.")
 (defvar tcp-refused-silently 0 "SYNs refused silently: MUST-63's sources, a full backlog.")
 
 (defun tcp-find (remote rport lport)
@@ -237,14 +253,34 @@ ERROR, or with EOF if it is NIL."
 (defvar tcp-isn-key 0 "The ISN's key, drawn at the network's start from the RTC and the clock.")
 (defvar tcp-clock-high 0 "Wraps of the network clock's 31 bits, for the ISN's 32-bit clock.")
 (defvar tcp-clock-last 0)
+(defvar tcp-ts-clock 0
+  "The millisecond clock of RFC 7323's TSval, 32 bits as a sequence number is held: the
+network clock's microseconds, its wraps counted as for the ISN, over 1,000 (section 5.5).")
+(defvar tcp-ts-clock-us 0 "The microseconds, 0 to 999, the millisecond clock has not yet counted.")
 
 (defun tcp-clock-track ()
-  "Count the network clock's wraps: called in every pass and at every ISN, and the
-timers wake the process at least every 15 minutes."
+  "Count the network clock's wraps, and move the millisecond clock on by the time since
+the last call: called in every pass, at every ISN and at every TSval, and the timers wake
+the process at least every 15 minutes, well within one wrap."
   (let ((now (network-now)))
     (when (< now tcp-clock-last) (incf tcp-clock-high))
+    ;; the microseconds since the last call, modulo 2^31, counted into the
+    ;; millisecond clock exactly, its remainder kept: so TSval is the 34-bit
+    ;; microsecond count over 1,000, modulo 2^32, consing nothing.
+    (multiple-value-bind (ms us)
+	(floor (logand (- now tcp-clock-last) #o17777777777) 1000.)
+      (setq us (+ us tcp-ts-clock-us))
+      (when (>= us 1000.)
+	(setq us (- us 1000.) ms (1+ ms)))
+      (setq tcp-ts-clock-us us
+	    tcp-ts-clock (seq+ tcp-ts-clock ms)))
     (setq tcp-clock-last now)
     now))
+
+(defun tcp-ts-now ()
+  "TSval: the millisecond clock now (RFC 7323 3.2 and 5.4: a tick of 1 ms)."
+  (tcp-clock-track)
+  tcp-ts-clock)
 
 (defsubst shl32 (x k)
   "X shifted left K bits, modulo 2^32, as a fixnum."
@@ -280,12 +316,14 @@ hook's ISN, once."
 ;;;; Sending segments
 
 (defun tcp-raw-send (remote sport dport seq ack flags window &optional (data-from nil)
-		     (data-offset 0) (data-length 0) (mss-option nil))
+		     (data-offset 0) (data-length 0) (mss-option nil) (ts-val nil) (ts-ecr nil))
   "Send one TCP segment.  Its data, DATA-LENGTH bytes, come from connection
-DATA-FROM's send buffer, DATA-OFFSET bytes past SND.UNA's first byte.  The checksum
-is the device's."
+DATA-FROM's send buffer, DATA-OFFSET bytes past SND.UNA's first byte.  With TS-VAL
+the segment carries the timestamps option, TSval TS-VAL and TSecr TS-ECR, after two
+NOPs (RFC 7323 3.2, as Linux lays it out).  The checksum is the device's."
   (multiple-value-bind (slot b o) (ipv4-datagram-slot)
-    (let ((header (if mss-option 24 20)))
+    (let ((header (+ 20 (if mss-option 4 0) (if ts-val %tcp-timestamps-length 0)))
+	  (i (+ o 20)))
       (put-16 b o sport)
       (put-16 b (+ o 2) dport)
       (put-32 b (+ o 4) seq)
@@ -295,9 +333,17 @@ is the device's."
       (put-16 b (+ o 16) 0)
       (put-16 b (+ o 18) 0)
       (when mss-option
-	(put-8 b (+ o 20) 2)
-	(put-8 b (+ o 21) 4)
-	(put-16 b (+ o 22) mss-option))
+	(put-8 b i 2)
+	(put-8 b (+ i 1) 4)
+	(put-16 b (+ i 2) mss-option)
+	(setq i (+ i 4)))
+      (when ts-val
+	(put-8 b i 1)
+	(put-8 b (+ i 1) 1)
+	(put-8 b (+ i 2) 8)
+	(put-8 b (+ i 3) 10.)
+	(put-32 b (+ i 4) ts-val)
+	(put-32 b (+ i 8) ts-ecr))
       (when (plusp data-length)
 	;; the send buffer is a ring: the data may wrap at its end.
 	(let* ((buffer (tcb-send-buffer data-from))
@@ -323,12 +369,18 @@ avoidance, MUST-39; section 5.5)."
       (if (minusp w) 0 (min w %tcp-buffer)))))
 
 (defun tcp-send (c flags seq &optional (data-offset 0) (data-length 0))
-  "A segment of connection C, acknowledging RCV.NXT."
+  "A segment of connection C, acknowledging RCV.NXT.  On a timestamped connection every
+segment, a resent one and an RST too, carries TSval, the millisecond clock now, and
+TSecr, TS.Recent (RFC 7323 3.2 and 4.3 (3)); its ACK field is Last.ACK.sent after."
   (setf (tcb-ack-pending c) nil)
-  (tcp-raw-send (tcb-remote c) (tcb-lport c) (tcb-rport c) seq (tcb-rcv-nxt c)
-		flags (if (zerop (logand flags %tcp-syn)) (tcp-window c) %tcp-buffer)
-		c data-offset data-length
-		(and (not (zerop (logand flags %tcp-syn))) %tcp-mss)))
+  (unless (zerop (logand flags %tcp-ack))
+    (setf (tcb-last-ack-sent c) (tcb-rcv-nxt c)))
+  (let ((ts (tcb-ts-recent c)))
+    (tcp-raw-send (tcb-remote c) (tcb-lport c) (tcb-rport c) seq (tcb-rcv-nxt c)
+		  flags (if (zerop (logand flags %tcp-syn)) (tcp-window c) %tcp-buffer)
+		  c data-offset data-length
+		  (and (not (zerop (logand flags %tcp-syn))) %tcp-mss)
+		  (and ts (tcp-ts-now)) ts)))
 
 (defun tcp-send-ack (c)
   (tcp-send c %tcp-ack (tcb-snd-nxt c)))
@@ -519,21 +571,33 @@ peer's window is open; an ACK that leaves the data held does not restart it."
       (let ((a (%logldb #o3010 source)))
 	(or (>= a 224) (= a 127)))))
 
-(defun tcp-option-mss (b p header)
-  "The MSS option of the segment at P, or NIL; :ILLEGAL for an illegal option length
-\(MUST-7).  Options are parsed anywhere, unaligned, and unknown ones skipped."
-  (do ((i (+ p 20)) (end (+ p header)) (mss nil))
-      ((>= i end) mss)
+(defun tcp-options (b p header)
+  "The options of the segment at P, two values: its MSS, or NIL, or :ILLEGAL for an
+illegal option length (MUST-7); and the TSval of its timestamps option (RFC 7323 3.2),
+or NIL.  Options are parsed anywhere, unaligned, and unknown ones skipped, a timestamps
+option of a length other than 10 among them.  TSecr is not read: the band takes no RTT
+sample from it, and builds no PAWS (section 5.5)."
+  (do ((i (+ p 20)) (end (+ p header)) (mss nil) (tsval nil))
+      ((>= i end) (values mss tsval))
     (let ((kind (get-8 b i)))
-      (cond ((= kind 0) (return mss))
+      (cond ((= kind 0) (return (values mss tsval)))
 	    ((= kind 1) (incf i))
 	    ((or (>= (1+ i) end)
 		 (< (get-8 b (1+ i)) 2)
 		 (> (+ i (get-8 b (1+ i))) end))
-	     (return :illegal))
+	     (return (values :illegal nil)))
 	    (t (when (and (= kind 2) (= (get-8 b (1+ i)) 4))
 		 (setq mss (get-16 b (+ i 2))))
+	       (when (and (= kind 8) (= (get-8 b (1+ i)) 10.))
+		 (setq tsval (get-32 b (+ i 2))))
 	       (incf i (get-8 b (1+ i))))))))
+
+(defun tcp-ts-recent-update (c seq tsval)
+  "RFC 7323 4.3 (2): TSVAL becomes TS.Recent when it is not older and the segment starts
+at or before Last.ACK.sent.  So a segment beyond a hole is not echoed, the one that fills
+it is, and of a batch acknowledged by one ACK the earliest segment's is."
+  (when (and (seq<= (tcb-ts-recent c) tsval) (seq<= seq (tcb-last-ack-sent c)))
+    (setf (tcb-ts-recent c) tsval)))
 
 (defun tcp-in-window-p (c seq)
   "SEQ in the receive window; at a zero window only RCV.NXT."
@@ -573,25 +637,26 @@ accepts: <SEQ=SEG.ACK><CTL=RST> if it carries ACK, else
 	 (flags (logand offset-flags #o77))
 	 (window (get-16 b (+ p 14)))
 	 (urgent (get-16 b (+ p 18)))
-	 (mss nil))
+	 (mss nil)
+	 (tsval nil))
     (when (or (< header 20) (> header length))
       (incf tcp-segments-dropped)
       (return-from tcp-receive nil))
-    (setq mss (tcp-option-mss b p header))
+    (multiple-value-setq (mss tsval) (tcp-options b p header))
     (when (eq mss :illegal)
       ;; an illegal option length drops the segment: nothing in it is used.
       (incf tcp-segments-dropped)
       (return-from tcp-receive nil))
     (let ((data (+ p header))
 	  (n (- length header)))
-      (when (tcp-time-wait-segment source sport dport seq flags n)
+      (when (tcp-time-wait-segment source sport dport seq flags n tsval)
 	(return-from tcp-receive nil))
       (let ((c (tcp-find source sport dport)))
 	(if c
-	    (tcp-receive-on c b seq ack flags window urgent data n)
-	  (tcp-receive-closed b source sport dport seq ack flags window mss n))))))
+	    (tcp-receive-on c b seq ack flags window urgent data n tsval)
+	  (tcp-receive-closed b source sport dport seq ack flags window mss n tsval))))))
 
-(defun tcp-receive-closed (b source sport dport seq ack flags window mss n)
+(defun tcp-receive-closed (b source sport dport seq ack flags window mss n tsval)
   (ignore b)
   (cond ((not (zerop (logand flags %tcp-rst))) nil)
 	((and (not (zerop (logand flags %tcp-syn))) (zerop (logand flags %tcp-ack))
@@ -607,20 +672,33 @@ accepts: <SEQ=SEG.ACK><CTL=RST> if it carries ACK, else
 	       ((>= (length tcp-connections) %tcp-connections)
 		(tcp-refuse source sport dport seq ack flags n))
 	       (t
+		;; a SYN with the timestamps option makes a timestamped connection,
+		;; TS.Recent its TSval (RFC 7323 3.2, appendix D), whose segments
+		;; each give up 12 bytes to the option; one without makes a connection
+		;; without timestamps, as before (section 5.5).
 		(let ((iss (tcp-isn source sport dport))
-		      (send-mss (min (or mss %tcp-default-mss) %tcp-mss)))
+		      (send-mss (- (min (or mss %tcp-default-mss) %tcp-mss)
+				   (if tsval %tcp-timestamps-length 0))))
 		  (let ((c (make-tcb-internal
 			     :remote source :rport sport :lport dport
 			     :irs seq :iss iss :rcv-nxt (seq+ seq 1)
 			     :snd-una iss :snd-nxt (seq+ iss 1) :max-sent (seq+ iss 1)
 			     :mss send-mss :peer-window window :max-window window
-			     :cwnd (* 3 send-mss) :ssthresh 65535.)))
+			     :cwnd (* 3 send-mss) :ssthresh 65535. :ts-recent tsval)))
 		    (push c tcp-connections)
 		    (tcp-send-synack c))))))
 	(t (tcp-refuse source sport dport seq ack flags n))))
 
-(defun tcp-receive-on (c b seq ack flags window urgent data n)
+(defun tcp-receive-on (c b seq ack flags window urgent data n tsval)
   (block nil
+    (when (and (tcb-ts-recent c) (zerop (logand flags %tcp-rst)))
+      (cond ((null tsval)
+	     ;; RFC 7323 3.2: on a timestamped connection a segment other than an
+	     ;; RST without the option is dropped silently, and the connection is
+	     ;; never aborted for it.
+	     (incf tcp-segments-dropped)
+	     (return nil))
+	    (t (tcp-ts-recent-update c seq tsval))))
     (when (not (zerop (logand flags %tcp-rst)))
       ;; an RST in the window is taken: in SYN-RECEIVED back to LISTEN, else the
       ;; connection is aborted and its stream signals it (MUST-11, -12).
@@ -755,6 +833,7 @@ when all 64 are taken."
 	  (aref tcp-tw-lport slot) (tcb-lport c)
 	  (aref tcp-tw-rcv-nxt slot) (tcb-rcv-nxt c)
 	  (aref tcp-tw-snd-nxt slot) (tcb-snd-nxt c)
+	  (aref tcp-tw-ts-recent slot) (tcb-ts-recent c)
 	  (aref tcp-tw-started slot) now)
     (tcp-time-wait-arm slot)))
 
@@ -762,24 +841,40 @@ when all 64 are taken."
   (setf (aref tcp-tw-end slot) (network-time-plus (network-now) %tcp-time-wait))
   (network-note-timer (aref tcp-tw-end slot)))
 
-(defun tcp-time-wait-segment (remote rport lport seq flags n)
+(defun tcp-time-wait-segment (remote rport lport seq flags n tsval)
   "A segment to a TIME-WAIT record, answered as RFC 9293 3.10.7.4 has TIME-WAIT
 answer; NIL if there is no record, or if it is a SYN above the final RCV.NXT, which
-ends the record and opens a new connection (MAY-2)."
+ends the record and opens a new connection (MAY-2).  A timestamped connection's record
+answers with the option, and drops a segment without it, as the connection did."
   (let ((slot (dotimes (i %tcp-time-wait-records)
 		(when (and (eql (aref tcp-tw-remote i) remote)
 			   (= (aref tcp-tw-rport i) rport) (= (aref tcp-tw-lport i) lport))
 		  (return i)))))
     (when slot
       (flet ((answer ()
-	       (tcp-raw-send remote lport rport (aref tcp-tw-snd-nxt slot) (aref tcp-tw-rcv-nxt slot)
-			     %tcp-ack %tcp-buffer)))
+	       (let ((ts (aref tcp-tw-ts-recent slot)))
+		 (tcp-raw-send remote lport rport (aref tcp-tw-snd-nxt slot) (aref tcp-tw-rcv-nxt slot)
+			       %tcp-ack %tcp-buffer nil 0 0 nil (and ts (tcp-ts-now)) ts))))
 	(cond ((not (zerop (logand flags %tcp-rst))) t)
 	      ((and (not (zerop (logand flags %tcp-syn))) (zerop (logand flags %tcp-ack)))
+	       ;; a SYN, with the option or without: a new connection may offer
+	       ;; anything.
 	       (cond ((seq< (aref tcp-tw-rcv-nxt slot) seq)
 		      (setf (aref tcp-tw-remote slot) nil)
 		      nil)
 		     (t (answer) t)))		;the challenge ACK; the record stays
+	      ((and (aref tcp-tw-ts-recent slot) (null tsval))
+	       (incf tcp-segments-dropped)	;RFC 7323 3.2: dropped silently
+	       t)
+	      ((progn
+		 ;; RFC 7323 4.3 (2), Last.ACK.sent being the final RCV.NXT, which
+		 ;; every answer of the record acknowledges; then on to the clauses
+		 ;; below.
+		 (when (and tsval (aref tcp-tw-ts-recent slot)
+			    (seq<= (aref tcp-tw-ts-recent slot) tsval)
+			    (seq<= seq (aref tcp-tw-rcv-nxt slot)))
+		   (setf (aref tcp-tw-ts-recent slot) tsval))
+		 nil))
 	      ((not (zerop (logand flags %tcp-fin)))
 	       ;; the peer's FIN again: acknowledged, and TIME-WAIT restarts.
 	       (answer)
@@ -987,6 +1082,9 @@ carrying C's foreign host itself (section 7)."
   (setq tcp-connections nil)
   (dotimes (i %tcp-time-wait-records) (setf (aref tcp-tw-remote i) nil))
   (setq tcp-clock-last (network-now) tcp-clock-high 0)
+  ;; the millisecond clock from the network clock now, as if counted from 0.
+  (multiple-value-bind (ms us) (floor tcp-clock-last 1000.)
+    (setq tcp-ts-clock ms tcp-ts-clock-us us))
   ;; the key from the RTC and the microsecond clock (section 5.5).
   (setq tcp-isn-key (tcp-mix (tcp-mix #x5A17 (ether-register #o103)) (network-now))))
 
