@@ -58,6 +58,7 @@ def machine_command(a, sock, eng):
     cmd = [a.quux, '-c', '/dev/null', '--' + eng, '--no-pace', '--rtc', str(a.rtc),
            '--disk-pack', a.band + ',ro', '--prom', a.prom, '--file-root', a.file_root,
            '--ethernet-socket', sock + ',clocked', '--ethernet-mac', a.band_mac]
+    # with no --microcycle-ns the machine runs at muir's default period
     if a.microcycle_ns:
         cmd += ['--microcycle-ns', a.microcycle_ns]
     if a.ethernet_trace:
@@ -191,7 +192,9 @@ def main():
     ap.add_argument('--prom', help='the PROM .mcr for the band\'s microcode')
     ap.add_argument('--file-root', help='HOST\'s / for the file device')
     ap.add_argument('--rtc', type=int, default=1700000000, help='a fixed RTC, so that two runs agree')
-    ap.add_argument('--microcycle-ns', help='the clock\'s period (muir: 5 to 63.5)')
+    # without it the machine runs at muir's default period (10 ns for
+    # revisions 15 and 16 from muir-sim 74d4ddd; 8.5 ns before)
+    ap.add_argument('--microcycle-ns', help='the clock\'s period (muir: 5 to 63.5); without it, muir\'s default')
     ap.add_argument('--ethernet-trace', action='store_true')
     # quux0's addresses, muir's defaults since amendment 2 (section 3).
     ap.add_argument('--band-mac', default='02:00:00:00:00:01')

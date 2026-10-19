@@ -10,7 +10,7 @@
 #   selftest.cases, broken.lisp (unclosed form)       exit 2, the file's load fails
 #   the same with --compile                           exit 2, qc-file reports it
 #   question.cases (bare questions, an error's)       exit 1, verdicts and texts as
-#                                                     expected-question.txt, in under 20 s
+#                                                     expected-question.txt, in under 40 s
 # (for the two with exit 2, the tool's message must name broken.lisp and the
 # step that failed), and then pass.cases once more with no --file-server,
 # where the default, auto, must choose the mode's server for the mode's band.
@@ -34,7 +34,7 @@
 # a date, but a check on such a band should serve it as it reads.
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
-# The self-test runs on micro only: its question cases are bounded at 20 s of
+# The self-test runs on micro only: its question cases are bounded at 40 s of
 # host time, which revision 15's rtl, the pipeline, overruns (44 s on a loaded
 # host), and the tool it tests is the same on either engine.
 prev=
@@ -108,8 +108,14 @@ for mode in ${LISPM_CHECK_TEST_MODES:-device}; do
     check "$mode broken-compile" 2 "" "lispm-check: $here/broken.lisp: (qc-file " -- "${m[@]}" --compile --files "$here/broken.lisp" "$@" "$here/selftest.cases"
     # the default, --file-server auto, must choose this mode for this band
     # a bare (Y or N) or (Yes or No) fails its case at once, answered No: with
-    # --timeout 30, a run that waited for any question takes 30 s or more
-    within=20 check "$mode question" 1 "$here/expected-question.txt" -- "${m[@]}" --files "$here/selftest.lisp" "$@" --timeout 30 "$here/question.cases"
+    # --timeout 60, a run that waited for any question takes 60 s or more.
+    # the bound was 20 s with --timeout 30: on revision 16, micro, at 20 ns,
+    # over tcp the cases took 19.2-22.3 s (six runs; over chaos 7.5-11.3 s),
+    # so the bound failed a run that asked nothing.  40 s leaves 18 s over the
+    # slowest and 20 s under a single wait for an answer, which --timeout 60 makes
+    # 60 s at least.  before:
+    #within=20 check "$mode question" 1 "$here/expected-question.txt" -- "${m[@]}" --files "$here/selftest.lisp" "$@" --timeout 30 "$here/question.cases"
+    within=40 check "$mode question" 1 "$here/expected-question.txt" -- "${m[@]}" --files "$here/selftest.lisp" "$@" --timeout 60 "$here/question.cases"
     check "$mode auto" 0 "" "lispm-check: files served by $mode: " -- --band "$band" --files "$here/selftest.lisp" "$@" "$here/pass.cases"
 done
 [ "$fails" = 0 ] && echo "self-test passed" || echo "self-test FAILED ($fails)"

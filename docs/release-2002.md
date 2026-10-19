@@ -677,6 +677,13 @@ file carries a comment in that file saying why.
     once rather than in a batch at the clock's next break: M-refill on micro
     at 19 ns, 100 frames a second, the workload 5.93 s against 4.32 s with
     MIT's `SGENT` (2.89 s with no frames).
+    The profile's record of `SGENT1`'s jump on the swapped state moves with
+    the jump, five words on, from `+25` to `+32` (octal;
+    `sys/ucadr/ucadr-profile.text:1761`): at `+25` it fell on a word of
+    another class, so the profile pass's report covered 72,821,976 of the
+    profile's 72,822,600 jump executions and `tools/assembler-check` `rev15`
+    failed. The record says 0, so the pass sets no hint there either way and
+    `ucadr.mcr` is the same.
     The CADR's line has the same code, but its only break is the clock's.
     With the interrupt's break and this, the microcode's `ucadr.mcr` for
     revisions 15 and 16 is

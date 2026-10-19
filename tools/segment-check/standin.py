@@ -4,8 +4,9 @@ clocked Ethernet socket and answers as QUUX's stack should, so that the
 segment scripts can be shown right before the Lisp stack exists.
 
 It connects to the peer's UNIX socket as muir does (QUUX's Ethernet
-contract, section 3), keeps a machine clock on a grid of edges (8.5 ns by
-default, the Kria's), delivers each Ethernet frame at the first edge at or
+contract, section 3), keeps a machine clock on a grid of edges (10 ns by
+default, muir's default period for revisions 15 and 16 since muir-sim 74d4ddd;
+8.5 ns before), delivers each Ethernet frame at the first edge at or
 after its time, sends its own with their times, answers "run until" with
 "reached", and waits.  Behind that is the least of section 5 the scripts of
 slice 0 reach:
@@ -1713,7 +1714,9 @@ def main():
     ap.add_argument('--telnet-port', type=int, default=23)
     ap.add_argument('--echo-port', type=int, default=7)
     ap.add_argument('--boot-ns', type=int, default=50 * MS, help='when the network starts, machine ns')
-    ap.add_argument('--microcycle-ns', type=float, default=8.5)
+    # muir's default period (muir-sim 74d4ddd: 10 ns for revisions 15 and 16;
+    # 8.5 before), so that the stand-in keeps the clock a run without the flag has
+    ap.add_argument('--microcycle-ns', type=float, default=10)
     ap.add_argument('--rtc', type=int, default=1700000000, help='seeds the ISN key, as the RTC does')
     ap.add_argument('--plant', help='a plant or variant, or several comma-separated')
     ap.add_argument('--timing', choices=('exact', 'tick'), default='exact',

@@ -252,8 +252,8 @@ service at EOF.
 
 `standin.py` plays muir's side of the clocked socket and answers as the
 stack should, so that the scripts are shown right before the Lisp exists:
-it connects to the peer's socket, keeps a clock of 8.5 ns edges
-(`--microcycle-ns`), delivers each frame at the first edge at or after its
+it connects to the peer's socket, keeps a clock of 10 ns edges, muir's
+default period (`--microcycle-ns`), delivers each frame at the first edge at or after its
 time, sends its own 30 us after the event plus the device's 20 us (or, with
 `--timing tick`, timers on 1/60 s ticks, their output at the tick, and
 answers to the peer's frames delayed by seeded amounts up to a tick, as the

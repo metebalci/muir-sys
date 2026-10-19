@@ -364,7 +364,7 @@ error message and an unexpected error on purpose, and a case that the tree's
 file with an unclosed form, loaded and compiled (2, with the tool's message
 naming the file and the step that failed), the question cases
 (`question.cases`: status 1, each verdict and its text as
-`expected-question.txt`, the cases' time under 20 s with `--timeout 30`); and then the passing cases once
+`expected-question.txt`, the cases' time under 40 s with `--timeout 60`); and then the passing cases once
 more with no `--file-server`, where `auto` must choose that mode's server for
 that band. `LISPM_CHECK_TEST_MODES` picks the modes, each run with the
 `ubin/` beside its band:

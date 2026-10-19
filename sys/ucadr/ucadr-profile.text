@@ -1757,7 +1757,8 @@ jump SGENT1+1 0 624
 jump SGENT1+4 1 624
 jump SGENT1+6 0 624
 jump SGENT1+16 0 624
-jump SGENT1+25 0 624
+; SGENT1+32: the swapped-state jump, at +25 before SGENT took the deferred flag (5 more words)
+jump SGENT1+32 0 624
 jump SGENT3+1 0 13962
 jump SGENT3+2 0 13962
 jump SGENT3+3 0 13358
