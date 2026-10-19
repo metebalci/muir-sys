@@ -133,8 +133,14 @@ a timestamped connection's effective send MSS is that much less (section 5.5).")
 ;; and Last.ACK.sent, the ACK field of the last segment sent (RFC 7323 4.3).
 (defsubst tcb-ts-recent (c) (aref c 54))
 (defsubst tcb-last-ack-sent (c) (aref c 55))
+;; T when the SYN-ACK went again for a duplicate SYN in SYN-RECEIVED: no timer ran,
+;; so RETRIES stays 0, but the handshake's ACK may answer either sending, and
+;; Karn's rule (RFC 6298 section 3; QUUX's Ethernet contract, section 5.5,
+;; MUST-18) allows no RTT sample from it.
+(defsubst tcb-synack-resent (c) (aref c 56))
 
-(defconst %tcb-words 56)
+;(defconst %tcb-words 56)	;before the SYN-ACK's resent mark
+(defconst %tcb-words 57)
 
 (defun make-tcb-internal (&key remote rport lport (state :syn-received) irs iss rcv-nxt snd-una snd-nxt max-sent mss peer-window max-window cwnd ssthresh ts-recent)
   "A connection, its other words at their initial values."
@@ -707,7 +713,15 @@ accepts: <SEQ=SEG.ACK><CTL=RST> if it carries ACK, else
       (return nil))
     (when (not (zerop (logand flags %tcp-syn)))
       (if (and (eq (tcb-state c) :syn-received) (= seq (tcb-irs c)))
-	  (tcp-send-synack c)			;the SYN again
+	  (progn
+	    ;; the SYN again: the SYN-ACK goes again, and its ACK gives no RTT
+	    ;; sample (Karn, RFC 6298 section 3; QUUX's Ethernet contract, section
+	    ;; 5.5).  sampled from the first sending, a duplicate SYN 0.8 s after
+	    ;; it made the first data RTO 2.4 s instead of 1 s; the RTO stays the
+	    ;; first, 1 s, with no RFC 6298 (5.7) and no cut of the initial
+	    ;; window, since no timer ran out.
+	    (setf (tcb-synack-resent c) t)
+	    (tcp-send-synack c))
 	(tcp-send-ack c))			;a challenge ACK (RFC 5961 4)
       (return nil))
     (when (zerop (logand flags %tcp-ack))
@@ -728,7 +742,11 @@ accepts: <SEQ=SEG.ACK><CTL=RST> if it carries ACK, else
 		 (tcb-max-window c) (max (tcb-max-window c) window)
 		 (tcb-rexmt-due c) nil
 		 (tcb-synack-r2-due c) nil)
-	   (cond ((and (tcb-synack-tx c) (zerop (tcb-retries c)))
+	   ;; before the SYN-ACK's resent mark (Karn: no sample from a SYN-ACK sent
+	   ;; again for a duplicate SYN, RFC 6298 section 3; QUUX's Ethernet
+	   ;; contract, section 5.5):
+	   ;(cond ((and (tcb-synack-tx c) (zerop (tcb-retries c)))
+	   (cond ((and (tcb-synack-tx c) (zerop (tcb-retries c)) (not (tcb-synack-resent c)))
 		  (tcp-sample c (network-time-difference (network-now) (tcb-synack-tx c))))
 		 ((and (plusp (tcb-retries c)) (null (tcb-srtt c)))
 		  ;; RFC 6298 (5.7): the SYN-ACK was resent, so data starts at 3 s.

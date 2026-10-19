@@ -2185,6 +2185,17 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   delivery stays; the band takes no RTT sample from TSecr. A connection is
   56 words. `sys/cold/crossdefs.lisp` gains the two substs and the new
   specials.
+- **No RTT sample from a SYN-ACK sent again for a duplicate SYN**
+  (`sys/network/ip/tcp.lisp`, `TCB-SYNACK-RESENT`, `:140`, set at `:723`,
+  read at `:749`; QUUX's Ethernet contract, 5.5; RFC 6298 section 3, Karn;
+  MUST-18). A duplicate SYN in SYN-RECEIVED makes the band send its SYN-ACK
+  again, with no timeout counted, so the handshake's ACK gave an RTT sample
+  timed from the first SYN-ACK: a duplicate SYN 0.8 s after it made the first
+  data RTO 2.4 s instead of 1 s (`karn-dup-syn`, below), and in T4's
+  loss20-both row a 64 KiB echo took 75.7 s. The resend is now marked and the
+  ACK gives no sample; the RTO stays the first, 1 s, with no RFC 6298 (5.7)
+  and no cut of the initial window, since no timer ran out. A connection is 57
+  words. `sys/cold/crossdefs.lisp` gains the subst.
 - **TCP's streams, the servers and the band's own host**
   (`sys/network/ip/servers.lisp`, new; QUUX's Ethernet contract, 5.6 and 7):
   stream flavors composed as Chaos's (`chuse.lisp`), the ASCII-translating one
@@ -2335,6 +2346,21 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   `ts_update`, `:1063`), and `test` checks the option's parsing. No script
   before the group changed its expectations; `handshake`, whose SYN is
   Linux's, now makes a timestamped connection on the band.
+- **`karn-dup-syn`** (`tools/segment-check/scripts.py`, `karn_dup_syn`,
+  `:2655`; its README): after a control connection whose first data RTO is the
+  200 ms floor, a duplicate SYN 0.8 s after the first SYN-ACK, answered
+  before the band's timer, then the handshake's ACK: the first data RTO is
+  1 s within a tick. The stand-in samples only from a SYN-ACK sent once
+  (`tools/segment-check/standin.py:964`), and its plants
+  `karn-synack-resample` and `karn-synack-retry` (`:182`, `:184`) fail the
+  script at 2.4 s and at 3 s.
+- **T4's table part waits for the table to empty** (`tools/tcp-check/run`,
+  `part_table`, `:450`; `TABLE_WAIT`, `:446`): the band's connections are
+  counted once a second until only the control session's is left, for at most
+  120 s, above R2's 100 s, and the line gives the wait and, on a failure, each
+  connection left by remote port and state. One count right after the echo
+  part failed loss20-both on seed 1 on a connection rightly in LAST-ACK,
+  whose last ACK the relay had lost and which the band closed 3.3 s later.
 - **`tools/fault-relay/relay --trace FILE`**: a line for every frame at its
   arrival (`in`, `LOST`) and its sending (`out`), with TCP's ports, flags,
   numbers and length (`Trace`, `:402`).

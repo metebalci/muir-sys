@@ -2649,6 +2649,71 @@ def ts_missing(s):
            'an RST without it taken' % at(again.t - first.t)
 
 
+DUP_SYN_DELAY = 800 * MS
+
+
+def karn_dup_syn(s):
+    """Karn's rule for a SYN-ACK resent for a duplicate SYN (section 5.5;
+    RFC 6298 section 3; MUST-18).  A control first: on connection A the
+    SYN-ACK goes once and is acknowledged at once, an RTT sample, so the
+    first data RTO is the 200 ms floor.  On B the SYN-ACK goes, the peer
+    sends the same SYN again 800 ms later, before the band's 1 s timer, and
+    the band answers it with the SYN-ACK again; the peer then acknowledges.
+    The SYN-ACK went twice, so the ACK gives no sample, no timeout ran (no
+    RFC 6298 (5.7)), and the first data RTO is the first RTO, 1 s.  A band
+    that samples from the first SYN-ACK's sending takes 0.8 s and resends at
+    3 x that, 2.4 s."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    ask(s, c, 'echo-on')
+    data = bytes((i * 29 + 5) & 255 for i in range(2 * 536))
+
+    def first_rto(e, what):
+        start = len(e.received)
+        e.write(data)
+        first = s.wait_for(s.now + p.answer, lambda x: e.ours(x) and x.tcp.data)
+        if first is None:
+            raise Fail('%s: no echo by %s' % (what, at(s.now)))
+        s.wait_for(first.t + 3 * S + 2 * TICK + PASS_LATENCY, lambda x: copies(e, first.tcp.seq, first.t))
+        r = copies(e, first.tcp.seq, first.t)
+        if not r:
+            raise Fail('%s: the first data not resent by %s' % (what, at(s.now)))
+        e.auto_ack = True
+        ack_to(s, e, e.rcv_nxt)
+        quiet_on(s, e, what)
+        if e.received[start:] != data:
+            raise Fail('%s: %d of %d bytes echoed' % (what, len(e.received) - start, len(data)))
+        return r[0].t - first.t
+
+    # A, the control: the SYN-ACK once, acknowledged at once.
+    a = open_connection(s, 40121, p.echo_port, ISN_A, F.opt_mss(536), 'the control connection')
+    a.ack()
+    s.run(s.now + 20 * MS)
+    ra = first_rto(a, 'the control: the first data RTO after a SYN-ACK sent once (the 200 ms floor)')
+    near(ra, 200 * MS, 'the control: the first data RTO after a SYN-ACK sent once (the 200 ms floor)')
+    # B: a duplicate SYN before the band's timer.
+    opts = F.opt_mss(536)
+    b = open_connection(s, 40122, p.echo_port, ISN_B, opts, 'the connection with a duplicate SYN')
+    sa1 = b.synack
+    s.run(sa1.t + DUP_SYN_DELAY)
+    b.segment(F.SYN, options=opts, ack=False, seq=ISN_B)
+    t_dup = s.now
+    sa2 = s.wait_for(s.now + 2 * TICK + PASS_LATENCY + p.answer,
+                     lambda x: b.ours(x) and x.tcp.flags & F.SYN and x.t > t_dup)
+    if sa2 is None:
+        raise Fail('the duplicate SYN in SYN-RECEIVED: no SYN-ACK by %s' % at(s.now))
+    if sa2.t - sa1.t >= 1 * S - TICK:
+        raise Fail('the duplicate SYN answered at %s after the first SYN-ACK, at the band\'s timer, not before it'
+                   % at(sa2.t - sa1.t))
+    b.ack()
+    s.run(s.now + 20 * MS)
+    rb = first_rto(b, 'after a duplicate SYN: the first data RTO')
+    near(rb, 1 * S, 'after a duplicate SYN and a SYN-ACK sent twice: the first data RTO (Karn, no sample)')
+    return 'the control: first data RTO %s; after a duplicate SYN, %s after the first SYN-ACK: %s' % (
+        at(ra), at(t_dup - sa1.t), at(rb))
+
+
 SCRIPTS = {
     'arp': arp,
     'arp-cache': arp_cache,
@@ -2678,6 +2743,7 @@ SCRIPTS = {
     'urgent': urgent,
     'synack-r2': synack_r2,
     'rule-5-7': rule_5_7,
+    'karn-dup-syn': karn_dup_syn,
     'fin-wait-2': fin_wait_2,
     'wrap': wrap,
     'ping': ping,

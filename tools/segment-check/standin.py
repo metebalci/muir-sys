@@ -179,6 +179,10 @@ PLANTS = {
     'rto-floor-1s': ('the RTO floor RFC 6298\'s 1 s, not 200 ms', 'rto', 'the 200 ms floor'),
     'rto-no-double': ('T5: the RTO not doubled', 'rto', 'the RTO doubled'),
     'karn-off': ('T5: Karn\'s rule not applied (a sample from a resent segment)', 'rto', 'Karn: Z resent'),
+    'karn-synack-resample': ('T5: Karn\'s rule not applied to a SYN-ACK resent for a duplicate SYN (a sample from its '
+                             'first sending)', 'karn-dup-syn', 'after a duplicate SYN'),
+    'karn-synack-retry': ('a SYN-ACK resent for a duplicate SYN counted as a timeout (RFC 6298 (5.7)\'s 3 s)',
+                          'karn-dup-syn', 'after a duplicate SYN'),
     'timer-no-restart': ('T5: the retransmit timer not restarted on an ACK', 'rto-restart', 'the timer restarted'),
     'cwnd-not-reset': ('T5: the congestion window not reset on a timeout', 'cwnd-reset', 'after the timeout'),
     'r1-no-arp': ('no negative advice after R1: the ARP entry kept (MUST-20)', 'r2', 'no ARP request'),
@@ -408,6 +412,7 @@ class Conn:
         self.timed = None       # (end, sent): the one segment being timed
         self.first_tx = []      # [(end, time first sent)], for Karn and R2
         self.synack_tx = None
+        self.synack_sends = 0   # the SYN-ACK's sendings, for Karn (a resend for a duplicate SYN too)
         self.rbuf = b''         # received, not yet read by the server
         self.adv_edge = None    # the right edge last advertised
         self.persist = None     # the persist timer's generation, when running
@@ -923,6 +928,8 @@ class Band:
             return
         if flags & SYN:
             if c.state == 'SYN-RECEIVED' and seq == c.irs:
+                if self.plant == 'karn-synack-retry':
+                    c.retries += 1
                 self.send_synack(t, c)
             elif self.plant == 'syn-estab-reset':
                 self.send_tcp(t, c, RST | ACK, b'', c.snd_nxt)
@@ -948,7 +955,13 @@ class Band:
             c.peer_window = win
             c.max_wnd = max(c.max_wnd, win)
             c.timer = None
-            if c.synack_tx is not None and c.retries == 0:
+            # Karn (MUST-18): a sample only from a SYN-ACK sent once.  A resend
+            # for a duplicate SYN leaves no timeout counted, but the ACK is as
+            # ambiguous; the karn-synack-resample plant samples from the first
+            # sending even then, and karn-synack-retry counts the resend as a
+            # timeout, so RFC 6298 (5.7)'s 3 s follows.
+            if c.synack_tx is not None and c.retries == 0 and (
+                    c.synack_sends == 1 or self.plant == 'karn-synack-resample'):
                 self.sample(c, t - c.synack_tx)
             elif c.retries and c.srtt is None and self.plant != 'no-rule-5-7':
                 # RFC 6298 (5.7): the SYN-ACK was resent and the RTO is
@@ -1642,6 +1655,7 @@ class Band:
         if self.plant == 'synack-wscale':
             opts += bytes([1, 3, 3, 0])
         self.send_tcp(t, c, SYN | ACK, b'', c.iss, opts)
+        c.synack_sends += 1
         if c.synack_tx is None:
             c.synack_tx = t
             # R2 for a SYN-ACK, 180 s from its first transmission: the

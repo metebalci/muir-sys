@@ -34,7 +34,8 @@ it, as Linux's own TCP:
            with RST; after them the band holds none but a new control
            session's
   table    T4, run when named: after the parts before it, no connection
-           but the control session's
+           but the control session's, counted once a second for at most
+           120 s, above R2's 100 s; the wait is reported
   totals   T4, run when named: since the faults started, the band's totals
            of 241 <15:9> and <7:4> risen by exactly the frames the relay
            corrupted and injected
@@ -260,6 +261,17 @@ class Control:
             form = '(length ip::tcp-connections)'
         return int(self.value(form))
 
+    def others_states(self):
+        """The remote port and state of each connection others() counts, for
+        a table part that fails."""
+        mine = ('(unless (= (ip::tcb-rport c) %d) ' % self.port) if self.a.network == 'tcp' else '(progn '
+        form = ('(let ((l nil)) (dolist (c ip::tcp-connections l) %s'
+                '(push (list (ip::tcb-rport c) (ip::tcb-state c)) l))))' % mine)
+        try:
+            return self.value(form)
+        except PartFailed as e:
+            return 'their states not read: %s' % e
+
     def time_wait(self):
         return int(self.value('(let ((n 0)) (dotimes (i 64 n) (when (aref ip::tcp-tw-remote i) (setq n (1+ n)))))'))
 
@@ -424,13 +436,41 @@ def part_stall(band, control, opts, log):
     return 'the session kept through each stall: ' + ', '.join(figures)
 
 
+# The table part counts the band's connections once a second until none is
+# left but the control session's, for at most TABLE_WAIT seconds.  A single
+# count right after the echo part failed T4's loss20-both row on seed 1: the
+# last session's echo had ended at the band's FIN, Linux's ACK of that FIN was
+# lost, and the band, rightly in LAST-ACK, closed 3.3 s later on its FIN's
+# resend.  120 s is above R2's 100 s (section 5.5), so a connection still held
+# then is one the band will not close by itself.
+TABLE_WAIT = 120.0
+TABLE_POLL = 1.0
+
+
 def part_table(band, control, opts, log):
     """T4: the connection table empty after the other parts, but for the
-    control session's."""
-    others, tw = control.others(), control.time_wait()
-    if others != 0:
-        raise PartFailed('%d connections besides the control session' % others)
-    return 'no connection besides the control session; %d TIME-WAIT records' % tw
+    control session's, within TABLE_WAIT seconds of the first count, counted
+    once a second."""
+    # the wait runs from the first count's answer, so that a table empty at
+    # once waits 0 s whatever a count takes on the control session
+    t0 = None
+    counts = 0
+    while True:
+        others = control.others()
+        counts += 1
+        if t0 is None:
+            t0 = time.monotonic()
+        waited = time.monotonic() - t0
+        if others == 0:
+            break
+        if waited >= TABLE_WAIT:
+            raise PartFailed('%d connections besides the control session after %.1f s (%d counts; the wait is '
+                             'at most %d s, above R2\'s 100 s): %s' % (others, waited, counts, TABLE_WAIT,
+                                                                     control.others_states()))
+        time.sleep(max(0.0, t0 + counts * TABLE_POLL - time.monotonic()))
+    tw = control.time_wait()
+    return 'no connection besides the control session after a wait of %.1f s (%d counts); %d TIME-WAIT records' % (
+        waited, counts, tw)
 
 
 def relay_report(control):

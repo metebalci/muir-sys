@@ -99,6 +99,7 @@
   ("SYS: NETWORK; IP; TCP" defsubst "TCB-SERVER-PROCESS" :new)
   ("SYS: NETWORK; IP; TCP" defsubst "TCB-TS-RECENT" :new)
   ("SYS: NETWORK; IP; TCP" defsubst "TCB-LAST-ACK-SENT" :new)
+  ("SYS: NETWORK; IP; TCP" defsubst "TCB-SYNACK-RESENT" :new)
   ("SYS: NETWORK; IP; TCP" defsubst "SHL32" :new)
   ("SYS: NETWORK; IP; TCP" defsubst "SHR32" :new)
   ("SYS: NETWORK; IP; TCP" defsubst "TCP-DUE-P" :new)

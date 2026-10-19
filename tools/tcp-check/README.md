@@ -65,7 +65,7 @@ when named:
 
 | Part | It checks |
 |---|---|
-| `table` | after the parts before it, the band holds no connection but the control session's |
+| `table` | after the parts before it, the band holds no connection but the control session's: counted once a second until none is left, for at most 120 s, above R2's 100 s; its line gives the wait and the counts, and on a failure each connection left, by remote port and state. A single count failed on a connection rightly in LAST-ACK, whose last ACK the relay had lost and which the band closed 3.3 s later |
 | `totals` | since the faults started, the band's total of 241 `<15:9>`, the IPv4 checks, has risen by exactly the frames the relay corrupted toward it, and of `<7:4>`, the type filter, by exactly the frames it injected (a frame still in flight is waited for, up to 5 s) |
 
 T4's matrix is `--parts echo,table,totals --faults '--inject 100 --seed 1
