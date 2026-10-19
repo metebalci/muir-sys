@@ -51,12 +51,14 @@ import frames as F                  # noqa: E402
 import scripts as SC                # noqa: E402
 from session import Fail, Params, Session, MS, S, at   # noqa: E402
 
-# Each board's revision 15 fit (muir-fpga docs/fits.md, 15 Oct): its period,
-# its cache (words) and muir's memory timing preset for it.
+# Each board's period for revision 16, its cache (words) and muir's memory
+# timing preset for it.  The periods are QUUX's revision 16 board periods, 20,
+# 25 and 55 ns; the revision 15 fits of 15 Oct (muir-fpga docs/fits.md) closed
+# at 19, 22.5 and 48 ns, which the measurements used before.
 BOARDS = {
-    'kria': {'ns': '19', 'cache': 65536, 'timing': 'kria'},
-    'de25': {'ns': '22.5', 'cache': 16384, 'timing': 'de25'},
-    'arty': {'ns': '48', 'cache': 4096, 'timing': 'arty'},
+    'kria': {'ns': '20', 'cache': 65536, 'timing': 'kria'},
+    'de25': {'ns': '25', 'cache': 16384, 'timing': 'de25'},
+    'arty': {'ns': '55', 'cache': 4096, 'timing': 'arty'},
 }
 
 # The workload's forms, typed on the control session.  Lisp in lower case,

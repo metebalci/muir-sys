@@ -17,7 +17,9 @@
 ; awaiting return (QMDDR0): the caller, entered from inside its callee's section
 (sgd-return) => (T RETURNED)
 ; resumable (R-BIT): a preempted process resumed by the scheduler, after the
-; listener deferred a break and waited inside its section: two passes before
-; the process's first form, one with MIT's SGENT
-(sgd-resume) => (T 2)
+; listener deferred a break and waited inside its section: two passes or more
+; before the process's first form (a pass for the network's own frames adds
+; one over TCP), one with MIT's SGENT; the count, for the record
+(subseq (sgd-resume) 0 2) => (T T)
+(sgd-resume)
 (sgd-stop) => T

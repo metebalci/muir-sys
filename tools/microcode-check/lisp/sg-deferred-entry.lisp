@@ -77,29 +77,47 @@
 ;; inhibited there), and on into the compute process it resumes, which breaks
 ;; at once: a second pass before the compute process's first form.  the
 ;; compute process records the pass count when it first runs after the wait;
-;; with mit's sgent it is one pass after the wait's, with the flag carried two.
+;; with mit's sgent it is one pass after the wait's, with the flag carried two
+;; or more: a pass the network process takes first, for the session's own
+;; frames over tcp, adds one (3, and 5 through the fault relay, on rtl).
 (defvar sgd-seen 0)
 (defvar sgd-stop-compute nil)
 
 (defun sgd-resume ()
-  "(RESUMABLE PASSES): T if the compute process's stack group was resumable at the wait,
-and the passes from the wait to its first form."
+  "(RESUMABLE BROKE PASSES): T if the compute process's stack group was resumable at the
+wait, T if two passes or more came from the wait to its first form, and how many."
   (setq sgd-stop-compute nil sgd-seen 0)
   (let ((x (process-run-function "sgd compute"
 				 #'(lambda () (do () (sgd-stop-compute)
 						(when (minusp sgd-seen) (setq sgd-seen sgd-passes)))))))
-    (unwind-protect
-	(let (before state)
-	  ;; x runs, and is preempted by a break when the listener wakes
-	  (process-sleep 10.)
-	  (without-interrupts
-	    (setq state (si:sg-current-state (process-stack-group x)))
-	    (sgd-defer)
-	    (setq sgd-seen -1 before sgd-passes)
-	    (process-wait "sgd" #'(lambda () (not (minusp sgd-seen)))))
-	  (list (= state si:sg-state-resumable) (- sgd-seen before)))
-      (setq sgd-stop-compute t)
-      (send x :kill))))
+    ;; the count is exact only if nothing else brings a pass between the wait
+    ;; and the compute process's first form: a clock break there (every 6
+    ;; ticks with the collector on) gave 3 now and then on rtl.  so for the
+    ;; case the clock runs at its default rate, 60 ticks, and the ethernet
+    ;; device's interrupt, on a band with the network, is disarmed (240 <8>
+    ;; clear, <0> kept; the network process arms it again before its next
+    ;; wait), so that until the next pass only the carried break can bring one.
+    (let ((rate (si:read-meter 'si:%tv-clock-rate))
+	  (ip (find-package "INTERNET")))
+      (unwind-protect
+	  (let (before state)
+	    (si:write-meter 'si:%tv-clock-rate 60.)
+	    ;; x runs, and is preempted by a break when the listener wakes
+	    (process-sleep 10.)
+	    (without-interrupts
+	      (setq state (si:sg-current-state (process-stack-group x)))
+	      (when (and ip (boundp (intern "ETHER-ENABLED" ip)) (symbol-value (intern "ETHER-ENABLED" ip)))
+		(funcall (intern "ETHER-SET-REGISTER" ip) (symbol-value (intern "%ETHER-CONTROL" ip)) 1))
+	      (sgd-defer)
+	      (setq sgd-seen -1 before sgd-passes)
+	      (process-wait "sgd" #'(lambda () (not (minusp sgd-seen)))))
+	    (list (= state si:sg-state-resumable) (>= (- sgd-seen before) 2) (- sgd-seen before)))
+	(setq sgd-stop-compute t)
+	(send x :kill)
+	;; gone before the next case: a killed process still in the scheduler's
+	;; list ran first in the next trial's pass and added one (2 with mit's sgent)
+	(process-wait-with-timeout "sgd kill" 60. #'(lambda () (not (assq x si:active-processes))))
+	(si:write-meter 'si:%tv-clock-rate rate)))))
 
 (defun sgd-stop ()
   (when sgd-counter (send sgd-counter :kill) (setq sgd-counter nil))
