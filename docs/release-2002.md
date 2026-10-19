@@ -2363,3 +2363,33 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   gated; a case failing in every run is said (`report`, `:220`). `--compare`
   lists the cases two soak runs differ on (`compare`, `:255`).
   `tools/gtcp/test` (new) checks it on stand-in suites.
+- **TCP is the default network on revision 16** (QUUX's Ethernet contract,
+  section 8 R2, the switch; `docs/lispm-check.md`, "The network"). A
+  `tools/lispm-check` run that names no network, by `--network` or
+  `LISPM_CHECK_NETWORK`, goes over TCP on revision 16 and over Chaos on
+  revisions 13-15 and the CADR (`default_network`, `resolve_network`,
+  `tools/lispm-check:593`, `:598`; the flag's default, `:1587`; `prepare`,
+  `:1646`), so a check on revision 16 starts no ozd; before, every run's
+  default was Chaos. A band without the network on revision 16 wants
+  `--network chaos`, as microcode-check's `ethernet-stray` now names it
+  (`tools/microcode-check/README.md`). The tools that build their own
+  sessions take the network and the tap through the new helper
+  `harness_network` (`tools/lispm-check:608`): `tools/system-check/warm-boot`
+  (`:70`; over TCP the session before the warm boot closes cleanly, `:189`)
+  and `tools/cross-build/run`'s sessions (`Run.session`, `:264`), and with
+  them `tools/microcode-check/generational-save`. A save gives no answer
+  over either network, and a refused one neither (the save is judged by its
+  partition); over TCP the band's network stops as the save begins, so the
+  silence is waited for 120 s rather than 600 (`:304`). The route itself
+  runs at revision 14 and stays on Chaos. The self-tests: `tools/lispm-check-test/network.sh` gains
+  the default's cases (`default`, `variable`, `rev15-default`,
+  `cadr-default`), and `tools/lispm-check-test/harnesses.sh` (new) checks
+  the two harnesses on revisions 16 and 15.
+- **lispm-check asks the machine's revision with no engine named**
+  (`machine_revision`, `tools/lispm-check:543`). It was asked with `--micro`,
+  which quux refuses for rtl's own flags (`--memory-timing`, `--cache`), so
+  a run through a wrapper that gives them, as the soak's rtl lanes do,
+  failed before it began, and on revision 16 could not take TCP, the
+  default. quux's own engine is rtl, and only rtl has flags of its own; the
+  asking takes about 4 ms. `tools/lispm-check-test/network.sh`'s new case
+  `rtl-flags` fails without the change.

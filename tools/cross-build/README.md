@@ -40,6 +40,22 @@ tools/cross-build/run --list
 Every option can also come from the environment as `CROSS_BUILD_` and the
 option's name (`CROSS_BUILD_BUILDER`). No path is written in the tool.
 
+The network follows the revision each run's machine runs (QUUX's Ethernet
+contract, section 8 R2): the route's runs are at revision 14, and the
+builder's at `--builder-revision`, so they go over Chaos through ozd, as
+before. A session or lispm-check run on revision 16, as when `--quux` is a
+wrapper that sets `MUIR_QUUX_REVISION=16` (the soak's harnesses and
+`tools/microcode-check/generational-save` take this tool's sessions so),
+takes a tap of `LISPM_CHECK_TAPS` and goes over TCP, with no ozd, unless
+`LISPM_CHECK_NETWORK` says `chaos`: lispm-check's default, and for the
+sessions its helper `harness_network` (`docs/lispm-check.md`, "The
+network"). A save gives no answer over either network, a refused one
+neither: over Chaos the connection closes, and over TCP the band's network
+stops as the save begins, so the connection goes silent. The save is judged
+by its partition alone, and a refused one fails as "no band saved", after
+30 minutes; over TCP the silence is waited for 120 s before the partition is
+watched, rather than 600.
+
 | Option | What it is |
 |---|---|
 | `--out` | a git-ignored directory: `record.txt`, each step's logs and results, `bands/` |
@@ -55,7 +71,7 @@ option's name (`CROSS_BUILD_BUILDER`). No path is written in the tool.
 | `--previous-band`, `--previous-ubin` | revision 13's disk and `sys/ubin/` (System 2001's), for A14.13's guards when the builder is itself revision 14 |
 | `--ubin-ref` | a `sys/ubin/` the assembled `.mcr`, `.tbl` and `.locs` must equal |
 | `--quux` | muir-sim's `quux` with the new revision (14) and the file device |
-| `--ozd` | ozd, the TELNET gateway of every lispm-check run |
+| `--ozd` | ozd, the TELNET gateway of the runs over Chaos |
 | `--ports` | at least 64 ports: lispm-check takes four a run from the range, the QLD and guard runs one each from its top 16 |
 
 ## The steps

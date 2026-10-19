@@ -40,6 +40,17 @@ the holders' marks and the lists stay.  The incremental compare makes RQBs in a
 fresh DISK-BUFFER-AREA region, so this mode needs the Lisp side's MAKE-DISK-RQB,
 which pads past the region's first-object table (clarification 11).
 
+The machine runs at revision 14 unless QUUX, a wrapper, sets another
+(MUIR_QUUX_REVISION, as the soak's lane wrappers do), and the network follows
+the revision it runs (QUUX's Ethernet contract, section 8 R2).  On revision
+16 the session and the boot each take a tap of LISPM_CHECK_TAPS and go over
+TCP unless LISPM_CHECK_NETWORK says chaos, with no ozd started
+(cross-build's Run.session, through lispm-check's harness_network, and
+lispm-check's own default); on revisions 13-15 over Chaos through ozd, as
+before.  Over TCP the save's connection goes silent rather than closing,
+since the band's network stops as the save begins; the save is judged by its
+partition alone, watched after 120 s.
+
 DIR gets record.txt, ending RESULT PASS or RESULT FAIL, the session's logs and
 the boot's.  Exit status 0 on PASS.
 """

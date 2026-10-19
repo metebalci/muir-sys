@@ -84,8 +84,18 @@ faults in the gate, each failing it: flaky cases gated, missing cases taken
 as passes, verdict kinds compared, the TCP run ignored, a check's own flags
 dropped.
 
-**What the gate does not reach yet.** Tools that build their own sessions
-from lispm-check's classes (cross-build's steps, `system-check/warm-boot`,
-`microcode-check/generational-save`, `run/rebuild/machine.py`) take no tap
-and stay on Chaos until E6 switches them; they join the gate then. The full
-G-TCP and the two soaks run once amendment 4's changes to the stack land.
+**What the gate does not reach.** The tools that build their own sessions
+from lispm-check's classes (cross-build's sessions, `system-check/warm-boot`,
+`microcode-check/generational-save`) are not units of the gate. Since R2's
+switch (QUUX's Ethernet contract, section 8 R2) they take their network and
+tap through lispm-check's `harness_network`, over TCP by default on
+revision 16, and `tools/lispm-check-test/harnesses.sh` checks them on
+revisions 16 and 15.
+
+**What it found.** On the stack with amendment 4's changes, G-TCP's 1,445
+cases on micro were all equal between the networks. On rtl, 1,444 were
+equal; the one difference, microcode-check's `sg-deferred-entry`, came from
+the check's exact count of the network process's passes, and with the
+check corrected it was equal over Chaos and TCP on both engines. The soak's
+`micro-kria-32mw` lane, run both ways (section 9, T6, which one lane
+satisfies), agreed case for case under `--compare`.

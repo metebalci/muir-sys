@@ -16,6 +16,15 @@ as lispm-check's.  Exit status 0 when every check passes; the last line is
 RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's and
 ozd's, and the screen at the warm boot and at a failure.
 
+The network is lispm-check's (QUUX's Ethernet contract, sections 3 and 8
+R2), through its helper, harness_network: on revision 16 the run takes a tap
+of LISPM_CHECK_TAPS through the fault relay, and the sessions go over TCP
+unless LISPM_CHECK_NETWORK says chaos, with no ozd started; on revisions
+13-15 they go over Chaos through ozd, as before.  Over TCP the session
+before the warm boot is closed cleanly (to the band's EOF), and the band's
+network starts again at the warm boot; DIR also keeps the fault relay's
+report and log.
+
 A warm boot that lands while a process other than the scheduler runs asks
 "Reset it?" on the console before the TELNET server is back, and shows no
 banner.  Before the warm boot the session is closed and the TELNET server
@@ -53,8 +62,25 @@ out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 log = open(os.path.join(out, 'telnet.log'), 'w', buffering=1)
 T = 3600 if a.engine == 'rtl' else 1200
-lock, pts = lc.take_ports()
-server = lc.DeviceFileServer(ozd, out, pts, log)
+# The network (QUUX's Ethernet contract, section 8 R2): over TCP on a tap on
+# revision 16 unless LISPM_CHECK_NETWORK says chaos, over Chaos below; before
+# the switch the server was given no network, so every run went over Chaos
+# through ozd:
+#   server = lc.DeviceFileServer(ozd, out, pts, log)
+try:
+    network, link = lc.harness_network(quux)
+except lc.RunFailed as e:
+    print('FAILED: %s' % e, flush=True)
+    print('RESULT FAIL', flush=True)
+    sys.exit(1)
+try:
+    lock, pts = lc.take_ports()
+except BaseException:
+    # the tap is held by its relay until stopped
+    if link:
+        link.stop()
+    raise
+server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
 machine = lc.Machine(quux, os.path.abspath(a.band), out, pts[3], server, a.engine)
 ok = True
 
@@ -159,7 +185,9 @@ try:
     check(s, '(c15-off)', 'T')
     check(s, '(c15-b-setup)', '(NIL T)')
     check(s, '(si:feature-page-field #o221 #o0001)', '1')
-    s.s.close()
+    # over TCP a clean close, to the band's EOF, so that its TELNET server
+    # ends as over Chaos; over Chaos the socket to ozd is closed, as before
+    server.close_session(s.s, False)
     # the TELNET server's process ends before the warm boot, or the band asks
     # whether to reset it
     time.sleep(0 if a.no_wait else 60 if a.engine == 'rtl' else 5)
@@ -193,5 +221,8 @@ finally:
     machine.stop(wait=30)
     server.stop()
     lock.release()
+    # the relay after the machine; its report and log join DIR
+    if link:
+        link.stop(out)
 say('RESULT %s' % ('PASS' if ok else 'FAIL'))
 sys.exit(0 if ok else 1)

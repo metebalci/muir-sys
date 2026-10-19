@@ -34,6 +34,30 @@
 #   no-tap       LISPM_CHECK_TAPS naming no tap of the pool: exit 2
 #   rev15-tcp    --network tcp on revision 15: exit 2, no Ethernet device
 #   rev15-chaos  revision 15 over Chaos: no tap, and the key without one
+#
+# The default, since R2's switch (section 8 R2): what a run gets when
+# neither --network nor LISPM_CHECK_NETWORK names a network.  ozd is given
+# as a stand-in that notes each start and exits, so that any start of ozd
+# fails the run and is seen; where ozd must start, the real one is given.
+#   default        revision 16: over tcp, on a tap, no Chaos cable, the
+#                  stand-in ozd never started
+#   variable       LISPM_CHECK_NETWORK=chaos on revision 16: over chaos, as
+#                  --network chaos, ozd started
+#   rev15-default  revision 15: no tap, the Chaos cable, ozd started
+#   cadr-default   the CADR, when LISPM_CHECK_TEST_CADR names muir-sim's cadr
+#                  and LISPM_CHECK_TEST_CADR_BAND a CADR band (its ubin/ beside
+#                  it; LISPM_CHECK_TEST_CADR_TREE its tree, by default this
+#                  one): a copy of the tool whose MACHINE line says cadr, as
+#                  the cadr line's copy differs, runs with no tap, the files
+#                  and the session by ozd, over Chaos
+#   rtl-flags      revision 16 on rtl through a wrapper that adds the rtl-only
+#                  flags of the soak's rtl lanes (--memory-timing kria --cache
+#                  65536) to --quux's machine: the revision is still asked and
+#                  is 16, so the run goes over tcp, the stand-in ozd never
+#                  started.  The asking once forced --micro, which quux refuses
+#                  with those flags, and every such run failed (exit 2, "did
+#                  not say which revision it runs").  Its setup is on rtl:
+#                  about 5 minutes more
 here=$(cd "$(dirname "$0")" && pwd)
 tool=${LISPM_CHECK_TEST_TOOL:-$here/../lispm-check}
 relay=$here/../fault-relay/relay
@@ -153,6 +177,83 @@ if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
         || fail "no revision 15 checkpoint keyed as before: $(key)"; } && ok
 else
     echo "skip rev15-tcp, rev15-chaos: no LISPM_CHECK_TEST_QUUX15"
+fi
+
+# The default (section 8 R2).  The stand-in ozd notes its arguments and
+# exits 1; given after the caller's arguments, it is the one the tool runs.
+trip=$work/ozd-stand-in trips=$work/ozd-stand-in.log
+printf '#!/bin/sh\necho "$*" >> %s\nexit 1\n' "$trips" > "$trip"
+chmod +x "$trip"
+chaos_cable() {  # the kept run's machine had its Chaos cable and ozd ran
+    local d; d=$(kept)
+    if ! head -1 "$d/${1:-quux}.log" | grep -qF -- '--chaos-udp'; then fail "the machine has no Chaos cable"
+    elif [ ! -e "$d/ozd.log" ]; then fail "ozd was not started"
+    else return 0; fi
+    return 1
+}
+
+# default: revision 16, neither the flag nor the variable: tcp, and no ozd
+rm -f "$trips"
+if LISPM_CHECK_NETWORK= run default 0 -- --keep "$@" --ozd "$trip" "$cases/tcp.cases" \
+   && has "TELNET over tcp"; then
+    d=$(kept)
+    if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
+    elif head -1 "$d/quux.log" | grep -qF -- '--chaos-udp'; then fail "the machine was given --chaos-udp"
+    elif ! head -1 "$d/quux.log" | grep -qF -- '--ethernet-socket'; then fail "the machine was given no --ethernet-socket"
+    else ok; fi
+elif [ -e "$trips" ]; then
+    echo "    ozd was started: $(cat "$trips")"
+fi
+
+# variable: LISPM_CHECK_NETWORK still names the network, as --network does
+LISPM_CHECK_NETWORK=chaos run variable 0 -- --keep "$@" "$cases/chaos.cases" \
+    && has "TELNET over chaos" && chaos_cable && ok
+
+if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
+    LISPM_CHECK_NETWORK= run rev15-default 0 -- --keep "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
+        && hasnt "lispm-check: tap " && chaos_cable && ok
+else
+    echo "skip rev15-default: no LISPM_CHECK_TEST_QUUX15"
+fi
+
+if [ -n "${LISPM_CHECK_TEST_CADR:-}" ] && [ -n "${LISPM_CHECK_TEST_CADR_BAND:-}" ]; then
+    # the cadr line's copy of the tool differs in its MACHINE line alone
+    mkdir -p "$work/cadr-tool"
+    sed "s/^MACHINE = 'quux'\$/MACHINE = 'cadr'/" "$tool" > "$work/cadr-tool/lispm-check"
+    chmod +x "$work/cadr-tool/lispm-check"
+    cb=$LISPM_CHECK_TEST_CADR_BAND
+    if ! grep -q "^MACHINE = 'cadr'\$" "$work/cadr-tool/lispm-check"; then
+        name=cadr-default; fail "no MACHINE line to change in $tool"
+    else
+        tool_was=$tool tool=$work/cadr-tool/lispm-check
+        LISPM_CHECK_NETWORK= run cadr-default 0 -- --keep "$@" --cadr "$LISPM_CHECK_TEST_CADR" --band "$cb" \
+            --ubin "$(dirname "$cb")/ubin" --tree "${LISPM_CHECK_TEST_CADR_TREE:-$(dirname "$(dirname "$here")")}" \
+            --file-server auto "$cases/plain.cases" \
+            && hasnt "lispm-check: tap " && has "files served by ozd: cadr has no file device" && chaos_cable cadr && ok
+        tool=$tool_was
+    fi
+else
+    echo "skip cadr-default: no LISPM_CHECK_TEST_CADR and LISPM_CHECK_TEST_CADR_BAND"
+fi
+
+# rtl-flags: the caller's --quux, the last one given, wrapped with the soak's
+# rtl-only flags (on a resume too, as the lane wrappers give them)
+q16=
+prev=
+for x in "$@"; do [ "$prev" = --quux ] && q16=$x; case $x in --quux=*) q16=${x#--quux=} ;; esac; prev=$x; done
+if [ -n "$q16" ]; then
+    printf '#!/bin/sh\nexec %s "$@" --memory-timing kria --cache 65536\n' "$q16" > "$work/q16-rtl-flags"
+    chmod +x "$work/q16-rtl-flags"
+    rm -f "$trips"
+    if LISPM_CHECK_NETWORK= run rtl-flags 0 -- --keep "$@" --quux "$work/q16-rtl-flags" --engine rtl \
+           --ozd "$trip" "$cases/tcp.cases" && has "TELNET over tcp (the default on revision 16)"; then
+        d=$(kept)
+        if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
+        elif ! grep -q '^cache: 65536 words' "$d/quux.log"; then fail "the machine ran without the wrapper's flags (no 'cache: 65536 words' in its log)"
+        else ok; fi
+    fi
+else
+    echo "skip rtl-flags: no --quux given"
 fi
 
 [ "$fails" = 0 ] && echo "network self-test passed" || echo "network self-test FAILED ($fails)"

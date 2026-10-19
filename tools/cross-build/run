@@ -253,9 +253,25 @@ class Run:
         shutil.rmtree(run_dir, ignore_errors=True)
         os.makedirs(run_dir)
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        ports_lock, ports = lc.take_ports()
-        server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log)
         quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'), rw=True)
+        # The network, by lispm-check's helper (QUUX's Ethernet contract,
+        # sections 3 and 8 R2): the machine's own revision decides, as the
+        # wrapper's quux may set another than REVISION.  On revision 16 a tap
+        # and TCP unless LISPM_CHECK_NETWORK says chaos; below, Chaos through
+        # ozd, as every session went before the switch:
+        #   server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log)
+        try:
+            network, link = lc.harness_network(quux)
+        except lc.RunFailed as e:
+            raise Failed('the session\'s network: %s' % e)
+        try:
+            ports_lock, ports = lc.take_ports()
+        except BaseException:
+            # the tap is held by its relay until stopped
+            if link:
+                link.stop()
+            raise
+        server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log, (), network, link)
         machine = lc.Machine(quux, disk, run_dir, ports[3], server, self.a.engine)
         results = []
         try:
@@ -276,13 +292,25 @@ class Run:
                     raise Failed('%s: %s' % (form[:80], r[1][:200]))
             if save_part:
                 form = '(si:disk-save "%s" t%s)' % (save_part, ' t' if incremental else '')
+                # The save gives no answer over either network, nor does a
+                # refused save, whose error is never seen: over Chaos
+                # CHAOS:RESET closes the connection, and over TCP the band's
+                # network stops at the save's :before-cold initialization,
+                # so the connection only goes silent.  The partition below
+                # decides, and a refused save fails there ("no band saved"),
+                # after 30 minutes.  Over TCP the silence is waited for 120 s
+                # rather than 600, since nothing can come.
                 try:
-                    r = sess.run(form, 600)
+                    r = sess.run(form, 120 if network == 'tcp' else 600)
                     why = '%s %s' % (r[0], r[1].strip()[:200])
                 except lc.RunFailed as e:     # the save closes the connection
                     why = str(e)
                 self.record('  session %s: %s -> %s' % (os.path.basename(where), form, why))
-            sock.close()
+                sock.close()
+            else:
+                # over TCP a clean close, to the band's EOF (section 7); over
+                # Chaos the socket is closed, as before
+                server.close_session(sock, False)
             if save_part:
                 p = self.part(disk, save_part)
                 last, t0 = None, time.time()
@@ -305,6 +333,10 @@ class Run:
             machine.stop(wait=30)
             server.stop()
             ports_lock.release()
+            # the relay after the machine; its report and log join the
+            # session's directory
+            if link:
+                link.stop(run_dir)
         return results
 
     def builder_check(self, where, cases, tree, timeout, keep=('home',), prime=True):

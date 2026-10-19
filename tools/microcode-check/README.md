@@ -47,7 +47,11 @@ mark a lost one), the lists young, and their sums right after three young
 collections; its head gives the arguments. With `--incremental` the save is
 incremental (format 2021 over LOD1), and the checks that read the band's region
 tables are left out. With `--engine rtl` each of its session's forms may take
-ten times as long as on micro.
+ten times as long as on micro. Its session and its boot are
+`tools/cross-build/run`'s, so their network follows the machine's revision
+(QUUX's Ethernet contract, section 8 R2): over TCP on a tap on revision 16,
+with no ozd, unless `LISPM_CHECK_NETWORK` says `chaos`, and over Chaos on
+revisions 13-15 (`tools/cross-build/README.md`).
 `generational-mutants` plants a partial fix of each item in a copy of the
 microcode and assembles it, as `rev14-mutants` does (`--list`; `--src` for
 another tree); the machine must then be given a disk with that microcode in
@@ -70,13 +74,15 @@ socket and sends every connection a broadcast ARP request every 20 ms, in
 the plain mode of muir-sim's `--ethernet-socket` (QUUX's Ethernet contract,
 section 3), so run it first and give the machine the socket through the
 `--quux` wrapper, with the revision and the boot PROM (revision 16 has none
-built in, and boots PROM 2002 for revision 15):
+built in, and boots PROM 2002 for revision 15). The band has no network, so
+the session goes over Chaos, `--network chaos`: on revision 16 lispm-check's
+default is TCP (section 8 R2), which such a band never answers:
 
 ```
 tools/microcode-check/ethernet-peer /path/to/peer.sock &
 # the wrapper: MUIR_QUUX_REVISION=16, and --ethernet-socket /path/to/peer.sock
 # on every run; --prom PROM unless it is a --resume
-tools/microcode-check/run ethernet-stray -- --band PACK --ubin UBIN --quux WRAPPER
+tools/microcode-check/run ethernet-stray -- --band PACK --ubin UBIN --quux WRAPPER --network chaos
 ```
 
 | Check | What it checks |
