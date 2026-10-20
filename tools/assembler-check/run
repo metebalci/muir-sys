@@ -191,7 +191,10 @@ UC_FILES = ['UC-PARAMETERS', 'UC-CADR', 'UC-MACROCODE', 'UC-CALL-RETURN',
             'UC-STORAGE-ALLOCATION', 'UC-FCTNS', 'UC-ARRAY', 'UC-LOGICAL', 'UC-ARITH',
             'UC-STRING', 'UC-TRANSPORTER', 'UC-STACK-CLOSURE', 'UC-METER', 'UC-HACKS',
             'UC-TV', 'UC-TRACK-MOUSE', 'UC-PAGE-FAULT', 'UC-DISK', 'UC-INTERRUPT',
-            'UC-CHAOS', 'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+            'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+# UC-CHAOS, the chaosnet's interrupt handler and %CHAOS-WAKEUP, left the list
+# with the NCP (QUUX's Ethernet contract, section 8, step R3), after
+# 'UC-INTERRUPT', as sys/ucadr/ucode.lisp has it.
 
 
 def uc_files():
@@ -203,6 +206,19 @@ def uc_files():
     if names != UC_FILES:
         sys.exit('assembler-check: ucode.lisp lists %s, not UC_FILES' % names)
     return names
+
+
+def ref_uc_files(ucadr_ref):
+    """The files of --ucadr-ref's sys/ucadr/ucode.lisp, in order: rev13 and
+    rev14 assemble the release's microcode from them.  Since step R3 of
+    QUUX's Ethernet contract the tree's list (UC_FILES) lacks UC-CHAOS, which
+    release-2001's has, and that microcode assembled from the tree's list
+    differed from the release."""
+    text = open(os.path.join(ucadr_ref, 'sys', 'ucadr', 'ucode.lisp'), 'rb').read().decode('latin-1')
+    m = re.search(r':MICRO-ASSEMBLE \((.*?)\)\)', text, re.S)
+    if not m:
+        sys.exit('assembler-check: --ucadr-ref %s: its ucode.lisp names no :MICRO-ASSEMBLE files' % ucadr_ref)
+    return re.findall(r'"([^"]+)"', re.sub(r';[^\r\n]*', '', m.group(1)))
 
 
 # ---------------------------------------------------------------- the plants
@@ -285,8 +301,9 @@ def oasel_files():
 
 # ---------------------------------------------------------------- the cases
 
-def assemble_form(version):
-    files = ' '.join('"SYS: UCADR; %s LISP"' % f for f in uc_files())
+def assemble_form(version, names=None):
+    # NAMES: the files to assemble, the tree's (uc_files) unless given
+    files = ' '.join('"SYS: UCADR; %s LISP"' % f for f in (names or uc_files()))
     return ('(let* ((files (mapcar #\'(lambda (name) (send (fs:parse-pathname name) :truename)) '
             "'(%s))) (ua:file-truenames-listified (mapcar #'ua:listify-pathname files)) "
             "(old (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p "
@@ -607,7 +624,9 @@ def dual_cases(rev):
                          "(mapcar #'car (ua:write-i-mem-breaches)) => NIL"] if rev == 14 else [])) + '\n'
 
 
-def cases(check):
+def cases(check, names=None):
+    # NAMES: the microcode's files, the tree's unless given (rev13 and rev14
+    # with --ucadr-ref: the reference's)
     c = CHECKS[check]
     if check == 'oa-select':
         return oa_select_cases()
@@ -639,7 +658,7 @@ def cases(check):
         # the PROM alone
         lines.append(prom_form(version) + ' =>! %s' % c['refused'])
         return '\n'.join(lines) + '\n'
-    lines.append(assemble_form(version) + (' => T' if c['refused'] is None
+    lines.append(assemble_form(version, names) + (' => T' if c['refused'] is None
                                            else ' =>! %s' % c['refused']))
     if check == 'main-loop-return':
         lines += ['%s => %s' % (f, want) for f, want in MLR_CASES]
@@ -1037,8 +1056,17 @@ SELECTS_15 = {'ucadr.mcr': (129, 30), 'promh.mcr': (8, 0)}
 # which the pass leaves alone; and the pass's report: every record found on
 # a word of its class, so all of the profile's executions covered, and 82
 # PDL address fields
-PROFILE_15 = {'ucadr.mcr': (359, 140), 'promh.mcr': (0, 0)}
-PROFILE_REPORT_15 = '(72822600 72822600 32404727 32404727 82)'
+# step R3: of those records 11 said H (10 of uc-chaos's and INTR-TICK+3's), so
+# 348 H remain
+#PROFILE_15 = {'ucadr.mcr': (359, 140), 'promh.mcr': (0, 0)}
+PROFILE_15 = {'ucadr.mcr': (348, 140), 'promh.mcr': (0, 0)}
+# QUUX's Ethernet contract, section 8, step R3: the records of uc-chaos's
+# words and of INTR-TICK+3, which left the microcode with the NCP, are
+# commented out of the profile, and its executions fall from 72,822,600 to
+# 72,777,045, all of them still covered (with the records in, 45,392 of them
+# were on keys no longer found).
+#PROFILE_REPORT_15 = '(72822600 72822600 32404727 32404727 82)'
+PROFILE_REPORT_15 = '(72777045 72777045 32404727 32404727 82)'
 
 
 def ext_env(sym_path, amem):
@@ -1144,6 +1172,51 @@ def extension_census(words, start, env):
     return c
 
 
+# Contract G3 revision 15b, appendix A15b.1: microcode 2002 for revision 15,
+# loaded directly on revision 14, halts below 15 at RESET-MACHINE, as
+# revision 14's does below 14.  muir cannot run that mix (no PROM loads a
+# revision-15 .mcr on revision 14, and quux refuses the file:
+# tools/cross-build/guards.py, "Not checked here"), so the check reads the
+# assembly instead: every jump to MACHINE-NOT-QUUX-14, RESET-DEVICES's and
+# PROM-ENTRY-READ's checks of MACHINE-ID (sys/ucadr/uc-cold-disk.lisp),
+# compares with an A constant, the signature 50525 (0x5155) or the revision,
+# and the revision is the assembly's.  Until the microcode's check followed
+# the assembly target it was 14 at every target.
+REVISION_CHECK_JUMPS = 4
+
+
+def revision_checks(mcr, sym, revision):
+    """(ok, lines): the jumps to MACHINE-NOT-QUUX-14 in the .mcr MCR (SYM its
+    .sym; revision 15's format or MIT's), each with the A constant it compares
+    with: two with the signature 50525 and two with REVISION, and no other."""
+    b = open(mcr, 'rb').read()
+    if b[:4] == struct.pack('<I', FORMAT_WORD):
+        secs = parse_15(b)
+        start, words = secs[1]
+        astart, amem = secs[4]
+    else:
+        # MIT's format, revisions 13 and 14: the I memory and A memory
+        # sections (codes 1 and 5), 48-bit words with the same fields
+        secs = {code: (st, data) for code, st, _, data in mcr_sections(mcr)[0]}
+        start, words = secs[1]
+        astart, amem = secs[5]
+    target = sym_table(sym)['MACHINE-NOT-QUUX-14'][1]
+    found = []
+    for i, x in enumerate(words):
+        # a jump (class 1, IR<44:43>), its address IR<25:12>, its A source IR<41:32>
+        if ir(x, 43, 2) == 1 and ir(x, 12, 14) == target:
+            a = ir(x, 32, 10)
+            found.append((start + i, a, amem[a - astart] & 0xffffffff))
+    values = sorted(v for _, _, v in found)
+    ok = values == sorted([0o50525] * 2 + [revision] * 2) and len(found) == REVISION_CHECK_JUMPS
+    # values in octal, as the microcode writes them, the revision in decimal too
+    lines = ['revision checks: %d jumps to MACHINE-NOT-QUUX-14 (%o), comparing with %s; want'
+             ' 50525 twice and %o (%d.) twice: %s' % (len(found), target,
+                                                     ', '.join('%o (%d.) at %o' % (v, v, pc) for pc, _, v in found),
+                                                     revision, revision, 'ok' if ok else 'WRONG')]
+    return ok, lines
+
+
 def check_rev15(out):
     """The tree's microcode and PROM at revision 15: each .mcr parses, every
     malformed variant of it is refused, the OA select check found no breach
@@ -1209,6 +1282,13 @@ def check_rev15(out):
         same = rules == [0, 0, 0]
         lines.append('  OA select check: breaches by rule %s: %s' % (rules, 'none' if same else 'BREACHES'))
         ok &= same
+    # A15b.1: the microcode's own revision check is revision 15's
+    try:
+        rok, rlines = revision_checks(os.path.join(out, 'ucadr.mcr'), os.path.join(out, 'ucadr.sym'), 15)
+    except (ValueError, KeyError, OSError) as e:
+        rok, rlines = False, ['revision checks: %s' % e]
+    lines += rlines
+    ok &= rok
     return ok, lines
 
 
@@ -1254,15 +1334,52 @@ def dual_images(out14, out15):
     return (i14, d14, a14, sa14), (i15, d15, a15, sa15)
 
 
-def dual_differences(one, other):
+# The two words where the assemblies at 14 and 15 differ by design (contract G3
+# revision 15b, appendix A15b.1; QUUX's Ethernet contract, section 8, step R3):
+# uc-cold-disk.lisp's revision checks compare with (max 14. *hardware-revision*),
+# so they name the A constant 14 at revision 14 and 15 at revision 15.  Each
+# must differ in its A source, IR<41:32>, alone.
+DUAL_REVISION_WORDS = (('RESET-DEVICES', 4), ('PROM-ENTRY-READ', 3))
+A_SOURCE = ((1 << 10) - 1) << 32
+
+
+def dual_revision_words(out, one, other):
+    """(ok, addresses, lines): DUAL_REVISION_WORDS in the assemblies of OUT's
+    rev14/ and rev15/ (their words from ONE and OTHER, dual_images'), each at
+    one address in both, differing in its A source alone, which holds 14 at
+    14 and 15 at 15."""
+    syms = [sym_table(os.path.join(out, d, 'ucadr.sym')) for d in ('rev14', 'rev15')]
+    secs, _ = mcr_sections(os.path.join(out, 'rev14', 'ucadr.mcr'))
+    astart14, amem14 = {code: (start, data) for code, start, count, data in secs}[5]
+    astart15, amem15 = parse_15(open(os.path.join(out, 'rev15', 'ucadr.mcr'), 'rb').read())[4]
+    ok, addrs, lines = True, set(), []
+    for name, off in DUAL_REVISION_WORDS:
+        k14, k15 = syms[0][name][1] + off, syms[1][name][1] + off
+        w14, w15 = one[0][k14], other[0][k15] & ((1 << 48) - 1)
+        x = w14 ^ w15
+        c14 = amem14[ir(w14, 32, 10) - astart14] & 0xffffffff
+        c15 = amem15[ir(w15, 32, 10) - astart15] & 0xffffffff
+        good = k14 == k15 and x != 0 and not x & ~A_SOURCE and (c14, c15) == (14, 15)
+        lines.append('%s+%d (I-MEM %o): %016o and %016o, A constants %d. and %d.: %s'
+                     % (name, off, k15, w14, w15, c14, c15,
+                        'the revision check' if good else 'NOT the revision check alone'))
+        ok &= good
+        addrs.add(k15)
+    return ok, addrs, lines
+
+
+def dual_differences(one, other, skip=()):
     """Where the revision-15 assembly differs from the revision-14 one other
     than in <63:48> (its extension: the selects, and the profile pass's
-    fields, which rev15 holds to their rules)."""
+    fields, which rev15 holds to their rules), the I-MEM addresses SKIP
+    left out."""
     (i14, d14, a14, sa14), (i15, d15, a15, sa15) = one, other
     out = []
     for k in range(max(len(i14), len(i15))):
         w14 = i14[k] if k < len(i14) else 0
         w15 = i15[k] if k < len(i15) else 0
+        if k in skip:
+            continue
         if w15 & ((1 << 48) - 1) != w14:
             out.append('I-MEM %o: %016o and %016o' % (k, w14, w15 & ((1 << 48) - 1)))
     out += ['D-MEM %o' % k for k, (x, y) in enumerate(zip(d14, d15)) if x != y]
@@ -1279,17 +1396,26 @@ def check_dual(out):
     memory, A memory and the symbol area equal, revision 15's extension one
     select or none; and a planted difference in one word's <47:0> caught."""
     one, other = dual_images(os.path.join(out, 'rev14'), os.path.join(out, 'rev15'))
-    diff = dual_differences(one, other)
+    # the revision checks' two words differ by design, in their A source alone
+    rok, raddrs, rlines = dual_revision_words(out, one, other)
+    diff = dual_differences(one, other, raddrs)
     sel = sum(1 for w in other[0] if (w >> 48) & 0o30000 and not (ir(w, 43, 2) == 2 and ir(w, 10, 2) != 2))
     lines = ['revision 14: %d control store words; revision 15: %d, %d of them with a select'
-             % (sum(1 for w in one[0] if w), sum(1 for w in other[0] if w), sel),
-             'differences other than the selects: %d' % len(diff)] + ['  ' + d for d in diff[:20]]
-    # the control: one bit of <47:0> changed in revision 15's image
-    k = max(i for i, w in enumerate(other[0]) if w)
+             % (sum(1 for w in one[0] if w), sum(1 for w in other[0] if w), sel)] + rlines + [
+             'differences other than the selects and the revision checks: %d' % len(diff)] + ['  ' + d for d in diff[:20]]
+    # the control: one bit of <47:0> changed in revision 15's image, in a
+    # word other than the revision checks'
+    k = max(i for i, w in enumerate(other[0]) if w and i not in raddrs)
     planted = list(other[0]); planted[k] ^= 1 << 20
-    caught = dual_differences(one, (planted,) + tuple(other[1:]))
+    caught = dual_differences(one, (planted,) + tuple(other[1:]), raddrs)
     lines.append('a planted change in I-MEM %o\'s <20>: %s' % (k, 'caught' if caught else 'NOT CAUGHT'))
-    return not diff and bool(caught), lines
+    # and one in a revision check's word outside its A source
+    r = min(raddrs)
+    planted = list(other[0]); planted[r] ^= 1 << 20
+    rcaught = not dual_revision_words(out, one, (planted,) + tuple(other[1:]))[0]
+    lines.append('a planted change in the revision check I-MEM %o\'s <20>: %s'
+                 % (r, 'caught' if rcaught else 'NOT CAUGHT'))
+    return rok and not diff and bool(caught) and rcaught, lines
 
 
 def check_oa_select(out):
@@ -1340,7 +1466,12 @@ def check_tree(out, ref):
     if len(sixes) != 1:
         lines.append('%d sections 6' % len(sixes))
         s6 = False
-    return s6, lines
+    # A15b.1: at revision 14 the microcode's own check asks for 14
+    try:
+        rok, rlines = revision_checks(os.path.join(out, 'ucadr.mcr'), os.path.join(out, 'ucadr.sym'), 14)
+    except (ValueError, KeyError, OSError) as e:
+        rok, rlines = False, ['revision checks: %s' % e]
+    return s6 and rok, lines + rlines
 
 
 def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
@@ -1398,7 +1529,8 @@ def run_check(check, outdir, ref, port, extra, results, ucadr_ref=None):
         results[check] = good
         return
     cf = os.path.join(out, 'cases.cases')
-    open(cf, 'w').write(cases(check))
+    names = ref_uc_files(ucadr_ref) if ucadr_ref and check in ('rev13', 'rev14') else None
+    open(cf, 'w').write(cases(check, names))
     cmd = [sys.executable, TOOL, '--tree', copy, '--timeout', '3000', '--keep'] + extra + [cf]
     with open(os.path.join(out, 'lispm-check.out'), 'w') as f:
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode

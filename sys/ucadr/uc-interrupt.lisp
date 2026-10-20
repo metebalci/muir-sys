@@ -80,7 +80,10 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 ;	(jump-if-bit-set (byte-field 1 5) md chaos-intr-quux)	;chaosnet (contract q4)
 	(jump-if-bit-set (byte-field 1 3) md intr-disk)	;block-disk (contract q13)
 	(jump-if-bit-set (byte-field 1 4) md intr-kbd)	;keyboard (contract q3, q13)
-	(jump-if-bit-set (byte-field 1 6) md chaos-intr-quux)	;chaosnet (contract q4, q13)
+	;; quux revision 16 (quux's ethernet contract, section 8, step r3): a stray
+	;; for the network, word 100 <6>, in place of chaos-intr-quux (uc-chaos is gone).
+;	(jump-if-bit-set (byte-field 1 6) md chaos-intr-quux)	;chaosnet (contract q4, q13)
+	(jump-if-bit-set (byte-field 1 6) md intr-network-stray)	;network (section 8 r3)
 	;; quux revision 10 (contract q11): word 100 <1> and <7> are timers 1 and 2,
 	;; which nothing in this system uses; a reset turns them off with their
 	;; interrupt enables.  one turned on with its interrupt enable by mistake
@@ -110,7 +113,9 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 						; PDP11 arbritrating UNIBUS. 
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 15.) MD INTRX0) ;If not Unibus, go check for XBUS
 	((M-B) SELECTIVE-DEPOSIT MD (BYTE-FIELD 8 2) A-ZERO)	;Interrupt vector address
-	(JUMP-EQUAL M-B (A-CONSTANT 270) CHAOS-INTR)	;Chaos net has special handler
+	;; quux revision 16 (quux's ethernet contract, section 8, step r3):
+	;; uc-chaos and its chaos-intr are gone (this code is no longer reached).
+;	(JUMP-EQUAL M-B (A-CONSTANT 270) CHAOS-INTR)	;Chaos net has special handler
 ;	(JUMP-EQUAL M-B (A-CONSTANT 400) ETHER-XMIT-DONE)	;Ether Xmit completed
 ;	(JUMP-EQUAL M-B (A-CONSTANT 404) ETHER-RCV-DONE)	;Ether Receive done
 ;	(JUMP-EQUAL M-B (A-CONSTANT 410) ETHER-COLLISION)	;Collision.
@@ -331,12 +336,15 @@ INTR-INTERVAL-TIMER
 
 ;get here if PDP11 arbitrating UNIBUS.  This means we cannot depend on any UNIBUS
 ;interrupts so we poll all UNIBUS devices every XBUS interrupt.
-INNL0	((VMA-START-READ M-B) A-CHAOS-CSR-ADDRESS)
-	(CHECK-PAGE-READ-NO-INTERRUPT)
-	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-RECEIVE-ENABLE) MD INNL1)
-	(JUMP-IF-BIT-SET (LISP-BYTE %%CHAOS-CSR-RECEIVE-DONE) MD CHAOS-INTR)
-INNL1	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-TRANSMIT-ENABLE) MD INNL2)
-	(JUMP-IF-BIT-SET (LISP-BYTE %%CHAOS-CSR-TRANSMIT-DONE) MD CHAOS-INTR)
+;; quux revision 16 (quux's ethernet contract, section 8, step r3): the pdp11's polling of the
+;; chaosnet csr went with uc-chaos's chaos-intr; innl0 is innl2.
+;INNL0	((VMA-START-READ M-B) A-CHAOS-CSR-ADDRESS)
+;	(CHECK-PAGE-READ-NO-INTERRUPT)
+;	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-RECEIVE-ENABLE) MD INNL1)
+;	(JUMP-IF-BIT-SET (LISP-BYTE %%CHAOS-CSR-RECEIVE-DONE) MD CHAOS-INTR)
+;INNL1	(JUMP-IF-BIT-CLEAR (LISP-BYTE %%CHAOS-CSR-TRANSMIT-ENABLE) MD INNL2)
+;	(JUMP-IF-BIT-SET (LISP-BYTE %%CHAOS-CSR-TRANSMIT-DONE) MD CHAOS-INTR)
+INNL0
 INNL2
   ;Now check all devices in the unibus vector tables.
 ;	((M-A) (A-CONSTANT (EVAL (+ 400 %SYS-COM-UNIBUS-INTERRUPT-LIST
@@ -440,6 +448,21 @@ intr-file-device-stray
 	(check-page-write-no-interrupt)
 	(jump intrx1)
 
+;; quux revision 16 (quux's ethernet contract, section 8, step r3): the
+;; network, word 100 <6>, is the chaosnet interface's request, up while its
+;; csr, word 140, has receive done and the receive interrupt enable, or
+;; transmit done (an idle transmitter) and the transmit interrupt enable
+;; (q13-register-page, word 100).  chaos-intr-quux took it until the ncp left
+;; the band, and nothing sets those enables now; but this microcode still runs
+;; on revision 15, and on 16 until the interface goes (step r4), where a stray
+;; enable would raise the level for ever: write the csr 0, which turns both
+;; interrupt enables off (and with them the level), and dismiss it.
+intr-network-stray
+	((md) setz)
+	((vma-start-write) (a-constant chaos-csr-address))
+	(check-page-write-no-interrupt)
+	(jump intrx1)
+
 ;; quux revision 16 (quux's ethernet contract, section 2.6, the fallback): the
 ;; ethernet device, word 100 <8>, is up while an ethernet frame waits (word 251
 ;; not equal to 252) and word 240's <8>, its interrupt enable, is set.  the
@@ -484,10 +507,12 @@ intr-tick
 	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))
 	(check-page-write-no-interrupt)
 	;; Here is the roughly-60-cycle clock interrupt handler
-	(JUMP-LESS-OR-EQUAL M-ZERO A-CHAOS-TRANSMIT-ABORTED 60CYC-0)
-	;; Wake up Chaosnet after transmit abort
-	(CALL-XCT-NEXT CHAOS-WAKEUP)
-       ((A-CHAOS-TRANSMIT-ABORTED) (A-CONSTANT 1))
+	;; quux revision 16 (quux's ethernet contract, section 8, step r3):
+	;; no chaosnet transmit to retry: the ncp and uc-chaos left with chaos-wakeup.
+;	(JUMP-LESS-OR-EQUAL M-ZERO A-CHAOS-TRANSMIT-ABORTED 60CYC-0)
+;	;; Wake up Chaosnet after transmit abort
+;	(CALL-XCT-NEXT CHAOS-WAKEUP)
+;       ((A-CHAOS-TRANSMIT-ABORTED) (A-CONSTANT 1))
 60CYC-0	(JUMP-NOT-EQUAL A-DISK-BUSY M-ZERO 60CYC-1)
 	((A-DISK-IDLE-TIME) M+A+1 M-ZERO A-DISK-IDLE-TIME)
 60CYC-1	(CALL TRACK-MOUSE)			;See if the mouse has moved

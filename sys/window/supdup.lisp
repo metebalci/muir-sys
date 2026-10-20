@@ -1,4 +1,5 @@
 ;;; Windows that hack the network -*- Mode:LISP; Package:SUPDUP; BASE: 8 -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 
 ;;; "Connect to:" may be answered by hostname, bridgehostname, bridgehostname/socket,
 ;;; or hostname/contactname.

@@ -100,8 +100,11 @@ AFTER=T means add at the top.  NIL means add at the bottom."
   :REUSABLE-WHEN :DEEXPOSED)
 
 (DEFVAR DEFAULT-WINDOW-TYPES-ITEM-LIST
-      '(("Supdup" :EVAL SUPDUP::SUPDUP-FLAVOR :DOCUMENTATION "Supdup to network host.")
-	("Telnet" :VALUE SUPDUP::TELNET :DOCUMENTATION "TELNET to Chaos or ARPAnet host.")
+      ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Supdup and
+      ;; Telnet, the SUPDUP and TELNET clients, spoke Chaos, which left the band.
+;      '(("Supdup" :EVAL SUPDUP::SUPDUP-FLAVOR :DOCUMENTATION "Supdup to network host.")
+;	("Telnet" :VALUE SUPDUP::TELNET :DOCUMENTATION "TELNET to Chaos or ARPAnet host.")
+      '(
 	("Lisp" :VALUE LISP-LISTENER
 	 :DOCUMENTATION "A READ-EVAL-PRINT loop in separate process.")
 	("Edit" :VALUE ZWEI:ZMACS-FRAME

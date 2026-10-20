@@ -1,4 +1,5 @@
 ;-*- Mode:LISP; Package:SYSTEM-INTERNALS; Base:8; Readtable:T -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 
 (DEFVAR BAND-TRANSFER-SERVER-ON ':NOTIFY
   "NIL - don't allow bands to be read or written.  T - do allow.  :NOTIFY - allow, but notify user.")

@@ -19,5 +19,8 @@
 		      "UC-STACK-CLOSURE"
 		      "UC-METER" "UC-HACKS" "UC-TV" "UC-TRACK-MOUSE"
 		      "UC-PAGE-FAULT" "UC-DISK" "UC-INTERRUPT" 
-		      "UC-CHAOS" "UC-STACK-GROUPS" "UC-COLD-DISK" "UC-MC"
+		      ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the
+		      ;; chaosnet's interrupt handler and %CHAOS-WAKEUP, UC-CHAOS, left with the NCP.
+;		      "UC-CHAOS" "UC-STACK-GROUPS" "UC-COLD-DISK" "UC-MC"
+		      "UC-STACK-GROUPS" "UC-COLD-DISK" "UC-MC"
 		      )))

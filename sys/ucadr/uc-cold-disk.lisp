@@ -67,7 +67,14 @@ RESET-DEVICES
 ;	(jump-less-than m-tem (a-constant 10.) machine-not-quux-10)
 ;	(jump-less-than m-tem (a-constant 11.) machine-not-quux-11)
 ;	(jump-less-than m-tem (a-constant 13.) machine-not-quux-13)
-	(jump-less-than m-tem (a-constant 14.) machine-not-quux-14)
+	;; quux revision 15 (contract g3 revision 15b, appendix a15b.1): the revision
+	;; asked for is the assembly's, ua:*hardware-revision*, not 14 whatever the
+	;; target: microcode 2002 for revision 15 loaded directly on revision 14
+	;; halts here below 15, as revision 14's does below 14.  never below 14,
+	;; which this microcode needs (machine-not-quux-14, below), whatever the
+	;; assembly: the assembler's default revision is 13.
+;	(jump-less-than m-tem (a-constant 14.) machine-not-quux-14)
+	(jump-less-than m-tem (a-constant (eval (max 14. *hardware-revision*))) machine-not-quux-14)
 	;; quux revision 10: interrupt-control <28>, the unibus reset, drives nothing
 	;; on quux, so its 10-microsecond pulse is gone; the register page's reset
 	;; devices takes its place (contract q11, and the q9 amendment for the file
@@ -529,7 +536,11 @@ warm-tables-2
 ;; 2002 needs the page table, the tlb and the windows, and below revision 14
 ;; every reference would go through a map it never loads.  the halt shows this
 ;; location.
+;; quux revision 15 (contract g3 revision 15b, appendix a15b.1): at a revision-15
+;; assembly the checks below come here below revision 15 (the assembly's
+;; ua:*hardware-revision*); machine-not-quux-15 names the same location.
 machine-not-quux-14
+machine-not-quux-15
 	(call illop)
 
 ;; prom-entry-read: the prom's entry (prom, uc-cadr) calls this for its first
@@ -542,7 +553,14 @@ prom-entry-read
 	((m-tem) (byte-field 20 20) machine-id)
 	(jump-not-equal m-tem (a-constant 50525) machine-not-quux-14)
 	((m-tem) (byte-field 14 4) machine-id)
-	(jump-less-than m-tem (a-constant 14.) machine-not-quux-14)
+	;; quux revision 15 (contract g3 revision 15b, appendix a15b.1): the revision
+	;; asked for is the assembly's, ua:*hardware-revision*, not 14 whatever the
+	;; target: microcode 2002 for revision 15 loaded directly on revision 14
+	;; halts here below 15, as revision 14's does below 14.  never below 14,
+	;; which this microcode needs (machine-not-quux-14, below), whatever the
+	;; assembly: the assembler's default revision is 13.
+;	(jump-less-than m-tem (a-constant 14.) machine-not-quux-14)
+	(jump-less-than m-tem (a-constant (eval (max 14. *hardware-revision*))) machine-not-quux-14)
 	(jump phys-mem-read)
 
 ;; band-not-revision-14: disk-restore-1 comes here when the band is revision

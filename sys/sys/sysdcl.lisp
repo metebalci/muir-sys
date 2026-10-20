@@ -17,7 +17,7 @@
   (:COMPONENT-SYSTEMS FONTS		;Before SYSTEM-INTERNALS because things use fonts
 		      SYSTEM-INTERNALS
 		      FORMAT		;a NO-OP if loading for first time
-		      CHAOS		;likewise
+;		      CHAOS		;likewise
 		      ;; quux revision 16: the ethernet device's driver, arp, ipv4
 		      ;; and icmp (QUUX's Ethernet contract, section 5)
 		      internet
@@ -27,7 +27,7 @@
 		      TIME		;must be before TV
 		      TV
 		      PEEK
-		      SUPDUP
+;		      SUPDUP
 		      ZWEI
 		      FED
 		      COLOR
@@ -36,7 +36,9 @@
 		      HACKS
 		      METER
 		      SRCCOM
-		      CONVERSE
+		      ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): CONVERSE,
+		      ;; SUPDUP and CHAOS left the band with the NCP.
+;		      CONVERSE
 		      )
   (:COMPILE-LOAD ALLDEFS)
   (:DO-COMPONENTS (:FASLOAD ALLDEFS)))
@@ -51,7 +53,9 @@
   (:MODULE METH "SYS: SYS2; METH")
   (:MODULE CLASS "SYS: SYS2; CLASS") 
   (:MODULE MAIN ("SYS: SYS2; ADVISE"
-		 "SYS: SYS2; BAND"
+		 ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): band
+		 ;; transfer went over Chaos, which left the band with the NCP.
+;		 "SYS: SYS2; BAND"
 		 "SYS: SYS2; CHARACTER"
 		 "SYS: SYS; CLPACK"	;packages
 		 "SYS: COLD; GLOBAL"	;for package initialization
@@ -75,6 +79,10 @@
 		 "SYS: SYS2; HASHFL"	;flavorized hash table stuff
 		 "SYS: NETWORK; HOST"	; Still in SYSTEM-INTERNALS (for now)
 		 "SYS: NETWORK; PACKAGE" ; network package definitions
+		 ;; quux revision 16 (QUUX's Ethernet contract, sections 7 and 8, step
+		 ;; R3): the TELNET server's body, protocol-independent, moved out of
+		 ;; the NCP's services (SYS: NETWORK; CHAOS; CHSAUX)
+		 "SYS: NETWORK; TELNET"
 		 "SYS: IO1; INC"
 		 "SYS: IO1; INFIX"
 		 "SYS: SYS2; LOGIN"
@@ -132,6 +140,10 @@
 	     "MOUSE" "SEARCH" "TOG" "ABACUS" "NARROW"))
   (:READFILE ("EQUIVALENCE")))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the NCP and
+;; its services leave QUUX's band: CHSNCP, CHUSE, CHSAUX and CHATST and the host
+;; table step, which the SITE system does (below).  The files stay in the tree.
+#|
 (DEFSYSTEM CHAOS
   (:PACKAGE CHAOS)
   (:PATHNAME-DEFAULT "SYS: NETWORK; CHAOS;")
@@ -141,13 +153,18 @@
   ;; no EFTP module.  EFTP spoke PUP to Xerox Altos and the Dover printer, and is deleted.
   (:COMPILE-LOAD (NCP AUX TEST))
   (:COMPILE-LOAD (:GENERATE-HOST-TABLE (("SYS: SITE; HOSTS" "SYS: SITE; HSTTBL")))))
+|#
 
 ;;; quux revision 16 (QUUX's Ethernet contract, sections 5 and 7): the
 ;;; ethernet device's driver and the network process, then arp, ipv4, icmp
 ;;; echo and ping, tcp, and tcp's streams and servers (telnet, the test echo
 ;;; service), in the internet package (SYS: NETWORK; PACKAGE).  the network
+;;;; starts at boot on a machine with the device; elsewhere the files only
+;;;; load.  the servers use chaos's telnet body, so chaos comes first.
 ;;; starts at boot on a machine with the device; elsewhere the files only
-;;; load.  the servers use chaos's telnet body, so chaos comes first.
+;;; load.  the servers use the TELNET server's body, SYS: NETWORK; TELNET, in
+;;; system-internals (until step R3 of section 8 it was chaos's, so chaos came
+;;; first).
 (defsystem internet
   (:package internet)
   (:pathname-default "SYS: NETWORK; IP;")
@@ -165,7 +182,10 @@
   (:MODULE SITE ("SYS: SITE; SITE" "SYS: SITE; LMLOCS"))
   (LOAD-SITE-FILE (:COMPILE SITE))
   (:MODULE HOST-TABLE (("SYS: SITE; HOSTS" "SYS: SITE; HSTTBL"))
-		      :PACKAGE CHAOS)
+		      ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): in SI,
+		      ;; the host table compiler's package, not in CHAOS.
+;		      :PACKAGE CHAOS)
+		      :package si)
   (LOAD-SITE-FILE (:COMPILE (:GENERATE-HOST-TABLE HOST-TABLE))))
 
 (DEFSYSTEM TIME
@@ -174,9 +194,14 @@
   ;; tzdata first: TIME looks the site's zone name up in it as it loads.
   (:compile-load ("TZDATA" "TIME" "TIMPAR")))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the SUPDUP
+;; and TELNET clients spoke Chaos, which left the band with the NCP; a TELNET
+;; client comes later, with active open (section 8).
+#|
 (DEFSYSTEM SUPDUP
   (:PACKAGE SUPDUP)
   (:COMPILE-LOAD ("SYS: WINDOW; SUPDUP")))
+|#
 
 (DEFSYSTEM FORMAT
   (:PACKAGE FORMAT)
@@ -307,11 +332,14 @@
   (:PACKAGE TV)
   (:PATHNAME-DEFAULT "SYS: WINDOW;")
   (:MODULE MAIN "PEEK")
-  (:MODULE CHAOS "SYS: NETWORK; CHAOS; PEEKCH" :PACKAGE CHAOS)
-  (:MODULE FILE "PEEKFS" :PACKAGE FS)
+;  (:MODULE CHAOS "SYS: NETWORK; CHAOS; PEEKCH" :PACKAGE CHAOS)
+;  (:MODULE FILE "PEEKFS" :PACKAGE FS)
   (:COMPILE-LOAD MAIN)
-  (:COMPILE-LOAD CHAOS)
-  (:COMPILE-LOAD FILE))
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): PEEK's
+  ;; Chaos pane and its QFILE pane left the band with the NCP.
+;  (:COMPILE-LOAD CHAOS)
+;  (:COMPILE-LOAD FILE))
+  )
 
 (DEFSYSTEM FILE-SYSTEM
   (:PACKAGE FILE-SYSTEM)
@@ -320,7 +348,9 @@
   (:MODULE BASIC-PATHNAMES ("ACCESS" "PATHNM"))
   (:MODULE HOST-PATHNAMES ("PATHST" "LOGICAL" "SYS:FILE;LMPARS"))
   (:MODULE FILE-IO ("OPEN" "BALDIR"))
-  (:MODULE CHAOS-FILE-IO ("SYS: NETWORK; CHAOS; QFILE"))
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the QFILE
+  ;; client, Chaos's file access, left the band with the NCP; HOST: serves files.
+;  (:MODULE CHAOS-FILE-IO ("SYS: NETWORK; CHAOS; QFILE"))
   ;; quux: the file device's driver and the pathname host HOST over it
   ;; (contract q9).  mini loads them too, from rest-of-pathnames-file-alist.
   (:module file-device "SYS: IO; FDEV" :package si)
@@ -328,7 +358,7 @@
   (:COMPILE-LOAD BASIC-PATHNAMES)
   (:COMPILE-LOAD HOST-PATHNAMES (:FASLOAD BASIC-PATHNAMES))
   (:COMPILE-LOAD FILE-IO (:FASLOAD BASIC-PATHNAMES))
-  (:COMPILE-LOAD CHAOS-FILE-IO (:FASLOAD HOST-PATHNAMES))
+;  (:COMPILE-LOAD CHAOS-FILE-IO (:FASLOAD HOST-PATHNAMES))
   (:compile-load file-device)
   (:compile-load host-file-io (:fasload host-pathnames file-device)))
 
@@ -358,10 +388,14 @@
   (:PACKAGE METER)
   (:COMPILE-LOAD ("SYS: IO1; METER")))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): CONVERSE sends
+;; its messages over Chaos, which left the band with the NCP.
+#|
 ;;; Interactive message program
 (DEFSYSTEM CONVERSE
   (:PACKAGE ZWEI)
   (:COMPILE-LOAD ("SYS: IO1; CONVER")))
+|#
 
 ;;; Systems not initially loaded, but done right afterwards
 ;;; MIT-Specific definition moved to SYS: SITE; MIT-SPECIFIC SYSTEM
@@ -527,9 +561,11 @@
 	    ("SYS: IO; FILE; LOGICAL QFASL >" "FS")
 	    ("SYS: FILE; LMPARS QFASL >" "FS")
 	    ("SYS: IO; FILE; OPEN QFASL >" "FS")
-	    ("SYS: NETWORK; CHAOS; CHSNCP QFASL >" "CHAOS")
-	    ("SYS: NETWORK; CHAOS; CHUSE QFASL >" "CHAOS")
-	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")
+	    ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the
+	    ;; NCP's files and the QFILE client leave the cold load and the band.
+;	    ("SYS: NETWORK; CHAOS; CHSNCP QFASL >" "CHAOS")
+;	    ("SYS: NETWORK; CHAOS; CHUSE QFASL >" "CHAOS")
+;	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")
 	    ;; quux: the file device and HOST, loaded here so that HOST is a
 	    ;; pathname host before the site's translations are read, and the
 	    ;; device is reset by qld's lisp-reinitialize (contract q9).
@@ -540,6 +576,9 @@
 	  '(("SYS: SITE; SITE QFASL >" "SI")))
 
 (DEFCONST HOST-TABLE-FILE-ALIST
-	  '(("SYS: SITE; HSTTBL QFASL >" "CHAOS")
+	  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the host
+	  ;; table is compiled in SI, its compiler's package, not in CHAOS.
+;	  '(("SYS: SITE; HSTTBL QFASL >" "CHAOS")
+	  '(("SYS: SITE; HSTTBL QFASL >" "SI")
 	    ("SYS: SITE; LMLOCS QFASL >" "SI")
 	    ("SYS: SITE; SYS TRANSLATIONS >" "FS")))

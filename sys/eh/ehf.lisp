@@ -1363,10 +1363,15 @@ Both of the last two are generic pathnames or NIL.")
 
 (defmethod (remote-network-error :after :init) (ignore)
   (setq connection (getf si:property-list :connection))
-  (setq foreign-host (or (getf si:property-list :foreign-host)
-			 (and connection
-			      (si:get-host-from-address
-				(chaos:foreign-address connection) :chaos)))))
+;; quux revision 16 (QUUX's Ethernet contract, sections 7 and 8, step R3): the
+;; foreign host is the one the signaller passes, as TCP's streams do
+;; (sys/network/ip/tcp.lisp, :foreign-host); it was derived from a Chaos
+;; connection's address, and Chaos left the band with the NCP.
+;  (setq foreign-host (or (getf si:property-list :foreign-host)
+;			 (and connection
+;			      (si:get-host-from-address
+;				(chaos:foreign-address connection) :chaos)))))
+  (setq foreign-host (getf si:property-list :foreign-host)))
 
 (defsignal sys:network-resources-exhausted local-network-error ()
   "The connection table was full, or something else has run out.")

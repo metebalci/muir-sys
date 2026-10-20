@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""tools/system-check/machine-name: the machine's name after step R3 of QUUX's
+Ethernet contract (section 5.6, "From R3"), as a harness, on revisions 15 and
+16 alike.
+
+    tools/system-check/machine-name --out DIR --band DISK --ubin UBIN --quux QUUX
+        [--engine micro|rtl] [--plant FILE]
+
+QUUX is a wrapper that sets the revision (MUIR_QUUX_REVISION) and gives the
+boot PROM, as lispm-check's --quux.  Revision 15's band has no network for a
+TELNET session, so every boot is driven at the console, through quux's RFB
+terminal: the harness types (login ...), loads lisp/machine-name.lisp from
+HOST's home and types a form that writes its answer to a file there, which it
+reads.  The file root is a copy of the tree's sys/ and site/ with UBIN as
+sys/ubin/ and an empty home/lispm/; the name file is site/hostname in it.
+Each boot is a cold boot of the band; DISK is opened read-only except for the
+save, which writes a copy of it in DIR.
+
+  none      no name file and no command: LOCALHOST, SI:LOCAL-HOST-NAME the
+            same, the pretty name "localhost", the associated machine HOST,
+            and the herald "band N of LOCALHOST" (N the band booted)
+  file      site/hostname "lispm-2": LISPM-2, Lisp Machine Two, HOST
+  override  in the same boot, (si:set-host-name "lispm-3"): LISPM-3 at once,
+            over the name file's name (the command sets the current name)
+  dropped   then (si:set-host-name nil): the name file's LISPM-2 again
+  command   no file; (si:set-host-name "lispm-3") names the machine at once:
+            LISPM-3, Lisp Machine Three; then a DISK-SAVE into LOD2
+  saved     the saved band booted with no file: LISPM-3
+  both      the saved band booted with site/hostname "lispm-2": the file wins,
+            LISPM-2
+  internet  revision 16 only: no file and no command, a site entry
+            TEST-INTERNET whose INTERNET address is the device's (register
+            255, link-local) defined, and the name found again: TEST-INTERNET
+            wins over LOCALHOST
+
+--plant FILE loads FILE (a Lisp file) in the command's boot before the
+command, so the saved band carries it: for showing that a fault in the order
+fails a case (lisp/machine-name-plant-order.lisp, the command before the name
+file, fails "both").
+
+Each line says PASS or FAIL with what the band wrote; DIR keeps each boot's
+screen, the band's answers and the machine's log.  Exit status 0 when every
+line passes; the last line is RESULT PASS or RESULT FAIL.  About 15 minutes
+on micro.
+"""
+import argparse, hashlib, os, shutil, socket, struct, subprocess, sys, time, zlib
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+lc = SourceFileLoader('lispm_check', os.path.join(TREE, 'tools', 'lispm-check')).load_module()
+cb = SourceFileLoader('cross_build', os.path.join(TREE, 'tools', 'cross-build', 'run')).load_module()
+
+p = argparse.ArgumentParser(description="The machine's name after R3, at the console.")
+p.add_argument('--out', required=True)
+p.add_argument('--band', required=True)
+p.add_argument('--ubin', required=True)
+p.add_argument('--quux', required=True)
+p.add_argument('--engine', default='micro', choices=('micro', 'rtl'))
+p.add_argument('--plant', help='a Lisp file loaded before the command, kept by the save')
+a = p.parse_args()
+out = os.path.abspath(a.out)
+os.makedirs(out, exist_ok=True)
+quux, band = os.path.abspath(a.quux), os.path.abspath(a.band)
+rev = lc.machine_revision(argparse.Namespace(exe=quux), hashlib.sha256(open(quux, 'rb').read()).hexdigest())
+ok = True
+
+
+def say(*x):
+    print(*x, flush=True)
+
+
+# the file root: the tree's sys/ and site/, ubin/ as sys/ubin/, an empty home
+root = os.path.join(out, 'root')
+shutil.rmtree(root, ignore_errors=True)
+for d in ('sys', 'site'):
+    shutil.copytree(os.path.join(TREE, d), os.path.join(root, d), symlinks=True)
+shutil.rmtree(os.path.join(root, 'sys', 'ubin'), ignore_errors=True)
+shutil.copytree(os.path.abspath(a.ubin), os.path.join(root, 'sys', 'ubin'))
+home = os.path.join(root, 'home', 'lispm')
+os.makedirs(home)
+shutil.copy2(os.path.join(HERE, 'lisp', 'machine-name.lisp'), home)
+if a.plant:
+    # the plant, served from HOST's home as plant.lisp
+    shutil.copy2(os.path.abspath(a.plant), os.path.join(home, 'plant.lisp'))
+hostname = os.path.join(root, 'site', 'hostname')
+
+
+def name_file(text):
+    if text is None:
+        if os.path.exists(hostname):
+            os.unlink(hostname)
+    else:
+        open(hostname, 'w').write(text + '\n')
+
+
+class Boot:
+    """A cold boot of DISK on QUUX with the file root, its console on RFB."""
+    def __init__(self, label, disk, rw=False):
+        self.label = label
+        _lock, self.pts = lc.take_ports()
+        self.lock = _lock
+        cmd = [quux, '-c', '/dev/null', '--' + a.engine, '--video-size', '1280x1024',
+               '--disk-pack', disk if rw else disk + ',ro', '--file-root', root,
+               '--terminal', '127.0.0.1:%d' % self.pts[3]]
+        self.log = open(os.path.join(out, label + '.quux.log'), 'w')
+        self.log.write('# %s\n' % ' '.join(cmd))
+        self.log.flush()
+        self.proc = subprocess.Popen(cmd, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
+
+    def rfb(self, text=None, png=None):
+        """Types TEXT (newline Return) at the console, and/or writes the screen to PNG."""
+        end = time.time() + 120
+        while True:
+            try:
+                s = socket.create_connection(('127.0.0.1', self.pts[3]), timeout=30)
+                break
+            except OSError:
+                # the terminal listens once the machine has started
+                if time.time() > end or self.proc.poll() is not None:
+                    raise
+                time.sleep(2)
+
+        def recvn(n):
+            b = b''
+            while len(b) < n:
+                c = s.recv(n - len(b))
+                if not c:
+                    raise EOFError
+                b += c
+            return b
+        recvn(12)
+        s.sendall(b'RFB 003.008\n')
+        recvn(recvn(1)[0])
+        s.sendall(b'\x01')
+        assert struct.unpack('>I', recvn(4))[0] == 0
+        s.sendall(b'\x01')
+        w, h = struct.unpack('>HH', recvn(4))
+        recvn(16)
+        recvn(struct.unpack('>I', recvn(4))[0])
+        shifted = '~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        for ch in text or '':
+            sym = 0xff0d if ch == '\n' else ord(ch)
+            if ch in shifted:
+                s.sendall(struct.pack('>BBxxI', 4, 1, 0xffe1))
+            s.sendall(struct.pack('>BBxxI', 4, 1, sym))
+            time.sleep(0.03)
+            s.sendall(struct.pack('>BBxxI', 4, 0, sym))
+            time.sleep(0.03)
+            if ch in shifted:
+                s.sendall(struct.pack('>BBxxI', 4, 0, 0xffe1))
+        if png:
+            time.sleep(2)
+            s.sendall(struct.pack('>BxxxBBBBHHHBBBxxx', 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))
+            s.sendall(struct.pack('>BxH', 2, 1) + struct.pack('>i', 0))
+            s.sendall(struct.pack('>BBHHHH', 3, 0, 0, 0, w, h))
+            fb, got = bytearray(w * h), 0
+            while got < w * h:
+                if recvn(1)[0] != 0:
+                    continue
+                recvn(1)
+                for _ in range(struct.unpack('>H', recvn(2))[0]):
+                    x, y, rw_, rh, _enc = struct.unpack('>HHHHi', recvn(12))
+                    data = recvn(rw_ * rh * 4)
+                    for j in range(rh):
+                        row = data[j * rw_ * 4:(j + 1) * rw_ * 4]
+                        fb[(y + j) * w + x:(y + j) * w + x + rw_] = bytes(max(row[4 * i:4 * i + 3])
+                                                                         for i in range(rw_))
+                    got += rw_ * rh
+            raw = b''.join(b'\x00' + bytes(fb[j * w:(j + 1) * w]) for j in range(h))
+
+            def chunk(t, d):
+                return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+            open(png, 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 0, 0, 0, 0))
+                                  + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+        s.close()
+
+    def answer(self, tag, form, limit=300):
+        """FORM typed (again every 60 s until its answer file appears): the answer, read."""
+        f = os.path.join(home, 'mn-%s.text' % tag)
+        if os.path.exists(f):
+            os.unlink(f)
+        end = time.time() + limit
+        while time.time() < end:
+            if self.proc.poll() is not None:
+                raise RuntimeError('the machine exited (%s)' % self.proc.returncode)
+            self.rfb(form + '\n')
+            t = time.time() + 60
+            while time.time() < t and not os.path.exists(f):
+                time.sleep(2)
+            if os.path.exists(f):
+                time.sleep(1)
+                return open(f).read().strip()
+        raise RuntimeError('no answer to %s in %d s' % (form, limit))
+
+    def stop(self):
+        try:
+            self.rfb(png=os.path.join(out, self.label + '.png'))
+        except Exception:
+            pass
+        if self.proc.poll() is None:
+            os.killpg(self.proc.pid, 15)
+            try:
+                self.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.proc.pid, 9)
+        self.lock.release()
+
+
+def prepare(b):
+    """Log in, then load the helper: typed until the helper's own answer comes."""
+    b.answer('ready', '(progn (login "LISPM" "HOST" t) (load "HOST: //home//lispm//machine-name.lisp")'
+                      ' (mn-write "ready" (list :ready)))')
+
+
+def expect(label, got, name, pretty):
+    """GOT, the band's answer, against (NAME NAME PRETTY "HOST" NAME)."""
+    global ok
+    want = '(%s %s %s "HOST" %s)' % tuple('"%s"' % x for x in (name, name, pretty, name))
+    good = lc.normal(got) == lc.normal(want)
+    ok &= good
+    say('%-9s %s  %s%s' % (label, 'PASS' if good else 'FAIL', got, '' if good else ', expected %s' % want))
+
+
+try:
+    name_file(None)
+    b = Boot('none', band)
+    try:
+        prepare(b)
+        expect('none', b.answer('none', '(mn-write "none")'), 'LOCALHOST', 'localhost')
+        if rev is None or rev >= 16:
+            expect('internet', b.answer('internet', '(mn-internet "internet")'), 'TEST-INTERNET', 'Unknown')
+    finally:
+        b.stop()
+
+    name_file('lispm-2')
+    b = Boot('file', band)
+    try:
+        prepare(b)
+        expect('file', b.answer('file', '(mn-write "file")'), 'LISPM-2', 'Lisp Machine Two')
+        expect('override', b.answer('override', '(progn (si:set-host-name "lispm-3") (mn-write "override"))'),
+               'LISPM-3', 'Lisp Machine Three')
+        expect('dropped', b.answer('dropped', '(progn (si:set-host-name nil) (mn-write "dropped"))'),
+               'LISPM-2', 'Lisp Machine Two')
+    finally:
+        b.stop()
+
+    # the command, then a save into LOD2 of a copy of the disk
+    name_file(None)
+    disk = os.path.join(out, 'save.img')
+    shutil.copyfile(band, disk)
+    b = Boot('command', disk, rw=True)
+    run = object.__new__(cb.Run)
+    try:
+        prepare(b)
+        if a.plant:
+            b.answer('plant', '(progn (load "HOST: //home//lispm//plant.lisp") (mn-write "plant" (list :plant)))')
+        expect('command', b.answer('command', '(progn (si:set-host-name "lispm-3") (mn-write "command"))'),
+               'LISPM-3', 'Lisp Machine Three')
+        b.rfb('(si:disk-save "LOD2" t)\n')
+        # the save: LOD2 holds a band that stays the same for 60 s
+        first = run.part(disk, 'LOD2')[2]
+        last, still, end = None, 0, time.time() + 3600
+        while time.time() < end:
+            time.sleep(20)
+            h = cb.Run.band_header(disk, first)
+            if h == last and h and h[1]:
+                still += 20
+                if still >= 60:
+                    break
+            else:
+                last, still = h, 0
+        say('save      LOD2 holds format %s, valid %s words' % (last[0] if last else None,
+                                                             last[1] if last else None))
+    finally:
+        b.stop()
+    run.set_current(disk, ['MCR1', 'LOD2'])
+    for label, text, name, pretty in (('saved', None, 'LISPM-3', 'Lisp Machine Three'),
+                                      ('both', 'lispm-2', 'LISPM-2', 'Lisp Machine Two')):
+        name_file(text)
+        b = Boot(label, disk)
+        try:
+            prepare(b)
+            expect(label, b.answer(label, '(mn-write "%s")' % label), name, pretty)
+        finally:
+            b.stop()
+    name_file(None)
+except Exception as e:
+    ok = False
+    say('FAILED: %s' % e)
+say('RESULT %s' % ('PASS' if ok else 'FAIL'))
+sys.exit(0 if ok else 1)

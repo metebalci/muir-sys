@@ -81,7 +81,10 @@ UC_FILES = ['UC-PARAMETERS', 'UC-CADR', 'UC-MACROCODE', 'UC-CALL-RETURN',
             'UC-STORAGE-ALLOCATION', 'UC-FCTNS', 'UC-ARRAY', 'UC-LOGICAL', 'UC-ARITH',
             'UC-STRING', 'UC-TRANSPORTER', 'UC-STACK-CLOSURE', 'UC-METER', 'UC-HACKS',
             'UC-TV', 'UC-TRACK-MOUSE', 'UC-PAGE-FAULT', 'UC-DISK', 'UC-INTERRUPT',
-            'UC-CHAOS', 'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+            'UC-STACK-GROUPS', 'UC-COLD-DISK', 'UC-MC']
+# UC-CHAOS, the chaosnet's interrupt handler and %CHAOS-WAKEUP, left the list
+# with the NCP (QUUX's Ethernet contract, section 8, step R3), after
+# 'UC-INTERRUPT', as sys/ucadr/ucode.lisp has it.
 UC_OUT = ('ucadr.mcr', 'ucadr.tbl', 'ucadr.locs', 'ucadr.sym')
 PROM_OUT = ('promh.mcr', 'promh.tbl', 'promh.locs', 'promh.sym')
 # QLD with a QUUX disk at 32 MW on micro took 15 minutes (revision 14); the

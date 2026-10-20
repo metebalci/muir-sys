@@ -1,4 +1,5 @@
 ;;; -*- Mode:LISP; Package:CHAOS; Base:8; Readtable:ZL -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 ;;; This is SYS: NETWORK; CHAOS; CHSNCP
 ;;;
 ;;;	** (c) Copyright 1980, 1984 Massachusetts Institute of Technology **

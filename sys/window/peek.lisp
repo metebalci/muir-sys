@@ -200,11 +200,14 @@ but with no menu -- only keyboard commands will be available."))
 	      ((CONSP CHAR)
 	       ;; A special command (forced input, no doubt)
 	       (CASE (CAR CHAR)
-		 (SUPDUP (SUPDUP (CADR CHAR)))
-		 (SUPDUP:TELNET (TELNET (CADR CHAR)))
-		 (QSEND (QSEND (CADR CHAR))
-			(SEND WINDOW :SET-NEEDS-REDISPLAY T)
-			(SEND *TERMINAL-IO* :MAKE-COMPLETE))
+		 ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3):
+		 ;; SUPDUP, TELNET and QSEND, from the Chaos hosts' menus, spoke Chaos, which
+		 ;; left the band with the NCP.
+;		 (SUPDUP (SUPDUP (CADR CHAR)))
+;		 (SUPDUP:TELNET (TELNET (CADR CHAR)))
+;		 (QSEND (QSEND (CADR CHAR))
+;			(SEND WINDOW :SET-NEEDS-REDISPLAY T)
+;			(SEND *TERMINAL-IO* :MAKE-COMPLETE))
 		 (EH (EH (CADR CHAR)))
 		 (INSPECT (INSPECT (CADR CHAR)))
 		 (DESCRIBE (DESCRIBE (CADR CHAR)))
@@ -611,6 +614,10 @@ but with no menu -- only keyboard commands will be available."))
 	   (SEND PEEK-WINDOW :FORCE-KBD-INPUT `(INSPECT ,SHEET))
 	   (SEND SHEET CHOICE))))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the Active
+;; Servers mode listed the Chaos servers' connections, which left the band with
+;; the NCP (the TCP servers keep no server descriptions).
+#|
 (DEFINE-PEEK-MODE PEEK-SERVERS #/S "Active Servers" NIL
   "List all servers, who they are serving, and their status.")
 
@@ -708,6 +715,7 @@ but with no menu -- only keyboard commands will be available."))
 	     (SETF (ARRAY-LEADER HOST-ITEM (+ TV:SCROLL-ITEM-LEADER-OFFSET 2)) HOST)))
 	  (T (SETF (FIFTH LIST-ITEM) NIL)
 	     (SETF (ARRAY-LEADER HOST-ITEM (+ TV:SCROLL-ITEM-LEADER-OFFSET 2)) NIL)))))
+|#
 
 
 (MAKE-WINDOW 'PEEK-FRAME :ACTIVATE-P T)  ;Pre-create one for the system key

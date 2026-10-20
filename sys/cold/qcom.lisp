@@ -237,10 +237,16 @@ GLOBAL:(UNLESS (= *READ-BASE* 8) (BREAK "*READ-BASE* not 8."))
 					; really the virtual address of the start
 					; of normal pageable memory
 
-  ;; Chaos net interrupt-handler variables
-  %SYS-COM-CHAOS-FREE-LIST
-  %SYS-COM-CHAOS-TRANSMIT-LIST
-  %SYS-COM-CHAOS-RECEIVE-LIST
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the Chaos
+  ;; interrupt handler's three lists left with the NCP and the microcode's
+  ;; uc-chaos; the slots are reserved, never reused.
+;  ;; Chaos net interrupt-handler variables
+;  %SYS-COM-CHAOS-FREE-LIST
+;  %SYS-COM-CHAOS-TRANSMIT-LIST
+;  %SYS-COM-CHAOS-RECEIVE-LIST
+  %sys-com-reserved-1			;was %sys-com-chaos-free-list
+  %sys-com-reserved-2			;was %sys-com-chaos-transmit-list
+  %sys-com-reserved-3			;was %sys-com-chaos-receive-list
 
   ;; Debugger locations  (*** these seem not to be used ***)
   %SYS-COM-DEBUGGER-REQUESTS		;REQUEST TO POWER CONTROL/DEBUGGER

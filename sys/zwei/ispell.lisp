@@ -59,12 +59,14 @@ IN-EDITOR-P is T,  we will change the buffer to have the correct word in it."
 	 (FERROR "An unparsable result ~A was obtained.
 Please send a bug report to BUG-ISPELL." RESULT))))
 
-(DEFUN CHECK-SPELLING-WORDLIST (WORDLIST)
-  "Given a string of words, such as #/"this si a test#/" return a list
-of with one element for each word in the wordlist which represents
-information about the correct spelling of the wordlist."
-  (IF (LISTP WORDLIST) (SETQ WORDLIST (PARSE-LIST-INTO-STRING WORDLIST)))
-  (PARSE-ISPELL-OUTPUT (CHAOS:CHECK-SPELLING-WORDLIST WORDLIST)))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the spelling
+;; was asked of a Chaos server, which left the band with the NCP.
+;(DEFUN CHECK-SPELLING-WORDLIST (WORDLIST)
+;  "Given a string of words, such as #/"this si a test#/" return a list
+;of with one element for each word in the wordlist which represents
+;information about the correct spelling of the wordlist."
+;  (IF (LISTP WORDLIST) (SETQ WORDLIST (PARSE-LIST-INTO-STRING WORDLIST)))
+;  (PARSE-ISPELL-OUTPUT (CHAOS:CHECK-SPELLING-WORDLIST WORDLIST)))
    
 
 ;Don't bother checking for spelling demons or user options yet (ie. words in the

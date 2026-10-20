@@ -165,8 +165,11 @@ MUIR_QUUX_REVISION), and remembered under the cache.
 The tools that build their own sessions from these classes
 (tools/system-check/warm-boot, tools/cross-build/run's sessions) take the
 network and the tap through harness_network, below, with the same default.
-One checkpoint serves both networks: --chaos-address is given in both, as
-the checkpoint holds the Chaosnet interface's switches.
+Each network has its own checkpoint on revision 16: since step R3 of the
+contract's section 8 the band has no NCP, so tcp gives the machine no
+--chaos-address, and chaos does, and the checkpoint holds the Chaosnet
+interface's switches (until R3 --chaos-address was given in both, and one
+checkpoint served both networks).
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
@@ -760,13 +763,15 @@ class OzdFileServer:
         return self.proc.pid
 
     def machine_flags(self):
-        """The network's flags, and revision 16's link's.  --chaos-address is
-        given in both networks until the NCP leaves the band (the contract's
-        R3): the checkpoint holds the Chaosnet interface's switches, and muir
-        refuses a resume under others, so one checkpoint serves both.  Over
-        TCP the machine has no Chaos cable: no --chaos-udp and no peer."""
+        """The network's flags, and revision 16's link's.  Over TCP the
+        machine has no Chaos cable and, since the NCP left the band (the
+        contract's section 8, R3), no Chaos address: until R3 --chaos-address
+        was given in both networks, so that one checkpoint served both, and
+        the band behind the pool was LISPM-1.  Over Chaos it has both, and a
+        checkpoint of its own (the key's -chaos, prepare below)."""
         if self.network == 'tcp':
-            flags = ['--chaos-address', CHAOS_LISPM]
+            # until R3: flags = ['--chaos-address', CHAOS_LISPM]
+            flags = []
         else:
             flags = ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
                      '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
@@ -1004,7 +1009,10 @@ HELPER = '(defun lispm-check-case (k form) %s)' % (CASE_FORM % {'k': 'k', 'form'
 SETUP_VERSION = '2'
 # 3: revision 16's setup gives the machine its tap's addresses, and over TCP
 # closes cleanly (the contract, amendment 2, 5.1); revision 15's key keeps 2
-SETUP_VERSION_TAP = '3'
+# 4: over TCP the machine has no --chaos-address (the contract's section 8,
+# R3), and a run over Chaos on revision 16 has its own key, -chaos
+#SETUP_VERSION_TAP = '3'
+SETUP_VERSION_TAP = '4'
 
 ERROR_RE = re.compile(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)')
 # The second line of defence, for a question the FQUERY clause does not see
@@ -1666,6 +1674,10 @@ def prepare(a):
         key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION_TAP if tapped else SETUP_VERSION,
                                a.engine)
         key = key if a.file_server == 'ozd' else key + '-' + a.file_server
+        # revision 16's two networks give the machine different Chaos
+        # switches since R3 (machine_flags), so each has its own checkpoint
+        if tapped and a.network == 'chaos':
+            key += '-chaos'
         if tapped:
             # A checkpoint for each tap index, keyed by QUUX's address behind
             # it (the contract, amendment 2, 5.1); the taps tried are those

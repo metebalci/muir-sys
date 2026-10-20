@@ -13,7 +13,9 @@ usage:
 It takes a tap and resumes that index's checkpoint as tools/lispm-check does
 (it is lispm-check's own code, loaded from beside it, so the flags after --
 are lispm-check's: --band, --quux, --ubin, --tree, --engine, --file-server,
---network and the rest, LISPM_CHECK_TAPS and LISPM_CHECK_PORTS too).  The
+--network and the rest, LISPM_CHECK_TAPS and LISPM_CHECK_PORTS too; its
+--files, with --compile, are loaded at the control session before the
+parts).  The
 machine must be revision 16 and the band one with the network.  It then
 opens the control session, a TELNET session of its own over lispm-check's
 --network (tcp by default here), and turns the test echo service on.  Each
@@ -22,7 +24,10 @@ it, as Linux's own TCP:
 
   telnet   three TELNET sessions to port 23 one after another and two at
            once: each gets the banner, answers a form, and at the client's
-           EOF closes its side, with FIN (section 7)
+           EOF closes its side, with FIN (section 7); then our EOF alone
+           after the banner, while a form runs (the form's value comes
+           first) and while the listener asks whether to enter the
+           debugger: each time the band closes and its server is gone
   echo     the test echo service, port 7, both ways at once: each size sent
            --echo-times times while its echo is read, the echo equal to what
            was sent by sha256 (1 B, 1 KiB, 64 KiB and 1 MiB, ten times each)
@@ -43,6 +48,11 @@ it, as Linux's own TCP:
            of --mloss-size with Linux's state read by ss -tnio every 2 s;
            it ends as T4 allows, and at every sample after progress of an
            MSS Linux's backoff is 3 or less
+  lockerror  run only when named: an error planted in a TELNET session's
+           send path while it holds NETWORK-LOCK (a microcode error; and
+           lockerror-lisp a Lisp error): the band closes that session, frees
+           the lock, ends its process and connection and records the error,
+           and a new session answers
   stall    M-tap's stall test (section 15, Q8), run only when named: the
            machine stopped for each of --stall's seconds (30 and 180) with a
            form in flight on a TELNET session over TCP; the session is kept
@@ -277,9 +287,73 @@ class Control:
         return int(self.value('(let ((n 0)) (dotimes (i 64 n) (when (aref ip::tcp-tw-remote i) (setq n (1+ n)))))'))
 
 
+def telnet_eof_session(band, control, form, wait_for, log):
+    """A TELNET session ended by our EOF at a given moment (section 7; the
+    cases system-check's telnet-eof made over Chaos, with the band its own
+    client, until step R3 of section 8 took Chaos out): after the banner,
+    FORM sent (or none) and, once WAIT_FOR appears (or at once), our EOF.
+    The band must answer with what was pending and then its own EOF, and
+    leave no connection but the control session's: its server ends."""
+    s = band.connect(TELNET_PORT)
+    try:
+        s.settimeout(0.2)
+        text, end = '', time.monotonic() + 120
+        while 'Telnet server here' not in text:
+            if time.monotonic() > end:
+                raise PartFailed('no banner in 120 s')
+            try:
+                d = s.recv(4096)
+            except socket.timeout:
+                continue
+            if not d:
+                raise PartFailed('the band closed before its banner')
+            text += d.decode('latin-1')
+        banner = len(text)
+        if form:
+            s.sendall(form.encode('latin-1') + b'\r\n')
+        if wait_for:
+            end = time.monotonic() + 120
+            while wait_for.lower() not in text[banner:].lower():
+                if time.monotonic() > end:
+                    raise PartFailed('%s: no %r in 120 s' % (form, wait_for))
+                try:
+                    d = s.recv(4096)
+                except socket.timeout:
+                    continue
+                if not d:
+                    raise PartFailed('%s: the band closed before %r' % (form, wait_for))
+                text += d.decode('latin-1')
+        s.settimeout(None)
+        s.shutdown(socket.SHUT_WR)
+        try:
+            rest = band.read_to_eof(s, time.monotonic() + 120).decode('latin-1')
+        except PartFailed:
+            raise PartFailed('%s: no EOF from the band within 120 s of ours' % (form or 'the banner'))
+        except ConnectionResetError:
+            raise PartFailed('%s: the band reset the connection at our EOF, not closing it' % (form or 'the banner'))
+        text += rest
+    finally:
+        s.close()
+        log.write(text)
+    if form and wait_for is None and ':TE-DONE' not in text[banner:].upper():
+        raise PartFailed('%s: the form\'s value did not come before the band\'s EOF' % form)
+    end = time.monotonic() + 30
+    while control.others() != 0:
+        if time.monotonic() > end:
+            raise PartFailed('%s: after the close, %d connections besides the control session'
+                             % (form or 'the banner', control.others()))
+        time.sleep(1)
+
+
 def part_telnet(band, control, opts, log):
     for i in range(3):
         telnet_session(band, '(+ %d 2)' % i, str(i + 2), log)
+    # our EOF alone after the banner; while a form runs (5 s), whose value
+    # must come first; and while the listener asks whether to enter the
+    # debugger
+    telnet_eof_session(band, control, None, None, log)
+    telnet_eof_session(band, control, '(progn (process-sleep 300) :te-done)', None, log)
+    telnet_eof_session(band, control, '(car 1)', 'debugger', log)
     out = []
     ts = [threading.Thread(target=lambda k=k: out.append(_catch(telnet_session, band, '(* %d 3)' % k, str(3 * k), log)))
           for k in (5, 7)]
@@ -290,7 +364,8 @@ def part_telnet(band, control, opts, log):
     bad = [x for x in out if x]
     if len(out) != 2 or bad:
         raise PartFailed('two sessions at once: %s' % (bad or 'one did not end'))
-    return '3 sessions in a row and 2 at once, each closed by the band at EOF'
+    return ('3 sessions in a row and 2 at once, each closed by the band at EOF; and our EOF after the banner,'
+            ' while a form runs (its value first) and at the debugger\'s question, each closed, its server gone')
 
 
 def _catch(f, *args):
@@ -894,10 +969,105 @@ def part_mloss(band, control, opts, log):
     return '%s; %s' % (figures, ending)
 
 
+# An error raised in a TELNET session's send path while its process holds
+# NETWORK-LOCK (QUUX's Ethernet contract, section 7; an error found in a
+# reload whose files did not match the running stack): before the TELNET server contained it, the session entered the
+# debugger on its own TCP stream, whose output re-raised the error, and kept
+# the lock, so the network process blocked on it at the next frame and the
+# whole stack was dead.  The plant, at the control session: TCP-SEND advised
+# so that its next call in the fresh session's process, with the lock held,
+# signals an error once: a microcode error, the reload's kind
+# (a subscript out of range), or with lockerror-lisp a Lisp error (FERROR).
+LOCKERROR_ERRORS = {'lockerror': '(aref (make-array 1) 5)',
+                    'lockerror-lisp': '(ferror nil "A planted error in the TCP send path.")'}
+LOCKERROR_TEXTS = {'lockerror': 'out of range', 'lockerror-lisp': 'planted error'}
+
+
+def part_lockerror(band, control, opts, log, name='lockerror'):
+    """The plant fires in a fresh TELNET session as it answers a form: the band
+    must close that session (EOF or RST) within 60 s, and then, at the control
+    session: NETWORK-LOCK free, the session's process gone (not in the
+    debugger), its connection gone, the error recorded in
+    TELNET-SERVER-LAST-ERROR, NETWORK-PASSES advanced; and a new TELNET
+    session must get its banner and answer a form."""
+    if control.a.network != 'tcp':
+        raise PartFailed('lockerror wants the control session over TCP')
+    plant = LOCKERROR_ERRORS[name]
+    control.value('(progn (defvar user::*lock-error-armed* nil) '
+                  ' (defvar user::*lock-error-victim* nil) (setq user::*lock-error-armed* nil)'
+                  ' (si:advise ip::tcp-send :before lock-error-plant nil'
+                  ' (when (and user::*lock-error-armed* (eq current-process user::*lock-error-victim*)'
+                  ' (eq ip::network-lock current-process))'
+                  ' (setq user::*lock-error-armed* nil) %s)) t)' % plant)
+    try:
+        before = control.value('(progn (setq ip::telnet-server-last-error nil) (list ip::network-passes))')
+        s = band.connect(TELNET_PORT)
+        try:
+            s.settimeout(0.2)
+            text, end = '', time.monotonic() + 120
+            while 'Telnet server here' not in text:
+                if time.monotonic() > end:
+                    raise PartFailed('no banner in 120 s')
+                try:
+                    d = s.recv(4096)
+                except socket.timeout:
+                    continue
+                if not d:
+                    raise PartFailed('the band closed before its banner')
+                text += d.decode('latin-1')
+            vport = s.getsockname()[1]
+            control.value('(setq user::*lock-error-victim* (ip::tcb-server-process (ip::tcp-connection-from-port %d)))'
+                          % vport)
+            control.value('(setq user::*lock-error-armed* t)')
+            s.sendall(b'(+ 1 2)\r\n')
+            # the band's close: EOF, or RST from the close with abort
+            closed, got, end = None, b'', time.monotonic() + 60
+            s.settimeout(None)
+            while closed is None and time.monotonic() < end:
+                if not select.select([s], [], [], max(0.0, end - time.monotonic()))[0]:
+                    break
+                try:
+                    d = s.recv(65536)
+                except ConnectionResetError:
+                    closed = 'RST'
+                    break
+                if not d:
+                    closed = 'EOF'
+                else:
+                    got += d
+            log.write(got.decode('latin-1'))
+            if closed is None:
+                raise PartFailed('the session was not closed within 60 s of the planted error (%d bytes read)'
+                                 % len(got))
+        finally:
+            s.close()
+        r = control.value('(list (null ip::network-lock) (not (null (memq user::*lock-error-victim* si:all-processes)))'
+                          ' (not (null (ip::tcp-connection-from-port %d))) (not (null ip::telnet-server-last-error))'
+                          ' (> ip::network-passes %s) user::*lock-error-armed*)'
+                          % (vport, before.strip('()').split()[0]))
+        want = '(T NIL NIL T T NIL)'
+        if r != want:
+            raise PartFailed('after the close (lock free, process alive, connection kept, error recorded, passes'
+                             ' advanced, armed): %s, wanted %s' % (r, want))
+        err = control.value('(send ip::telnet-server-last-error :report-string)')
+        if LOCKERROR_TEXTS[name] not in err.lower():
+            raise PartFailed('the error recorded is not the planted one: %s' % err)
+        telnet_session(band, '(* 6 7)', '42', log)
+    finally:
+        try:
+            control.value('(progn (setq user::*lock-error-armed* nil) (si:unadvise ip::tcp-send :before lock-error-plant) t)')
+        except (PartFailed, OSError, lc.RunFailed):
+            pass
+    return ('the session closed (%s), lock free, its process and connection gone, the error recorded (%s),'
+            ' passes advanced; a new session answers' % (closed, err))
+
+
 # The parts run by default are T2's; stall is M-tap's, and table and totals
 # T4's, each run when named.
 PARTS = {'telnet': part_telnet, 'echo': part_echo, 'churn': part_churn, 'limit': part_limit,
-         'stall': part_stall, 'table': part_table, 'totals': part_totals, 'mloss': part_mloss}
+         'stall': part_stall, 'table': part_table, 'totals': part_totals, 'mloss': part_mloss,
+         'lockerror': part_lockerror,
+         'lockerror-lisp': lambda *a: part_lockerror(*a, name='lockerror-lisp')}
 T2_PARTS = ('telnet', 'echo', 'churn', 'limit')
 
 
@@ -973,6 +1143,27 @@ def main():
             control = Control(a, server, machine, log)
             control.link = link
             control.open()
+            # lispm-check's --files (and --compile), loaded at the control
+            # session before the parts, as lispm-check loads them before its
+            # cases: a changed source on a band built before it, or a plant
+            # (lisp/, README.md)
+            for path in a.files:
+                name, logical = server.place(path, a.tree)
+                kind = 'LISP' if logical else 'lisp'
+                if a.compile:
+                    steps = ['(qc-file "%s %s")' % (name, kind) if logical else '(qc-file "%s.lisp")' % name,
+                             '(let ((si:inhibit-fdefine-warnings t)) (load "%s %s") t)'
+                             % (name, 'QFASL' if logical else 'qfasl') if logical else
+                             '(let ((si:inhibit-fdefine-warnings t)) (load "%s.qfasl") t)' % name]
+                else:
+                    steps = ['(let ((si:inhibit-fdefine-warnings t)) (load "%s%s") t)'
+                             % (name, ' LISP' if logical else '.lisp')]
+                for step in steps:
+                    r = control.sess.run(step, 900)
+                    if r[0] != 'value':
+                        raise lc.RunFailed('%s: %s: %s %s' % (path, step, r[0], lc.normal(r[1])))
+                print('%-6s %-5s %s %s' % ('file', 'PASS', os.path.relpath(path, a.tree) if logical else path,
+                                           'compiled and loaded' if a.compile else 'loaded'), flush=True)
             band = Band(link, opts.transfer_timeout)
             # the test switch is a line of its own; the parts run whatever
             # it gave, so that on a band without the stack each fails for

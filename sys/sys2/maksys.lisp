@@ -1772,7 +1772,10 @@ KEYLIST is a MAKE-SYSTEM keyword or a list of such, or NIL for none."
   (LET ((FDEFINE-FILE-PATHNAME NIL))		;Prevent MAKE-SYSTEM trying to load bogus file
     (DEFSYSTEM-1 NAME (NREVERSE OPTIONS))))
 
-(DEFINE-SIMPLE-TRANSFORMATION :GENERATE-HOST-TABLE CHAOS:GENERATE-HOST-TABLE-1
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the host
+;; table's compiler moved from CHAOS to SI (SYS: NETWORK; HOST).
+;(DEFINE-SIMPLE-TRANSFORMATION :GENERATE-HOST-TABLE CHAOS:GENERATE-HOST-TABLE-1
+(define-simple-transformation :generate-host-table generate-host-table-1
   FILE-NEWER-THAN-FILE-P (':TEXT) (':LISP) ("Generate host table from"
 					    "Generating host table from"
 					    "generated into host table"))

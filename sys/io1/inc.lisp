@@ -607,9 +607,12 @@ pages not currently in use, and pages which have no data in the disk partition."
 			     (ldb %%region-space-type (region-bits region-number)))
 		    ;; This UNLESS avoids a bug in PAGE-OUT-REGION
 		    ;; fixed in system 95.
-		    (unless (= (%area-number (region-origin region-number))
-			       chaos:chaos-buffer-area)
-		      (si:page-out-region region-number))))
+		    ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3):
+		    ;; CHAOS-BUFFER-AREA, wired, left the band with the NCP.
+;		    (unless (= (%area-number (region-origin region-number))
+;			       chaos:chaos-buffer-area)
+;		      (si:page-out-region region-number))))
+		    (si:page-out-region region-number)))
 		;; Partition exists in the disk partition,
 		;; so advance over it to find address on disk of following region.
 ;		(setq region-page-on-disk

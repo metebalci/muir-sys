@@ -698,13 +698,28 @@ and start the network process (section 5.1).  Returns T, or NIL and a message."
 ;   (si:request-clock-rate :network 1)
     t))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): with the
+;; NCP gone, a machine without the Ethernet device (revision 15) has no network
+;; at all, and the band says so, once at each boot, where it would have started
+;; the network.
+;(defun network-boot-start ()
+;  "At boot and at warm boot: start the network if the machine has the device and
+;the host gave the band an address (section 5.1)."
+;  (when (and (ether-present-p) (not (zerop (ether-register %ether-ip-address))))
+;    (multiple-value-bind (ok message) (network-start)
+;      (unless ok
+;	(format t "~&~A~%" message)))))
 (defun network-boot-start ()
   "At boot and at warm boot: start the network if the machine has the device and
-the host gave the band an address (section 5.1)."
-  (when (and (ether-present-p) (not (zerop (ether-register %ether-ip-address))))
-    (multiple-value-bind (ok message) (network-start)
-      (unless ok
-	(format t "~&~A~%" message)))))
+the host gave the band an address (section 5.1); else say once that it has no network."
+  (cond ((not (ether-present-p))
+	 (format t "~&This machine has no network: it has no Ethernet device (feature word 15 <2> is clear).~%"))
+	((zerop (ether-register %ether-ip-address))
+	 (format t "~&This machine has no network: its Ethernet device has no IPv4 address (word 255 is 0).~%"))
+	(t
+	 (multiple-value-bind (ok message) (network-start)
+	   (unless ok
+	     (format t "~&~A~%" message))))))
 
 ;; no dma while disk-save writes memory out.
 (add-initialization "Network off" '(network-stop) '(:before-cold))

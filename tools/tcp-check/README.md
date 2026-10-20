@@ -15,8 +15,9 @@ tools/tcp-check/run [--parts telnet,echo,churn,limit,stall,table,totals]
 
 It is `tools/lispm-check`'s own code, loaded from beside it: the flags after
 `--` are lispm-check's (`--band`, `--quux`, `--ubin`, `--tree`, `--engine`,
-`--file-server`, `--network`, `--keep`, and `LISPM_CHECK_TAPS` and
-`LISPM_CHECK_PORTS`), and it takes a tap and resumes that index's checkpoint
+`--file-server`, `--network`, `--keep`, `--files` and `--compile`, and
+`LISPM_CHECK_TAPS` and `LISPM_CHECK_PORTS`; the `--files` are loaded at the
+control session before the parts), and it takes a tap and resumes that index's checkpoint
 as lispm-check does, making it first when there is none. The machine must be
 revision 16 and the band one with the network. The control session is a
 TELNET session over lispm-check's `--network`, `tcp` unless another is
@@ -27,11 +28,12 @@ bound to the run's tap to QUUX's address behind it:
 | Part | It checks |
 |---|---|
 | `switch` | the test switch is turned on at the control session |
-| `telnet` | three TELNET sessions to port 23 one after another and two at once: each gets the banner, answers a form, and at the client's EOF its server closes its side, with FIN (section 7) |
+| `telnet` | three TELNET sessions to port 23 one after another and two at once: each gets the banner, answers a form, and at the client's EOF its server closes its side, with FIN (section 7); then the client's EOF alone after the banner, while a form runs (`(progn (process-sleep 300) :te-done)`, whose value must come before the band's EOF) and while the listener asks whether to enter the debugger (after `(car 1)`): each time the band closes with FIN and no connection is left but the control session's (system-check's `telnet-eof` checked these over Chaos until step R3 of section 8). Measured on the R3 band (micro): all pass; with `SI:TELNET-SERVER-EOF` planted to wait without closing, all three fail (no EOF in 120 s), and planted to close with abort, all three fail (the connection reset) |
 | `echo` | the test echo service, port 7, both ways at once: each size (1 B, 1 KiB, 64 KiB, 1 MiB) sent ten times while its echo is read, the echo equal to what was sent by sha256 |
 | `churn` | 1,000 connections to port 7 opened and closed in a row, each echoing one byte; after them the band has no connection but the control session's, and 64 TIME-WAIT records or fewer |
 | `limit` | with the control session closed first, since it is one of the 8: 8 connections at once, each echoing a byte, and a ninth refused with RST; after them none but a new control session's |
 | `relay` | the fault relay, which checks every Ethernet frame the band sends with its own code, found none bad |
+| `lockerror`, `lockerror-lisp` | run only when named: an error planted at the control session in `IP::TCP-SEND` (advised) fires once in a fresh TELNET session's process as it answers a form, with `NETWORK-LOCK` held: a microcode error, a subscript out of range, as a reload whose files did not match the running stack raised, or with `lockerror-lisp` an `FERROR`. The band must close that session (EOF or RST) within 60 s; then, at the control session, `NETWORK-LOCK` is free, the session's process is gone (not left in the debugger), its connection is gone, `IP::TELNET-SERVER-LAST-ERROR` holds the planted error and `NETWORK-PASSES` has advanced; and a new TELNET session answers a form. Measured on a band built from the sources before the change (micro): before the TELNET server contained the error, the session sat in the debugger with the lock and the control session never answered again; with the fix loaded both pass, the session closed with RST; with a partial fix that frees the lock but leaves the session in the debugger, `lockerror` fails (not closed within 60 s). On a band built before the fix, give the fixed sources first, `-- --compile --files sys/network/telnet.lisp,sys/network/ip/servers.lisp`; the partial fix is `lisp/lockerror-partial-fix-plant.lisp`, given after them |
 
 The status is 0 when every line passes, 1 when one fails, 2 when the run
 itself failed (lispm-check's), 3 for a hang in the setup. T2 asserts

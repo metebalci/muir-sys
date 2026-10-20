@@ -1,0 +1,11 @@
+; The band's own host and the names that follow from it agree (QUUX's
+; Ethernet contract, sections 5.6 and 8, step R3; sys/network/host.lisp,
+; SET-LOCAL-HOST-VARIABLES's cold initialization, and
+; sys/network/ip/servers.lisp, INTERNET-SET-LOCAL-HOST).  Until they were set
+; together, SI:LOCAL-HOST-NAME kept the saved band's host while SI:LOCAL-HOST
+; was this boot's: on revision 16, "UNKNOWN-NIL-NIL" against
+; "UNKNOWN-INTERNET-<address>".  On revision 15, with no network to drive a
+; session, type the first form at the console.
+(string= si:local-host-name (send si:local-host :name)) => T
+; recorded: the host, its names, its location and the associated machine
+(list (send si:local-host :name) si:local-pretty-host-name si:local-finger-location (send si:associated-machine :name))

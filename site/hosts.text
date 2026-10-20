@@ -15,3 +15,7 @@ HOST LISPM-4,		CHAOS 177204,USER,LISPM,CADR
 HOST LISPM-5,		CHAOS 177205,USER,LISPM,CADR
 HOST LISPM-6,		CHAOS 177206,USER,LISPM,CADR
 HOST LISPM-7,		CHAOS 177207,USER,LISPM,CADR
+; LOCALHOST names a machine nothing else names (QUUX's Ethernet contract,
+; section 5.6): no name file, no SET-HOST-NAME, no INTERNET match.  Its
+; address is only the host table's form; the band has no loopback.
+HOST LOCALHOST,		INTERNET 127.0.0.1,USER,LISPM,CADR

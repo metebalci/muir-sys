@@ -1,4 +1,5 @@
 ;;; -*- Mode:LISP; Package:CHAOS; Base:8; Readtable:T -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 ;;; Stuff that uses the NCP.  Servers, etc.
 
 (DEFUN HOST-UP-P (HOST &OPTIONAL (TIMEOUT 180.) &AUX PKT)
@@ -1222,23 +1223,28 @@ If mode is :NOTIFY, you will be notified whenever an EVAL server is created."
     (PUSH CONN EVAL-SERVER-CONNECTIONS)
     (SEND TV:WHO-LINE-FILE-STATE-SHEET :ADD-SERVER CONN "TELNET")
     (CONDITION-CASE ()
-	(LET ((UNTYI-CHAR NIL))
-	  (DECLARE (SPECIAL UNTYI-CHAR))
-	  (WITH-OPEN-STREAM (STREAM (MAKE-STREAM CONN :ASCII-TRANSLATION T))
-	    (DECLARE (SPECIAL STREAM))
-	    (PRINT-HERALD STREAM)
-	    (FORMAT STREAM "~&Telnet server here~2%")
-	    (SEND STREAM :FORCE-OUTPUT)
-	    ;; Flush any number of telnet negotiations.  (We only understand the simplest kind).
-	    ;; peek at the next byte instead of reading it and sending :UNTYI (#2).  The
-	    ;; stream reads CR LF as one Return, which :UNTYI cannot push back, so a session
-	    ;; whose first input was Return died in the error handler.  :TYIPEEK consumes
-	    ;; nothing, and IAC (#o377) is the same byte translated or not.
-	    (DO-FOREVER
-	      (IF (EQ (SEND STREAM :TYIPEEK) #o377)
-		  (PROGN (SEND STREAM :TYI) (SEND STREAM :TYI) (SEND STREAM :TYI))
-		(RETURN)))
-	    (SI:LISP-TOP-LEVEL1 (CLOSURE '(STREAM UNTYI-CHAR) 'ECHOING-STREAM))))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the session's
+;; body moved to SYS: NETWORK; TELNET (SI:TELNET-SERVER-BODY), which takes the
+;; stream.
+;	(LET ((UNTYI-CHAR NIL))
+;	  (DECLARE (SPECIAL UNTYI-CHAR))
+;	  (WITH-OPEN-STREAM (STREAM (MAKE-STREAM CONN :ASCII-TRANSLATION T))
+;	    (DECLARE (SPECIAL STREAM))
+;	    (PRINT-HERALD STREAM)
+;	    (FORMAT STREAM "~&Telnet server here~2%")
+;	    (SEND STREAM :FORCE-OUTPUT)
+;	    ;; Flush any number of telnet negotiations.  (We only understand the simplest kind).
+;	    ;; peek at the next byte instead of reading it and sending :UNTYI (#2).  The
+;	    ;; stream reads CR LF as one Return, which :UNTYI cannot push back, so a session
+;	    ;; whose first input was Return died in the error handler.  :TYIPEEK consumes
+;	    ;; nothing, and IAC (#o377) is the same byte translated or not.
+;	    (DO-FOREVER
+;	      (IF (EQ (SEND STREAM :TYIPEEK) #o377)
+;		  (PROGN (SEND STREAM :TYI) (SEND STREAM :TYI) (SEND STREAM :TYI))
+;		(RETURN)))
+;	    (SI:LISP-TOP-LEVEL1 (CLOSURE '(STREAM UNTYI-CHAR) 'ECHOING-STREAM))))
+	(with-open-stream (stream (make-stream conn :ascii-translation t))
+	  (si:telnet-server-body stream))
       (SYS:REMOTE-NETWORK-ERROR NIL))))
 
 (ADD-INITIALIZATION "TELNET"
@@ -1246,6 +1252,10 @@ If mode is :NOTIFY, you will be notified whenever an EVAL server is created."
                     NIL
                     'SERVER-ALIST)
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the TELNET
+;; server's body, protocol-independent, moved to SYS: NETWORK; TELNET, in SI:
+;; ECHOING-STREAM, TELNET-SERVER-EOF and their variables.
+#|
 (DEFVAR RECORD-STREAM NIL)
 
 (DEFVAR *TELNET-OUTPUT-TRANSLATION-TABLE* ; for 32 random LM-characters
@@ -1308,6 +1318,7 @@ If mode is :NOTIFY, you will be notified whenever an EVAL server is created."
   (send stream :close)
   (process-run-function "Kill" current-process :kill)
   (process-wait "Die" 'false))
+|#
 
 (DEFUN SYMBOLICS-CONNECTION-P (CONN &OPTIONAL REJECT-UNKNOWN-HOSTS)
   (LET ((HOST (CATCH-ERROR (SI:GET-HOST-FROM-ADDRESS (FOREIGN-ADDRESS CONN) :CHAOS) NIL)))
@@ -1505,6 +1516,10 @@ If you want to quit, hit the ~:@C key, to end your message hit the ~:@C key."
   (PRINT-RECENT-HEADERS))
 
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the host table's
+;; parser and compiler moved to SYS: NETWORK; HOST, in SI, since the host table
+;; serves every network.
+#|
 ;;;; Host table frobs
 
 (DEFUN GENERATE-HOST-TABLE (&OPTIONAL INPUT-FILE)
@@ -1658,3 +1673,4 @@ If you want to quit, hit the ~:@C key, to end your message hit the ~:@C key."
 
 (DEFUN (:INTERNET HOST-ADDRESS-PARSER) (IGNORE LINE START END)
   (SUBSTRING LINE START END))
+|#

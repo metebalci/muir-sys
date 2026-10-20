@@ -147,7 +147,7 @@ session:
 | `--network` | The session | The machine's Chaos | ozd |
 |---|---|---|---|
 | `chaos` | ozd's TCP gateway to the band's Chaos TELNET server | `--chaos-address 177201` and its cable, `--chaos-udp` to ozd | started |
-| `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | `--chaos-address 177201` only: no cable and no peer | not started |
+| `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | none: no address, no cable and no peer (until R3, `--chaos-address 177201` alone) | not started |
 
 **The default** (the contract, section 8 R2): a run that names no network,
 by the flag or the variable, takes `tcp` on revision 16, whose band has the
@@ -175,10 +175,13 @@ system-check, assembler-check and cross-check do, get its default.
 `tcp` needs revision 16 and a band whose `SYS:` is on HOST, its files on the
 file device: ozd would serve OZ's files over Chaos. So `--file-server auto`
 means `device` under `tcp`, and the setup's check refuses a band whose `SYS:`
-is on OZ. `--chaos-address` is given in both until the NCP leaves the band
-(the contract's R3), since the checkpoint holds the Chaosnet interface's
-switches and muir refuses a resume under others; so one checkpoint serves
-both networks. At the end of a setup over TCP the tool closes cleanly
+is on OZ. Since the NCP left the band (the contract's section 8, R3),
+`tcp` gives the machine no `--chaos-address`, and on revision 16 each
+network has a checkpoint of its own, `chaos`'s key ending `-chaos` before the
+address: the checkpoint holds the Chaosnet interface's switches and muir
+refuses a resume under others. Until R3 `--chaos-address` was given in both,
+so that one checkpoint served both networks and the band behind the pool
+was LISPM-1; now a band is the unnamed host of its INTERNET address. At the end of a setup over TCP the tool closes cleanly
 (section 7): it half-closes the session, reads to the band's EOF, which the
 band's server sends at the client's EOF, and waits 0.5 s for the last ACK, so
 that the checkpoint holds no connection; a band that sends no EOF within 60
@@ -192,10 +195,10 @@ a /30 of their own, since a LAN tap's address is a real one (the contract,
 amendment 3). A checkpoint is made for each tap index on its first use, by
 the run that holds that tap, and its key names QUUX's address behind the tap,
 since muir refuses a resume under other addresses; on revision 16 the key's
-setup version is 3:
+setup version is 4 (3 until R3), and a run over Chaos adds `-chaos` before the address:
 
 ```
-<band sha256>-<quux sha256>-3-micro-device-169.254.101.2.chk   (each sha256 its first 16 digits)
+<band sha256>-<quux sha256>-4-micro-device-169.254.101.2.chk   (each sha256 its first 16 digits; 3 until R3)
 ```
 
 The JSON beside it records the tap, both addresses, and the network that made
@@ -410,8 +413,11 @@ cache of its own, so that its first run sets up over TCP: `tcp` (A held by
 another program, the run takes B, sets up over TCP and resumes; the machine
 has B's addresses and no Chaos peer, ozd is not started, the relay found no
 bad frame, the key names B's address, and the resumed band holds only the
-session's connection), `order` (both free, B alone with a checkpoint: the run
-takes B over Chaos with no setup, one checkpoint serving both networks),
+session's connection; and the machine has no `--chaos-address`), `chaos-own`
+(both free, B alone with tcp's checkpoint: the run over Chaos sets up its own,
+keyed `-chaos`, its machine having `--chaos-address 177201` and its cable;
+until R3 this was `order`, the run taking B with no setup, one checkpoint
+serving both networks),
 `index` (B held: A, with a setup of its own), `order-both` (both free: A, no
 setup), `wait` (A alone and held for 5 s: the run waits, then takes it),
 `no-tap` (a range with no tap: status 2), and with
@@ -430,7 +436,13 @@ tap and over Chaos, ozd serving the files. Last, `rtl-flags`: revision 16
 on rtl through a wrapper that adds the soak's rtl-only flags,
 `--memory-timing kria --cache 65536`, to `--quux`'s machine, still asked its
 revision (16) and so over TCP, with the stand-in ozd never started; its
-setup is on rtl, about 5 minutes more. `LISPM_CHECK_TEST_TOOL` names
+setup is on rtl, about 5 minutes more. Since step R3 the band has no Chaos,
+so the Chaos cases, `chaos-own`, `rev15-chaos`, `variable` and
+`rev15-default`, run on a band from before R3 that has both networks,
+`LISPM_CHECK_TEST_CHAOS_BAND`, with its `ubin/` in
+`LISPM_CHECK_TEST_CHAOS_UBIN` and its machines in `LISPM_CHECK_TEST_CHAOS_QUUX`
+(revision 16) and `LISPM_CHECK_TEST_CHAOS_QUUX15`; without it they are
+skipped. `LISPM_CHECK_TEST_TOOL` names
 another copy of the tool to test, a planted one say. About 5 minutes on
 micro.
 

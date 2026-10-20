@@ -1526,9 +1526,14 @@ A-flavor-of ~S being-created, atom-name ~S, path ~S, package-name ~S"
   (vwrite (+ adr sym:%sys-com-memory-size) (vfix #o100000))	;assume 32K, fixed later
   (vwrite (+ adr sym:%sys-com-wired-size)  ;region-gc-pointer is the first pageable area
 	  (vfix (get-area-origin 'sym:region-gc-pointer)))
-  (vwrite (+ adr sym:%sys-com-chaos-free-list) qnil)
-  (vwrite (+ adr sym:%sys-com-chaos-transmit-list) qnil)
-  (vwrite (+ adr sym:%sys-com-chaos-receive-list) qnil)
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the Chaos
+  ;; lists' three slots are reserved, and hold nil as the lists' empty heads did.
+;  (vwrite (+ adr sym:%sys-com-chaos-free-list) qnil)
+;  (vwrite (+ adr sym:%sys-com-chaos-transmit-list) qnil)
+;  (vwrite (+ adr sym:%sys-com-chaos-receive-list) qnil)
+  (vwrite (+ adr sym:%sys-com-reserved-1) qnil)
+  (vwrite (+ adr sym:%sys-com-reserved-2) qnil)
+  (vwrite (+ adr sym:%sys-com-reserved-3) qnil)
   (vwrite (+ adr sym:%sys-com-debugger-requests) (vfix 0))
   (vwrite (+ adr sym:%sys-com-debugger-keep-alive) (vfix 0))
   (vwrite (+ adr sym:%sys-com-debugger-data-1) (vfix 0))

@@ -574,9 +574,11 @@ and four other names that do not allow LEFT- or RIGHT- :
 ;      (#/E (SI:CALL-ELEVATOR) (AND (OR (SI:TECH-SQUARE-FLOOR-P 8)
 ;					(SI:TECH-SQUARE-FLOOR-P 9))
 ;				    "Call the elevator"))
-       (#/F KBD-FINGER (FINGER-ARG-PROMPT) :TYPEAHEAD)
+;       (#/F KBD-FINGER (FINGER-ARG-PROMPT) :TYPEAHEAD)
        (#/G (KBD-GC-STATUS) "Show the current state of all garbage collection.")
-       (#/H (KBD-HOSTAT) "Show status of CHAOSnet hosts" :TYPEAHEAD)
+       ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Terminal
+       ;; F and H, FINGER and HOSTAT, went over Chaos, which left the band.
+;       (#/H (KBD-HOSTAT) "Show status of CHAOSnet hosts" :TYPEAHEAD)
        (#/I KBD-ESC-I
 	"Selected window deexposed input notify flag (complement, or arg=1 on, 0 off)")
        (#/M KBD-ESC-MORE "Selected window **MORE** enable (complement, or arg=1 on, 0 off)"
@@ -1008,6 +1010,9 @@ OPTIONS can include either :TYPEAHEAD or :KEYBOARD-PROCESS,
 (DEFVAR *LAST-PRINTED-FINGER-ARG-STRING* NIL
   "The last value returned by FINGER-ARG-PROMPT.")
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Terminal F's
+;; prompt, for the FINGER client over Chaos, which left the band with the NCP.
+#|
 (DEFUN FINGER-ARG-PROMPT ()
   "Return a string describing the possible arguments to Terminal F."
   (IF (EQUAL *FINGER-ARG-ALIST* *LAST-PRINTED-FINGER-ARG-ALIST*)
@@ -1087,6 +1092,7 @@ OPTIONS can include either :TYPEAHEAD or :KEYBOARD-PROCESS,
 ;; A warm boot cannot change this as far as I can tell.
 ;(ADD-INITIALIZATION "Finger arg prompt" '(FINGER-INITIALIZE-PROMPT)
 ;		    '(:WARM))
+|#
 
 ;;; this used to be a macro, but foo.
 (DEFUN AWAIT-USER-TYPEAHEAD (WINDOW)
@@ -1094,6 +1100,10 @@ OPTIONS can include either :TYPEAHEAD or :KEYBOARD-PROCESS,
   (FORMAT WINDOW "~&~%Type a space to flush: ") ;well any character, anyway
   (SEND WINDOW :TYI))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Terminal F
+;; fingered hosts over Chaos (the FINGER client), which left the band with the
+;; NCP.
+#|
 (DEFUN KBD-FINGER (ARG &AUX MODE HOSTS LISPMS-P ALL-LISPMS-P)
   "This function fingers various hosts and displays them on a temporary window.
 It is called when the user types terminal-f"
@@ -1164,6 +1174,7 @@ It is called when the user types terminal-f"
 	     (CONDITION-TYPEP RESULT 'SYS:NETWORK-ERROR))
     (SEND WINDOW :FRESH-LINE)
     (SEND RESULT :REPORT WINDOW)))
+|#
 
 (DEFUN KBD-ESC-NOTIFICATIONS (ARG &AUX NN TEM)	;terminal n
   "Display notifications in a pop-up window.
@@ -1284,6 +1295,9 @@ ARG is NIL, view own's new mail, 0 view other person's mail, 1 view a different 
 	(AWAIT-USER-TYPEAHEAD WINDOW)))))
 
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Terminal H
+;; showed the Chaos hosts' status (HOSTAT), which left the band with the NCP.
+#|
 (DEFUN KBD-HOSTAT ()				;terminal h
   "In a temporary window, show the user the status of various chaosnet hosts."
   (USING-RESOURCE (WINDOW POP-UP-FINGER-WINDOW)
@@ -1295,6 +1309,7 @@ ARG is NIL, view own's new mail, 0 view other person's mail, 1 view a different 
 	(SETQ KBD-ESC-TIME NIL)			;Window configuration stable.
 	(HOSTAT)
 	(AWAIT-USER-TYPEAHEAD WINDOW)))))
+|#
 
 (DEFUN KBD-ESC-I (ARG)				;terminal i
   "Control the selected window's deexposed type-IN action.
@@ -1441,15 +1456,21 @@ Hold-Output	(not used)			Line		Next line and indent (Zmacs)
 
 ;character lossage
 (DEFVAR *SYSTEM-KEYS*
-	'((#/C ZWEI:CONVERSE-FRAME "Converse" T)
+	;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Converse
+	;; sent its messages over Chaos, which left the band with the NCP.
+;	'((#/C ZWEI:CONVERSE-FRAME "Converse" T)
+	'(
 	  (#/E ZWEI:ZMACS-FRAME "Editor" T)
 	  (#/F FED:FED-FRAME "Font Edit" T)
 	  (#/I INSPECT-FRAME "Inspector" T)
 	  (#/L LISTENER-MIXIN "Lisp" LISP-LISTENER)
 	  (#/P PEEK-FRAME "Peek" T)
 	  ;(#/R EH::ERROR-HANDLER-FRAME "Window error-handler" NIL)  ;not a program!
-	  (#/S (PROGN SUPDUP:SUPDUP-FLAVOR) "Supdup" T)
-	  (#/T SUPDUP:TELNET "Telnet" T))
+	  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): Supdup and
+	  ;; Telnet, the SUPDUP and TELNET clients, spoke Chaos, which left the band.
+;	  (#/S (PROGN SUPDUP:SUPDUP-FLAVOR) "Supdup" T)
+;	  (#/T SUPDUP:TELNET "Telnet" T))
+	  )
   "Defines keys you can type after the System key.
 Each element is a list (CHARACTER FLAVOR DOCUMENTATION-STRING CREATE-FLAVOR)
 CHARACTER is the character this applies to.

@@ -382,7 +382,9 @@ COLD-BOOT is T if this is for a cold boot."
 
   (SETQ SI:PRINT-READABLY NIL)
 
-  (SETQ CHAOS:CHAOS-SERVERS-ENABLED NIL)	;Don't allow botherage from networks
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the Chaos
+  ;; servers left the band with the NCP.
+;  (SETQ CHAOS:CHAOS-SERVERS-ENABLED NIL)	;Don't allow botherage from networks
   (IF COLD-BOOT (SETQ FS:USER-LOGIN-MACHINE NIL))
   (SETQ *PACKAGE* PKG-USER-PACKAGE)
 
@@ -511,7 +513,11 @@ If you examine it, you will see a state that is not quite the latest one."
     (SETQ *TERMINAL-IO* TV::DEFAULT-BACKGROUND-STREAM))
 
   ;; Now that -all- initialization has been completed, allow network servers
-  (SETQ CHAOS:CHAOS-SERVERS-ENABLED T))
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the Chaos
+  ;; servers left the band with the NCP; the TCP servers have no such switch.
+;  (SETQ CHAOS:CHAOS-SERVERS-ENABLED T))
+  ;; the setq's value, which ended the function
+  t)
 
 (DEFUN UNCLOSUREBIND (SYMBOLS)
   "If any of SYMBOLS has a closure binding evcp pointer in its value cell, remove it.

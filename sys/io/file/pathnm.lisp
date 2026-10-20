@@ -1541,7 +1541,10 @@ Note that the names of some of the logical hosts in this list may shadow the nam
 of physical hosts in FS:*PATHNAME-HOST-LIST*")
 
 (DEFUN GET-PATHNAME-HOST (HOST-NAME &OPTIONAL NO-ERROR-P
-			  (UNKNOWN-OK (VARIABLE-BOUNDP CHAOS:MY-ADDRESS)))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): unknown hosts were
+			  ;; asked of the network while the NCP was up; no network asks now.
+;			  (UNKNOWN-OK (VARIABLE-BOUNDP CHAOS:MY-ADDRESS)))
+			  (unknown-ok nil))
   "Parse a host for use in a pathname.
 HOST-NAME can be a host object or a host name.
 If NO-ERROR-P is non-NIL, we return NIL if given an undefined host name."

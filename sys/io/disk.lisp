@@ -647,32 +647,41 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
 	   (DECLARE (SPECIAL CC-DISK-UNIT))
 	   (CLOSURE '(CC-DISK-UNIT)
 		    'CC-TEST-HANDLER)))
-	((STRINGP UNIT)				;Open connection to foreign disk
-	 ;; make @lm1 work as well as lm1
-	 ;; if a host is stupid enough to have a name like @Losing  then use "@@Losing"
-	 (IF (CHAR= #/@ (CHAR UNIT 0))
-	     (SETQ UNIT (SUBSTRING UNIT 1)))
-	 (LET ((REMOTE-DISK-CONN
-		 (CHAOS:CONNECT (SUBSTRING UNIT 0 (SETQ TEM (STRING-SEARCH-CHAR #/SP UNIT)))
-				"REMOTE-DISK" 25.))
-	       (REMOTE-DISK-STREAM)
-	       (REMOTE-DISK-UNIT (IF (NULL TEM) 0 (READ-FROM-STRING UNIT NIL (1+ TEM)))))
-	   (DECLARE (SPECIAL REMOTE-DISK-CONN REMOTE-DISK-STREAM REMOTE-DISK-UNIT))
-	   (AND (STRINGP REMOTE-DISK-CONN)
-		(FERROR NIL "Cannot connect to ~S: ~A" UNIT REMOTE-DISK-CONN))
-	   (SETQ REMOTE-DISK-STREAM (CHAOS:MAKE-STREAM REMOTE-DISK-CONN))
-	   (FORMAT REMOTE-DISK-STREAM "SAY Disk being hacked remotely by ~A@~O -- ~A~%"
-		   		      USER-ID
-				      (GET-HOST-FROM-ADDRESS CHAOS:MY-ADDRESS :CHAOS)
-				      USE)
-	   (SEND REMOTE-DISK-STREAM :FORCE-OUTPUT)
-	   (CLOSURE '(REMOTE-DISK-CONN REMOTE-DISK-STREAM REMOTE-DISK-UNIT)
-		    'REMOTE-DISK-HANDLER)))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): a
+;; string names another machine's disk, reached over Chaos, which left the
+;; band with the NCP; such a unit is refused.
+;	((STRINGP UNIT)				;Open connection to foreign disk
+;	 ;; make @lm1 work as well as lm1
+;	 ;; if a host is stupid enough to have a name like @Losing  then use "@@Losing"
+;	 (IF (CHAR= #/@ (CHAR UNIT 0))
+;	     (SETQ UNIT (SUBSTRING UNIT 1)))
+;	 (LET ((REMOTE-DISK-CONN
+;		 (CHAOS:CONNECT (SUBSTRING UNIT 0 (SETQ TEM (STRING-SEARCH-CHAR #/SP UNIT)))
+;				"REMOTE-DISK" 25.))
+;	       (REMOTE-DISK-STREAM)
+;	       (REMOTE-DISK-UNIT (IF (NULL TEM) 0 (READ-FROM-STRING UNIT NIL (1+ TEM)))))
+;	   (DECLARE (SPECIAL REMOTE-DISK-CONN REMOTE-DISK-STREAM REMOTE-DISK-UNIT))
+;	   (AND (STRINGP REMOTE-DISK-CONN)
+;		(FERROR NIL "Cannot connect to ~S: ~A" UNIT REMOTE-DISK-CONN))
+;	   (SETQ REMOTE-DISK-STREAM (CHAOS:MAKE-STREAM REMOTE-DISK-CONN))
+;	   (FORMAT REMOTE-DISK-STREAM "SAY Disk being hacked remotely by ~A@~O -- ~A~%"
+;		   		      USER-ID
+;				      (GET-HOST-FROM-ADDRESS CHAOS:MY-ADDRESS :CHAOS)
+;				      USE)
+;	   (SEND REMOTE-DISK-STREAM :FORCE-OUTPUT)
+;	   (CLOSURE '(REMOTE-DISK-CONN REMOTE-DISK-STREAM REMOTE-DISK-UNIT)
+;		    'REMOTE-DISK-HANDLER)))
+	((stringp unit)
+	 (ferror nil "~S names a remote disk, reached over Chaos, which this band does not have." unit))
 	(T (VALUES UNIT T))))				;Probably remote disk at higher level
 
 (DEFUN DISPOSE-OF-UNIT (UNIT)
   (OR (NUMBERP UNIT) (SEND UNIT :DISPOSE)))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the remote
+;; disk spoke Chaos (the REMOTE-DISK server, its packets), which left the band
+;; with the NCP.
+#|
 ;;; :READ-COMPARE not supported, nothing uses it.
 ;;; 1024-word pages (contract g2, option (w)): an rqb's blocks are its pages'
 ;;; (rqb-nblocks), each disk-block-words words, 1024 bytes.
@@ -778,6 +787,7 @@ If second value is NIL, the caller should call DISPOSE-OF-UNIT eventually."
     (SETF (AREF PKT (+ (FLOOR (ARRAY-LENGTH OUTOF) 2) #o10)) (CHECKSUM-STRING OUTOF))
     (SETF (CHAOS:PKT-NBYTES PKT) (+ (ARRAY-LENGTH OUTOF) 2))
     (CHAOS:SEND-PKT CONN PKT)))
+|#
 
 (DEFUN CHECKSUM-STRING (STR)
   (DO ((CKSM 0 (+ (AREF STR I) CKSM))
@@ -1236,7 +1246,10 @@ RQB is an rqb to use, or NIL meaning allocate one temporarily."
 
 ;;; This is a hack to allow one to easily find if a partition he wants is available.
 (DEFUN PRINT-AVAILABLE-BANDS (&OPTIONAL (WHICH "LOD")
-					(MACHINES (CHAOS:FINGER-ALL-LMS 'IGNORE NIL T))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the
+;; machines on the chaosnet are gone with the NCP; only this machine's disk.
+;					(MACHINES (CHAOS:FINGER-ALL-LMS 'IGNORE NIL T))
+					(machines '(0))
 			      &AUX (WL (AND (STRINGP WHICH)
 					    (MIN (ARRAY-ACTIVE-LENGTH WHICH) 4)))
 			      DONT-DISPOSE
@@ -2495,9 +2508,12 @@ frames PAGE-RQB's ccws name, and make them the pages' frames."
   unit
   (local-machine-name))
 
+;; quux (QUUX's Ethernet contract, section 5.6, "From R3"): the gpt has no pack
+;; name, and the machine's name is the band's: SI:SET-HOST-NAME gives it
+;; (sys/network/host), so this still refuses, naming that command.
 (defun set-pack-name (pack-name &optional (unit 0))
   pack-name unit
-  (ferror nil "The pack name is retired on QUUX, whose GPT has none; the host table names the machine."))
+  (ferror nil "The pack name is retired on QUUX, whose GPT has none; SI:SET-HOST-NAME names the machine."))
 
 ;This is a test function.
 (DEFUN READ-ALL-BLOCKS (&OPTIONAL (UNIT 0) &AUX RQB BUF BLOCKS-PER-TRACK N-CYLS N-HEADS)

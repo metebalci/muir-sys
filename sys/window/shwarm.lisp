@@ -1968,7 +1968,9 @@ SHEET's cursor is not used or moved."
       ;; was saved at had no chaosnet, and no telnet server.  the reset
       ;; turns the chaosnet on again when it was on, which in the other
       ;; order, before chaos-ncp, it is not (the save turns it off).
-      (if (fboundp 'chaos:reset) (chaos:reset (symbol-value 'chaos:enable)))
+      ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3):
+      ;; the NCP left the band, and with it the chaosnet's reset.
+;      (if (fboundp 'chaos:reset) (chaos:reset (symbol-value 'chaos:enable)))
       (delaying-screen-management
 	(without-interrupts
 	  (let ((who-height (sheet-height who-line-screen)))

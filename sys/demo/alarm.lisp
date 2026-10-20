@@ -378,6 +378,10 @@ TIME MESSAGE INTERVAL REPEAT-END-TIME ALSO-SHOW-MESSAGE-P FUNCTION ARGS")
 (DEFVAR HOSTS-CURRENT-STATUS NIL "List of hosts for which we know their present status.")
 (DEFVAR HOSTS-WITH-NEW-STATUS NIL "List of hosts which have just gone up or down.")
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the HOSTS alarm
+;; opened Chaos connections to the hosts' STATUS servers, which left the band
+;; with the NCP.
+#|
 (DEFUN (HOSTS CHECK) (&AUX CONNECTIONS CURRENT-STATUS)
   (UNWIND-PROTECT
     (PROGN (PROCESS-LOCK (LOCF HOSTS-TO-CHECK-LOCK))
@@ -463,11 +467,15 @@ TIME MESSAGE INTERVAL REPEAT-END-TIME ALSO-SHOW-MESSAGE-P FUNCTION ARGS")
 	       (PUSH HOST HOSTS-TO-CHECK)))
     (%STORE-CONDITIONAL (LOCF HOSTS-TO-CHECK-LOCK) CURRENT-PROCESS NIL)))
 
+|#
 ;; Make alarm go off when a Lispm frees up.
 ;; Here CHAOS:FINGER-ALL-LMS does all the work for us.
 (DEFVAR FREE-LISPMS NIL  "List of free lisp machines.  Initially, NIL")
 (DEFVAR NEW-FREE-LISPMS NIL "List of lisp machines which have just become free.")
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the LISPM alarm
+;; asked the Chaos FINGER server of every Lisp machine, which left the band with the NCP.
+#|
 (DEFUN (LISPM CHECK) ()
   (LET ((LISPMS (CHAOS:FINGER-ALL-LMS  'IGNORE NIL T)))
     (DOLIST (LISPM LISPMS)
@@ -489,6 +497,7 @@ TIME MESSAGE INTERVAL REPEAT-END-TIME ALSO-SHOW-MESSAGE-P FUNCTION ARGS")
 (DEFPROP LISPM IGNORE RESET)
 (DEFPROP LISPM IGNORE NEW-ALARM)
 (DEFPROP LISPM IGNORE REMOVE-ALARM) ;foo
+|#
 
 
 ;;; User interface functions.
@@ -552,6 +561,9 @@ of ARGS instead of you being notified of the MESSAGE, unless ALSO-SHOW-MESSAGE-P
 ;; By default, the background host stuff will always notify if the host is not up.
 ;; See the variable ALWAYS-NOTIFY-IF-HOST-NOT-UP.   It's a kludge, but...
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the HOSTS and LISPM
+;; alarms' user functions, gone with the alarms.
+#|
 (DEFUN BACKGROUND-CHECK-HOSTS (NOTIFY-INITIALLY-P &REST HOSTS)
   "Notify me when one of the hosts specified goes up or down."
   (DO ((H HOSTS (CDR H))) ((NULL H))
@@ -571,7 +583,11 @@ will be be notified."
       (SET-ALARM-INHIBIT-NOTIFY 'LISPM))
   (ADD-ALARM 'LISPM))
 
-(DEFVAR ALARM-TYPE-LIST '(TIME FILE HOSTS LISPM MAIL) "A list of know types of alarm.")
+|#
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the HOSTS and LISPM
+;; alarms are gone.
+;(DEFVAR ALARM-TYPE-LIST '(TIME FILE HOSTS LISPM MAIL) "A list of know types of alarm.")
+(defvar alarm-type-list '(time file mail) "A list of know types of alarm.")
 
 (DEFUN PRINT-ALARM (&OPTIONAL ALARM (STREAM STANDARD-OUTPUT))
   "Display information about a particular alarm."

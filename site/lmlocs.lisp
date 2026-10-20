@@ -20,4 +20,8 @@
    ("LISPM-5" "Lisp Machine Five" "MUIR" (muir 1) "HOST")
    ("LISPM-6" "Lisp Machine Six" "MUIR" (muir 1) "HOST")
    ("LISPM-7" "Lisp Machine Seven" "MUIR" (muir 1) "HOST")
+   ;; quux revision 16 (QUUX's Ethernet contract, section 5.6): LOCALHOST, the
+   ;; name of a machine nothing else names, prints as "localhost", its
+   ;; associated machine HOST like the others.
+   ("LOCALHOST" "localhost" "(Unknown)" (unknown 0) "HOST")
    ))

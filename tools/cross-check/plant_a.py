@@ -19,12 +19,15 @@ when a plant is not judged as it must be.
   generated symbol made a plain one  its G made H: must DIFFER
   EXPR-SXHASH value                  equal
   a fixnum beside it                 another fixnum of that FEF: must DIFFER
-  GENTEMP name in a local map        its number changed: equal
+  GENTEMP name in a local map        a name same40 numbers away only in a
+                                     local map, its number changed: equal
   a macro's hash in the record       (SI:FASL-RECORD-FILE-MACROS-EXPANDED): equal
-  local-map name made another        its first letter changed: must DIFFER
+  local-map name made another        that name's first letter changed:
+                                     must DIFFER
 """
 import io
 import os
+import re
 import shutil
 import struct
 import sys
@@ -103,6 +106,53 @@ def judge(orig_tree, rel, words, data):
         return rc, buf.getvalue()
     finally:
         shutil.rmtree(tmp)
+
+
+def local_map_spans(text):
+    """The (start, end) of each (COMPILER:LOCAL-MAP ...) in TEXT, as same40's
+    local_maps finds them."""
+    spans, i, key = [], 0, '(COMPILER:LOCAL-MAP '
+    while True:
+        j = text.find(key, i)
+        if j < 0:
+            return spans
+        depth, k = 0, j
+        while k < len(text):
+            if text[k] == '(':
+                depth += 1
+            elif text[k] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        spans.append((j, k + 1))
+        i = k + 1
+
+
+def local_map_name(d):
+    """(name, at, length) of a symbol of D that same40 normalises as a
+    local-map name and nowhere else: its name matches same40.GENTEMP whole and
+    not same40.GENERATED, and each place the file's text names it, with a
+    package prefix or without, is inside a local map, unprefixed; else None."""
+    texts = [same40.render(x, None) for x in [list(e) for e in d.events] + list(d.fefs)]
+    p = d.plist or []
+    texts += [same40.render(p[i], None) + ' ' + same40.render(p[i + 1], None) for i in range(0, len(p) - 1, 2)]
+    spans = [local_map_spans(t) for t in texts]
+    seen = set()
+    for name, at, n in d.at_symbols:
+        if name in seen or not same40.GENTEMP.fullmatch(name) or same40.GENERATED.fullmatch(name):
+            continue
+        seen.add(name)
+        tok = re.compile(r'(?<![\w*%.-])(?:[\w*%.-]+:)?' + re.escape(name) + r'(?![\w*%-])')
+        found, inside = 0, True
+        for t, sp in zip(texts, spans):
+            for m in tok.finditer(t):
+                found += 1
+                if ':' in m.group(0) or not any(a <= m.start() and m.end() <= b for a, b in sp):
+                    inside = False
+        if found and inside:
+            return name, at, n
+    return None
 
 
 def find_file(tree, want):
@@ -214,10 +264,12 @@ def main():
         return 'fixnum %d changed' % other[0]
     plant('a fixnum beside it', rel, refix, 'DIFFER')
 
-    # a GENTEMP name in a local map
-    lm = re.compile(r'^PKT\d+$')
-    rel, d = find_file(tree, lambda d: any(lm.match(x) for x, _, _ in d.at_symbols))
-    s2, p2, n2 = next(x for x in d.at_symbols if lm.match(x[0]))
+    # a GENTEMP name in a local map: a symbol whose name same40's GENTEMP
+    # pattern takes whole (a letter-led name ending in a number), not one its
+    # GENERATED pattern numbers away everywhere, and found in the file's text
+    # only inside local maps, where same40's local_maps rule writes it NAME#
+    rel, d = find_file(tree, lambda d: local_map_name(d) is not None)
+    s2, p2, n2 = local_map_name(d)
 
     def renum2(w):
         lo, hi = w[p2 + n2 - 1] & 0o377, w[p2 + n2 - 1] >> 8
@@ -228,9 +280,12 @@ def main():
         return 'local-map name %s, its number changed' % s2
     plant('GENTEMP name in a local map', rel, renum2, 'EQUAL')
 
+    # another first letter, so that the name is another one
+    q = 'R' if s2[0] == 'Q' else 'Q'
+
     def rename2(w):
-        w[p2] = (w[p2] & 0o177400) | ord('Q')
-        return 'local-map name %s made Q%s' % (s2, s2[1:])
+        w[p2] = (w[p2] & 0o177400) | ord(q)
+        return 'local-map name %s made %s%s' % (s2, q, s2[1:])
     plant('local-map name made another', rel, rename2, 'DIFFER')
 
     # a definition's hash in the file's record of the macros it expanded

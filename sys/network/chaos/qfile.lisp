@@ -1,4 +1,5 @@
 ;;; -*- Mode: LISP; Package: FILE-SYSTEM; Base: 8; Readtable:T -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 ;;;  ** (c) Copyright 1980 Massachusetts Institute of Technology
 
 ;;; This is SYS: NETWORK;CHAOS; QFILE

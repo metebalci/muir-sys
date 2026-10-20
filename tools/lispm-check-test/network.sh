@@ -15,6 +15,12 @@
 # that a planted copy can be run against it.  Every run uses a cache of its
 # own, made empty here, so that the first one sets up over TCP; it is kept
 # with the runs' files, and the end says where.  About 5 minutes on micro.
+# Since step R3 of section 8 the band has no Chaos, so the Chaos cases
+# (chaos-own, rev15-chaos, variable, rev15-default) run on a band from before
+# R3 with both networks, LISPM_CHECK_TEST_CHAOS_BAND, its ubin/
+# LISPM_CHECK_TEST_CHAOS_UBIN and its machines LISPM_CHECK_TEST_CHAOS_QUUX
+# (revision 16) and LISPM_CHECK_TEST_CHAOS_QUUX15, given after the arguments;
+# without that band they are skipped.
 #
 #   tcp          --network tcp, tap A held by another program: exit 0 on
 #                tap B; the setup is made over TCP and closed cleanly, so the
@@ -23,10 +29,13 @@
 #                --chaos-udp), ozd is not started, the fault relay found no
 #                bad Ethernet frame from the band, and the checkpoint is
 #                keyed by B's address
-#   order        --network chaos, both free, B alone with a checkpoint: the
-#                run takes B, resuming the checkpoint tcp made (one serves
-#                both networks); the machine has its Chaos cable and B's
-#                addresses
+#                (and no --chaos-address: since step R3 of section 8 the
+#                band has no NCP, and TCP's machine no Chaos address)
+#   chaos-own    --network chaos, both free, B alone with tcp's checkpoint:
+#                the run sets up a checkpoint of its own, keyed -chaos, as
+#                its machine has --chaos-address 177201 and its Chaos cable,
+#                which tcp's has not (until R3 one checkpoint served both
+#                networks, the run took B and resumed tcp's: the case order)
 #   index        B held: the run takes A and sets up A's own checkpoint
 #   order-both   both free, both with checkpoints: A, the lowest, no setup
 #   wait         A alone in the range and held for 5 s: the run says it
@@ -109,10 +118,11 @@ hold() {  # hold tap $1 by a relay of the test's own, until release
 release() { kill "$held" 2>/dev/null; wait "$held" 2>/dev/null; held=; }
 
 fail() { echo "FAIL $name: $*"; sed 's/^/    /' "$out"; fails=$((fails+1)); }
+extra=()
 run() {  # run NAME STATUS -- ARGS...: the tool, its exit status checked
     name=$1 want=$2; shift 3
-    "$tool" "$@" > "$out" 2>&1
-    got=$?
+    "$tool" "$@" "${extra[@]}" > "$out" 2>&1
+    got=$? extra=()
     [ "$got" = "$want" ] || { fail "exit $got, wanted $want"; return 1; }
 }
 has() { grep -qF -- "$1" "$out" || { fail "no \"$1\" in the output"; return 1; }; }
@@ -130,24 +140,35 @@ if run tcp 0 -- --network tcp --keep "$@" "$cases/tcp.cases" && has "lispm-check
     # the command line heads the machine's log; quux's own lines name the
     # flag too ("--chaos-udp is the cable")
     if head -1 "$d/quux.log" | grep -qF -- '--chaos-udp'; then fail "the machine was given --chaos-udp"
+    elif head -1 "$d/quux.log" | grep -qF -- '--chaos-address'; then fail "the machine was given --chaos-address"
     elif ! head -1 "$d/quux.log" | grep -qF -- "--ethernet-socket"; then fail "the machine was given no --ethernet-socket"
     elif ! head -1 "$d/quux.log" | grep -qF -- "--ip-address $qb/30"; then fail "the machine was not given $B's address"
     elif [ -e "$d/ozd.log" ]; then fail "ozd was started"
     elif ! python3 -c 'import json, sys; d = json.load(open(sys.argv[1]))
 sys.exit(not (d["bad_from_band"] == 0 and d["from_band"]["frames"] > 0))' "$d/relay.json"; then
         fail "the fault relay's report: $(cat "$d/relay.json")"
-    elif ! key | grep -qE -- "-3-.*-${qb//./\\.}\.chk\$"; then fail "no checkpoint keyed by $qb: $(key)"
+    elif ! key | grep -qE -- "-4-.*-${qb//./\\.}\.chk\$"; then fail "no checkpoint keyed by $qb: $(key)"
     else ok; fi
 fi
 release
 
-# order: both free, B the only index with a checkpoint: the run takes B,
-# with no setup, over Chaos this time: one checkpoint serves both networks
-if run order 0 -- --network chaos --keep "$@" "$cases/chaos.cases" && has "lispm-check: tap $B, QUUX at $qb, TELNET over chaos" \
-   && hasnt "setting up a checkpoint"; then
+# a Chaos case's band and machine, before R3's (above), as the next run's last
+# arguments (extra): chaos NAME [QUUX]; or the case skipped
+chaos() {
+    [ -n "${LISPM_CHECK_TEST_CHAOS_BAND:-}" ] || { echo "skip $1: no LISPM_CHECK_TEST_CHAOS_BAND"; return 1; }
+    [ $# -lt 2 ] || [ -n "$2" ] || { echo "skip $1: no LISPM_CHECK_TEST_CHAOS_QUUX15"; return 1; }
+    extra=(--band "$LISPM_CHECK_TEST_CHAOS_BAND" --ubin "$LISPM_CHECK_TEST_CHAOS_UBIN"
+           --quux "${2:-$LISPM_CHECK_TEST_CHAOS_QUUX}")
+}
+# chaos-own: both free, B the only index with tcp's checkpoint: over Chaos
+# the run sets up its own, keyed -chaos, since its machine's Chaos switches
+# are not tcp's (QUUX's Ethernet contract, section 8, step R3)
+if chaos chaos-own && run chaos-own 0 -- --network chaos --keep "$@" "$cases/chaos.cases" && has "TELNET over chaos" \
+   && has "setting up a checkpoint"; then
     d=$(kept)
     if ! head -1 "$d/quux.log" | grep -qF -- "--chaos-udp"; then fail "the machine has no Chaos cable"
-    elif ! head -1 "$d/quux.log" | grep -qF -- "--ip-address $qb/30"; then fail "the machine was not given $B's address"
+    elif ! head -1 "$d/quux.log" | grep -qF -- "--chaos-address 177201"; then fail "the machine has no --chaos-address 177201"
+    elif ! key | grep -qE -- "-4-.*-chaos-"; then fail "no checkpoint keyed -chaos: $(key)"
     else ok; fi
 fi
 
@@ -172,7 +193,7 @@ LISPM_CHECK_TAPS=63 run no-tap 2 -- --network tcp "$@" "$cases/tcp.cases" && has
 if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
     run rev15-tcp 2 -- --network tcp "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/tcp.cases" \
         && has "which has no Ethernet device" && ok
-    run rev15-chaos 0 -- --network chaos "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
+    chaos rev15-chaos "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && run rev15-chaos 0 -- --network chaos "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
         && hasnt "lispm-check: tap " && { key | grep -E -- '-2-[a-z]+(-device)?\.chk$' > /dev/null \
         || fail "no revision 15 checkpoint keyed as before: $(key)"; } && ok
 else
@@ -206,11 +227,11 @@ elif [ -e "$trips" ]; then
 fi
 
 # variable: LISPM_CHECK_NETWORK still names the network, as --network does
-LISPM_CHECK_NETWORK=chaos run variable 0 -- --keep "$@" "$cases/chaos.cases" \
+chaos variable && LISPM_CHECK_NETWORK=chaos run variable 0 -- --keep "$@" "$cases/chaos.cases" \
     && has "TELNET over chaos" && chaos_cable && ok
 
 if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
-    LISPM_CHECK_NETWORK= run rev15-default 0 -- --keep "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
+    chaos rev15-default "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && LISPM_CHECK_NETWORK= run rev15-default 0 -- --keep "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
         && hasnt "lispm-check: tap " && chaos_cable && ok
 else
     echo "skip rev15-default: no LISPM_CHECK_TEST_QUUX15"

@@ -1,4 +1,5 @@
 ;;; -*- Mode: LISP;  Package: CHAOS;  Base: 8 -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 ;;;	** (c) Copyright 1981 Massachusetts Institute of Technology **
 ;;; Chaosnet peek functions
 

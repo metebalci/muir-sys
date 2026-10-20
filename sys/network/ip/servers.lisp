@@ -138,30 +138,80 @@ connection in a process of its own; while SWITCH, a variable, is NIL the port is
 
 ;;;; The TELNET server (section 7)
 
-(defvar telnet-server-last-error nil "The network error that last ended a TELNET session.")
+(defvar telnet-server-last-error nil "The network error that last ended a TELNET session, or the error
+that aborted one while it held NETWORK-LOCK.")
+
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the session is
+;; SI:TELNET-SERVER-BODY (SYS: NETWORK; TELNET), the body moved out of the NCP's
+;; services, which binds STREAM and UNTYI-CHAR itself.
+;(defun telnet-server-function (c)
+;  "The TELNET server on connection C: MIT's body (chsaux.lisp, TELNET-SERVER-FUNCTION)
+;over a TCP stream, the herald, the IAC flush by peeking and the listener over
+;CHAOS:ECHOING-STREAM, which ends the session cleanly at the client's EOF."
+;  ;; the stream is bound to STREAM, the special that ECHOING-STREAM reads, only
+;  ;; through TCP-STREAM: STREAM is GLOBAL's symbol, and an init form STREAM
+;  ;; under its own special declaration read the special's outer value, a
+;  ;; chaos stream, so the herald went to chaos.
+;  (let ((tcp-stream (make-tcp-stream c :ascii-translation t)))
+;    (let ((chaos::untyi-char nil) (chaos::stream tcp-stream))
+;      (declare (special chaos::untyi-char chaos::stream))
+;      (condition-case (err)
+;	  (progn
+;	    (print-herald tcp-stream)
+;	    (format tcp-stream "~&Telnet server here~2%")
+;	    (send tcp-stream :force-output)
+;	    (do-forever
+;	      (if (eq (send tcp-stream :tyipeek) #o377)
+;		  (progn (send tcp-stream :tyi) (send tcp-stream :tyi) (send tcp-stream :tyi))
+;		(return)))
+;	    (si:lisp-top-level1 (closure '(chaos::stream chaos::untyi-char) 'chaos::echoing-stream)))
+;	(sys:remote-network-error (setq telnet-server-last-error err))))
+;    ;; an abnormal exit closes with abort, as WITH-OPEN-STREAM does; after a
+;    ;; close of its own the session's stream sends nothing.
+;    (send tcp-stream :close :abort)))
+;; an error signalled in a session while its process holds NETWORK-LOCK (in
+;; its stream's send path, as when a reload left the loaded files and the
+;; running stack's structures at odds) aborts the session.  it used to enter
+;; the debugger on the session's own TCP stream, whose output signalled the
+;; same error again, one level deeper each time, and the debugger, inside
+;; WITH-NETWORK-LOCK's extent, kept the lock: the network process then
+;; blocked on it at the next frame, and the whole stack was dead (new
+;; connections found no route).  the handler throws out of the session
+;; instead, which unwinds WITH-NETWORK-LOCK and frees the lock; the session's
+;; connection is closed with abort, the error recorded in
+;; TELNET-SERVER-LAST-ERROR, and a notice goes to the console.  an error with
+;; the lock free enters the debugger on the session as before.
+(defun telnet-session-lock-error (condition)
+  "A handler in a TELNET session: CONDITION, an error, was signalled while this process
+holds NETWORK-LOCK: throw it to TELNET-SERVER-FUNCTION, which aborts the session."
+  ;; a network error ends the session as before, by the condition-case
+  ;; around it, which unwinds the lock too.
+  (when (and (eq network-lock current-process)
+	     (not (condition-typep condition 'sys:remote-network-error)))
+    (throw 'telnet-session-lock-error condition)))
+
+(defun telnet-session-lock-error-notice (c condition)
+  "Tell the console that the TELNET session on connection C was aborted for CONDITION."
+  (condition-case ()
+      (tv:notify nil "TELNET session from ~A aborted: an error while it held the network lock: ~A"
+		 (address-string (tcb-remote c)) (send condition :report-string))
+    (error nil)))
 
 (defun telnet-server-function (c)
-  "The TELNET server on connection C: MIT's body (chsaux.lisp, TELNET-SERVER-FUNCTION)
-over a TCP stream, the herald, the IAC flush by peeking and the listener over
-CHAOS:ECHOING-STREAM, which ends the session cleanly at the client's EOF."
-  ;; the stream is bound to STREAM, the special that ECHOING-STREAM reads, only
-  ;; through TCP-STREAM: STREAM is GLOBAL's symbol, and an init form STREAM
-  ;; under its own special declaration read the special's outer value, a
-  ;; chaos stream, so the herald went to chaos.
+  "The TELNET server on connection C: MIT's body (SI:TELNET-SERVER-BODY, SYS: NETWORK;
+TELNET) over a TCP stream, the herald, the IAC flush by peeking and the listener over
+SI:ECHOING-STREAM, which ends the session cleanly at the client's EOF.  An error while
+the session holds NETWORK-LOCK aborts it (TELNET-SESSION-LOCK-ERROR)."
   (let ((tcp-stream (make-tcp-stream c :ascii-translation t)))
-    (let ((chaos::untyi-char nil) (chaos::stream tcp-stream))
-      (declare (special chaos::untyi-char chaos::stream))
-      (condition-case (err)
-	  (progn
-	    (print-herald tcp-stream)
-	    (format tcp-stream "~&Telnet server here~2%")
-	    (send tcp-stream :force-output)
-	    (do-forever
-	      (if (eq (send tcp-stream :tyipeek) #o377)
-		  (progn (send tcp-stream :tyi) (send tcp-stream :tyi) (send tcp-stream :tyi))
-		(return)))
-	    (si:lisp-top-level1 (closure '(chaos::stream chaos::untyi-char) 'chaos::echoing-stream)))
-	(sys:remote-network-error (setq telnet-server-last-error err))))
+    (condition-case (err)
+	(let ((lock-error (catch 'telnet-session-lock-error
+			    (condition-bind ((error 'telnet-session-lock-error))
+			      (si:telnet-server-body tcp-stream))
+			    nil)))
+	  (when lock-error
+	    (setq telnet-server-last-error lock-error)
+	    (telnet-session-lock-error-notice c lock-error)))
+      (sys:remote-network-error (setq telnet-server-last-error err)))
     ;; an abnormal exit closes with abort, as WITH-OPEN-STREAM does; after a
     ;; close of its own the session's stream sends nothing.
     (send tcp-stream :close :abort)))
@@ -246,15 +296,44 @@ yet received included (section 5.5)."
 
 ;;;; The band's own host (section 5.6)
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the band's own host
+;; is set independently of the protocol (SI:SET-LOCAL-HOST, SYS: NETWORK; HOST)
+;; from each network's function on SI:LOCAL-HOST-FUNCTIONS; this is the
+;; internet's, third in SI:FIND-LOCAL-HOST's order (the name file, SET-HOST-NAME,
+;; a network's, LOCALHOST).  It reads the address from register 255 itself, since it also
+;; runs at a cold boot, before the network has started and set MY-ADDRESS.
+;; Until R3 the second case was the host of the Chaos address, as the NCP had
+;; set it.
+;(defun internet-set-local-host ()
+;  "SI:LOCAL-HOST: the site table's host whose INTERNET address is the band's; failing
+;that the host of the Chaos address, as the chaos initialization set it; failing both an
+;unnamed host."
+;  (let ((host (address-host my-address)))
+;    (cond (host (setq si:local-host host))
+;	  ((and (boundp 'si:local-host) si:local-host))
+;	  (t (setq si:local-host
+;		   (si:make-unnamed-host :lispm `(:internet (,(address-string my-address)))))))))
+(defun internet-local-host ()
+  "The site table's host whose INTERNET address is the device's, register 255, or NIL
+(no such host, no Ethernet device, or no address): the machine's name when neither the
+name file nor SET-HOST-NAME gives one (SI:FIND-LOCAL-HOST)."
+  (let ((address (and (ether-present-p) (ether-register %ether-ip-address))))
+    (unless (or (null address) (zerop address))
+      (address-host address))))
+
 (defun internet-set-local-host ()
-  "SI:LOCAL-HOST: the site table's host whose INTERNET address is the band's; failing
-that the host of the Chaos address, as the chaos initialization set it; failing both an
-unnamed host."
-  (let ((host (address-host my-address)))
-    (cond (host (setq si:local-host host))
-	  ((and (boundp 'si:local-host) si:local-host))
-	  (t (setq si:local-host
-		   (si:make-unnamed-host :lispm `(:internet (,(address-string my-address)))))))))
+  "SI:LOCAL-HOST as the network starts, the name file as the cold boot read it (SI:SET-LOCAL-HOST),
+then the names and location that follow from it (SI:SET-LOCAL-HOST-VARIABLES)."
+  ;; the name file is not read again here, in the network process under the
+  ;; network lock; the cold boot read it.
+  (si:set-local-host nil)
+  ;; the names follow the host, as at a cold boot (sys/network/host.lisp,
+  ;; SET-LOCAL-HOST-VARIABLES's initialization): the network may start, at a
+  ;; warm boot, with another address than the cold boot found.
+  (si:set-local-host-variables))
+
+(or (memq 'internet-local-host si:local-host-functions)
+    (push 'internet-local-host si:local-host-functions))
 
 (tcp-listen 23. "TELNET" 'telnet-server-function)
 (tcp-listen 7 "Test Echo" 'test-echo-server '*test-echo-service*)

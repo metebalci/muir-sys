@@ -972,6 +972,37 @@ the loaded band, System version and SYS file access. With the emulator
 stopped, copy verified LOD3 to LOD1 and LOD4 to LOD2 for the development
 layout, preserve their comments, and select LOD2 for subsequent boots.
 
+
+## Naming a machine
+
+A band names its machine at every cold boot, on revisions 15 and 16 alike,
+from the first of these that gives a name (QUUX's Ethernet contract, section
+5.6; `SI:FIND-LOCAL-HOST`, `sys/network/host.lisp`):
+
+1. **The name file**, `SYS: SITE; HOSTNAME`, which is `site/hostname` under
+   the file device's root: one line, the name, as Unix's `/etc/hostname`.
+   Each muir file root and each board's card can name its machine so, with no
+   new band. Only its first line is read, trimmed and taken in upper case.
+2. **The name given in the band**, `(si:set-host-name "name")`, which a
+   `DISK-SAVE` keeps. The name file wins over it at boot.
+3. **The site table's host whose INTERNET address is the machine's**, on
+   revision 16 (register 255).
+4. **LOCALHOST**, which prints as "localhost" with the associated machine
+   HOST. It only names the machine: the band has no loopback.
+
+A name the site table (`site/hosts.text`) has takes that host, and LMLOCS's
+row (`site/lmlocs.lisp`) gives its pretty name, location and associated
+machine; any other name makes a host of that name with no address, whose
+pretty name is "Unknown" and whose associated machine is the site's,
+HOST. The herald's "band N of NAME", `SI:LOCAL-HOST-NAME` and the pretty name
+follow the host.
+
+The order holds at the cold boot; the name file is read then only, like an
+initialization. `(si:set-host-name "name")` sets the current name: it names
+the running machine at once, over the name file's name too. `(si:set-host-name
+nil)` drops the name given, and the machine takes what the order gives
+without it: the name file's read at boot, else a network's, else LOCALHOST. `tools/system-check/machine-name` checks the order.
+
 ## Checks
 
 - The cold load's partition comment says "cold" and the date.

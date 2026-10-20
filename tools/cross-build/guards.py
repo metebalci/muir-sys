@@ -356,7 +356,10 @@ def run_all_14(run):
 # Not checked here, since muir cannot reach it: PROM 2002 for revision 15's
 # own halt on revision 14 (quux refuses the file first, prom15-file-rev14),
 # and the revision-15 microcode loaded directly on revision 14 (no PROM loads
-# it there: disk15-rev14).
+# it there: disk15-rev14).  The microcode's halt there, at MACHINE-NOT-QUUX-14
+# below the assembly's revision (sys/ucadr/uc-cold-disk.lisp, RESET-DEVICES),
+# is checked in the assembly instead: tools/assembler-check's rev15,
+# revision_checks, reads the A constants its jumps compare with.
 
 # the revision-15 .mcr's section 6 value, the hardware revision: the 11th
 # 32-bit word (the format word, the number of sections, section 6's 8-word

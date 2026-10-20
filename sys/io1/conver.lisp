@@ -1,4 +1,5 @@
 ;;; -*- Mode: LISP; Package: ZWEI; Font: CPTFONT; BASE: 8 -*-
+;;; Not loaded on QUUX's line since step R3 of QUUX's Ethernet contract (section 8), which took Chaos out of the band, and not compiled there.
 ;;; Network message facility
 ;;;	** (c) Copyright 1982 Cliff Lasser **
 

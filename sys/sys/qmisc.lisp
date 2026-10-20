@@ -972,9 +972,14 @@ Type NIL to exit (or Abort)."
 ;;; MacLisp's STATUS and SSTATUS, which read and changed this list, are
 ;;; deleted.  Use the variable *FEATURES* directly.
 
-(DEFVAR *FEATURES*
-	'(:LISPM :MIT :LMI :COMMON	;":common" is what dec prolelisp says it is
-	  :CHAOS :SORT :FASLOAD :STRING :NEWIO :ROMAN :TRACE :GRINDEF :GRIND))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): :CHAOS is
+;; no feature of a band without the NCP.
+;(DEFVAR *FEATURES*
+;	'(:LISPM :MIT :LMI :COMMON	;":common" is what dec prolelisp says it is
+;	  :CHAOS :SORT :FASLOAD :STRING :NEWIO :ROMAN :TRACE :GRINDEF :GRIND))
+(defvar *features*
+	'(:lispm :mit :lmi :common	;":common" is what dec prolelisp says it is
+	  :sort :fasload :string :newio :roman :trace :grindef :grind))
 
 (DEFUN PROB-FROCESSOR ()
   ;; always :CADR, the only processor this system runs on.
@@ -1863,7 +1868,10 @@ will take a few minutes.")
 	 (SEND INITIAL-LISP-LISTENER :REFRESH)
 	 (SEND INITIAL-LISP-LISTENER :HOME-CURSOR))
 
-    (CHAOS:RESET)  ;Otherwise, UCODE could lose hacking packets as world dumped.
+    ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the
+    ;; NCP left the band; the network stops before the save (sys/network/ip/ether,
+    ;; "Network off", a before-cold initialization).
+;    (CHAOS:RESET)  ;Otherwise, UCODE could lose hacking packets as world dumped.
 
     ;; Compare all pages with band we booted from,
     ;; record unchanged pages in a bitmap in the band being saved in.

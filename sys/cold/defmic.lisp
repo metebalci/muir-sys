@@ -250,7 +250,10 @@
 (DEFMIC %UNIBUS-READ 555 (UNIBUS-ADDR) T)
 (DEFMIC %UNIBUS-WRITE 556 (UNIBUS-ADDR WORD) T)
 (DEFMIC %GC-SCAVENGE 557 (WORK-UNITS) T)
-(DEFMIC %CHAOS-WAKEUP 560 () T)
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the
+;; chaosnet's interrupt handler left the microcode with the NCP, and with it
+;; %chaos-wakeup; 560 is free
+;(DEFMIC %CHAOS-WAKEUP 560 () T)
 (DEFMIC %AREA-NUMBER 561 (X) T)
 (DEFMIC *MAX 562 (NUM1 NUM2) T)
 (DEFMIC *MIN 563 (NUM1 NUM2) T)

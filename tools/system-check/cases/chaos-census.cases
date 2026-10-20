@@ -1,0 +1,24 @@
+; QUUX's band carries no Chaos after step R3 (QUUX's Ethernet contract,
+; section 8): a census of the files loaded and of the CHAOS: symbols in
+; compiled code finds 0 (lisp/chaos-census.lisp).  On a band built before R3
+; the NCP and its services are loaded, and the census finds them: its
+; failing cases are the check's control, and the recorded ones say what was
+; found.
+;
+; The census looks: the band has loaded files, and has FEFs, walked from
+; every structure region with no failed walk
+(plusp (census-loaded-files)) => T
+(let ((f (census-fefs))) (list (> (car f) 1000) (cadr f))) => (T 0)
+; Chaos's files loaded: none
+(census-files) => NIL
+; (FEF, CHAOS: symbol) pairs in compiled code: none
+(census-symbols) => 0
+; CHAOS: symbols in the interpreted forms of the initialization lists: none
+(census-initializations) => NIL
+; recorded: the FEFs walked, all files loaded, and the files whose FEFs name
+; a CHAOS: symbol, with their pairs
+(census-fefs)
+(census-loaded-files)
+(census-hits-by-file)
+; recorded: the pairs whose FEF's defining file is not known
+(census-hits-unattributed)

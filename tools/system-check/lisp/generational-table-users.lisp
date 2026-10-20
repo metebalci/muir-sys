@@ -12,11 +12,14 @@
 ;;; - P4, MAPATOMS-NR-SYM: every object it visits is a symbol, as many as a
 ;;;   walk by %STRUCTURE-TOTAL-SIZE from each region's table end finds, in
 ;;;   NR-SYM, in a region of it made since, and in WORTHLESS-SYMBOL-AREA.
-;;; - P5, CHAOS-BUFFER-AREA: PRINT-INT-PKT-STATUS visits the buffers, from the
-;;;   table's end, and nothing else; the area keeps one region.
+;;; - P5, RESET-TEMPORARY-AREA: a temporary area's regions reset to their
+;;;   table's end, so that the objects made after lie from the table's end, in
+;;;   a scratch area and in the compiler's temporary area (it was CHAOS-BUFFER-
+;;;   AREA's walk by PRINT-INT-PKT-STATUS until step R3 of QUUX's Ethernet
+;;;   contract, section 8, took the NCP out of the band).
 ;;; The planted controls are the functions as they were, in
 ;;; generational-table-users-plant-disk.lisp, -plant-mapatoms.lisp and
-;;; -plant-chaos.lisp, each given after this file.  Each test uses up regions
+;;; -plant-reset.lisp (-plant-chaos.lisp until step R3), each given after this file.  Each test uses up regions
 ;;; of a system area, so the check runs on a copy of the band (lispm-check's).
 
 ;;; The table checker of contract 6.3, as the check generational-collector
@@ -234,28 +237,42 @@ against its walk's; elsewhere (NIL and T); the fresh symbol visited)."
 	  other fresh)))
 
 ;;; P5
-(defun gtu-chaos-walk (area)
-  "PRINT-INT-PKT-STATUS's walk of AREA, as CHAOS-BUFFER-AREA, with CHAOS:PRINT-PKT
-replaced by a recorder and the output dropped: (the packets it visits, NIL if it
-signalled)."
-  (let ((visited nil)
-	(old (fsymeval 'chaos:print-pkt)))
-    (unwind-protect
-	(progn
-	  (fset 'chaos:print-pkt #'(lambda (pkt &rest ignore) (push pkt visited)))
-	  (condition-case ()
-	      (progv '(chaos:chaos-buffer-area) (list area)
-		(let ((standard-output 'si:null-stream))
-		  (chaos:print-int-pkt-status t))
-		(nreverse visited))
-	    (error nil)))
-      (fset 'chaos:print-pkt old))))
+;;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): P5 was
+;;; PRINT-INT-PKT-STATUS's walk of CHAOS-BUFFER-AREA, which left the band with
+;;; the NCP.  It is now RESET-TEMPORARY-AREA's reset (sys/sys/qrand.lisp), the
+;;; code of a temporary area that found its regions' first object at their
+;;; origin: a region's free pointer goes back to its table's end, not to 0, so
+;;; that the objects made after it lie after the table and a walk from the
+;;; table's end finds them.  Its areas: a scratch area of 40 buffers made,
+;;; reset and made again, and the compiler's own temporary area, which the
+;;; compiler resets as it takes it and gives it back (LOCKING-RESOURCES,
+;;; sys/sys/qcdefs.lisp).  The plant, -plant-reset.lisp, is RESET-TEMPORARY-AREA
+;;; as it was, the free pointer set to 0.
+;(defun gtu-chaos-walk (area)
+;  "PRINT-INT-PKT-STATUS's walk of AREA, as CHAOS-BUFFER-AREA, with CHAOS:PRINT-PKT
+;replaced by a recorder and the output dropped: (the packets it visits, NIL if it
+;signalled)."
+;  (let ((visited nil)
+;	(old (fsymeval 'chaos:print-pkt)))
+;    (unwind-protect
+;	(progn
+;	  (fset 'chaos:print-pkt #'(lambda (pkt &rest ignore) (push pkt visited)))
+;	  (condition-case ()
+;	      (progv '(chaos:chaos-buffer-area) (list area)
+;		(let ((standard-output 'si:null-stream))
+;		  (chaos:print-int-pkt-status t))
+;		(nreverse visited))
+;	    (error nil)))
+;      (fset 'chaos:print-pkt old))))
 
-(defun gtu-buffer-walk (area)
-  "AREA's region walked by %STRUCTURE-TOTAL-SIZE from its table's end: the array header of
-each ART-16B array with a leader, as PRINT-INT-PKT-STATUS names a buffer, or :OTHER for
-another object."
-  (let* ((r (si:area-region-list area))
+;;; the buffers' leader: six words, as the Chaos buffers' leader had them
+;;; (CHAOS-BUFFER-LEADER-QS); any leader would do.
+(defconst gtu-p5-leader-length 6)
+
+(defun gtu-buffer-walk (area &optional (region (si:area-region-list area)))
+  "REGION of AREA walked by %STRUCTURE-TOTAL-SIZE from its table's end: the array header of
+each array with a leader of GTU-P5-LEADER-LENGTH words, or :OTHER for another object."
+  (let* ((r region)
 	 (org (%make-pointer dtp-locative (si:region-origin r)))
 	 (fp (si:region-free-pointer r))
 	 (found nil))
@@ -264,45 +281,121 @@ another object."
 	((>= i fp) (nreverse found))
       (let ((leader (%make-pointer-offset dtp-locative org i)))
 	(push (if (= (%p-data-type leader) dtp-header)
-		  (%make-pointer-offset dtp-array-pointer org
-					(+ i 2 (length chaos:chaos-buffer-leader-qs)))
+		  (%make-pointer-offset dtp-array-pointer org (+ i 2 gtu-p5-leader-length))
 		:other)
 	      found)))))
 
 (defun gtu-p5-sizes (area)
-  "(AREA's first region's free pointer, its length, its table's end)"
-  (let ((r (si:area-region-list area)))
+  "(AREA's first structure region's free pointer, its length, its table's end)"
+  (let ((r (loop for x = (si:area-region-list area) then (si:region-list-thread x)
+		 until (minusp x)
+		 when (si:region-has-first-object-table-p x) return x)))
     (list (si:region-free-pointer r) (si:region-length r) (si:region-first-object-table-end r))))
 
-(defun gtu-p5-check (area)
-  "(AREA's regions, its buffers walked, PRINT-INT-PKT-STATUS's visits the same buffers,
-each of them an ART-16B array's header, the free pointer below the region's length)"
-  (let ((visited (gtu-chaos-walk area))
-	(walked (gtu-buffer-walk area))
-	(r (si:area-region-list area)))
-    (list (loop for x = r then (si:region-list-thread x) until (minusp x) count t)
-	  (length walked)
-	  (and visited (= (length visited) (length walked))
-	       (loop for v in visited for w in walked always (= (%pointer v) (%pointer w))))
-	  (and visited
-	       (loop for v in visited
-		     always (and (= (%p-data-type v) dtp-array-header)
-				 (= (%p-ldb si:%%array-type-field v) (ldb si:%%array-type-field art-16b)))))
+(defun gtu-p5-reset-check (area)
+  "AREA reset by RESET-TEMPORARY-AREA: (its regions that begin with a first-object table,
+by their bits: structure regions; of those, the ones whose free pointer is not their table's
+end, the ones whose first word is no table's header, the table checker's failures).  A list
+region, which the compiler's area has too, has no table and is not counted."
+  (si:reset-temporary-area area)
+  (let ((regions (loop for x = (si:area-region-list area) then (si:region-list-thread x)
+		       until (minusp x)
+		       when (si:region-has-first-object-table-p x) collect x)))
+    (list (length regions)
+	  (loop for r in regions
+		count (not (and (plusp (si:region-first-object-table-end r))
+				(= (si:region-free-pointer r) (si:region-first-object-table-end r)))))
+	  (loop for r in regions count (not (gtu-table-header-p r)))
+	  (loop for r in regions append (gtu-check-region-table r)))))
+
+(defun gtu-p5-fill-check (area)
+  "40 buffers made in AREA, just reset: (the buffers walked from the table's end in the
+region of the first, each of them an ART-16B array's header and one of those made, its
+table header still there, the table checker's failures, the free pointer below the
+region's length)."
+  (let* ((made (loop repeat 40
+		     collect (make-array 256 :type 'art-16b :area area
+					 :leader-length gtu-p5-leader-length)))
+	 (r (%region-number (car made)))
+	 (walked (gtu-buffer-walk area r)))
+    (list (length walked)
+	  (and (= (length walked) (length made))
+	       (loop for w in walked for m in made
+		     always (and (not (eq w :other)) (= (%pointer w) (%pointer m))
+				 (= (%p-data-type w) dtp-array-header)
+				 (= (%p-ldb si:%%array-type-field w)
+				    (ldb si:%%array-type-field art-16b)))))
+	  (gtu-table-header-p r)
+	  (gtu-check-region-table r)
 	  (< (si:region-free-pointer r) (si:region-length r)))))
 
 (defvar *gtu-p5-scratch-area* nil)
 
-(defun gtu-p5-scratch ()
-  "A temporary area made as CREATE-CHAOSNET-BUFFERS makes CHAOS-BUFFER-AREA, its 40
-buffers made, the area reset (RESET-TEMPORARY-AREA) and the 40 made again: GTU-P5-CHECK.
-The area is kept in *GTU-P5-SCRATCH-AREA*."
-  (let* ((n (length chaos:chaos-buffer-leader-qs))
-	 (area (make-area :name (gensym "GTU-CHAOS-")
+;;; each area's reset and its refill are separate cases, so that under the
+;;; plant the reset's failure is reported before the refill, which then
+;;; writes over the region's table, can leave the machine where it never
+;;; answers.
+(defun gtu-p5-scratch-reset ()
+  "A temporary area made as the Chaos buffers' area was, its 40 buffers made, then reset:
+GTU-P5-RESET-CHECK.  The area is kept in *GTU-P5-SCRATCH-AREA*."
+  (let* ((n gtu-p5-leader-length)
+	 (area (make-area :name (gensym "GTU-P5-")
 			  :size (* (ceiling (* 40 (+ 3 128 n)) si:page-size) si:page-size)
 			  :gc :temporary)))
     (setq *gtu-p5-scratch-area* area)
-    (dotimes (pass 2)
-      (when (= pass 1) (si:reset-temporary-area area))
-      (dotimes (i 40)
-	(make-array 256 :type 'art-16b :area area :leader-length n)))
-    (gtu-p5-check area)))
+    (dotimes (i 40)
+      (make-array 256 :type 'art-16b :area area :leader-length n))
+    (gtu-p5-reset-check area)))
+
+(defun gtu-p5-scratch-fill ()
+  "GTU-P5-FILL-CHECK of the scratch area, just reset."
+  (gtu-p5-fill-check *gtu-p5-scratch-area*))
+
+(defvar *gtu-p5-compiler-area* nil)
+
+(defun gtu-p5-compiler-reset ()
+  "The compiler's temporary area, taken as a compilation takes it (LOCKING-RESOURCES-NO-QFASL,
+which resets it) with a function compiled in it, then given back (and reset again): (the
+area is temporary, GTU-P5-RESET-CHECK).  The area is kept in *GTU-P5-COMPILER-AREA*."
+  (compiler::locking-resources-no-qfasl
+    (setq *gtu-p5-compiler-area* compiler:qcompile-temporary-area)
+    (compile nil '(lambda (x) (list x (1+ x)))))
+  (let ((area *gtu-p5-compiler-area*))
+    (list (si:area-temporary-p area) (gtu-p5-reset-check area))))
+
+(defun gtu-p5-compiler-fill ()
+  "GTU-P5-FILL-CHECK of the compiler's temporary area, just reset."
+  (gtu-p5-fill-check *gtu-p5-compiler-area*))
+
+;(defun gtu-p5-check (area)
+;  "(AREA's regions, its buffers walked, PRINT-INT-PKT-STATUS's visits the same buffers,
+;each of them an ART-16B array's header, the free pointer below the region's length)"
+;  (let ((visited (gtu-chaos-walk area))
+;	(walked (gtu-buffer-walk area))
+;	(r (si:area-region-list area)))
+;    (list (loop for x = r then (si:region-list-thread x) until (minusp x) count t)
+;	  (length walked)
+;	  (and visited (= (length visited) (length walked))
+;	       (loop for v in visited for w in walked always (= (%pointer v) (%pointer w))))
+;	  (and visited
+;	       (loop for v in visited
+;		     always (and (= (%p-data-type v) dtp-array-header)
+;				 (= (%p-ldb si:%%array-type-field v) (ldb si:%%array-type-field art-16b)))))
+;	  (< (si:region-free-pointer r) (si:region-length r)))))
+;
+;(defvar *gtu-p5-scratch-area* nil)
+;
+;(defun gtu-p5-scratch ()
+;  "A temporary area made as CREATE-CHAOSNET-BUFFERS makes CHAOS-BUFFER-AREA, its 40
+;buffers made, the area reset (RESET-TEMPORARY-AREA) and the 40 made again: GTU-P5-CHECK.
+;The area is kept in *GTU-P5-SCRATCH-AREA*."
+;  (let* ((n (length chaos:chaos-buffer-leader-qs))
+;	 (area (make-area :name (gensym "GTU-CHAOS-")
+;			  :size (* (ceiling (* 40 (+ 3 128 n)) si:page-size) si:page-size)
+;			  :gc :temporary)))
+;    (setq *gtu-p5-scratch-area* area)
+;    (dotimes (pass 2)
+;      (when (= pass 1) (si:reset-temporary-area area))
+;      (dotimes (i 40)
+;	(make-array 256 :type 'art-16b :area area :leader-length n)))
+;    (gtu-p5-check area)))

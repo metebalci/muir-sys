@@ -272,7 +272,10 @@ The last value is remembered in the WHO-LINE-ITEM-STATE instance variable."
   (SEND SELF :DELETE-SERVER CONNECTION)
   (PUSH (MAKE-SERVER-DESC
 	  :CONNECTION CONNECTION
-	  :HOST-NAME (CHAOS:HOST-SHORT-NAME (CHAOS:FOREIGN-ADDRESS CONNECTION))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): a server's host
+;; was its Chaos connection's; only Chaos servers were listed here.
+;	  :HOST-NAME (CHAOS:HOST-SHORT-NAME (CHAOS:FOREIGN-ADDRESS CONNECTION))
+	  :host-name nil
 	  :CONTACT-NAME CONTACT-NAME
 	  :PROCESS PROCESS
 	  :FUNCTION FUNCTION
@@ -290,8 +293,11 @@ The last value is remembered in the WHO-LINE-ITEM-STATE instance variable."
   (SETQ SERVERS-LIST NIL))
 
 (DEFMETHOD (WHO-LINE-FILE-SHEET :CLOSE-ALL-SERVERS) (REASON)
-  (LOOP FOR SERVER IN SERVERS-LIST FINALLY (SETQ SERVERS-LIST NIL) DO
-	(CHAOS:CLOSE-CONN (SERVER-DESC-CONNECTION SERVER) REASON)))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the listed servers
+;; were Chaos servers, whose connections left the band with the NCP.
+;  (LOOP FOR SERVER IN SERVERS-LIST FINALLY (SETQ SERVERS-LIST NIL) DO
+;	(CHAOS:CLOSE-CONN (SERVER-DESC-CONNECTION SERVER) REASON)))
+  (setq servers-list nil))
 
 ;;; Remove all servers which aren't current anymore.
 (DEFUN PURGE-SERVERS ()
@@ -300,14 +306,17 @@ The last value is remembered in the WHO-LINE-ITEM-STATE instance variable."
     (DO ((S SERVERS-LIST (CDR S)))
 	((NULL S)
 	 (SETQ SERVERS-LIST (DELQ NIL SERVERS-LIST)))
-      (COND ((AND (NEQ (CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S))) 'CHAOS:OPEN-STATE)
-		  (NEQ (CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S)))
-		       'CHAOS:RFC-RECEIVED-STATE))
-;	     (BACKGROUND-NOTIFY "Server ~A from ~A being purged; state is ~A"
-;				(SERVER-DESC-CONTACT-NAME (CAR S))
-;				(SERVER-DESC-HOST-NAME (CAR S))
-;				(CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S))))
-	     (SETF (CAR S) NIL))))))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): a server was purged
+;; when its Chaos connection was no longer open; no Chaos connection is left.
+;      (COND ((AND (NEQ (CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S))) 'CHAOS:OPEN-STATE)
+;		  (NEQ (CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S)))
+;		       'CHAOS:RFC-RECEIVED-STATE))
+;;	     (BACKGROUND-NOTIFY "Server ~A from ~A being purged; state is ~A"
+;;				(SERVER-DESC-CONTACT-NAME (CAR S))
+;;				(SERVER-DESC-HOST-NAME (CAR S))
+;;				(CHAOS:STATE (SERVER-DESC-CONNECTION (CAR S))))
+;	     (SETF (CAR S) NIL))))))
+      nil)))
 
 (DEFUN BACKGROUND-NOTIFY (FORMAT-STRING &REST ARGS)
   (APPLY #'PROCESS-RUN-FUNCTION "Notify" 'NOTIFY NIL FORMAT-STRING ARGS))

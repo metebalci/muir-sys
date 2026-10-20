@@ -742,6 +742,30 @@ file carries a comment in that file saying why.
   `promh.mcr` is unchanged,
   `3d93319a8e851f5f14a2fcd66cd1ed21abb33049c355edf8cc893c791fb4b124`.
 
+- **The microcode drops Chaos and takes the network's interrupt as a stray**
+  (QUUX's Ethernet contract, section 8, step R3; contract Q13's register page,
+  word 100). `UC-CHAOS`, the chaosnet's interrupt handler, leaves the
+  assembly (`sys/ucadr/ucode.lisp`), and with it `CHAOS-INTR-QUUX`, the
+  60-cycle clock's retry of an aborted transmit and the PDP-11 path's poll of
+  the CSR (`sys/ucadr/uc-interrupt.lisp`), and the misc instruction
+  `%CHAOS-WAKEUP`, whose 560 is free (`sys/cold/defmic.lisp`). Word 100
+  `<6>`, the Chaosnet interface's request, goes to a stray,
+  `INTR-NETWORK-STRAY` (`sys/ucadr/uc-interrupt.lisp:460`), since the
+  microcode still runs on revision 15, and on 16 until the interface goes
+  (step R4): it writes the CSR, word 140, 0, which turns both interrupt
+  enables off and drops the level, and dismisses the interrupt. The A memory
+  variables of the chaosnet stay in place, unused, so no later location
+  moves. `tools/assembler-check/run` and `tools/cross-build/run` drop
+  `UC-CHAOS` from their file lists. The profile's 57 records of `uc-chaos`'s
+  words and its `INTR-TICK+3`, the clock's test of an aborted transmit, are
+  commented out of `sys/ucadr/ucadr-profile.text`: left in, 45,392 of its
+  executions fell on keys no longer found, and `INTR-TICK+3` on 60CYC-0's
+  word; without them the profile pass covers all of its 72,777,045, and
+  sets 348 hints, not 359 (`PROFILE_REPORT_15`, `PROFILE_15`,
+  `tools/assembler-check/run`). The profile was not measured again on the
+  changed microcode: its other records are as measured, and a fresh
+  measurement belongs to the later work on performance.
+
 ## Revision 14
 
 QUUX's revision 14 (contract G3, revision 14, and its appendix A14) gives the
@@ -1985,6 +2009,19 @@ tree assembles for revision 14 too, which the boards run until then.
   on any other page would overwrite a page of the running world. The PROM's
   words run from 36000 to 37016, 527 of its 1,024.
 
+- **The microcode's revision check follows the assembly target** (contract G3
+  revision 15b, appendix A15b.1; `sys/ucadr/uc-cold-disk.lisp:75`, `:559`).
+  RESET-DEVICES and PROM-ENTRY-READ halted at `MACHINE-NOT-QUUX-14` below
+  revision 14 whatever the target; they now compare with the assembly's
+  `UA:*HARDWARE-REVISION*`, so microcode 2002 for revision 15 halts below 15,
+  as A15b.1 says (`MACHINE-NOT-QUUX-15` names the same location), and a
+  revision-14 assembly is as before. muir cannot run that mix (no PROM loads
+  a revision-15 `.mcr` on revision 14, and quux refuses the file), so
+  `tools/assembler-check`'s `rev15` reads the assembly instead
+  (`revision_checks`): every jump to `MACHINE-NOT-QUUX-14` compares with the
+  signature 50525 or the revision, two of each, and the revision is 15. The
+  route's revision-15 assembly before the change fails it (14 twice).
+
 ### The Lisp side
 
 - **The microcode loader takes the control store's layout from the target
@@ -2100,7 +2137,8 @@ QUUX's revision 16 adds the Ethernet device on the register page, words
 240-257 (QUUX's Ethernet contract, sections 2 and 10). Its stack's first part
 is here: the driver, the network process, ARP, IPv4 and ICMP echo, `PING`,
 TCP, and TELNET and the test echo service over TCP (the contract's sections 5
-and 7). Chaos stays beside it until the checks run over TCP (section 8).
+and 7). Chaos stayed beside it until the checks ran over TCP (section 8, R2),
+and then left the band and the microcode (step R3, below).
 
 ### The Lisp side
 
@@ -2261,6 +2299,101 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   after CHAOS, compiles and loads the four files.
 - **`sys/cold/crossdefs.lisp`** lists the four files' compile-time definitions
   and specials, and `SI:CLOCK-RATE-REQUESTS`.
+- **An error in a TELNET session while it holds the network lock aborts that
+  session, not the stack** (`TELNET-SESSION-LOCK-ERROR` and
+  `TELNET-SERVER-FUNCTION`, `sys/network/ip/servers.lisp:184`, `:200`). An
+  error signalled in the session's send path inside `WITH-NETWORK-LOCK` (as
+  a reload whose files did not match the running stack's structures raised:
+  a subscript out of range in `TCP-SEND`) entered the debugger on the
+  session's own TCP stream, whose output signalled it again, 12 to 96 levels
+  deep, and kept `NETWORK-LOCK`: the network process blocked on it at the
+  next frame (`NETWORK-PASS`), so the whole stack was dead and new
+  connections found no route. A handler in the session now throws such an
+  error out of it, which unwinds the lock; the connection is closed with
+  abort, the error recorded in `TELNET-SERVER-LAST-ERROR` and a notice sent
+  to the console (`TV:NOTIFY`). An error with the lock free, or a network
+  error, takes its old path. `tools/tcp-check`'s new parts `lockerror` and
+  `lockerror-lisp` plant a microcode and a Lisp error there: on a band built
+  before it the first fails before the change (the session in the debugger, the
+  control session never answering again), both pass with it, and a partial
+  fix that frees the lock but leaves the session in the debugger fails.
+- **Chaos leaves QUUX's band** (QUUX's Ethernet contract, section 8, step R3).
+  The NCP and its services are no longer loaded; their files stay in the tree,
+  their loading commented out in place. The CHAOS system, CONVERSE (SEND over
+  Chaos), SUPDUP (the SUPDUP and TELNET clients), band transfer
+  (`sys/sys2/band.lisp`), the QFILE client and PEEK's Chaos and QFILE panes
+  leave SYSTEM, and CHSNCP, CHUSE and QFILE the cold load's MINI list
+  (`sys/sys/sysdcl.lisp`). Moved first, out of `chsaux.lisp`, to files
+  independent of the protocol: the TELNET server's body, ECHOING-STREAM and
+  TELNET-SERVER-EOF (`sys/network/telnet.lisp`, new, in SI;
+  `SI:TELNET-SERVER-BODY`, `:14`), which TCP's TELNET server now calls
+  (`sys/network/ip/servers.lisp:171`); the host table's parser and compiler
+  (`sys/network/host.lisp:567`, in SI, so `SYS: SITE; HSTTBL` is compiled and
+  loaded in SI, not CHAOS; `sys/sys2/maksys.lisp`'s `:GENERATE-HOST-TABLE`);
+  `REMOTE-NETWORK-ERROR`'s host, now the one the signaller passes, as TCP's
+  streams do (`sys/eh/ehf.lisp:1364`); and `SI:LOCAL-HOST`, which the NCP set
+  from the Chaos address (the machine's name now has its own bullet, below).
+  The site's associated machine is HOST for a machine LMLOCS does not name
+  too (`site/site.lisp`, `:DEFAULT-ASSOCIATED-MACHINE`). Chaos's uses elsewhere are commented out
+  in place: the remote disk and `PRINT-AVAILABLE-BANDS`' Lisp machines
+  (`sys/io/disk.lisp`), PEEK's Active Servers mode and its SUPDUP, TELNET
+  and QSEND commands (`sys/window/peek.lisp`), the who-line's Chaos servers
+  (`sys/window/wholin.lisp`), Terminal F and H and System C, S and T
+  (`sys/window/basstr.lisp`), the window menu's Supdup and Telnet
+  (`sys/window/sysmen.lisp`), the HOSTS and LISPM alarms
+  (`sys/demo/alarm.lisp`), the birthday time spec, which fingered over Chaos
+  (`sys/io1/timpar.lisp`), the spelling server (`sys/zwei/ispell.lisp`), the
+  NCP's reset at a disk save (`sys/sys/qmisc.lisp`), at a screen change
+  (`sys/window/shwarm.lisp`) and its servers' switch at boot
+  (`sys/sys/ltop.lisp`), `CHAOS-BUFFER-AREA` in the incremental save
+  (`sys/io1/inc.lisp`), FINGER's cache at login (`sys/io/file/access.lisp`),
+  the network's unknown hosts in `FS:GET-PATHNAME-HOST`
+  (`sys/io/file/pathnm.lisp`), the site's integrity check of the Chaos
+  address and a host's `:CONNECT` (`sys/network/host.lisp`), and `:CHAOS` in
+  `*FEATURES*`. The three system communication slots of the Chaos lists are
+  reserved, never reused (`%SYS-COM-RESERVED-1` to `-3`,
+  `sys/cold/qcom.lisp:247`; the cold load writes them NIL,
+  `sys/cold/coldut.lisp:1534`). On a machine with no Ethernet device
+  (revision 15) the band has no network and says so once at each boot
+  (`NETWORK-BOOT-START`, `sys/network/ip/ether.lisp:712`). OZ, the site's
+  Chaos file, time and host-table server, is no longer named
+  (`site/site.lisp`), as nothing could reach it. The unloaded Chaos files
+  carry a line saying so. `sys/cold/crossdefs.lisp` adds
+  `SI:LOCAL-HOST-FUNCTIONS`.
+- **The machine's name** (QUUX's Ethernet contract, section 5.6, "From
+  R3"; `SI:FIND-LOCAL-HOST`, `sys/network/host.lisp`). With the NCP gone the
+  Chaos address names no machine. At every cold boot, on revisions 15 and 16
+  alike, the name is taken from the first that gives one: the name file,
+  `SYS: SITE; HOSTNAME` (`site/hostname` under the file device's root, one
+  line, as Unix's `/etc/hostname`); the name `(si:set-host-name "name")` gave
+  the running band, which a `DISK-SAVE` keeps (`sys/network/host.lisp`;
+  `SI:SET-PACK-NAME`, with which MIT's Lambda named a machine that had no
+  Chaos address, still refuses and names `SI:SET-HOST-NAME`, as the GPT has
+  no pack name); the site table's host whose INTERNET
+  address is register 255's, on revision 16 (`INTERNET-LOCAL-HOST`,
+  `sys/network/ip/servers.lisp`); else LOCALHOST, a new entry of the site
+  table (`site/hosts.text`, its address the host table's form only: the band
+  has no loopback) with an LMLOCS row, "localhost", associated machine HOST
+  (`site/lmlocs.lisp`). The name file is read at the cold boot only;
+  `SI:SET-HOST-NAME` sets the current name, naming the running machine at
+  once over the name file's name too, and with NIL drops the name given,
+  the machine taking what the order gives without it. A name the site
+  table lacks makes a host of that name with no address. `SI:LOCAL-HOST-NAME`, the pretty name and the
+  associated machine follow from the host: the cold initialization of
+  `SET-LOCAL-HOST-VARIABLES` finds the host first, and the internet's start
+  and `SET-HOST-NAME` set them after it (a separate "Local host"
+  initialization with `:first` had run after it, `:first` meaning "run now",
+  so the names were the saved band's). `docs/building.md`, "Naming a
+  machine", says how. `tools/system-check`'s new `machine-name` boots the
+  band at the console (revision 15 has no network for a session) with no
+  name file, with one (and `SET-HOST-NAME` over it, then NIL), after
+  `SET-HOST-NAME` and a save, with both, and on
+  16 with a matching INTERNET entry; `local-host` checks that
+  `SI:LOCAL-HOST-NAME` is the host's name over TCP.
+- **A band on revision 16 whose Ethernet device has no address says so once
+  at each boot** (`NETWORK-BOOT-START`, `sys/network/ip/ether.lisp:718`),
+  where it would have started the network: "its Ethernet device has no IPv4
+  address (word 255 is 0)". Before, it said nothing.
 
 ### The checks
 
@@ -2458,3 +2591,21 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   default. quux's own engine is rtl, and only rtl has flags of its own; the
   asking takes about 4 ms. `tools/lispm-check-test/network.sh`'s new case
   `rtl-flags` fails without the change.
+- **Chaos's own checks leave with it** (QUUX's Ethernet contract, section 8,
+  step R3). `tools/microcode-check`'s `chaos-transmit-order` is retired with
+  `uc-chaos`. Its new `network-stray` (with `lisp/network-stray.lisp`)
+  enables the Chaosnet interface's transmit interrupt with the transmitter
+  idle, which requests at once, and the stray must leave the CSR's enables 0
+  and word 100 `<6>` down; the receive enable alone, with nothing received,
+  is the control. `tools/system-check`'s `generational-table-users` P5 was
+  `PRINT-INT-PKT-STATUS`'s walk of `CHAOS-BUFFER-AREA`; it is now
+  `RESET-TEMPORARY-AREA`'s reset to a table region's end, in a scratch area
+  and in the compiler's temporary area, each reset then refilled with 40
+  buffers walked from the table's end; its plant, `-plant-reset.lisp` (MIT's
+  reset to 0), fails the scratch area's reset, and the refill after it, over
+  the table, leaves the machine with no answer; `-plant-chaos.lisp` is gone.
+  The new `chaos-census` (with `lisp/chaos-census.lisp`) is the step's
+  census: no file of Chaos loaded and no `CHAOS:` symbol in any FEF found by
+  walking every structure region, nor in the initialization lists' forms; on
+  a band from before the step it finds 9 files, 3,525 (FEF, symbol) pairs
+  over 14,670 FEFs and 22 initializations.

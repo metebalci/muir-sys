@@ -247,7 +247,9 @@ accept :HOST as an init keyword.  The desirability is expressed as a flonum in t
        (SETQ USER-PERSONAL-NAME PERSONAL-NAME
 	     USER-GROUP-AFFILIATION GROUP
 	     USER-PERSONAL-NAME-FIRST-NAME-FIRST PERSONAL-NAME-1))
-  (SETQ CHAOS::GIVE-FINGER-SAVED-USER-ID T)	;Clear cache
+  ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): FINGER's
+  ;; cache was the Chaos FINGER server's, which left the band with the NCP.
+;  (SETQ CHAOS::GIVE-FINGER-SAVED-USER-ID T)	;Clear cache
   ;; If this is the user's login host but the host user id is not the one specified in LOGIN,
   ;; do not accept the file server's suggested home dir
   ;; since it is based on the file server login id.

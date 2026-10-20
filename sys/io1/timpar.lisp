@@ -1278,20 +1278,22 @@ Assumes that the package is the TIME package for them."
   (SETQ *RELATIVE-P* ':RELATIVE))
 
 
-(DEFUN SET-BIRTHDAY (USER-ID)
-  (PARSE-1 (LEXICALLY-ANALYZE
-	     (FIND-BIRTHDAY (WITH-OUTPUT-TO-STRING (*STANDARD-OUTPUT*)
-			       (CHAOS:FINGER (STRING-APPEND
-					       "//W "
-					       (IF (STRING-SEARCH-CHAR #/@ USER-ID)
-						   USER-ID
-						 (STRING-APPEND
-						   USER-ID
-						   "@"
-						   (SEND (OR FS:USER-LOGIN-MACHINE
-							     SI:ASSOCIATED-MACHINE)
-							 ':NAME))))))))
-	   'MAIN))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the birthday was
+;; read from a Chaos FINGER server, which left the band with the NCP.
+;(DEFUN SET-BIRTHDAY (USER-ID)
+;  (PARSE-1 (LEXICALLY-ANALYZE
+;	     (FIND-BIRTHDAY (WITH-OUTPUT-TO-STRING (*STANDARD-OUTPUT*)
+;			       (CHAOS:FINGER (STRING-APPEND
+;					       "//W "
+;					       (IF (STRING-SEARCH-CHAR #/@ USER-ID)
+;						   USER-ID
+;						 (STRING-APPEND
+;						   USER-ID
+;						   "@"
+;						   (SEND (OR FS:USER-LOGIN-MACHINE
+;							     SI:ASSOCIATED-MACHINE)
+;							 ':NAME))))))))
+;	   'MAIN))
   
 
 ;;;; Top level.

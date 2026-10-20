@@ -26,6 +26,10 @@
 # is newer (:GENERATE-HOST-TABLE, sys/sysdcl.lisp:158-160).
 /site/hsttbl.lisp
 
+# The name file: each file root names its own machine (docs/building.md,
+# Naming a machine).
+/site/hostname
+
 # COLDRUN is a local build script served to a cold boot, not release source.
 /site/coldrun.lisp
 

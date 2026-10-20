@@ -39,9 +39,14 @@
 ;;;	:HOST-NAMES list-of-nicknames
 ;;;				        All other options are taken as a network type and
 ;;;				        the value as a list of addresses.
-;;;				        The function CHAOS:GENERATE-HOST-TABLE-1 knows how
-;;;				        to make a set of these forms from the HOSTS2 CHAOS
-;;;				        host table.
+;;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the compiler
+;;; moved from CHAOS to this file.
+;;;;				        The function CHAOS:GENERATE-HOST-TABLE-1 knows how
+;;;;				        to make a set of these forms from the HOSTS2 CHAOS
+;;;;				        host table.
+;;;				        The function SI:GENERATE-HOST-TABLE-1 (below) knows how
+;;;				        to make a set of these forms from the site's host table,
+;;;				        SYS: SITE; HOSTS.
 ;;; SI:GET-HOST-FROM-ADDRESS address network - returns a host object for address on network.
 ;;;	E.g. (SI:GET-HOST-FROM-ADDRESS 2026 :CHAOS) => #<MUMBLE MIT-AI>.
 
@@ -223,9 +228,12 @@ Each element is a HOST-ALIST-ELEM structure, and looks like
   (AND LOCAL-HOST
        (SETQ FS:*PATHNAME-HOST-LIST* (DELQ LOCAL-HOST FS:*PATHNAME-HOST-LIST*)
 	     FS:LOCAL-HOST-ADDED NIL
-	     SI:LOCAL-HOST (CATCH-ERROR
-			     (GET-HOST-FROM-ADDRESS CHAOS:MY-ADDRESS :CHAOS)
-			     NIL)))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the local host was
+;; the host of the Chaos address, which left the band with the NCP.
+;	     SI:LOCAL-HOST (CATCH-ERROR
+;			     (GET-HOST-FROM-ADDRESS CHAOS:MY-ADDRESS :CHAOS)
+;			     NIL)))
+	     si:local-host (catch-error (find-local-host nil) nil)))
   ;; Flush all the old *chaos-file-hosts* and *pathnamehost-list* elements
   ;; and make new ones from the new host table.
   (AND (FBOUNDP 'FS:SITE-PATHNAME-INITIALIZE)
@@ -278,8 +286,10 @@ Each element is a HOST-ALIST-ELEM structure, and looks like
 
 (DEFMETHOD (HOST :SET-SITE) (NEW-SITE) (SETF (HOST-SITE-NAME ALIST-ELEM) NEW-SITE))
 
-(DEFMETHOD (HOST :CONNECT) (CONTACT-NAME) (SEND SELF :CHAOS-CONNECT CONTACT-NAME))
-(DEFMETHOD (HOST :CHAOS-CONNECT) (CONTACT-NAME) (CHAOS:CONNECT SELF CONTACT-NAME))
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): a host's connection
+;; was a Chaos connection, which left the band with the NCP.
+;(DEFMETHOD (HOST :CONNECT) (CONTACT-NAME) (SEND SELF :CHAOS-CONNECT CONTACT-NAME))
+;(DEFMETHOD (HOST :CHAOS-CONNECT) (CONTACT-NAME) (CHAOS:CONNECT SELF CONTACT-NAME))
 
 (DEFMETHOD (HOST :FILE-SYSTEM-TYPE) () (SEND SELF :SYSTEM-TYPE))
 
@@ -450,6 +460,10 @@ There don't appear to be any translations."
 		       HOST)))))
   (TERPRI))
 
+;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the check read
+;; the machine's Chaos address, which left the band with the NCP; the band's
+;; host may now be an unnamed one (SET-LOCAL-HOST, below).
+#|
 (DEFUN CHECK-THIS-SITE-INTEGRITY (&AUX (TIMES-LOST 0))
   "Check to see that this host is in the host table properly."
   (WHEN (VARIABLE-BOUNDP CHAOS:MY-ADDRESS)
@@ -480,6 +494,7 @@ Please add an entry for this host in the file SYS: SITE;LMLOCS LISP"
       )))
 
 (ADD-INITIALIZATION "Verify this site exists" '(check-this-site-integrity) '(SITE))
+|#
 
 ;;;; LISPM Location stuff
 (DEFVAR LOCAL-HOST NIL "The host object for this Lisp machine.")
@@ -515,7 +530,16 @@ Locations are stored in the file SYS: SITE; LMLOCS LISP.")
 	       HOST-OVERRIDDEN-SITE-OPTION-ALIST NIL)))
   (INITIALIZATIONS 'SITE-OPTION-INITIALIZATION-LIST T))
 
-(ADD-INITIALIZATION "SET-LOCAL-HOST-VARIABLES" '(SET-LOCAL-HOST-VARIABLES) '(COLD))
+;; quux revision 16 (QUUX's Ethernet contract, sections 5.6 and 8, step R3): the
+;; band's own host is found first (SET-LOCAL-HOST), then its names and location
+;; from it.  a separate "Local host" initialization with :first ran after this
+;; one at a boot, since :first runs an init at once rather than putting it at the
+;; front (:head-of-list does that), so the names came from the saved band's host.
+;; SET-LOCAL-HOST-VARIABLES is not called from SET-LOCAL-HOST itself, which may run
+;; while MINI loads this file, before SYS: SITE; LMLOCS defines
+;; MACHINE-LOCATION-ALIST.
+;(ADD-INITIALIZATION "SET-LOCAL-HOST-VARIABLES" '(SET-LOCAL-HOST-VARIABLES) '(COLD))
+(add-initialization "SET-LOCAL-HOST-VARIABLES" '(progn (set-local-host) (set-local-host-variables)) '(cold))
 
 
 ;;; This has to go somewhere....
@@ -548,3 +572,278 @@ All strings are returned trimmed of whitespace."
 		     (SYS:LOCAL-NETWORK-ERROR RESULT)	; return instance
 		     (:NO-ERROR RESULT)))	; return host object
 		  (:NO-ERROR (OR (SI:PARSE-HOST HOST T USE-NET-P) HOST))))))))
+
+;;;; The host table's parser and compiler
+
+;;; quux revision 16 (QUUX's Ethernet contract, sections 5.6 and 8, step R3):
+;;; moved here from the NCP's services (SYS: NETWORK; CHAOS; CHSAUX, "Host
+;;; table frobs"), which left the band, since the host table is the site's
+;;; and serves every network.  SYS: SITE; HOSTS is compiled into SYS: SITE;
+;;; HSTTBL in this package, SI, not in CHAOS, and the :GENERATE-HOST-TABLE
+;;; transformation (sys2/maksys) names SI:GENERATE-HOST-TABLE-1.  The code is
+;;; MIT's but for the package.
+(defun generate-host-table (&optional input-file)
+  ;; the host table is a site file, and lives in SYS: SITE;.
+  (let ((default-input-file "SYS: SITE; HOSTS TEXT >")
+	(si:*force-package* "SI"))
+    (cond ((and (not input-file)		;if not specified 
+		(not (probef default-input-file)))	;and reasonable file doesn't exist
+	   (format *query-io* "~&Default host table input file not found.")
+	   (setq input-file (prompt-and-read `(:pathname :defaults ,default-input-file)
+					     "Please specify file to use instead: ")))
+	  (t
+	   (if (not input-file) (setq input-file default-input-file))))
+    (generate-host-table-1 input-file "SYS: SITE; HSTTBL LISP >")))
+
+;;; System system transformation
+(defun generate-host-table-1 (input-file output-file)
+  (let ((*package* (find-package "SI"))
+	(*read-base* 8) (*print-base* 8) (*print-radix* t)
+	(*readtable* si:standard-readtable))
+    (with-open-file (output-stream output-file :direction :output :characters t)
+      (format output-stream "~
+;;; -*- Mode: LISP;~@[ Package: ~A;~] Base: 8; Readtable:T -*-
+;;; *** THIS FILE WAS AUTOMATICALLY GENERATED BY A PROGRAM, DO NOT EDIT IT ***
+;;; Host table made from ~A~%"
+	      si:*force-package* (send (fs:parse-pathname input-file) :truename))
+      (si::write-responsibility-comment output-stream)
+      (generate-host-table-2 input-file output-stream)
+      (when (get-site-option :non-chaos-host-table-file)
+	(generate-host-table-2 (get-site-option :non-chaos-host-table-file)
+			       output-stream)))))
+
+(defun generate-host-table-2 (input-file output-stream)
+  (with-open-file (input-stream input-file :direction :input :characters t)
+    (do ((line) (eof)
+	 (i) (j)
+	 (ni) (nj)
+	 (hostl) (namel) (delim))
+	(nil)
+      (multiple-value (line eof)
+	(send input-stream :line-in nil))
+      (and eof (return))
+      (multiple-value (i j)
+	(parse-host-table-token line 0))
+      (cond ((and i (string-equal line "HOST" :start1 i :end1 j))
+	     ;; Host name
+	     (multiple-value (ni nj)
+	       (parse-host-table-token line (1+ j)))
+	     (multiple-value (i j delim)
+	       (parse-host-table-token line (1+ nj)))
+	     (setq hostl (ncons (substring line ni nj)))
+	     (if (char= delim #/[)
+		 (do ((l nil)
+		      (i1) (j1))
+		     ((char= delim #/])
+		      (incf j)
+		      (nreverse l))
+		   (multiple-value (i1 j1 delim)
+		     (parse-host-table-token line (1+ j)))
+		   (if (char= delim #/Sp)
+		       (multiple-value (i j delim)
+			 (parse-host-table-token line (1+ j1)))
+		       (setq i i1 j j1 j1 i1))
+		   (add-host-table-address line i1 j1 i j hostl))
+		 (let ((i1 i) (j1 j))
+		   (if (= delim #/Sp)
+		       (multiple-value (i j)
+			 (parse-host-table-token line (1+ j)))
+		       (setq i i1 j j1 j1 i1))
+		   (add-host-table-address line i1 j1 i j hostl)))
+;	     (COND ((OR (GET HOSTL :CHAOS)	;If there were any chaosnet addresses
+;			;; Include some popular ARPA sites for speed in SUPDUP/TELNET, etc.
+;			(SYS:MEMBER-EQUAL (CAR HOSTL) INCLUDED-NON-CHAOS-HOSTS))
+	     (dotimes (k 2)
+	       (multiple-value (i j delim)
+		 (parse-host-table-token line (1+ j))))
+	     (when i
+	       (putprop hostl (intern (substring line i j) "") :system-type))
+	     (multiple-value (i j delim)
+	       (parse-host-table-token line (1+ j)))
+	     (when i
+	       (putprop hostl (intern (substring line i j) "") :machine-type))
+	     (multiple-value (i j delim)
+	       (parse-host-table-token line (1+ j)))
+	     (or i (setq delim -1))
+	     (setq namel (ncons (car hostl)))
+	     (and (char= delim #/[)
+		  (do () ((char= delim #/])
+			  (setq namel (stable-sort namel
+						   #'(lambda (x y)
+						       (< (string-length x)
+							  (string-length y))))))
+		    (multiple-value (i j delim)
+		      (parse-host-table-token line (1+ j)))
+		    (push (substring line i j) namel)))
+	     (putprop hostl namel :host-names)
+	     (let ((*package* (or (find-package si:*force-package*) *package*)))
+	       (format output-stream "(~S ~S~{~%  '~S '~S~})~2%"
+		       'si::define-host (car hostl) (cdr hostl))))))))
+
+
+(defun parse-host-table-token (string &optional (start 0) end)
+  (or end (setq end (length string)))
+  (do ((idx start (1+ idx))
+       (sidx) (ch))
+      (( idx end)
+       (values sidx idx -1))
+    (setq ch (char string idx))
+    (or sidx
+	(memq ch '(#/Sp #/Tab))
+	(setq sidx idx))
+    (and sidx
+	 (memq ch '(#/, #/Sp #/Tab #/[ #/]))
+	 (return (values sidx idx ch)))))
+
+(defun add-host-table-address (line net-start net-end address-start address-end hostl
+			       &aux symbol parser)
+  (setq symbol (if (= net-start net-end) :arpa
+		   (intern (substring line net-start net-end) "")))
+  (cond ((setq parser (get symbol 'host-address-parser))
+	 (setf (get hostl symbol)		;Keep addresses in original order
+	       (nconc (get hostl symbol)
+		      (ncons (funcall parser symbol line address-start address-end)))))))
+
+;;; For now, this is all we really support
+(defun (:chaos host-address-parser) (ignore line start end)
+  (zwei:parse-number line start end 8))
+
+(defun (:ru host-address-parser) (ignore line start end)
+  (zwei:parse-number line start end 8))
+
+(defun (:arpa host-address-parser) (ignore line start end &aux slash)
+  (setq slash (string-search-char #// line start end))
+  (dpb (zwei:parse-number line start slash) #o1110 (zwei:parse-number line (1+ slash) end)))
+
+(defun (:dial host-address-parser) (ignore line start end)
+  (substring line start end))			;A phone number is just characters.
+
+(defun (:lcs host-address-parser) (ignore line start end &aux slash)
+  (setq slash (string-search-char #// line start end))
+  (dpb (zwei:parse-number line start slash) #o1010 (zwei:parse-number line (1+ slash) end)))
+
+(defun (:su host-address-parser) (ignore line start end &aux sharp)
+  (setq sharp (string-search-char #/# line start end))
+  (dpb (zwei:parse-number line start sharp) #o1010 (zwei:parse-number line (1+ sharp) end)))
+
+(defun (:rcc host-address-parser) (ignore line start end &aux slash)
+  (setq slash (string-search-char #// line start end))
+  (dpb (zwei:parse-number line start slash 10.)
+       #o1010 (zwei:parse-number line (1+ slash) end 10.)))
+
+(defun (:internet host-address-parser) (ignore line start end)
+  (substring line start end))
+
+;;;; The band's own host
+
+;;; quux revision 16 (QUUX's Ethernet contract, sections 5.6 and 8, step R3):
+;;; SI:LOCAL-HOST was set by the NCP (SYS: NETWORK; CHAOS; CHSNCP,
+;;; SETUP-MY-ADDRESS), from the machine's Chaos address, which left the band.
+;;; Now the machine's name is taken at every cold boot, on revisions 15 and 16
+;;; alike, in this order (QUUX's Ethernet contract, section 5.6, "From R3"):
+;;;  1. the name file, SYS: SITE; HOSTNAME (HOST: /site/hostname), a one-line
+;;;     file read at boot, as Unix's /etc/hostname: each file root and each
+;;;     board's card names its machine without a new band;
+;;;  2. else the name SET-HOST-NAME gave (below), kept by DISK-SAVE;
+;;;  3. else a network's: each network that can name the machine puts a
+;;;     function on LOCAL-HOST-FUNCTIONS, the internet's (SYS: NETWORK; IP;
+;;;     SERVERS) the site table's host whose INTERNET address is the device's;
+;;;  4. else LOCALHOST, the site table's, whose LMLOCS row gives the pretty
+;;;     name "localhost" and the associated machine HOST.  it only names the
+;;;     machine: the band has no loopback.
+;;; the name file is like an initialization, read at the cold boot only; the
+;;; command, SET-HOST-NAME, sets the current name: given in a running band it
+;;; names the machine at once, over the name file's name too, until the next
+;;; cold boot, where the order above holds again.  (set-host-name nil) drops
+;;; the command's name, and the machine takes what the order gives without it.
+;;; a name the site table does not have makes a host of that name with no
+;;; address.  SET-LOCAL-HOST-VARIABLES then sets the names and the location
+;;; from the host, so that they all agree.
+(defvar local-host-functions nil
+  "Functions of no arguments, one for each network, each returning the site table's host
+of this machine's address on its network, or NIL.")
+
+(defvar *host-name* nil
+  "The name SET-HOST-NAME gave this machine, a string, or NIL: kept by DISK-SAVE, it names
+the machine at boot when the name file does not.")
+
+(defvar *host-name-since-boot* nil
+  "T when SET-HOST-NAME has named this machine since the last cold boot: its name then
+comes before the name file's.  Each cold boot sets it to NIL.")
+
+(defvar local-host-file-name nil
+  "The name the name file (LOCAL-HOST-NAME-FILE) gave at the last cold boot, or NIL.")
+
+(defconst local-host-name-file "SYS: SITE; HOSTNAME"
+  "The name file: its first line, trimmed, names this machine at boot.")
+
+(defun read-local-host-name-file ()
+  "The name in the name file, its first line trimmed and in upper case, or NIL when there
+is no file, it is empty, or it cannot be read."
+  ;; at a cold boot no one is logged in, and a file access would ask for a
+  ;; login at the console: logged in for the read, as the error table's load
+  ;; is (eh/eh, LOAD-ERROR-TABLE).
+  (condition-case ()
+      (with-sys-host-accessible
+	;; the name file has no type, as /etc/hostname: unspecific, or the
+	;; open's default type (LISP) would be added to its name.
+	(let ((path (send (fs:parse-pathname local-host-name-file) :new-type :unspecific)))
+	  (and (probef path)
+	       (with-open-file (s path :direction :input)
+		 (let* ((line (send s :line-in))
+			(name (and line (string-trim '(#/space #/tab) line))))
+		   (and name (plusp (string-length name)) (string-upcase name)))))))
+    (error nil)))
+
+(defun host-of-name (name)
+  "The site table's host named NAME, by its name or a nickname; failing that a host made
+with that name and no address (the one made before, if there is one)."
+  (or (loop for elem in host-alist
+	    when (or (string-equal name (host-name elem))
+		     (mem #'string-equal name (host-name-list elem)))
+	      return (get-alist-elem-host elem))
+      (let ((elem (make-host-alist-elem :name name :system-type-internal :lispm
+					:site-name site-name :addresses nil)))
+	(push elem host-alist)
+	(get-alist-elem-host elem))))
+
+(defun find-local-host (&optional (read-file t))
+  "This machine's host, in the order above: the name file's (read again when READ-FILE,
+as at the cold boot), SET-HOST-NAME's, a network's, or LOCALHOST; SET-HOST-NAME's first
+when it was given since the cold boot."
+  ;; reading the file is the cold boot's: the command's name given before it,
+  ;; kept by a DISK-SAVE, comes after the file again
+  (when read-file
+    (setq *host-name-since-boot* nil)
+    (setq local-host-file-name (read-local-host-name-file)))
+  (cond ((and *host-name-since-boot* *host-name*) (host-of-name *host-name*))
+	(local-host-file-name (host-of-name local-host-file-name))
+	(*host-name* (host-of-name *host-name*))
+	((loop for f in local-host-functions thereis (funcall f)))
+	(t (host-of-name "LOCALHOST"))))
+
+(defun set-local-host (&optional (read-file t))
+  "Set LOCAL-HOST, this machine's host, by FIND-LOCAL-HOST."
+  (setq local-host (find-local-host read-file)))
+
+;; the command that names the machine in the running band (QUUX's Ethernet
+;; contract, section 5.6, "From R3"): it sets the current name, over the name
+;; file's; at a cold boot it is second in the order above.  the name is the
+;; band's, so a DISK-SAVE keeps it; the GPT has no pack name to hold it
+;; (SET-PACK-NAME, sys/io/disk, refuses).
+(defun set-host-name (name)
+  "Name this machine NAME now, a string or a symbol, over the name file's name too; NIL
+drops the name given, and the machine takes what the boot's order gives without it (the
+name file's read at boot, a network's, or LOCALHOST).  The name is kept in the band, so a
+DISK-SAVE keeps it; at the next cold boot the name file, SYS: SITE; HOSTNAME, wins over
+it, and it wins over a network's name and LOCALHOST (FIND-LOCAL-HOST).  Returns the
+machine's name."
+  (setq *host-name* (and name (string-upcase (string name))))
+  (setq *host-name-since-boot* (and *host-name* t))
+  ;; the name file as the cold boot read it, not read again
+  (set-local-host nil)
+  (set-local-host-variables)
+  (local-machine-name))
+
+;; at every cold boot, SET-LOCAL-HOST-VARIABLES's initialization (above) runs it
+;; first, reading the name file.
