@@ -1957,8 +1957,8 @@ pathname sets the defaults."
 ;;; which convert solid case, ("SYS" "SYS2"); pathname-component-match
 ;;; compares with case, so such a pattern matched no solid-case pathname,
 ;;; not even itself.  back-translation into SYS: then failed for every
-;;; HOST: or OZ: pathname: the cold load's files kept their ids and source
-;;; file names on HOST: generic pathnames, so QLD's make-system found no id
+;;; FILES: or OZ: pathname: the cold load's files kept their ids and source
+;;; file names on FILES: generic pathnames, so QLD's make-system found no id
 ;;; on the SYS: ones and loaded every file MINI had loaded a second time.
 ;;; the specs come out in interchange case, which is what the target's
 ;;; :translation-case-converter expects (:target-translate-wild-pathname),

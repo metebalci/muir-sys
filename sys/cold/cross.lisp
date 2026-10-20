@@ -51,7 +51,12 @@
 (defvar *cross-saved* nil
   "(name . original definition) of each function the cross build wraps.")
 
-(defvar *cross-log-directory* "HOST: //home//lispm//")
+;; the directory of the logs, tables and the builder's own QFASLs: NIL until
+;; cross-begin takes it from :log-directory, else from the user's home
+;; directory, so that this file names no pathname host and serves a builder
+;; whose file device is named FILES or HOST alike.  it was HOST's, a constant:
+;(defvar *cross-log-directory* "HOST: //home//lispm//")
+(defvar *cross-log-directory* nil)
 
 (defvar *cross-fileno* 0 "The number of the last file logged.")
 
@@ -670,7 +675,7 @@ since the target's are the cold-load generator's own."
 	  (puthash key out *cross-host-fasls*)
 	  out))))
 
-;;; HOST: //home//lispm//hq-zwei-defs.qfasl for SYS: ZWEI; DEFS LISP, apart
+;;; FILES: //home//lispm//hq-zwei-defs.qfasl for SYS: ZWEI; DEFS LISP, apart
 ;;; from the tree, whose QFASLs are the target's
 (defun cross-host-fasl-name (source)
   (let ((dir (send source :directory)))
@@ -688,7 +693,8 @@ since the target's are the cold-load generator's own."
 ;;; definitions: the tree's compile-time definitions (cross-declare-definitions)
 (defun cross-begin (&key (overlays '("SYS: COLD; TARGET40 LISP"))
 		    (check-data-types t) (check-misc-instructions t) (check-formats t)
-		    (log-directory *cross-log-directory*)
+;		    (log-directory *cross-log-directory*)
+		    (log-directory nil)
 		    (definitions t))
   "Load the target's parameters, check what the hook cannot see, and turn the cross build on.
 OVERLAYS are loaded over QCOM, QDEFS and DEFMIC; NIL gives this tree's own parameters.
@@ -696,7 +702,11 @@ DEFINITIONS: T gives every compile for the target the tree's compile-time defini
 that SYS: COLD; CROSSDEFS lists, NIL none (this world's own target), (:OMIT FILE...)
 all but FILEs'."
   (when *cross-active* (cross-end))
-  (setq *cross-log-directory* log-directory)
+;  (setq *cross-log-directory* log-directory)
+  ;; :log-directory, else the directory an earlier cross-begin took, else the
+  ;; user's home (the file device's /home/lispm/ in a builder session)
+  (setq *cross-log-directory*
+	(or log-directory *cross-log-directory* (string (fs:user-homedir))))
   ;; the parameters afresh: a value an earlier overlay or cold load left in the
   ;; cold-load package would otherwise stay in the table
   (mapatoms #'(lambda (s) (when (eq (symbol-package s) sym-package) (makunbound s)))

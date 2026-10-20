@@ -3,9 +3,9 @@
 ; MAKE-COLD into LOD3 (the band is opened read-only: the writes stay in the
 ; run), and the partition's pages copied out for check3.py.
 ; the readtable compiler, in no system, compiled and loaded as for any build
-(qc-file "SYS: IO; RTC LISP" "HOST: //home//lispm//h-rtc.qfasl")
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//h-rtc.qfasl"))
-(cold:cross-begin :log-directory "HOST: //home//lispm//c-")
+(qc-file "SYS: IO; RTC LISP" "FILES: //home//lispm//h-rtc.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//h-rtc.qfasl"))
+(cold:cross-begin :log-directory "FILES: //home//lispm//c-")
 (cold:cross-write-table)
 ; SI:COLD-LOAD-FILE-LIST (sys/sys/sysdcl.lisp) but its font
 (qc-file "SYS: SYS; QRAND LISP")
@@ -32,5 +32,5 @@
 (let ((p (si:qfasl-file-plist "SYS: IO; RDTBL QFASL"))) (getf p :word-width)) => 40
 (let ((p (si:qfasl-file-plist "SYS: FONTS; CPTFON QFASL"))) (getf p :word-width)) => 40
 (cold:cross-make-cold "LOD3")
-(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold40.img")
+(cold:cross-copy-partition "LOD3" "FILES: //home//lispm//cold40.img")
 (cold:cross-end)

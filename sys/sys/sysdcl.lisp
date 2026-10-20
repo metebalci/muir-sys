@@ -349,9 +349,9 @@
   (:MODULE HOST-PATHNAMES ("PATHST" "LOGICAL" "SYS:FILE;LMPARS"))
   (:MODULE FILE-IO ("OPEN" "BALDIR"))
   ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the QFILE
-  ;; client, Chaos's file access, left the band with the NCP; HOST: serves files.
+  ;; client, Chaos's file access, left the band with the NCP; FILES: serves files.
 ;  (:MODULE CHAOS-FILE-IO ("SYS: NETWORK; CHAOS; QFILE"))
-  ;; quux: the file device's driver and the pathname host HOST over it
+  ;; quux: the file device's driver and the pathname host FILES over it
   ;; (contract q9).  mini loads them too, from rest-of-pathnames-file-alist.
   (:module file-device "SYS: IO; FDEV" :package si)
   (:module host-file-io ("HOSTFS"))
@@ -566,7 +566,7 @@
 ;	    ("SYS: NETWORK; CHAOS; CHSNCP QFASL >" "CHAOS")
 ;	    ("SYS: NETWORK; CHAOS; CHUSE QFASL >" "CHAOS")
 ;	    ("SYS: NETWORK; CHAOS; QFILE QFASL >" "FS")
-	    ;; quux: the file device and HOST, loaded here so that HOST is a
+	    ;; quux: the file device and FILES, loaded here so that FILES is a
 	    ;; pathname host before the site's translations are read, and the
 	    ;; device is reset by qld's lisp-reinitialize (contract q9).
 	    ("SYS: IO; FDEV QFASL >" "SI")

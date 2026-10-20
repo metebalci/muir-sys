@@ -487,9 +487,9 @@ file carries a comment in that file saying why.
   `tools/assembler-check` passes all 30 checks, its revision-15 counts
   unchanged (359 hints, 140 predicted targets, every execution of the
   profile covered).
-- **"Creates the directory and tries again" works on `HOST:`**
-  (`sys/io/file/hostfs.lisp:87-93`, `:246`, `:255`, `:266`, `:382`, `:710`).
-  Opening a `HOST:` file for output in a directory that does not exist
+- **"Creates the directory and tries again" works on `FILES:`**
+  (`sys/io/file/hostfs.lisp:87-93`, `:251`, `:260`, `:271`, `:387`, `:715`).
+  Opening a `FILES:` file for output in a directory that does not exist
   offered it, s-A in the debugger; it made the directory and then stopped at
   "Invalid proceed-type :RETRY-FILE-OPERATION returned by handler for
   #<FS::DIRECTORY-NOT-FOUND-ERROR ...>" (`sys/eh/ehf.lisp:861`), as System
@@ -503,7 +503,7 @@ file carries a comment in that file saying why.
   delete, rename, creating a directory and a directory's listing, now do
   too, so the option makes the directory and the open is tried again, and
   the debugger also offers "Retry the operation on the same file" for their
-  errors. The operations that `HOST:` does not have (changing properties,
+  errors. The operations that `FILES:` does not have (changing properties,
   links, expunge, remote connect) and the streams' reads, writes and closes
   offer no retry, as before. The other proceed types such an error can be
   offered are given by its callers or its condition, not by the device:
@@ -765,6 +765,28 @@ file carries a comment in that file saying why.
   `tools/assembler-check/run`). The profile was not measured again on the
   changed microcode: its other records are as measured, and a fresh
   measurement belongs to the later work on performance.
+- **The file device's pathname host is FILES** (`sys/io/file/hostfs.lisp:168-173`,
+  `site/sys.translations:33`, `site/site.lisp:32`, `site/lmlocs.lisp:17-27`).
+  With QUUX's network on Ethernet, "host" means a host of the network, as the
+  machine's own host name does; the folders the file device serves, and every
+  machine's associated machine, are now `FILES` (`FILES: /home/lispm/`,
+  `(login "LISPM" "FILES" t)`, the herald's "with associated machine FILES").
+  Systems 2000 and 2001 call it `HOST`. The computer QUUX runs on is still its
+  host, and MIT's network sense of the word stays. A band reads the
+  translations of its own tree: a band that names the host HOST, served this
+  tree, keeps `SYS:` on HOST, and one that names it FILES, served an older
+  tree, keeps FILES. A leftover `HOST:` in a FILES band parses silently as a
+  relative directory on FILES, and every open of it then fails with
+  "Directory not found". The comments that mean the pathname host, the case
+  files and the documents follow; `HOSTFS`, `FILE-DEVICE-HOST` and the case
+  `host-create-directory` keep their names, which mean the host computer's
+  folders and MIT's pathname host. The cross build's log directory, which named
+  HOST, now defaults to the user's home directory at `CROSS-BEGIN`
+  (`sys/cold/cross.lisp:54-59`, `:705-709`), so the file names no pathname
+  host. The route's builder is the renamed builder, System 2002's hand-over
+  with the rename loaded and saved (`docs/building.md`, "The renamed
+  builder"), since a QFASL's source id and a cold load's truenames record the
+  compiling band's name for the host.
 
 ## Revision 14
 
@@ -1090,7 +1112,7 @@ Citations are of the files as this step left them.
   so that revision 13's still give their cold load byte for byte; the cross
   build's builder is System 2001's band, and a file carrying the word-width
   mark is foreign only when the target's word is not the builder's
-  (`CROSS-FOREIGN-FILE-P`, `sys/cold/cross.lisp:634`) (`tools/cross-check/run`,
+  (`CROSS-FOREIGN-FILE-P`, `sys/cold/cross.lisp:657`) (`tools/cross-check/run`,
   `crossdefs.py`, `check3.py`, `cases/native.cases`; `sys/cold/crossdefs.lisp`
   against System 2001's tree).
 - **A flip no longer walks each old region's pages to remap them**
@@ -2333,7 +2355,7 @@ and then left the band and the microcode (step R3, below).
   `REMOTE-NETWORK-ERROR`'s host, now the one the signaller passes, as TCP's
   streams do (`sys/eh/ehf.lisp:1364`); and `SI:LOCAL-HOST`, which the NCP set
   from the Chaos address (the machine's name now has its own bullet, below).
-  The site's associated machine is HOST for a machine LMLOCS does not name
+  The site's associated machine is FILES for a machine LMLOCS does not name
   too (`site/site.lisp`, `:DEFAULT-ASSOCIATED-MACHINE`). Chaos's uses elsewhere are commented out
   in place: the remote disk and `PRINT-AVAILABLE-BANDS`' Lisp machines
   (`sys/io/disk.lisp`), PEEK's Active Servers mode and its SUPDUP, TELNET
@@ -2373,7 +2395,7 @@ and then left the band and the microcode (step R3, below).
   address is register 255's, on revision 16 (`INTERNET-LOCAL-HOST`,
   `sys/network/ip/servers.lisp`); else LOCALHOST, a new entry of the site
   table (`site/hosts.text`, its address the host table's form only: the band
-  has no loopback) with an LMLOCS row, "localhost", associated machine HOST
+  has no loopback) with an LMLOCS row, "localhost", associated machine FILES
   (`site/lmlocs.lisp`). The name file is read at the cold boot only;
   `SI:SET-HOST-NAME` sets the current name, naming the running machine at
   once over the name file's name too, and with NIL drops the name given,

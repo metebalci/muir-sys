@@ -2,8 +2,8 @@
 ; docs/building.md, "The native rebuild on revision 13", and on revision 14 the
 ; same): the band compiles its own system from the served tree, whose QFASLs it
 ; writes.  SYSDCL, the ALLDEFS files, the site, the readtables, WORMCH from its
-; AST, then SYSTEM with :RECOMPILE.  The site must be :MIT and SYS: on HOST.
-(list :build-site si:site-name (send (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) :name) (eq (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) fs:*file-device-host*)) => (:BUILD-SITE :MIT "HOST" T)
+; AST, then SYSTEM with :RECOMPILE.  The site must be :MIT and SYS: on FILES.
+(list :build-site si:site-name (send (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) :name) (eq (send (fs:translated-pathname "SYS: SYS; SYSDCL LISP") :host) fs:*file-device-host*)) => (:BUILD-SITE :MIT "FILES" T)
 (let ((si:inhibit-fdefine-warnings :just-warn)) (qc-file "SYS: SYS; SYSDCL LISP") (load "SYS: SYS; SYSDCL QFASL") t) => T
 (qc-file "SYS: SYS2; DEFMAC LISP")
 (qc-file "SYS: SYS2; LMMAC LISP")

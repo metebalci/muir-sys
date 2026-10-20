@@ -240,7 +240,7 @@ Each element is a HOST-ALIST-ELEM structure, and looks like
        (FS:SITE-PATHNAME-INITIALIZE))
   (AND (FBOUNDP 'FS:LM-HOST-INITIALIZE)
        (FS:LM-HOST-INITIALIZE))			;For local file, if loaded
-  ;; quux: site-pathname-initialize dropped HOST with every file host; put
+  ;; quux: site-pathname-initialize dropped FILES with every file host; put
   ;; the same instance back (io/file/hostfs.lisp).
   (and (fboundp 'fs:file-device-host-initialize)
        (fs:file-device-host-initialize))
@@ -741,7 +741,7 @@ All strings are returned trimmed of whitespace."
 ;;; SETUP-MY-ADDRESS), from the machine's Chaos address, which left the band.
 ;;; Now the machine's name is taken at every cold boot, on revisions 15 and 16
 ;;; alike, in this order (QUUX's Ethernet contract, section 5.6, "From R3"):
-;;;  1. the name file, SYS: SITE; HOSTNAME (HOST: /site/hostname), a one-line
+;;;  1. the name file, SYS: SITE; HOSTNAME (FILES: /site/hostname), a one-line
 ;;;     file read at boot, as Unix's /etc/hostname: each file root and each
 ;;;     board's card names its machine without a new band;
 ;;;  2. else the name SET-HOST-NAME gave (below), kept by DISK-SAVE;
@@ -749,7 +749,7 @@ All strings are returned trimmed of whitespace."
 ;;;     function on LOCAL-HOST-FUNCTIONS, the internet's (SYS: NETWORK; IP;
 ;;;     SERVERS) the site table's host whose INTERNET address is the device's;
 ;;;  4. else LOCALHOST, the site table's, whose LMLOCS row gives the pretty
-;;;     name "localhost" and the associated machine HOST.  it only names the
+;;;     name "localhost" and the associated machine FILES.  it only names the
 ;;;     machine: the band has no loopback.
 ;;; the name file is like an initialization, read at the cold boot only; the
 ;;; command, SET-HOST-NAME, sets the current name: given in a running band it

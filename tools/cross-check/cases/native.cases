@@ -16,20 +16,20 @@
 ;(let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: COLD; COLDLD QFASL"))
 ; the builder's own generator compiled from its tree's sources here: System
 ; 2002's hand-over tree carries no QFASL of it (System 2001's did)
-(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//coldut-old.qfasl")
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldut-old.qfasl"))
+(qc-file "SYS: COLD; COLDUT LISP" "FILES: //home//lispm//coldut-old.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//coldut-old.qfasl"))
 (cold:load-parameters)
-(qc-file "SYS: COLD; COLDLD LISP" "HOST: //home//lispm//coldld-old.qfasl")
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldld-old.qfasl"))
+(qc-file "SYS: COLD; COLDLD LISP" "FILES: //home//lispm//coldld-old.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//coldld-old.qfasl"))
 (let ((si:inhibit-fdefine-warnings :just-warn)) (load "SYS: CROSS-CHECK; COPY-PARTITION LISP"))
 (list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
 (cold:xc-make-cold "LOD3")
-(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-old.img" (* 5 (ceiling cold:vmem-highest-address 1024)))
-(qc-file "SYS: CROSS-CHECK; COLDUT-NEW LISP" "HOST: //home//lispm//coldut-new.qfasl")
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldut-new.qfasl"))
+(cold:xc-copy-partition "LOD3" "FILES: //home//lispm//cold-old.img" (* 5 (ceiling cold:vmem-highest-address 1024)))
+(qc-file "SYS: CROSS-CHECK; COLDUT-NEW LISP" "FILES: //home//lispm//coldut-new.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//coldut-new.qfasl"))
 (cold:load-parameters)
-(qc-file "SYS: CROSS-CHECK; COLDLD-NEW LISP" "HOST: //home//lispm//coldld-new.qfasl")
-(let ((si:inhibit-fdefine-warnings :just-warn)) (load "HOST: //home//lispm//coldld-new.qfasl"))
+(qc-file "SYS: CROSS-CHECK; COLDLD-NEW LISP" "FILES: //home//lispm//coldld-new.qfasl")
+(let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//coldld-new.qfasl"))
 (list cold:word-bits cold:word-bytes cold:blocks-per-page) => (40 5 5)
 ; the builder's own parameters ask for no first-object tables (the
 ; generational collector's cold load, contract G3 step 2, 9.3, 9.4): for them
@@ -38,4 +38,4 @@
 ;(cold:target-has-page-hash-table-p) => T
 (cold:target-has-generations-p) => NIL
 (cold:xc-make-cold "LOD3")
-(cold:xc-copy-partition "LOD3" "HOST: //home//lispm//cold-new.img" (* 5 (ceiling cold:vmem-highest-address 1024)))
+(cold:xc-copy-partition "LOD3" "FILES: //home//lispm//cold-new.img" (* 5 (ceiling cold:vmem-highest-address 1024)))

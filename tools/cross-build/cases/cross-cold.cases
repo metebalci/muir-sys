@@ -2,7 +2,7 @@
 ; builder's cross build, after tools/cross-check/cases/prime.cases, makes the
 ; target's cold load from a native rebuild's QFASLs, the served tree, compiling
 ; nothing; it must equal that rebuild's own cold load byte for byte.
-(cold:cross-begin :log-directory "HOST: //home//lispm//y-")
+(cold:cross-begin :log-directory "FILES: //home//lispm//y-")
 (cold:cross-make-cold "LOD3")
-(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold.img")
+(cold:cross-copy-partition "LOD3" "FILES: //home//lispm//cold.img")
 (cold:cross-end)

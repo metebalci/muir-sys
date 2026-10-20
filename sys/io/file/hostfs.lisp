@@ -2,14 +2,14 @@
 ;;;
 ;;; This is SYS: IO; FILE; HOSTFS
 ;;;
-;;; quux: the pathname host HOST, the folders its host computer serves to it
+;;; quux: the pathname host FILES, the folders its host computer serves to it
 ;;; through quux's file device (contract q9, revision 9; muir's docs/quux.md,
 ;;; "the file device", as built at muir ab87378).  the driver, the rings and
 ;;; the registers are SYS: IO; FDEV; this file is the host, its access and its
 ;;; streams, on the model of SYS: FILE; FSACC and FSSTR.
 ;;;
-;;; HOST speaks unix pathname syntax, so its pathnames print and parse as
-;;; OZ's do, "HOST: /sys/io/disk.lisp".  it is on no network: QFILE's access
+;;; FILES speaks unix pathname syntax, so its pathnames print and parse as
+;;; OZ's do, "FILES: /sys/io/disk.lisp".  it is on no network: QFILE's access
 ;;; never takes it.  the device moves bytes and never interprets them
 ;;; (decision 3 of the contract), so the streams here translate characters,
 ;;; with ozd's tables, and decide :characters :default by the qfasl magic, as
@@ -148,8 +148,8 @@ pathname itself unless normalizing changed its name."
   ;; a logical pathname's truename is its translation.  MAKE-SYSTEM asks for
   ;; the properties of SYS: pathnames, which LOGICAL-PATHNAME passes on to this
   ;; host untranslated, and the :TRUENAME was then the logical pathname: never
-  ;; EQUAL to a loaded file's id, whose truename is HOST's, so with SYS: on
-  ;; HOST, MAKE-SYSTEM loaded every file of a system again, and QLD reloaded
+  ;; EQUAL to a loaded file's id, whose truename is FILES's, so with SYS: on
+  ;; FILES, MAKE-SYSTEM loaded every file of a system again, and QLD reloaded
   ;; the cold load's files and stopped at a redefinition query.  a physical
   ;; pathname translates to itself.
   (let ((pathname (send pathname :translated-pathname)))
@@ -163,22 +163,27 @@ pathname itself unless normalizing changed its name."
 ;;;; The host
 
 (defflavor file-device-host () (file-host-unix-mixin si:basic-host)
-  (:documentation "HOST, the folders served by quux's file device."))
+  (:documentation "FILES, the folders served by quux's file device."))
 
-(defmethod (file-device-host :name) () "HOST")
+;; the pathname host is FILES: with quux's network on ethernet, a host is a
+;; host of the network, so the folders the file device serves take a name of
+;; their own.  systems 2000 and 2001, and the bands before this change, name
+;; it HOST.
+;(defmethod (file-device-host :name) () "HOST")
+(defmethod (file-device-host :name) () "FILES")
 (defmethod (file-device-host :system-type) () :unix)
 (defmethod (file-device-host :file-system-type) () :file-device)
-;; file-host-mixin requires it; it is qfile's login reply, which HOST has not.
+;; file-host-mixin requires it; it is qfile's login reply, which FILES has not.
 (defmethod (file-device-host :hsname-information) (&rest ignore)
   (values (send self :sample-pathname) "" #/- ""))
 
 (compile-flavor-methods file-device-host)
 
-(defvar *file-device-host* nil "The one pathname host HOST; the SYS logical host may hold it.")
+(defvar *file-device-host* nil "The one pathname host FILES; the SYS logical host may hold it.")
 
 (defun file-device-host-initialize ()
-  "Put HOST on the pathname host list, always the same instance.
-Called when this file is loaded, before any translation can name HOST, and
+  "Put FILES on the pathname host list, always the same instance.
+Called when this file is loaded, before any translation can name FILES, and
 again by RESET-NON-SITE-HOSTS after SITE-PATHNAME-INITIALIZE, which drops
 every file host (access.lisp), as LM-HOST-INITIALIZE is."
   (or *file-device-host* (setq *file-device-host* (make-instance 'file-device-host)))
@@ -218,7 +223,7 @@ every file host (access.lisp), as LM-HOST-INITIALIZE is."
 (defmethod (file-device-access :homedir) (&optional (user user-id))
   (file-device-homedir host user))
 
-;; the home is HOST:/home/<user>/ (the user, 2026-09-25), the user id in
+;; the home is FILES:/home/<user>/, the user id in
 ;; lower case, as unix names normally are: LISPM's is /home/lispm/.
 (defun file-device-homedir (host user)
   (parse-pathname (if (and user (plusp (string-length user)))
@@ -678,7 +683,7 @@ the file was not written." truename)))
 	 (values nil (if (eq (car element-type) 'mod)
 			 (haulong (1- (cadr element-type)))
 		       (cadr element-type))))
-	(t (ferror 'unimplemented-option "~S is not implemented as an ELEMENT-TYPE on HOST."
+	(t (ferror 'unimplemented-option "~S is not implemented as an ELEMENT-TYPE on FILES."
 		   element-type))))
 
 (defmethod (file-device-access :open) (file pathname &rest options)

@@ -67,7 +67,9 @@ is never written either; QFASLs land in the copy.
 A file inside the tree's `sys/` is served in its own place and loaded by its
 logical name, `sys/io1/time.lisp` as `SYS: IO1; TIME LISP`, so the world sees
 the source file it already knows. Any other file is served in the login's home
-directory, `OZ: /lispm/` or `HOST: /home/lispm/`. Some `sys/` files do not
+directory, `OZ: /lispm/`, or `/home/lispm/` on the file device's host:
+`FILES: /home/lispm/`, `HOST: /home/lispm/` in a band that names it HOST
+(Systems 2000 and 2001, and the bands before the rename). Some `sys/` files do not
 load as source because they use functions only the compiler open-codes
 (`sys/io1/time.lisp` stops at "The function %PUSH is undefined"): check those
 with `--compile`.
@@ -79,8 +81,9 @@ A compiler file patched alone into a band built before the cross build (System
 
 The copy is served the way the band reads its `SYS:` files, since a band
 boots to its prompt only with its `SYS:` host served: a band whose `SYS:` is
-on OZ served by the file device alone, or one whose `SYS:` is on HOST served
-by ozd alone, waits at boot with no TELNET server, and ozd logs "No server
+on OZ served by the file device alone, or one whose `SYS:` is on the file
+device's host (FILES, or HOST in the bands before the rename) served by ozd
+alone, waits at boot with no TELNET server, and ozd logs "No server
 for this contact name" until the setup gives up at `--setup-limit` and
 reports a hang (exit status 3). So does a band
 the machine cannot run: a System 1002 band for QUUX (microcode 1000) on quux
@@ -89,7 +92,7 @@ revision 11 or later (see [Defaults](#defaults)).
 | `--file-server` | For a band whose `SYS:` is on | The copy is served by | The setup logs in to |
 |---|---|---|---|
 | `ozd` | OZ | ozd: its roots `sys`, `site` and `lispm` | `OZ` |
-| `device` | HOST | quux's file device: the copy is HOST's `/` (`--file-root`), holding `sys/`, `site/` and `home/lispm/` | `HOST` |
+| `device` | FILES or HOST, the file device's host as the band names it | quux's file device: the copy is that host's `/` (`--file-root`), holding `sys/`, `site/` and `home/lispm/` | the band's name for it, `FILES` or `HOST` |
 
 In both, ozd carries the band's TELNET listener; with `device` that is all it
 does: its one root is an empty read-only folder (ozd wants one), so it serves
@@ -100,7 +103,7 @@ The file device is QUUX's: cadr has none, so on the `cadr` line the files are
 always served by ozd, and `--file-server device` is refused.
 
 `auto`, the default, chooses by the host the band's `SYS:` is on: `device`
-for HOST, `ozd` for OZ. It takes that from a checkpoint of this band and
+for FILES or HOST, `ozd` for OZ. It takes that from a checkpoint of this band and
 machine already made, whose setup asked the band; else from the answers remembered in
 `sys-hosts.json` under the cache; else from a probe, a cold boot with the copy
 served both ways that only asks the band (about 15 s, once for each band and
@@ -108,7 +111,7 @@ machine). A machine without a file device (no `--file-root` in its `--help`,
 as cadr) means `ozd`. Every run says which server it chose and why:
 
 ```
-lispm-check: files served by device: the band's SYS: is on HOST (auto, from its checkpoint)
+lispm-check: files served by device: the band's SYS: is on FILES (auto, from its checkpoint)
 ```
 
 ## The engine
@@ -172,8 +175,8 @@ network through its helper, `harness_network`: the machine's revision,
 `LISPM_CHECK_TAPS`. The tools that run this one, as microcode-check,
 system-check, assembler-check and cross-check do, get its default.
 
-`tcp` needs revision 16 and a band whose `SYS:` is on HOST, its files on the
-file device: ozd would serve OZ's files over Chaos. So `--file-server auto`
+`tcp` needs revision 16 and a band whose `SYS:` is on the file device's host
+(FILES, or HOST before the rename), its files on the file device: ozd would serve OZ's files over Chaos. So `--file-server auto`
 means `device` under `tcp`, and the setup's check refuses a band whose `SYS:`
 is on OZ. Since the NCP left the band (the contract's section 8, R3),
 `tcp` gives the machine no `--chaos-address`, and on revision 16 each

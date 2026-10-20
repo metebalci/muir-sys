@@ -14,20 +14,22 @@
   ;; a number here is a fixed offset in hours west, with no summer time.
   (:timezone "Europe//Berlin")
   ;; OZ is this site's Chaos file, time and host-table server, used only
-  ;; when named: SYS: and the associated machine are HOST, the file device
+  ;; when named: SYS: and the associated machine are FILES, the file device
   ;; (SYS: SITE; SYS TRANSLATIONS, LMLOCS), and the time comes from QUUX's
   ;; real-time clock.
   ;; quux revision 16 (QUUX's Ethernet contract, section 8, step R3): the NCP
   ;; and the QFILE client left the band, so OZ can serve nothing and is no
-  ;; longer made a file host; the builder's files come from HOST: too.
+  ;; longer made a file host; the builder's files come from FILES: too.
 ;  (:CHAOS-FILE-SERVER-HOSTS '("OZ"))
 ;  (:CHAOS-TIME-SERVER-HOSTS '("OZ"))
 ;  (:CHAOS-HOST-TABLE-SERVER-HOSTS '("OZ"))
   ;; quux revision 16 (QUUX's Ethernet contract, sections 5.6 and 8, step R3):
   ;; with the NCP gone a machine is an unnamed host, which LMLOCS cannot name,
-  ;; so the associated machine of every machine is HOST here too, as LMLOCS
+  ;; so the associated machine of every machine is FILES here too, as LMLOCS
   ;; gives it for LISPM-1 to LISPM-7 (else it was the first pathname host).
-  (:default-associated-machine "HOST")
+  ;; it was HOST, the file device's name before it became FILES:
+;  (:default-associated-machine "HOST")
+  (:default-associated-machine "FILES")
   ;; Compiler warnings go beside the patches
   (:WARNINGS-PATHNAME-DEFAULT "SYS: PATCH;")
   )

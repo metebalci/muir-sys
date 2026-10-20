@@ -19,9 +19,9 @@
 ; an instance variable seen by an interpreted lambda run inside the instance
 (send (make-condition 'ferror :format-string "fs") :funcall-inside-yourself #'(lambda () eh::format-string)) => "fs"
 ; the handler that declines an error signalled inside OPEN's method
-(condition-case (e) (condition-bind ((error #'(lambda (e) e nil))) (open "HOST: //home//lispm//nonesuch.text")) (error (send e :report-string))) => "File not found for HOST: //home//lispm//nonesuch.text"
+(condition-case (e) (condition-bind ((error #'(lambda (e) e nil))) (open "FILES: //home//lispm//nonesuch.text")) (error (send e :report-string))) => "File not found for FILES: //home//lispm//nonesuch.text"
 ; CONDITION-CALL, whose handler is an interpreted lambda
-(condition-call (e) (open "HOST: //home//lispm//nonesuch.text") ((errorp e) 'called)) => CALLED
+(condition-call (e) (open "FILES: //home//lispm//nonesuch.text") ((errorp e) 'called)) => CALLED
 ; APPLY-LAMBDA's own forms run compiled: an evalhook, as the stepper's, sees
 ; only the forms of the code it runs.  With the binding's place taken inside a
 ; LOCALLY, the interpreter evaluated it and the hook saw

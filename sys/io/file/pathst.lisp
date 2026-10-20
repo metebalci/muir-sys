@@ -333,8 +333,8 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 ;;; the open, Unix seconds in two 16-bit halves, (high . low) (cold; mini).
 ;;; MINI keeps the halves because it has no bignums and, as the device path
 ;;; never does, neither prints nor parses a date.  file-device-universal-time
-;;; is what HOST's :creation-date uses, so a file MINI loaded has the date
-;;; HOST gives it, and QLD's make-system does not load it again.
+;;; is what FILES's :creation-date uses, so a file MINI loaded has the date
+;;; FILES gives it, and QLD's make-system does not load it again.
 (defun mini-date-universal-time (date)
   (file-device-universal-time (+ (* (car date) 65536.) (cdr date))))
 
@@ -389,7 +389,7 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 ;		   (AND (STRINGP (CAR INFO))
 ;			(SETF (CAR INFO) (MERGE-PATHNAMES (CAR INFO) PHYS-PATHNAME)))
 		   ;; the truename is the translation of the file's SYS: name, the
-		   ;; pathname HOST gives as the truename when MAKE-SYSTEM asks.  the
+		   ;; pathname FILES gives as the truename when MAKE-SYSTEM asks.  the
 		   ;; name merged into SYS:'s physical pathname is that same pathname
 		   ;; only for a file two or more directories deep: for one directory
 		   ;; deep, /site/hsttbl.qfasl, the merge's directory is the string
@@ -404,7 +404,7 @@ SIGN-OK non-NIL says a sign at the front is allowed."
 			     (if logical (send logical :translated-pathname) recorded))))
 		   ;; and before there are bignums: MINI's date is the open's
 		   ;; mtime halves, made a universal time here, before QLD's
-		   ;; make-system compares it with HOST's date for the file.
+		   ;; make-system compares it with FILES's date for the file.
 		   (when (consp (cdr info))
 		     (setf (cdr info) (mini-date-universal-time (cdr info))))))
 		((EQ PROP :DEFINITIONS)

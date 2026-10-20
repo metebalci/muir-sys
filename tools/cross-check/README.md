@@ -42,7 +42,7 @@ every check given passes. Each check writes `run/cross-check/CHECK/` (git-ignore
 | `lispm-check.out` | lispm-check's output: one line per case |
 | `cases.cases` | the cases the builder ran: `cases/prime.cases` and the check's own |
 | `manifest.txt` | the sha256 of the cross build's sources the run used |
-| `home/` | what the run left in HOST's home: QFASLs, logs, tables, images |
+| `home/` | what the run left in FILES's home: QFASLs, logs, tables, images |
 | `served/` | the run's served `sys/`, with the QFASLs it made (checks 3 and 2) |
 | `*.log` | the machine's, ozd's and the TELNET session's logs |
 
@@ -63,7 +63,7 @@ every check given passes. Each check writes `run/cross-check/CHECK/` (git-ignore
   `run/cross-check/tree-2000/`.
 - The builder is primed as `docs/building.md` says: `cases/prime.cases`
   compiles and loads the compiler files the cross build changes, `SYSDCL`, the
-  cold-load generator and `SYS: COLD; CROSS`, with their QFASLs in HOST's
+  cold-load generator and `SYS: COLD; CROSS`, with their QFASLs in FILES's
   home. Every check but the native control starts with it.
 
 The files of `lisp/` are served to the builder as `SYS: CROSS-CHECK;`
@@ -250,7 +250,7 @@ It takes about two hours and twenty minutes on the micro engine.
 - `SYSDCL` and SYSTEM's definition files are compiled for the target, then
   `MAKE-SYSTEM` through `cold:cross-compile-system`. Then the controls: the
   planted fold, and an uncovered `#.`, which must stop its file.
-- Each file compiled leaves a log in HOST's home, `x1-cross-NNNN.txt` (`cold:cross-write-log`).
+- Each file compiled leaves a log in FILES's home, `x1-cross-NNNN.txt` (`cold:cross-write-log`).
   The log holds every read of a watched symbol at an interpreted point, with
   its target and builder values, every fold, every `#.`, every miss and every
   `LSH` or `ROT` left to the target. The table is `x1-cross-table.txt`, and the

@@ -1,6 +1,6 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Readtable:ZL -*-
 ;;; For the check host-create-directory (tools/system-check/README.md): a
-;;; HOST: file opened for output in a directory that does not exist is
+;;; FILES: file opened for output in a directory that does not exist is
 ;;; written once the error is proceeded with :CREATE-DIRECTORY-AND-RETRY, the
 ;;; debugger's "Creates the directory and tries again" (sys/io/file/open.lisp,
 ;;; DIRECTORY-NOT-FOUND-ERROR).  That proceed type creates the directory and

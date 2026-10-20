@@ -50,7 +50,10 @@ which has the Ethernet device: each run takes a tap of the pool
 the band's server, with no ozd. The microcode and PROM are assembled for
 revision 15 (`ASM_TARGET`, `:72`; `--asm-target` overrides it), which
 revision 16 runs. Every machine's files are served by quux's file device
-(`--file-root`), its `SYS:` on HOST.
+(`--file-root`), its `SYS:` on FILES, the file device's pathname host.
+Systems 2000 and 2001, and System 2002's bands before the rename (the
+hand-over that is the builder among them), call it HOST; the route's builder
+is therefore the renamed builder ("The renamed builder", below).
 
 **The disk** is a GPT (docs/booting.md), made on the host from the
 builder's disk, so it has the builder's layout: MCR1, MCR2, PAGE and LOD1 to
@@ -124,6 +127,83 @@ resource (`network/ip/ether.lisp:223-227`). native5's and native6's
 compiles load the network's QFASLs into the band they run on, over that
 band's own TCP session, and run on. No route session started ozd; the
 builder's runs did.
+
+### The renamed builder
+
+A QFASL records, in its source id, the name of the compiling band's file
+device host, and a cold load records it in its truenames; the route's checks
+(a) and (b) compare the builder's output with the route's own byte for byte.
+The builder, System 2002's hand-over, names the file device's pathname host
+HOST and this tree names it FILES, so with that band as the builder check (a)
+differs on every QFASL and check (b) stops at the first QFASL whose host its
+band does not know. The route's builder is therefore the renamed builder: the
+hand-over's band with the rename loaded into it and saved.
+
+1. A raw copy of the hand-over's disk (`qemu-img convert -f vpc -O raw`).
+2. Boot it read-write at the builder's revision, 14, with its microcode and
+   PROM, as the route's builder sessions run, this tree on the file device,
+   and log in as LISPM to the band's own `SYS:` host (HOST).
+3. Put this file in the served home as `renamed-builder.lisp`, compile it with
+   `QC-FILE` and load its QFASL with `SI:INHIBIT-FDEFINE-WARNINGS` bound to
+   `T` (the method is redefined from another file). In this band
+   `QC-FILE-LOAD`, and the `MAPHASH` below run interpreted (at the listener,
+   or as a QFASL's top-level form), stop at "The function %PUSH is
+   undefined", so the rest is in a function:
+
+   ```lisp
+   ;;; -*- Mode:LISP; Package:FILE-SYSTEM; Base:10 -*-
+   ;;; the renamed builder: the file device's pathname host renamed FILES in
+   ;;; a band that names it HOST, before the band is saved.
+   (defmethod (file-device-host :name) () "FILES")
+
+   (defun renamed-builder ()
+     "The rest of the rename, in a function: a QFASL's top-level forms run
+   interpreted, and the band's interpreter stops in them, %PUSH undefined."
+     ;; the printed strings the host's pathnames cached still name HOST
+     (maphash #'(lambda (key p)
+                  (when (eq (car key) *file-device-host*)
+                    (set-in-instance p 'string-for-printing nil)
+                    (set-in-instance p 'string-for-editor nil)))
+              *pathname-hash-table*)
+     ;; SYS's translations read again: SYS was defined by hand (MINI, QLD),
+     ;; so make-logical-pathname-host returns at once without reading them
+     (load (make-pathname :host "SYS" :device :unspecific :directory '("SITE")
+                          :name "SYS" :canonical-type :logical-pathname-translations
+                          :version :newest)
+           :verbose nil :package (pkg-find-package "FILE-SYSTEM"))
+     ;; the site's associated machine and every machine's, then the local
+     ;; host's variables from them: without these the saved band's cold boot
+     ;; stops in si:set-local-host-variables, "HOST" not a known file host
+     (load "SYS: SITE; SITE LISP" :verbose nil :package (pkg-find-package "SYSTEM-INTERNALS"))
+     (load "SYS: SITE; LMLOCS LISP" :verbose nil :package (pkg-find-package "SYSTEM-INTERNALS"))
+     (si:set-local-host-variables)
+     (send *file-device-host* :name))
+
+   (renamed-builder)
+   ```
+
+4. `(si:disk-save "LOD2" t)`, and the saved band put on a fresh copy of the
+   hand-over's disk, current in LOD1 with the hand-over's microcode in MCR1,
+   as the route puts each band it makes (`band_disk`,
+   `tools/cross-build/run`).
+
+The route takes it as `--builder`, with the hand-over's `--builder-ubin`,
+`--builder-prom` and `--builder-revision 14`. The assembly stays on the
+hand-over itself, `--asm-band` its disk and `--asm-prom` its PROM, at
+`--asm-revision 14`: `ucadr.sym` records the assembling band's host, and
+assembled on the hand-over the microcode's files can equal `--ubin-ref`.
+
+Measured on a renamed builder made so: it boots cold and warm, each time
+with `SYS:` translating to FILES, `(fs:get-pathname-host "HOST" t)` NIL,
+the home `FILES: /home/lispm/`, the associated machine FILES (the herald's
+"with associated machine FILES"), and no interned pathname printing a
+`HOST:`; check 3 on it passes (`tools/cross-check/run check3`, 50 of 50),
+and its cold load holds 41 truenames `FILES: /` and no `HOST: /`; a fresh
+`QC-FILE` records FILES in its source id; and a loading `MAKE-SYSTEM` of
+SITE (`UPDATE-SITE-CONFIGURATION-INFO`) keeps `SYS:`, the pathname host and
+the associated machine on FILES. Without SITE and LMLOCS loaded, the saved
+band's cold boot stops in `SET-LOCAL-HOST-VARIABLES`: "HOST" is not the name
+of a known file host.
 
 ### Priming the builder
 
@@ -258,12 +338,12 @@ which are the target's; then `SYSDCL`, the cold-load generator and the cross
 build:
 
 ```lisp
-(qc-file "SYS: SYS; QCDEFS LISP" "HOST: //home//lispm//h-qcdefs.qfasl")
-(load "HOST: //home//lispm//h-qcdefs.qfasl")
+(qc-file "SYS: SYS; QCDEFS LISP" "FILES: //home//lispm//h-qcdefs.qfasl")
+(load "FILES: //home//lispm//h-qcdefs.qfasl")
 ;; the same for SYS: SYS; QCFASD, QCP1, QCOPT, SYS: IO; RTC and SYS: SYS; SYSDCL
 (load "SYS: COLD; COLDPK LISP")
-(qc-file "SYS: COLD; COLDUT LISP" "HOST: //home//lispm//h-coldut.qfasl")
-(load "HOST: //home//lispm//h-coldut.qfasl")
+(qc-file "SYS: COLD; COLDUT LISP" "FILES: //home//lispm//h-coldut.qfasl")
+(load "FILES: //home//lispm//h-coldut.qfasl")
 (cold:load-parameters)
 ;; then compile and load SYS: COLD; COLDLD and SYS: COLD; CROSS the same way
 ```
@@ -271,14 +351,14 @@ build:
 **Then**, with `SI:INHIBIT-FDEFINE-WARNINGS` at `:JUST-WARN` for the loads:
 
 ```lisp
-(cold:cross-begin :log-directory "HOST: //home//lispm//x-")
+(cold:cross-begin :log-directory "FILES: //home//lispm//x-")
 (qc-file "SYS: SYS; SYSDCL LISP")	;and the six ALLDEFS files, as above
 (cold:cross-compile-system)
 (si:rtc-file "SYS: IO; RDTBL LISP")
 (si:rtc-file "SYS: IO; CRDTBL LISP")
 (cold:cross-redump-value-file "SYS: FONTS; CPTFON QFASL" 'fonts:cptfont)
 (cold:cross-make-cold "LOD3")
-(cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold40.img")
+(cold:cross-copy-partition "LOD3" "FILES: //home//lispm//cold40.img")
 (cold:cross-end)
 ```
 
@@ -440,7 +520,7 @@ tree's own `QCOM`:
 - **Then**, with no overlay:
 
   ```lisp
-  (cold:cross-begin :overlays nil :log-directory "HOST: //home//lispm//y-")
+  (cold:cross-begin :overlays nil :log-directory "FILES: //home//lispm//y-")
   (qc-file "SYS: SYS; SYSDCL LISP")	;and the six ALLDEFS files
   (make-system 'site :recompile :noload :noconfirm :nowarn)
   (si:rtc-file "SYS: IO; RDTBL LISP")
@@ -448,7 +528,7 @@ tree's own `QCOM`:
   ;; SYS: DEMO; WORMCH QFASL from its AST, as for any build
   (cold:cross-compile-system)
   (cold:cross-make-cold "LOD3")
-  (cold:cross-copy-partition "LOD3" "HOST: //home//lispm//cold.img")
+  (cold:cross-copy-partition "LOD3" "FILES: //home//lispm//cold.img")
   (cold:cross-end)
   ```
 
@@ -720,7 +800,7 @@ A world cannot be built from nothing, so each stage runs on the one before.
 ## What is needed
 
 - **A running band** to compile with, such as a 1000 band, **whose site is the site being built** (see "What the 2026-09-22 rebuild added" below).
-- **A file server for `SYS:`** that serves both FILE and MINI. For System 2000 it is quux's file device: `SYS:` is on `HOST` (`site/sys.translations:30-35`), MINI reads through the device (`cold/mini.lisp`), and quux's `--file-root` names the host folder that is `HOST`'s `/`, holding `sys/`, `site/` and `home/lispm/`. On the CADR's line, where `SYS:` is on OZ, ozd does.
+- **A file server for `SYS:`** that serves both FILE and MINI. For System 2000 it is quux's file device: `SYS:` is on `HOST` (`site/sys.translations:32-37`), MINI reads through the device (`cold/mini.lisp`), and quux's `--file-root` names the host folder that is `HOST`'s `/`, holding `sys/`, `site/` and `home/lispm/`. On the CADR's line, where `SYS:` is on OZ, ozd does.
 - **A site.** The repository includes an example `site/` directory. The build loads `SYS: SITE; SITE`, `LMLOCS`, `HSTTBL` and `SYS TRANSLATIONS` (`sys/sysdcl.lisp:598-605`). They must be compiled for the site first, with `(make-system 'site :compile :noload :noconfirm)`.
 - **The translations file must survive the traditional readtable.** A cold load reads it with `MINI-READFILE` (`cold/mini.lisp:319`), which ignores the file's attribute list, so it is read in traditional syntax whatever the file says. There a slash escapes the next character. A file whose targets are Unix paths must therefore double every slash and name no readtable, or the cold load stops with "End of file ... in the middle of the list". MIT's own site file never met this: its targets are TOPS-20 paths with no slashes. This is metebalci/muir-sys issue 9.
 - **A free partition for the cold load,** and a larger one for the saved world (step 7).
@@ -988,13 +1068,13 @@ from the first of these that gives a name (QUUX's Ethernet contract, section
 3. **The site table's host whose INTERNET address is the machine's**, on
    revision 16 (register 255).
 4. **LOCALHOST**, which prints as "localhost" with the associated machine
-   HOST. It only names the machine: the band has no loopback.
+   FILES. It only names the machine: the band has no loopback.
 
 A name the site table (`site/hosts.text`) has takes that host, and LMLOCS's
 row (`site/lmlocs.lisp`) gives its pretty name, location and associated
 machine; any other name makes a host of that name with no address, whose
 pretty name is "Unknown" and whose associated machine is the site's,
-HOST. The herald's "band N of NAME", `SI:LOCAL-HOST-NAME` and the pretty name
+FILES. The herald's "band N of NAME", `SI:LOCAL-HOST-NAME` and the pretty name
 follow the host.
 
 The order holds at the cold boot; the name file is read then only, like an
@@ -1146,8 +1226,8 @@ band afresh for every assembly of changed sources.
 
 **Serve the table of the microcode that runs.** A band whose microcode is not
 the one it was saved with reads `SYS: UBIN; UCADR TBL` at boot, and the file
-server serves files without versions (ozd, and the file device, whose `HOST`
-is a Unix host, `io/file/hostfs.lisp:158`), so the served `sys/ubin/` must
+server serves files without versions (ozd, and the file device, whose `FILES`
+is a Unix host, `io/file/hostfs.lisp:165`), so the served `sys/ubin/` must
 hold the running microcode's `ucadr.tbl`. With System 1001's band on microcode 1000 and 323's
 table served, the machine never reached its TELNET server.
 

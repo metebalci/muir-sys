@@ -18,9 +18,9 @@ Each boot is a cold boot of the band; DISK is opened read-only except for the
 save, which writes a copy of it in DIR.
 
   none      no name file and no command: LOCALHOST, SI:LOCAL-HOST-NAME the
-            same, the pretty name "localhost", the associated machine HOST,
+            same, the pretty name "localhost", the associated machine FILES,
             and the herald "band N of LOCALHOST" (N the band booted)
-  file      site/hostname "lispm-2": LISPM-2, Lisp Machine Two, HOST
+  file      site/hostname "lispm-2": LISPM-2, Lisp Machine Two, FILES
   override  in the same boot, (si:set-host-name "lispm-3"): LISPM-3 at once,
             over the name file's name (the command sets the current name)
   dropped   then (si:set-host-name nil): the name file's LISPM-2 again
@@ -222,9 +222,13 @@ def prepare(b):
 
 
 def expect(label, got, name, pretty):
-    """GOT, the band's answer, against (NAME NAME PRETTY "HOST" NAME)."""
+    """GOT, the band's answer, against (NAME NAME PRETTY "FILES" NAME): the
+    associated machine is FILES, the file device's pathname host, from the
+    rename on; the bands before it say HOST, and fail here only on that."""
     global ok
-    want = '(%s %s %s "HOST" %s)' % tuple('"%s"' % x for x in (name, name, pretty, name))
+    # it expected HOST, the associated machine before the rename:
+    #   want = '(%s %s %s "HOST" %s)' % tuple('"%s"' % x for x in (name, name, pretty, name))
+    want = '(%s %s %s "FILES" %s)' % tuple('"%s"' % x for x in (name, name, pretty, name))
     good = lc.normal(got) == lc.normal(want)
     ok &= good
     say('%-9s %s  %s%s' % (label, 'PASS' if good else 'FAIL', got, '' if good else ', expected %s' % want))

@@ -273,7 +273,7 @@
 ;							  (aref mini-ring (+ mini-slot 8.))))))
 	 ;; the date is the open's mtime as the device gave it, Unix seconds in
 	 ;; two 16-bit halves, (high . low); fs:canonicalize-cold-load-pathnames
-	 ;; makes it a universal time, as HOST's :creation-date does, before
+	 ;; makes it a universal time, as FILES's :creation-date does, before
 	 ;; QLD's make-system compares it.  as text, printed here in UTC, it was
 	 ;; still text when make-system compared it (TIMPAR, which parses it, is
 	 ;; loaded by that make-system), and text compares as newer, so QLD loaded
