@@ -60,8 +60,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.dirname(os.path.dirname(HERE))
 STEPS = ['export', 'assemble', 'cross', 'target', 'band4', 'native5', 'native6', 'checks',
          'guards', 'high', 'incremental', 'built']
-# the system's number, its microcode's and the hardware revision the band is for
-SYSTEM, MICROCODE, REVISION = 2002, 2002, 14
+# the system's number and its microcode's
+SYSTEM, MICROCODE = 2002, 2002
+# The route's two revisions (QUUX's Ethernet contract, section 8 R2, clarified
+# 19 Oct): its machine runs at revision 16, which has the Ethernet device, so
+# that its sessions and checks go over TCP; the microcode and PROM are
+# assembled for revision 15, which revision 16 runs (there is no assembly
+# target for 16).  The builder stays at --builder-revision, its own band's,
+# over Chaos.  Before, one revision, 14, was both:
+#   SYSTEM, MICROCODE, REVISION = 2002, 2002, 14
+MACHINE_REVISION, ASM_TARGET = 16, 15
 BAND_GUID = uuid.UUID('a3b30470-c5d4-41c1-87a8-d26590424cb8').bytes_le
 # the band formats the microcode writes: saved, incremental, cold load (A14.13)
 #FORMAT_SAVED = 0o2010
@@ -237,14 +245,14 @@ class Run:
         return rc, text
 
     def session(self, where, disk, tree, forms, save_part=None, files=(), incremental=False):
-        """Boot DISK's band cold, read-write, on quux at the target's revision
+        """Boot DISK's band cold, read-write, on quux at MACHINE_REVISION
         with TREE on the file device, log in, and run FORMS, each (form,
         timeout), in one TELNET session, through lispm-check's own classes;
         FILES are served in HOST's home.  With SAVE_PART, (si:disk-save
-        SAVE_PART t) is typed last, the session's connection closing as the
-        save begins, and the save is waited for until SAVE_PART holds a band
-        that stays the same for 60 s, before the machine is stopped.  Returns
-        [(form, kind, text)]."""
+        SAVE_PART t) is typed last, the session's connection closing (over
+        Chaos) or going silent (over TCP) as the save begins, and the save is
+        waited for until SAVE_PART holds a band that stays the same for 60 s,
+        before the machine is stopped.  Returns [(form, kind, text)]."""
         from importlib.machinery import SourceFileLoader
         lc = SourceFileLoader('lispm_check', os.path.join(TREE, 'tools', 'lispm-check')).load_module()
         os.environ['LISPM_CHECK_PORTS'] = self.lc_ports
@@ -253,12 +261,12 @@ class Run:
         shutil.rmtree(run_dir, ignore_errors=True)
         os.makedirs(run_dir)
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'), rw=True)
+        quux = self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr'), rw=True)
         # The network, by lispm-check's helper (QUUX's Ethernet contract,
         # sections 3 and 8 R2): the machine's own revision decides, as the
-        # wrapper's quux may set another than REVISION.  On revision 16 a tap
-        # and TCP unless LISPM_CHECK_NETWORK says chaos; below, Chaos through
-        # ozd, as every session went before the switch:
+        # wrapper's quux may set another than MACHINE_REVISION.  On revision
+        # 16 a tap and TCP unless LISPM_CHECK_NETWORK says chaos; below, Chaos
+        # through ozd, as every session went before the switch:
         #   server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log)
         try:
             network, link = lc.harness_network(quux)
@@ -463,13 +471,13 @@ class Run:
     # ----------------------------------------------------------- QLD
 
     def qld(self, where, disk, tree, timeout=QLD_TIMEOUT, tenure=True):
-        """Boot DISK's current band, a cold load, on quux at the target's
-        revision with TREE served as HOST's / on the file device and COLDRUN
-        running QLD and DISK-SAVE into LOD4; wait for the save to settle;
-        stop the machine.  Returns the band's format and valid size.  With
-        TENURE (the default), COLDRUN tenures every young object before the
-        save (contract G3 step 2 revision 1, 9.4); without it, the band keeps
-        QLD's young objects, for C29's record."""
+        """Boot DISK's current band, a cold load, on quux at
+        MACHINE_REVISION with TREE served as HOST's / on the file device and
+        COLDRUN running QLD and DISK-SAVE into LOD4; wait for the save to
+        settle; stop the machine.  Returns the band's format and valid size.
+        With TENURE (the default), COLDRUN tenures every young object before
+        the save (contract G3 step 2 revision 1, 9.4); without it, the band
+        keeps QLD's young objects, for C29's record."""
         os.makedirs(where, exist_ok=True)
         root = os.path.join(self.work, 'qld-' + os.path.basename(where))
         shutil.rmtree(root, ignore_errors=True)
@@ -483,7 +491,7 @@ class Run:
         open(os.path.join(root, 'site', 'coldrun.lisp'), 'w').write(coldrun)
         with self.lock:
             port = self.qld_ports.pop(0)
-        cmd = [self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')), '-c', '/dev/null',
+        cmd = [self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr')), '-c', '/dev/null',
                '--' + self.a.engine, '--main-memory-size', '32MW', '--disk-pack', disk,
                '--file-root', root, '--terminal', '127.0.0.1:%d' % port]
         log = os.path.join(where, 'quux.log')
@@ -605,12 +613,13 @@ class Run:
                      " (symbol-function 'y-or-n-p))) (unwind-protect (progn (fset 'y-or-n-p"
                      " #'(lambda (&rest ignore) t)) (ua:assemble \"SYS: UCADR; PROMH TEXT\") t)"
                      " (fset 'y-or-n-p old))) => T" % MICROCODE)
-        # the target the microcode is assembled for: revision 14's unless
-        # --asm-target says another (contract G3 revision 15, 7: revision 15's
-        # two-host check); --oa-select-check report writes a revision-15
-        # assembly that the OA select check would refuse, for measuring
-        # microcode that has no selects yet, and records its breaches
-        target = self.a.asm_target or REVISION
+        # the target the microcode is assembled for: ASM_TARGET, revision
+        # 15's, unless --asm-target says another (contract G3 revision 15, 7:
+        # revision 15's two-host check; it was revision 14's before the
+        # route's machine moved to 16); --oa-select-check report writes a
+        # revision-15 assembly that the OA select check would refuse, for
+        # measuring microcode that has no selects yet, and records its breaches
+        target = self.a.asm_target or ASM_TARGET
         head = ["(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
                 '(setq ua:*word-width* 40.) => 40',
                 '(setq ua:*hardware-revision* %d.) => %d' % (target, target),
@@ -799,7 +808,7 @@ class Run:
             os.unlink(os.path.join(tree, 'sys', 'sys', 'ucinit.qfasl'))
         shutil.rmtree(os.path.join(tree, 'sys', 'ubin'), ignore_errors=True)
         shutil.copytree(self.ubin, os.path.join(tree, 'sys', 'ubin'))
-        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'))
+        quux = self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr'))
         before = len(glob.glob(os.path.join(tree, '**', '*.qfasl'), recursive=True))
         cases = open(os.path.join(HERE, 'cases', 'native-compile.cases')).read()
         rc, text = self.lispm_check(os.path.join(N, 'compile'), cases, builder, self.ubin, quux,
@@ -871,7 +880,7 @@ class Run:
             cases = open(os.path.join(HERE, 'cases', 'native-cold.cases')).read()
             rc, _ = self.lispm_check(os.path.join(K, 'b1-native'), cases,
                                      os.path.join(self.bands, 'native5.img'), self.ubin,
-                                     self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')),
+                                     self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr')),
                                      target, 7200, extra=['--file-server', 'device'])
             results['b1-native'] = (rc, os.path.join(K, 'b1-native', 'home', 'cold.img'),
                                     os.path.join(self.work, 'cold-3.img'))
@@ -937,7 +946,7 @@ class Run:
             '(= (si:system-communication-area si:%%sys-com-region-floor) si:%%region-floor) => T\n'
             '(let ((o (si:region-origin %s))) (list (si:%%pointer-lessp o (si:%%make-pointer-unsigned #o20000000000)) (si:%%pointer-lessp (si:%%make-pointer-unsigned #o20000000000) (%%pointer-plus o (si:region-length %s))))) => (T T)\n'
             % (0o17777740000, across[0][0], across[0][0]),
-            band, self.ubin, self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')), tree, 600,
+            band, self.ubin, self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr')), tree, 600,
             extra=['--file-server', 'device'])
         self.record('  high: the saved band booted keeps the floor and the region: lispm-check exit %d' % rc)
         if rc:
@@ -1001,7 +1010,7 @@ class Run:
                 ' (= (ldb (byte 4 28) (%pointer *inc-young*)) #o15)) => (30000 0 T)\n'
                 '(list (si:%pointer-unsigned (%pointer *inc-young*)) (second *inc-mark*))\n'
                 '(let ((x (make-array 10 :area *inc-area*))) (= (ldb (byte 4 28) (%pointer x)) #o15)) => T\n',
-                disk, self.ubin, self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr')),
+                disk, self.ubin, self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr')),
                 os.path.join(self.work, 'native6-tree'), 600, extra=['--file-server', 'device'])
             self.record('  incremental %s: the incremental band booted: lispm-check exit %d' % (name, rc))
             ok &= rc == 0
@@ -1021,7 +1030,7 @@ class Run:
         B = os.path.join(self.out, 'built')
         self.boot_and_save('band4-untenured', os.path.join(self.work, 'cold-3.img'),
                            os.path.join(self.work, 'target'), tenure=False)
-        quux = self.wrapper(REVISION, os.path.join(self.ubin, 'promh.mcr'))
+        quux = self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr'))
         cases = open(os.path.join(HERE, 'cases', 'built.cases')).read()
         bad = []
         for name, tree in (('band4-untenured', 'target'), ('band4', 'target'), ('native5', 'native5-tree'),
@@ -1073,7 +1082,7 @@ def main():
     p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
     p.add_argument('--asm-target', type=int, default=int(env('asm-target', '0')),
                    help='the hardware revision the microcode and PROM are assembled for'
-                        ' (default %d)' % REVISION)
+                        ' (default %d)' % ASM_TARGET)
     p.add_argument('--oa-select-check', choices=('refuse', 'report'),
                    default=env('oa-select-check', 'refuse'),
                    help="revision 15's OA select check: refuse (a build) or report (a measurement)")
@@ -1087,7 +1096,8 @@ def main():
                    help="that disk's sys/ubin/ (microcode and PROM 2001)")
     p.add_argument('--ubin-ref', default=env('ubin-ref'),
                    help='a sys/ubin/ the assembly must equal (.mcr, .tbl, .locs)')
-    p.add_argument('--quux', default=env('quux'), help="muir-sim's quux, with revision %d" % REVISION)
+    p.add_argument('--quux', default=env('quux'),
+                   help="muir-sim's quux, with revision %d, the route's machine" % MACHINE_REVISION)
     p.add_argument('--ozd', default=env('ozd'))
     p.add_argument('--ports', default=env('ports'), help='LO-HI, at least 64 ports')
     p.add_argument('--engine', default=env('engine', 'micro'))

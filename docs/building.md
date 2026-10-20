@@ -32,85 +32,98 @@ sources.
 
 ## Building a band on QUUX
 
-QUUX's system is built on QUUX alone: a band of `main` compiles the next one, on
-one machine, with no CADR (the user, 2026-09-25, as the CADR will never get
-a file device). The route through the CADR, below, stays documented as the
-fallback until it is retired. The stages are the ones described under "The
-stages"; what differs is where each one runs and how the disk is handled.
+QUUX's bands are built by `tools/cross-build/run`, one tool run from one
+source tree (`tools/cross-build/README.md`). The previous system's band, the
+builder, assembles the microcode and cross-builds the new system; the band
+the cross build gives compiles its own system, and that band compiles it once
+more. The stages are the ones described under "The stages", and the cross
+build's are under "Cross-building for the 40-bit QUUX", "Loading the 40-bit
+cold load" and "The native rebuild"; what follows is where each one runs.
 
-**The disk** is a GPT (docs/booting.md), made on the host with `sgdisk`:
-MCR1, MCR2, PAGE and LOD1 to LOD4, in the layout given under "Writing
-QUUX's release disk" (from System 2001 on, a PAGE of 128 M words). The
-machine only reads its GPT.
+**Two kinds of machine** (QUUX's Ethernet contract, section 8 R2). The
+builder runs at its own band's revision (`--builder-revision`, 14 for System
+2002's hand-over), on its own microcode and PROM, and is driven over Chaos,
+ozd carrying its TELNET session; it serves no file. The route's own
+machines run at revision 16 (`MACHINE_REVISION`, `tools/cross-build/run:72`),
+which has the Ethernet device: each run takes a tap of the pool
+(`LISPM_CHECK_TAPS`) and its TELNET session is the build host's own TCP to
+the band's server, with no ozd. The microcode and PROM are assembled for
+revision 15 (`ASM_TARGET`, `:72`; `--asm-target` overrides it), which
+revision 16 runs. Every machine's files are served by quux's file device
+(`--file-root`), its `SYS:` on HOST.
 
-1. **The builder goes in LOD2.** Copy the previous band (its current
-   LOD partition) into LOD2 and its microcode's `ucadr.mcr` into MCR1, and
-   set attribute bit 48 on MCR1 and LOD2. Nothing writes LOD2 after this:
-   the cold load goes to LOD3 and the finished world to LOD4, so a failed
-   build leaves the builder as it was.
-2. **Serve the builder's microcode in `SYS: UBIN;`**, all four files. The
-   band reads `UCADR TBL` at every boot (`EH:INITIALIZE`, `eh/eh.lisp`).
-3. **Boot the builder and compile.** Log in, load `SYS: SYS; SYSDCL QFASL`,
-   run any priming forms (below), then
-   `(make-system 'system :compile :noload :noconfirm :nowarn :no-increment-patch)`.
-   Then build the cold load exactly as in steps 3 and 4 below, into LOD3.
-   `MAKE-COLD` finds LOD3 by its GPT name (`io/disk.lisp:940`) and writes it
-   with `DISK-WRITE`; where it would set the partition's comment it prints
-   the `sgdisk -c` command instead (`io/disk.lisp:1492`).
-4. **Boot the cold load.**
-   - *Same microcode:* from the running builder,
-     `(si:disk-restore "LOD3")`, with `FQUERY` answering yes. The world is
-     replaced at once, so a TELNET driver sees its connection close; no
-     restart and no GPT edit. `DISK-RESTORE` keeps the running microcode
-     (`sys/qmisc.lisp:1676`), so this path is only for a target that runs
-     on the builder's microcode.
-   - *New microcode:* stop the machine, write the new `ucadr.mcr` into MCR1
-     with `dd` (the file is in partition order), move bit 48 from LOD2 to
-     LOD3 with `sgdisk -A 5:clear:48 -A 6:set:48`, serve the new microcode's
-     four files in `SYS: UBIN;`, and start the machine: a cold boot.
-5. **QLD and save.** COLDRUN runs QLD as in steps 5 and 6; then, from
-   the generational collector on (System 2002, contract G3 step 2 revision
-   1, 9.4), `(si:gc-flip-now :young t)` and `(si:gc-reclaim-oldspace)`,
-   which tenure every young object; then `(si:disk-save "LOD4" t)`. QLD runs
-   with no collection, so without the tenuring its working-storage objects
-   would be young in the band, and the first young collection after every
-   boot would copy them into the tenured generation again. `DISK-SAVE`
-   itself never tenures. The save closes the TELNET connection, at
-   once or when ozd gives up on the host, up to three minutes later: ozd
-   carries the TELNET listener here too, though it serves no file
-   (`docs/lispm-check.md`, "The file server").
-6. **On the host,** with the machine stopped: bit 48 on MCR1 and LOD4
-   only, LOD4 named (`sgdisk -c 7:"LOD4 System 2002 ..."`), and LOD2, LOD3
-   and PAGE zeroed before the disk is handed over.
+**The disk** is a GPT (docs/booting.md), made on the host from the
+builder's disk, so it has the builder's layout: MCR1, MCR2, PAGE and LOD1 to
+LOD4. For each band the route makes (`make_disk`, `boot_and_save`), PAGE and
+every band partition not written are zeroed, the new `ucadr.mcr` goes into
+MCR1 and the cold load into LOD3, and attribute bit 48 is set on MCR1 and
+LOD3 alone. The machine only reads its GPT.
 
-**Measured on 2026-09-25** (muir's micro engine, MONO TV 1280x1024), tree
-`3569eeb` with the same five sources recompiled as in the CADR-route build
-of that tree. Build A had dev11 (CADR-built) as its builder and took path
-4a; build B had A's band as its builder and took path 4b:
+1. **Assemble** (step `assemble`): the builder assembles UCADR twice and
+   PROMH once, the two UCADRs compared byte for byte, and the files
+   compared with `--ubin-ref` when it is given.
+2. **Cross-build** (steps `cross`, `target`): on the builder, check 3
+   compiles the cold load's files for the target and makes the cold load,
+   check 2 compiles SYSTEM for the target, and the site's files and
+   WORMCH are compiled in cross sessions; the target's tree is check 2's
+   with these laid over it and the assembled `sys/ubin/`.
+3. **Boot the cold load and save** (step `band4`): the disk above, booted
+   on revision 16 with the target's tree on the file device and no network
+   peer (no `--ethernet-socket`), runs COLDRUN (`lisp/coldrun.lisp`)
+   unattended: `QLD`, then a young flip with the tenure-all table and its
+   reclaim, so that no object is young in the band, then
+   `(si:disk-save "LOD4" t)`. The host watches LOD4 until it holds a band of
+   the saved format that stays the same for 60 s, then stops the machine
+   and copies the band to a fresh disk, current in LOD1 (`bands/band4.img`).
+4. **The native rebuild** (steps `native5`, `native6`): the band just made,
+   booted on revision 16, compiles the system from the sources
+   (`cases/native-compile.cases`) over TCP, makes the cold load in a fresh
+   boot (`cases/native-cold.cases`), and the cold load is booted, run
+   through QLD and saved as in step 3. native6 repeats it from native5's
+   band.
+5. **The checks** (steps `checks` to `built`): G2 section 7's checks (a)-(d)
+   compare the cross build with the native one and the two native ones with
+   each other, the builder making the cross cold load once more from
+   native5's QFASLs; then the guards (A15b.1's for revision 15's
+   microcode, `guards.py`), the high band, an incremental save and
+   restore, and the built bands' RQBs and first-object tables. The high
+   and incremental steps save a band from a session: the session gives no
+   answer to `DISK-SAVE`, since the band's network stops as the save begins,
+   so its partition is watched as in step 3.
 
-| Stage | A | B |
+Nothing writes the builder's disk: each band is made on its own copy, and a
+failed step leaves the earlier bands as they were. A step that fails stops
+the run, and `--from STEP` continues a run whose record shows every earlier
+step passed.
+
+**Measured on 2026-10-19 and 20** (muir's micro engine, quux at revision 16
+for the route and 14 for the builder, System 2002's revision-14 hand-over as
+the builder): one clean route of every step, each passing, against the
+previous route, at revision 14 for both machine and target, from an older
+tree on an older build of muir-sim:
+
+| Step | At revision 16, target 15 | At revision 14, target 14 |
 |---|---|---|
-| Disk and builder | 3 s | 4 s |
-| Boot, incremental compile (5 files) | 4 min 31 s | 4 min 29 s |
-| Cold load | 5 min 27 s | 5 min 11 s |
-| Restore or cold boot, to the cold load's first MINI read | 9 s | 10 s |
-| QLD, to COLDRUN's end | 17 min 35 s | 18 min 11 s |
-| Save and stop, with a fixed 60 s wait | 4 min 7 s | 1 min 10 s |
-| Whole build | 31 min 57 s | 29 min 21 s |
+| `assemble` | 10 min 11 s | 13 min 11 s |
+| `cross` | 2 h 44 min 26 s | 3 h 7 min 6 s |
+| `band4` | 16 min 29 s | 29 min 10 s |
+| `native5` | 2 h 26 min 24 s | 3 h 41 min 29 s |
+| `native6` | 2 h 29 min 55 s | 3 h 13 min 38 s |
+| `checks` | 24 min 26 s | 21 min 14 s |
+| `guards` | 11 min 2 s | 10 min 8 s |
+| `high` | 5 min 50 s | 4 min 13 s |
+| `incremental` | 13 min 47 s | 11 min 35 s |
+| `built` | 18 min 50 s | 18 min 19 s |
 
-On the CADR with MIT's 323 the same compile took 8 min 5 s and the cold
-load 5 min 48 s. The cold loads of A, B and the CADR route are byte for
-byte the same. B's five compiled files differ from the CADR route's in 4
-bytes each: the header's time and system version (1001 on the CADR's 1001
-builder, 1002 here, this system's number until it became 2000). A's
-differ further in the order of the header's attribute list and in the
-numbers of generated symbols (`#:PKT2` against
-`#:PKT3`, in `CHSNCP`), which two compiles in one band also show. UNFASL
-listings with table indexes and generated-symbol numbers normalised differ
-only in the time and the version. LOD2 was unchanged at the end of both
-builds, and no GPT byte changed while the machine ran. B's band then booted
-cold and ran the checks and the end-to-end test (a warm boot, a save into
-LOD3, a cold boot, `(si:disk-restore 3)`) on muir's micro and RTL engines.
+The assembly equalled the revision-15 files the tree's microcode had given
+before, byte for byte. The target's tree has 303 QFASLs, four more than the
+previous route's: the network's, `ETHER`, `IPV4`, `TCP` and `SERVERS`. Each
+band holds 3,659,776 words, 41,984 more than before, and each has 8 RQBs
+where it had 6: the network's driver takes its rings' RQBs from that
+resource (`network/ip/ether.lisp:223-227`). native5's and native6's
+compiles load the network's QFASLs into the band they run on, over that
+band's own TCP session, and run on. No route session started ozd; the
+builder's runs did.
 
 ### Priming the builder
 

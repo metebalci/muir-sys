@@ -2400,19 +2400,41 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   `--network chaos`, as microcode-check's `ethernet-stray` now names it
   (`tools/microcode-check/README.md`). The tools that build their own
   sessions take the network and the tap through the new helper
-  `harness_network` (`tools/lispm-check:608`): `tools/system-check/warm-boot`
+  `harness_network` (`tools/lispm-check:609`): `tools/system-check/warm-boot`
   (`:70`; over TCP the session before the warm boot closes cleanly, `:189`)
-  and `tools/cross-build/run`'s sessions (`Run.session`, `:264`), and with
+  and `tools/cross-build/run`'s sessions (`Run.session`, `:272`), and with
   them `tools/microcode-check/generational-save`. A save gives no answer
   over either network, and a refused one neither (the save is judged by its
   partition); over TCP the band's network stops as the save begins, so the
-  silence is waited for 120 s rather than 600 (`:304`). The route itself
-  runs at revision 14 and stays on Chaos. The self-tests: `tools/lispm-check-test/network.sh` gains
-  the default's cases (`default`, `variable`, `rev15-default`,
-  `cadr-default`), and `tools/lispm-check-test/harnesses.sh` (new) checks
-  the two harnesses on revisions 16 and 15.
+  silence is waited for 120 s rather than 600 (`:312`). The route's
+  machine runs at revision 16 and the microcode and PROM are assembled for
+  15, which 16 runs (`MACHINE_REVISION`, `ASM_TARGET`,
+  `tools/cross-build/run:72`; one revision, 14, was both): its QLD boots,
+  its sessions and its lispm-check runs are on 16, over TCP with no ozd. The
+  builder stays at its own band's revision over Chaos. The self-tests:
+  `tools/lispm-check-test/network.sh` gains the default's cases (`default`,
+  `variable`, `rev15-default`, `cadr-default`),
+  `tools/lispm-check-test/harnesses.sh` (new) checks the two harnesses on
+  revisions 16 and 15, and `tools/cross-build/test` (new) checks the route's
+  and the builder's revisions and networks with a stand-in quux and ozd.
+- **cross-build's guards for revision 15** (contract G3 revision 15b,
+  appendix A15b.1; `run_all_15`, `tools/cross-build/guards.py:382`). With the
+  route's microcode and PROM assembled for revision 15, A14.13's guards
+  stopped at once (the microcode does not open with section 6), and their
+  controls would boot revision 15's PROM on revision 14, which quux refuses.
+  `run_all` (`:163`) now chooses by the assembled `ucadr.mcr`: A15b.1's for
+  revision 15's, A14.13's (`run_all_14`, `:177`) for revision 14's. A15b.1's:
+  quux refuses PROM 2002 for revision 15 on revisions 14 and 13, and the old
+  PROMs on 15, naming format and revision (`refused`, `:367`); a revision-14
+  disk on 15 halts at `ERROR-MCR-FORMAT`, the route's disk on 14 at
+  `ERROR-MICROCODE-NOT-REVISION-14` and on 13 at `ERROR-BAD-SECTION-TYPE`,
+  its microcode with section 6 saying 14 at
+  `ERROR-MICROCODE-NOT-REVISION-15`; C27's band formats under the route's
+  microcode on 15 and revision 14's on 14; the route's disk runs on revision
+  16; a checkpoint of 14 is refused on 15 and one of 15 on 14. Each halt has
+  its control, which runs past it.
 - **lispm-check asks the machine's revision with no engine named**
-  (`machine_revision`, `tools/lispm-check:543`). It was asked with `--micro`,
+  (`machine_revision`, `tools/lispm-check:544`). It was asked with `--micro`,
   which quux refuses for rtl's own flags (`--memory-timing`, `--cache`), so
   a run through a wrapper that gives them, as the soak's rtl lanes do,
   failed before it began, and on revision 16 could not take TCP, the
