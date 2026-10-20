@@ -190,7 +190,7 @@ def main():
     ap.add_argument('--quux', help='muir\'s quux executable (revision 16)')
     ap.add_argument('--band', help='the band\'s disk pack, opened read-only')
     ap.add_argument('--prom', help='the PROM .mcr for the band\'s microcode')
-    ap.add_argument('--file-root', help='HOST\'s / for the file device')
+    ap.add_argument('--file-root', help='the folder the file device serves as its /')
     ap.add_argument('--rtc', type=int, default=1700000000, help='a fixed RTC, so that two runs agree')
     # without it the machine runs at muir's default period (10 ns for
     # revisions 15 and 16 from muir-sim 74d4ddd; 8.5 ns before)

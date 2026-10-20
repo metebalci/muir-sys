@@ -1133,7 +1133,12 @@ def main():
         run_dir = lc.run_dir_new('t2')
         ports_lock, ports = lc.take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+        # the host the checkpoint's band answered (the file device's HOST or
+        # FILES), which --files are named on, as lispm-check's own check
+        # does; made without it, the server had one host, HOST, as a constant:
+        #   server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+        server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
+                                                host=lc.checkpoint_host(chk))
         machine = lc.Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
         ok_run = False
         try:

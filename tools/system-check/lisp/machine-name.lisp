@@ -3,8 +3,9 @@
 ;;; the machine's name after step R3 of QUUX's Ethernet contract (section 5.6,
 ;;; "From R3"): the name file, SET-HOST-NAME's name, the INTERNET match, else
 ;;; LOCALHOST.  Typed at the console, since revision 15's band has no network
-;;; for a session; each answer goes to a file in HOST's home, which the
-;;; harness reads.
+;;; for a session; each answer goes to a file in the login's home directory
+;;; (the file device's /home/lispm/, on HOST or FILES as the band names it),
+;;; which the harness reads.
 
 (defun mn-facts ()
   "(the host's name, SI:LOCAL-HOST-NAME, the pretty name, the associated machine's name,
@@ -19,8 +20,13 @@ the name the herald gives after /"band N of/")"
 	  (and at (substring herald (+ at 4) end)))))
 
 (defun mn-write (tag &optional (facts (mn-facts)))
-  "Write FACTS to HOST: /home/lispm/mn-TAG.text, for the harness."
-  (with-open-file (s (string-append "HOST: //home//lispm//mn-" (string-downcase tag) ".text")
+  "Write FACTS to mn-TAG.text in the login's home directory, for the harness."
+  ;; the home, not a named host, so that a band naming the file device's host
+  ;; HOST or FILES writes alike; the file was HOST's, which a FILES band misparses:
+  ;;   (with-open-file (s (string-append "HOST: //home//lispm//mn-" (string-downcase tag) ".text")
+  ;;                   :direction :output)
+  (with-open-file (s (fs:merge-pathname-defaults
+		       (string-append "mn-" (string-downcase tag) ".text") (fs:user-homedir))
 		     :direction :output)
     (let ((*print-base* 10.)) (prin1 facts s)))
   facts)

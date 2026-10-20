@@ -5,7 +5,7 @@ by the cross compiler carries the target's values in its decoded QFASL, and not
 this world's; and the controls (cases/check1.cases).
 
 Usage: check1.py HOME-DIR
-HOME-DIR holds what check1.cases left in HOST's home: native-family.qfasl,
+HOME-DIR holds what check1.cases left in the login's home: native-family.qfasl,
 id-family.qfasl, synth-family.qfasl, t40-family.qfasl, t40-planted.qfasl,
 t40-defs.qfasl and
 the tables synth-cross-table.txt and t40-cross-table.txt

@@ -760,15 +760,61 @@ def ir(word, lo, n):
     return word >> lo & ((1 << n) - 1)
 
 
+# The file device's pathname host, by either of its names: HOST in the bands
+# before its rename to FILES, FILES after it.
+FILE_DEVICE_HOST_NAMES = ('"HOST"', '"FILES"')
+
+
+def truenames_one_host(head):
+    """HEAD with the host at the head of each truename in its
+    FILE-TRUENAMES-LISTIFIED written "HOST" when it is the file device's,
+    by either name.  Each truename records the host the assembling band read
+    that source from, its file device's pathname host, which the rename of
+    HOST to FILES changed: release 2001's microcode assembled on a band of
+    either name is the same assembly.  Nothing else in the head changes: any
+    other host, and every file name, type and version, compare exactly."""
+    key = 'FILE-TRUENAMES-LISTIFIED ('
+    start = head.find(key)
+    if start < 0:
+        return head
+    k = start + len(key)
+    out, depth, instr = [head[:k]], 1, False
+    while k < len(head) and depth:
+        c = head[k]
+        if instr:
+            instr = c != '"' or head[k - 1] == '\\'
+        elif c == '"':
+            instr = True
+        elif c == '(':
+            depth += 1
+            if depth == 2:
+                # a truename opens: its first element is its host
+                for name in FILE_DEVICE_HOST_NAMES:
+                    if head.startswith(name + ' ', k + 1) or head.startswith(name + ')', k + 1):
+                        out.append('(' + FILE_DEVICE_HOST_NAMES[0])
+                        k += 1 + len(name)
+                        break
+                else:
+                    out.append(c)
+                    k += 1
+                continue
+        elif c == ')':
+            depth -= 1
+        out.append(c)
+        k += 1
+    return ''.join(out) + head[k:]
+
+
 def same_sym(a, b):
     """Whether two .sym files hold the same assembler state and the same
     symbols.  The symbols are dumped in the order of the package's hash table
     (docs/building.md, "Assembling the microcode"), which any symbol interned
-    in UA moves, so they are compared as a set."""
+    in UA moves, so they are compared as a set.  The head's truenames name the
+    file device's host by either name (truenames_one_host)."""
     def parts(path):
         text = open(path, 'rb').read().decode('latin-1')
         head, _, body = text.partition('\n-2 ')
-        return head, sorted(re.findall(r'(\S+) ([IAMD]-MEM) ([0-7]+)', body))
+        return truenames_one_host(head), sorted(re.findall(r'(\S+) ([IAMD]-MEM) ([0-7]+)', body))
     return parts(a) == parts(b)
 
 

@@ -1,5 +1,6 @@
 ;;; COLDRUN for tools/cross-build: the cold load runs QLD unattended, with
-;;; SYS: on HOST (quux's file device) and no Chaosnet, reports through MINI,
+;;; SYS: on quux's file device (its host HOST or FILES, as the band names it)
+;;; and no Chaosnet, reports through MINI,
 ;;; and saves the band into @SAVE@, since nothing types at it.  Register-page
 ;;; word 224 (contract g3 revision 14, a14.9) and the paging counters, read
 ;;; with si:read-meter, are reported before the save.  the counters were read at

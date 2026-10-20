@@ -212,7 +212,7 @@ class Run:
     def lispm_check(self, where, cases, band, ubin, quux, tree, timeout, keep=('home',),
                     extra=()):
         """lispm-check of CASES (text) on BAND with TREE served; the run's
-        logs, and of what it left the parts in KEEP (home: HOST's home;
+        logs, and of what it left the parts in KEEP (home: the login's home;
         sys, site: the served copy), go to WHERE.  Returns (exit, output)."""
         os.makedirs(where, exist_ok=True)
         cf = os.path.join(where, 'cases.cases')
@@ -251,7 +251,7 @@ class Run:
         """Boot DISK's band cold, read-write, on quux at MACHINE_REVISION
         with TREE on the file device, log in, and run FORMS, each (form,
         timeout), in one TELNET session, through lispm-check's own classes;
-        FILES are served in HOST's home.  With SAVE_PART, (si:disk-save
+        FILES are served in the login's home.  With SAVE_PART, (si:disk-save
         SAVE_PART t) is typed last, the session's connection closing (over
         Chaos) or going silent (over TCP) as the save begins, and the save is
         waited for until SAVE_PART holds a band that stays the same for 60 s,
@@ -475,7 +475,7 @@ class Run:
 
     def qld(self, where, disk, tree, timeout=QLD_TIMEOUT, tenure=True):
         """Boot DISK's current band, a cold load, on quux at
-        MACHINE_REVISION with TREE served as HOST's / on the file device and
+        MACHINE_REVISION with TREE served as the file device's / and
         COLDRUN running QLD and DISK-SAVE into LOD4; wait for the save to
         settle; stop the machine.  Returns the band's format and valid size.
         With TENURE (the default), COLDRUN tenures every young object before
@@ -923,7 +923,11 @@ class Run:
         forms = [('(list (= si:%region-floor (si:region-floor-default)) (si:%pointer-unsigned si:%region-floor))', 60),
                  ('(si:%pointer-unsigned (si:set-region-floor ' + floor + '))', 60),
                  ('(progn (si:full-gc) t)', 4 * 3600),
-                 ('(progn (load "HOST: //home//lispm//high.lisp") t)', 600),
+                 # from the login's home, which the session's login puts on
+                 # the host SYS: is on, HOST or FILES as the band names it;
+                 # it was HOST's:
+                 #   ('(progn (load "HOST: //home//lispm//high.lisp") t)', 600),
+                 ('(progn (load (fs:merge-pathname-defaults "high.lisp" (fs:user-homedir))) t)', 600),
                  ('(high-region-report)', 600)]
         res = self.session(H, disk, tree, forms, save_part='LOD2',
                            files=[os.path.join(HERE, 'lisp', 'high.lisp')])

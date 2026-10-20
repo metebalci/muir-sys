@@ -16,12 +16,17 @@
 # where the default, auto, must choose the mode's server for the mode's band.
 # The eight run in each mode of LISPM_CHECK_TEST_MODES, "device" by default:
 #   device  --file-server device on LISPM_CHECK_DEVICE_BAND, or the tool's
-#           default band run/check/band.img: a band whose SYS: is on HOST, its
-#           files served by quux's file device
+#           default band run/check/band.img: a band whose SYS: is on the file
+#           device's pathname host, HOST (System 2001, and the bands of 2002
+#           built before the name changed) or FILES (after it), its files
+#           served by quux's file device; the tool takes the name from the band
 #   ozd     --file-server ozd on LISPM_CHECK_BAND, or run/check/band.img: a band
 #           whose SYS: is on OZ, its files served by ozd
-# On this line the default band is System 2000's, whose SYS: is on HOST, so
-# only device is run by default.  ozd was the default too while the default
+# On this line the default band is System 2001's (its hand-over band, on
+# revision 13 with its own PROM), whose SYS: is on HOST, so only device is run
+# by default.  It was System 2000's, which runs on revision 12 alone, and the
+# current quux refuses revision 12 ("revision 13, 14, 15 or 16"), so the
+# default no longer booted.  ozd was the default too while the default
 # band was a System 1002 band on OZ; no such band boots on quux since revision
 # 11 (its microcode 1000 waits for block-disk at 17377774, where revision 11
 # has no register), so ozd needs LISPM_CHECK_BAND naming a band on OZ that
@@ -93,8 +98,9 @@ check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-AR
 for mode in ${LISPM_CHECK_TEST_MODES:-device}; do
     case $mode in
         ozd) band=${LISPM_CHECK_BAND:-$tree/run/check/band.img} ;;
-        # the default band, System 2000's, is on HOST: run/check/device/ was
-        # the device's own band while the default was a System 1002 band on OZ
+        # the default band, System 2001's (System 2000's before quux
+        # refused its revision, 12), is on HOST: run/check/device/ was the
+        # device's own band while the default was a System 1002 band on OZ
         device) band=${LISPM_CHECK_DEVICE_BAND:-${LISPM_CHECK_BAND:-$tree/run/check/band.img}} ;;
         *) echo "FAIL unknown mode $mode"; fails=$((fails+1)); continue ;;
     esac

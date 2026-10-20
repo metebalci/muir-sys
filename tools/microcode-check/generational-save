@@ -131,8 +131,13 @@ def main():
     disk = os.path.join(a.work, 'disk.img')
     subprocess.run(['cp', '--sparse=always', x.disk, disk], check=True)
     lisp = [os.path.join(HERE, 'lisp', f) for f in ('generational.lisp', 'generational-save.lisp')]
-    forms = [('(progn (load "HOST: //home//lispm//generational.lisp") t)', 120),
-             ('(progn (load "HOST: //home//lispm//generational-save.lisp") t)', 120),
+    # the files from the login's home, which the session's login puts on the
+    # host SYS: is on, so that a band naming the file device's host HOST or
+    # FILES loads them alike; they were HOST's:
+    #   forms = [('(progn (load "HOST: //home//lispm//generational.lisp") t)', 120),
+    #            ('(progn (load "HOST: //home//lispm//generational-save.lisp") t)', 120),
+    forms = [('(progn (load (fs:merge-pathname-defaults "generational.lisp" (fs:user-homedir))) t)', 120),
+             ('(progn (load (fs:merge-pathname-defaults "generational-save.lisp" (fs:user-homedir))) t)', 120),
              ('(si:gs-setup)', 600), ('(si:gs-sums)', 120), ('(si:gs-holder-pages)', 300),
              ('(si:gen-register #o224)', 60)]
     # on rtl every form may take ten times as long: revision 15's rtl, the
@@ -199,7 +204,10 @@ def main():
     # revision 14's Lisp, whose save ran none and left 2
     cases = ('(si:gs-after) => (1 1 1 3 3 1)\n'
              + ('' if x.incremental else
-                '(si:gs-bitmap-marked "HOST: //home//lispm//gs-bits.lisp") => (%d 0 NIL)\n' % len(bits)
+                # from the login's home, as the session's files; it was HOST's:
+                #   '(si:gs-bitmap-marked "HOST: //home//lispm//gs-bits.lisp") => (%d 0 NIL)\n' % len(bits)
+                '(si:gs-bitmap-marked (fs:merge-pathname-defaults "gs-bits.lisp" (fs:user-homedir)))'
+                ' => (%d 0 NIL)\n' % len(bits)
                 # clarification 16: no young flip ran between the save and the
                 # bitmap case, so a mark it found cleared was lost, not
                 # cleared by a later flip's walk
@@ -208,8 +216,13 @@ def main():
              '(si:gs-collect-sums) => ((49995000 499500 4950) (49995000 499500 4950)'
              ' (49995000 499500 4950))\n'
              '(si:gen-register #o224) => 0\n')
+    # the boot at the route's machine revision, cross-build's MACHINE_REVISION:
+    # its old name REVISION is gone from tools/cross-build/run, so every run
+    # stopped here, after the save, with an AttributeError:
+    #   rc, text = r.lispm_check(os.path.join(a.out, 'boot'), cases, disk, a.ubin,
+    #                            r.wrapper(CB.REVISION, os.path.join(a.ubin, 'promh.mcr')), TREE, 900,
     rc, text = r.lispm_check(os.path.join(a.out, 'boot'), cases, disk, a.ubin,
-                             r.wrapper(CB.REVISION, os.path.join(a.ubin, 'promh.mcr')), TREE, 900,
+                             r.wrapper(CB.MACHINE_REVISION, os.path.join(a.ubin, 'promh.mcr')), TREE, 900,
                              extra=['--file-server', 'device', '--files', bitsfile])
     for line in text.splitlines():
         if line.startswith(('PASS', 'FAIL', 'ERROR', 'lispm-check:')):

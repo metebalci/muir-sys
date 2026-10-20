@@ -86,6 +86,17 @@ change in one symbol area value of the assembled file, not in its tag, and
 fails unless the comparison then finds the areas differ
 (`symbol_area_control`).
 
+**The `.sym`, by its state and its symbols.** A `.sym` that is not `UBIN`'s
+byte for byte passes when it holds the same assembler state and the same
+symbols (`same_sym`): the symbols are dumped in the order of a package's hash
+table and are compared as a set. The state's `FILE-TRUENAMES-LISTIFIED`
+records, at the head of each truename, the host the assembling band read
+that source from, its file device's pathname host: HOST in `UBIN` and in the
+bands before the host's rename to FILES, FILES after it. That one host
+compares as the same name, HOST or FILES (`truenames_one_host`); any other
+host, and every file name, type and version, and the rest of the state,
+compare exactly.
+
 `oa-select`'s `control` is the control for its variants, and `rev15` for the `oa-` plants: the same assembly, unplanted, passes the check.
 
 `tree` is the control for `fiddle`; `rev13` and `rev14` are the controls for the five planted checks: the same

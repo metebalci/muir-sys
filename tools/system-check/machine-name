@@ -9,9 +9,10 @@ Ethernet contract (section 5.6, "From R3"), as a harness, on revisions 15 and
 QUUX is a wrapper that sets the revision (MUIR_QUUX_REVISION) and gives the
 boot PROM, as lispm-check's --quux.  Revision 15's band has no network for a
 TELNET session, so every boot is driven at the console, through quux's RFB
-terminal: the harness types (login ...), loads lisp/machine-name.lisp from
-HOST's home and types a form that writes its answer to a file there, which it
-reads.  The file root is a copy of the tree's sys/ and site/ with UBIN as
+terminal: the harness types (login ...), to the host the band's SYS: is on,
+loads lisp/machine-name.lisp from the login's home directory (the file
+device's /home/lispm/, on HOST or FILES as the band names it) and types a
+form that writes its answer to a file there, which it reads.  The file root is a copy of the tree's sys/ and site/ with UBIN as
 sys/ubin/ and an empty home/lispm/; the name file is site/hostname in it.
 Each boot is a cold boot of the band; DISK is opened read-only except for the
 save, which writes a copy of it in DIR.
@@ -82,7 +83,7 @@ home = os.path.join(root, 'home', 'lispm')
 os.makedirs(home)
 shutil.copy2(os.path.join(HERE, 'lisp', 'machine-name.lisp'), home)
 if a.plant:
-    # the plant, served from HOST's home as plant.lisp
+    # the plant, served from the login's home as plant.lisp
     shutil.copy2(os.path.abspath(a.plant), os.path.join(home, 'plant.lisp'))
 hostname = os.path.join(root, 'site', 'hostname')
 
@@ -209,8 +210,14 @@ class Boot:
 
 
 def prepare(b):
-    """Log in, then load the helper: typed until the helper's own answer comes."""
-    b.answer('ready', '(progn (login "LISPM" "HOST" t) (load "HOST: //home//lispm//machine-name.lisp")'
+    """Log in, then load the helper: typed until the helper's own answer comes.
+    The login is to the host SYS: is on, as QLD's, and the helper is loaded
+    from the login's home, so that a band naming the file device's host HOST
+    or FILES is driven alike; it named HOST, and so failed on a FILES band:
+        b.answer('ready', '(progn (login "LISPM" "HOST" t) (load "HOST: //home//lispm//machine-name.lisp")'
+                          ' (mn-write "ready" (list :ready)))')"""
+    b.answer('ready', '(progn (login "LISPM" (send (fs:get-pathname-host "SYS") :physical-host) t)'
+                      ' (load (fs:merge-pathname-defaults "machine-name.lisp" (fs:user-homedir)))'
                       ' (mn-write "ready" (list :ready)))')
 
 
@@ -255,7 +262,10 @@ try:
     try:
         prepare(b)
         if a.plant:
-            b.answer('plant', '(progn (load "HOST: //home//lispm//plant.lisp") (mn-write "plant" (list :plant)))')
+            # from the login's home, as the helper (prepare); it was HOST's:
+            #   b.answer('plant', '(progn (load "HOST: //home//lispm//plant.lisp") (mn-write "plant" (list :plant)))')
+            b.answer('plant', '(progn (load (fs:merge-pathname-defaults "plant.lisp" (fs:user-homedir)))'
+                              ' (mn-write "plant" (list :plant)))')
         expect('command', b.answer('command', '(progn (si:set-host-name "lispm-3") (mn-write "command"))'),
                'LISPM-3', 'Lisp Machine Three')
         b.rfb('(si:disk-save "LOD2" t)\n')

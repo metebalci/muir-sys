@@ -174,11 +174,19 @@ def session(limit=T):
 
 try:
     server.lay_out(TREE, os.path.abspath(a.ubin))
-    names = [server.place(os.path.join(HERE, 'lisp', f), TREE)[0]
-             for f in ('generational-collector.lisp', 'warm-boot.lisp')]
+    # The files go to the login's home on the host the band names its SYS:
+    # host, HOST or FILES, which the first session asks, so they are placed
+    # after it (the file device opens a file when the band asks for it).
+    # They were placed before the boot, on HOST, a constant:
+    #   names = [server.place(os.path.join(HERE, 'lisp', f), TREE)[0]
+    #            for f in ('generational-collector.lisp', 'warm-boot.lisp')]
     server.start()
     machine.start()
     s = session()
+    r = check(s, lc.SYS_HOST)
+    server.learn_host(r[1].strip('"') if r[0] == 'value' else None)
+    names = [server.place(os.path.join(HERE, 'lisp', f), TREE)[0]
+             for f in ('generational-collector.lisp', 'warm-boot.lisp')]
     for n in names:
         check(s, '(progn (let ((si:inhibit-fdefine-warnings :just-warn)) (qc-file-load "%s")) t)'
               % (n + '.lisp'), 'T')

@@ -47,7 +47,8 @@ output names the rule, trying (2), (3) and (4) before (1):
   (2) it is an e-mail address listed in the baseline as one of MIT's
       addresses in sys/man/bug-mail.txt, and it is in that file: a new
       address fails even there;
-  (3) it is /home/lispm, the system's own home directory on HOST:
+  (3) it is /home/lispm, the system's own home directory on the file
+      device's host (HOST: or FILES:, as the band names it)
       (sys/io/file/hostfs.lisp:214-219);
   (4) it is the home directory's .cache, written with a tilde, in
       tools/lispm-check or docs/lispm-check.md: that tool's documented

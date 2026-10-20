@@ -336,18 +336,26 @@ Each is overridden by its flag or an environment variable.
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check
 against, or a copy) and `run/check/ubin/` are set up once per clone:
 
-- **`main`:** QUUX's current System 2000 band, the one muir-sim's tests boot:
-  `run/check/band.img` a link to muir-sim's `ref/band-2000/pack-2000.vhd`, and
-  `run/check/ubin/` links to the `ucadr.*` and `promh.*` beside it, so both
-  follow when muir-sim takes a new hand-over. Its `SYS:` is on HOST, so its
-  files are served by the file device. From the tree:
+- **`main`:** System 2001's band, the one muir-sim's tests boot
+  (`tests/system_2001.rs`, release-2001's disk): `run/check/band.img` a link
+  to muir-sim's `ref/band-2001-81b3973/handover-2001-81b3973-disk.vhd`, the
+  same disk uncompressed, and `run/check/ubin/` links to the `ucadr.*` and
+  `promh.*` beside it, so both follow when muir-sim takes a new hand-over.
+  It runs on quux at revision 13 with its PROM, `run/check/ubin/promh.mcr`
+  (a wrapper that sets `MUIR_QUUX_REVISION=13` and gives `--prom`, as
+  `--quux`). Its `SYS:` is on HOST, so its files are served by the file
+  device. From the tree:
 
   ```
-  ln -s ../../../muir-sim/ref/band-2000/pack-2000.vhd run/check/band.img
+  ln -s ../../../muir-sim/ref/band-2001-81b3973/handover-2001-81b3973-disk.vhd run/check/band.img
   mkdir run/check/ubin
   for f in ucadr.mcr ucadr.sym ucadr.tbl ucadr.locs promh.mcr promh.sym promh.tbl promh.locs
-  do ln -s ../../../../muir-sim/ref/band-2000/$f run/check/ubin/$f; done
+  do ln -s ../../../../muir-sim/ref/band-2001-81b3973/$f run/check/ubin/$f; done
   ```
+
+  The default was System 2000's band (muir-sim's `ref/band-2000/`), which
+  runs on revision 12 alone (at 13 it stays at a black screen), and the
+  current quux refuses revision 12 ("revision 13, 14, 15 or 16").
 
   The default was a System 1002 band for QUUX (microcode 1000, `SYS:` on OZ)
   until quux revision 11. That microcode reads block-disk's registers at
@@ -399,7 +407,7 @@ that band. `LISPM_CHECK_TEST_MODES` picks the modes, each run with the
 
 | Line | Modes by default | `device` band | `ozd` band |
 |---|---|---|---|
-| `main` | `device` | `LISPM_CHECK_DEVICE_BAND`, else `LISPM_CHECK_BAND`, else `run/check/band.img` (System 2000, `SYS:` on HOST) | `LISPM_CHECK_BAND`, else `run/check/band.img`: a band whose `SYS:` is on OZ, of which quux since revision 11 runs none |
+| `main` | `device` | `LISPM_CHECK_DEVICE_BAND`, else `LISPM_CHECK_BAND`, else `run/check/band.img` (System 2001, `SYS:` on HOST) | `LISPM_CHECK_BAND`, else `run/check/band.img`: a band whose `SYS:` is on OZ, of which quux since revision 11 runs none |
 | `cadr` | `ozd` | none: cadr has no file device | `LISPM_CHECK_BAND`, else `run/check/band.img` |
 
 It passes its arguments on to every run (`--quux`, `--cadr`, `--engine` and

@@ -10,7 +10,8 @@
       (check-selftest-square 3)) => (A 9)
 "a string" => "a string"
 
-; the tree's sys/ is served, on the host the band's SYS: is on (OZ or HOST)
+; the tree's sys/ is served, on the host the band's SYS: is on (OZ, or the file
+; device's HOST or FILES)
 (not (null (probef "SYS: SYS; SYSDCL LISP"))) => T
 
 ; a deliberately failing case: the expected value is wrong

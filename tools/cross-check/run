@@ -11,7 +11,7 @@ The checks given run at once, each in its own lispm-check run with its own
 ports.  Each gets a copy of this tree's sys/ and site/ (native: the builder's
 own tree, from TARBALL) with the files of lisp/ served as SYS: CROSS-CHECK;, runs
 cases/prime.cases and its own case file on the builder, and then its analysis
-on what the run left in HOST's home.  Output in DIR/CHECK/ (DIR is the tree's
+on what the run left in the login's home.  Output in DIR/CHECK/ (DIR is the tree's
 run/cross-check/ unless --out): lispm-check.out, the machine's logs, home/,
 result.txt.  Exit status 0 when every check given passes.
 
@@ -126,7 +126,7 @@ def environment():
 
 
 def lispm_check(tree, cases, timeout, extra, where):
-    """Run lispm-check; keep what the run left in HOST's home, its logs and
+    """Run lispm-check; keep what the run left in the login's home, its logs and
     its served sys/ in WHERE; return its exit status and output."""
     os.makedirs(where, exist_ok=True)
     log = os.path.join(where, 'lispm-check.out')

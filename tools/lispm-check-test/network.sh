@@ -7,7 +7,8 @@
 #
 # The arguments are lispm-check's and go to every run; --quux must name a
 # machine of revision 16 (a wrapper that sets MUIR_QUUX_REVISION=16, say) and
-# the band must be one with the network, whose SYS: is on HOST.
+# the band must be one with the network, whose SYS: is on the file device's
+# pathname host (HOST or FILES, as the band names it).
 # LISPM_CHECK_TAPS must name two host-only taps at least, of which the first
 # two, A and B, are used.  LISPM_CHECK_TEST_QUUX15, when set, names a machine
 # of revision 15 for the two runs that need one.  LISPM_CHECK_TEST_TOOL names

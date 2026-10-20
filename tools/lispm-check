@@ -62,7 +62,8 @@ ozd's logs) under the cache and says where; --keep keeps it always.
 --files takes paths, comma separated.  A file inside the tree's sys/ is served
 at its own place and loaded by its logical name (sys/io1/time.lisp as
 "SYS: IO1; TIME LISP"), so the world sees the same source file; any other file
-is served in the login's home directory (OZ: /lispm/ or HOST: /home/lispm/).
+is served in the login's home directory (OZ: /lispm/, or /home/lispm/ on the
+file device's pathname host, HOST: or FILES: as the band names it).
 The tree itself is never written:
 the machine is served a copy under the cache, so QFASLs land there.  Some sys
 files do not load as source, since they use functions only the compiler opens
@@ -108,18 +109,23 @@ started before it exits.
 The copy is served the way the band reads its SYS: files.  With
 --file-server ozd, by ozd (the class OzdFileServer), for a band whose SYS: is
 on OZ; the setup logs in to OZ.  With --file-server device, by quux's own file
-device (DeviceFileServer), for a band whose SYS: is on HOST: quux mounts the
-copy as HOST's / (--file-root), ozd serves no file and is only the TELNET
-gateway, and the setup logs in to HOST.  The file device is QUUX's: cadr has
-none, so on the cadr line the files are always served by ozd.  A band boots to
+device (DeviceFileServer), for a band whose SYS: is on the file device's
+pathname host, which a band names HOST (Systems 2000 and 2001, and the bands
+of 2002 built before the name changed) or FILES (after it): quux mounts the
+copy as that host's / (--file-root), ozd serves no file and is only the
+TELNET gateway, and the setup logs in to the host the band named.  The file
+device serves either name alike, its paths carrying no host.  The file device
+is QUUX's: cadr has none, so on the cadr line the files are always served by
+ozd.  A band boots to
 its prompt only with its SYS: host served.  auto, the default, takes the host
 the band's SYS: is on from a checkpoint of this band and machine (its setup
 asked the band), else from the answers remembered under the cache, else from a
 probe (a cold boot with the copy served both ways, about 15 s, once for each
 band and machine); a machine without a file device means ozd.  Every run says
-which it chose and why.  A setup checks that the band's SYS: is on the chosen
-server's host.  Everything that knows how the tree is served is in these
-classes.
+which it chose and why.  A setup checks that the band's SYS: is on a host the
+chosen server serves, and keeps the band's answer in the checkpoint, from
+which every check takes the host it names files on.  Everything that knows
+how the tree is served is in these classes.
 
 --ozd-file-dates mit|utc and --ozd-timezone N are passed to ozd as its
 --file-dates and --timezone: how FILE writes and reads its dates.  ozd's
@@ -153,15 +159,16 @@ MUIR_QUUX_REVISION), and remembered under the cache.
                     bound to the tap, to the band's TELNET server on port 23
                     at QUUX's address; the machine is given no Chaos peer at
                     all, and ozd is not started.  It needs revision 16, and a
-                    band whose SYS: is on HOST (--file-server device; auto
-                    then means device).  At the end of a setup it half-closes
-                    the session and reads to the band's EOF, which the band's
-                    server sends at the client's EOF, then waits 0.5 s for
-                    the last ACK, so that the checkpoint holds no connection;
-                    a setup whose band does not close is a failed run.  The
-                    default on revision 16 (the contract, section 8 R2), so
-                    a run there starts no ozd unless it asks for chaos; a
-                    band without the network wants --network chaos
+                    band whose SYS: is on the file device's host, HOST or
+                    FILES (--file-server device; auto then means device).
+                    At the end of a setup it half-closes the session and
+                    reads to the band's EOF, which the band's server sends
+                    at the client's EOF, then waits 0.5 s for the last ACK,
+                    so that the checkpoint holds no connection; a setup
+                    whose band does not close is a failed run.  The default
+                    on revision 16 (the contract, section 8 R2), so a run
+                    there starts no ozd unless it asks for chaos; a band
+                    without the network wants --network chaos
 The tools that build their own sessions from these classes
 (tools/system-check/warm-boot, tools/cross-build/run's sessions) take the
 network and the tap through harness_network, below, with the same default.
@@ -186,11 +193,15 @@ TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 MACHINE = 'quux'
 CHAOS_HOST, CHAOS_LISPM = '177200', '177201'   # ozd's and the band's addresses
 TV_SIZE = '1280x1024'   # QUUX's video controller (--video-size); cadr has none
-# The host SYS: translates to in the band: HOST when the band reads its
-# sources through quux's file device, OZ when through ozd.  Asked before the
-# login, since a translation opens no file.
+# The host SYS: translates to in the band: the file device's pathname host,
+# HOST or FILES, when the band reads its sources through quux's file device,
+# OZ when through ozd.  Asked before the login, since a translation opens no
+# file.
 SYS_HOST = ('(send (send (send (fs:parse-pathname "SYS: SYS; SYSDCL LISP")'
             ' :translated-pathname) :host) :name)')
+# The login to the host SYS: is on, whatever the band names it, as QLD's own
+# (sys/sys/ltop.lisp): for a session that has not asked SYS_HOST.
+LOGIN_SYS_HOST = '(login "LISPM" (send (fs:get-pathname-host "SYS") :physical-host) t)'
 
 
 def now():
@@ -680,10 +691,10 @@ def stop_process(p, stdin_command=None, wait=10):
 # None, and its flags are the machine's in either network.
 
 # The networks that carry the TELNET session (--network), each with whether
-# it needs ozd as the gateway.  A third, host (a HOST: files transport, the
-# session through quux's file device, for a band without its network), is to
-# come, as another entry here and another branch in connect_listener,
-# network_flags and close_session.
+# it needs ozd as the gateway.  A third, files (a transport through the file
+# device's pathname host, the session through quux's file device, for a band
+# without its network), is to come, as another entry here and another branch
+# in connect_listener, network_flags and close_session.
 NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}}
 TELNET_PORT = 23
 # The clean close's wait for the band's FIN after ours, and then for the last
@@ -692,11 +703,16 @@ CLOSE_WAIT, LAST_ACK_WAIT = 60, 0.5
 
 
 class OzdFileServer:
-    # the --file-server name, and the host the setup logs in to: the band's
-    # files and the login's home are on OZ
-    mode, login_host = 'ozd', 'OZ'
+    # the --file-server name, the host the setup logs in to, and the hosts a
+    # band's SYS: may be on for this server: the band's files and the login's
+    # home are on OZ
+    mode, login_host, hosts = 'ozd', 'OZ', ('OZ',)
 
-    def __init__(self, ozd, run_dir, ports, log, ozd_flags=(), network='chaos', link=None):
+    def __init__(self, ozd, run_dir, ports, log, ozd_flags=(), network='chaos', link=None, host=None):
+        # HOST: the band's answer to SYS_HOST, when known (a checkpoint keeps
+        # it); OzdFileServer has one host, and takes it only to check it
+        if host is not None:
+            self.learn_host(host)
         self.ozd, self.run_dir, self.log = ozd, run_dir, log
         # --file-dates and --timezone for ozd, as --ozd-file-dates and
         # --ozd-timezone give them; none, ozd's defaults
@@ -710,6 +726,14 @@ class OzdFileServer:
 
     def login(self):
         return '(login "LISPM" "%s" t)' % self.login_host
+
+    def learn_host(self, host):
+        """Take HOST, the band's answer to SYS_HOST, as the host the login
+        and the served files are on; refused unless this server serves it."""
+        if host not in self.hosts:
+            raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
+                            % (host, self.mode, ' or '.join(self.hosts)))
+        self.login_host = host
 
     def lay_out(self, tree, ubin=None):
         """Copy the tree's sys/ and site/ to be served (the tree is never
@@ -891,18 +915,34 @@ class OzdFileServer:
 
 class DeviceFileServer(OzdFileServer):
     """The tree served by quux's own file device, for a band whose SYS: is on
-    HOST.  Against such a band OzdFileServer never reaches the prompt: the
-    boot reads SYS: through the device, which with nothing mounted serves an
-    empty /, and ozd saw only "No server for this contact name" from the
-    band's TELNET contact for minutes.  Here quux mounts the private copy as
-    HOST's / (sys/, site/ and home/lispm/, --file-root), and ozd stays only as
-    the TELNET gateway: its one root is an empty read-only folder, since ozd
-    wants one, so it serves no file.  The copy is laid out and written as
-    OzdFileServer's is; only the folders and the pathnames differ."""
-    mode, login_host = 'device', 'HOST'
+    the file device's pathname host.  Against such a band OzdFileServer never
+    reaches the prompt: the boot reads SYS: through the device, which with
+    nothing mounted serves an empty /, and ozd saw only "No server for this
+    contact name" from the band's TELNET contact for minutes.  Here quux
+    mounts the private copy as the host's / (sys/, site/ and home/lispm/,
+    --file-root), and ozd stays only as the TELNET gateway: its one root is
+    an empty read-only folder, since ozd wants one, so it serves no file.
+    The copy is laid out and written as OzdFileServer's is; only the folders
+    and the pathnames differ.
+
+    The host's name is the band's: HOST in Systems 2000 and 2001 and the
+    bands of 2002 built before the name changed, FILES after it; the device
+    serves either alike.  The setup asks the band (SYS_HOST) and learns it,
+    a check is given it from the checkpoint (host=), and until it is known
+    the login is the band's own SYS: host, as QLD's (sys/sys/ltop.lisp), and
+    place() refuses, having no host to name a file on.  The class named
+    one host, HOST, as a constant, and refused a band whose SYS: is on FILES
+    at the setup:
+        mode, login_host = 'device', 'HOST'"""
+    mode, login_host, hosts = 'device', None, ('HOST', 'FILES')
+
+    def login(self):
+        if self.login_host is None:
+            return LOGIN_SYS_HOST
+        return super().login()
 
     def lay_out(self, tree, ubin=None):
-        """The copy as HOST's /: sys/ and site/ of the tree (ubin/ as
+        """The copy as the host's /: sys/ and site/ of the tree (ubin/ as
         sys/ubin/ when given) and an empty home/lispm/ for the login."""
         super().lay_out(tree, ubin)
         os.rmdir(os.path.join(self.root, 'lispm'))
@@ -910,14 +950,19 @@ class DeviceFileServer(OzdFileServer):
         os.makedirs(os.path.join(self.run_dir, 'no-files'))
 
     def place(self, path, tree):
-        """A sys/ file as OzdFileServer places it (SYS: translates to HOST in
-        the band); any other in the login's home, HOST: /home/lispm/."""
+        """A sys/ file as OzdFileServer places it (SYS: translates to the
+        file device's host in the band); any other in the login's home,
+        /home/lispm/ on the host the band named (HOST: or FILES:)."""
         rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
         if rel.startswith('sys' + os.sep):
             return super().place(path, tree)
+        if self.login_host is None:
+            raise RunFailed('%s: not known which host the band names its home on (host=)' % path)
         name = os.path.basename(path)
         shutil.copyfile(path, os.path.join(self.root, 'home', 'lispm', name))
-        return 'HOST: //home//lispm//' + os.path.splitext(name)[0], False
+        # the home on the band's host, which was HOST alone:
+        #   return 'HOST: //home//lispm//' + os.path.splitext(name)[0], False
+        return '%s: //home//lispm//%s' % (self.login_host, os.path.splitext(name)[0]), False
 
     def ozd_roots(self):
         return ['--root', '%s/no-files,ro' % self.run_dir]
@@ -931,8 +976,9 @@ class ProbeFileServer(DeviceFileServer):
     on the device and as ozd's roots, so that a band boots to its prompt
     whichever host its SYS: is on and can be asked which that is.  A band
     boots only with its SYS: host served: one on OZ served by the device alone,
-    or a band whose SYS: is on HOST served by ozd alone, waits at boot with
-    no TELNET server.  Nothing is checked in a probe's boot."""
+    or a band whose SYS: is on the file device's host (HOST or FILES)
+    served by ozd alone, waits at boot with no TELNET server.  Nothing is
+    checked in a probe's boot."""
     mode = 'probe'
 
     def ozd_roots(self):
@@ -1279,8 +1325,9 @@ def ensure_checkpoint(a, key, link=None):
             except RunFailed as e:
                 if getattr(e, 'stopped', False):
                     raise
-                # A band whose SYS: is on HOST waits at boot, with no TELNET
-                # server, when its files are not on quux's file device.
+                # A band whose SYS: is on the file device's host (HOST or
+                # FILES) waits at boot, with no TELNET server, when its files
+                # are not on quux's file device.
                 # Or the band is not one this machine runs: a System 1002 band
                 # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
                 # on quux revision 11 and later, which moved block-disk off
@@ -1289,7 +1336,7 @@ def ensure_checkpoint(a, key, link=None):
                 # address is not its tap's, gives the same sign.
                 raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
                               ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
-                              % (e, a.file_server, server.login_host, MACHINE,
+                              % (e, a.file_server, ' or '.join(server.hosts), MACHINE,
                                  ' (a System 1002 band does not run on quux revision 11 and later)'
                                  if MACHINE == 'quux' else '',
                                  ' Over TCP: does the band start its network, and answer at %s, port %d,'
@@ -1304,9 +1351,14 @@ def ensure_checkpoint(a, key, link=None):
             if r[0] != 'value':
                 raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
             sys_host = r[1].strip('"')
-            if sys_host != server.login_host:
-                raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
-                                % (sys_host, a.file_server, server.login_host))
+            # A host the server serves, which the login and the served files
+            # then name: the device's either name, HOST or FILES, as the band
+            # answers.  The check compared it with the server's one constant
+            # host, which refused a band whose SYS: is on FILES:
+            #   if sys_host != server.login_host:
+            #       raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
+            #                       % (sys_host, a.file_server, server.login_host))
+            server.learn_host(sys_host)
             # Log in, define and compile the helper, then close the band's file connection, so the first file
             # access after a resume opens a new one rather than using a
             # connection whose ozd has gone (which closed the TELNET session).
@@ -1355,11 +1407,30 @@ def ensure_checkpoint(a, key, link=None):
 # --------------------------------------------------------------------------
 # A check.
 
+def checkpoint_host(chk):
+    """The host the band's SYS: is on, as the setup of the checkpoint CHK
+    asked it (its JSON's sys_host): the host a check names served files on.
+    tools/tcp-check/run takes it for its server too."""
+    try:
+        with open(chk[:-4] + '.json') as f:
+            host = json.load(f).get('sys_host')
+    except (OSError, ValueError) as e:
+        raise RunFailed('%s: no record of the band\'s SYS: host (%s)' % (chk, e))
+    if not host:
+        raise RunFailed('%s: no record of the band\'s SYS: host' % chk)
+    return host
+
+
 def check(a, chk, cases, link=None):
+    # the host the setup's band answered, which the served files are named on
+    # (the device's HOST or FILES); the server was made knowing only its own:
+    #   server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+    host = checkpoint_host(chk)
     run_dir = run_dir_new('check')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
+                                         host=host)
     machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
     results, t0 = [], now()
     ok_run = False
@@ -1488,8 +1559,9 @@ def probe_sys_host(a):
 
 
 def choose_file_server(a):
-    """--file-server auto: device when the band's SYS: is on HOST, ozd when it
-    is on OZ, and ozd with a machine that has no file device (cadr).  The band's answer
+    """--file-server auto: device when the band's SYS: is on the file
+    device's host, HOST or FILES, ozd when it is on OZ, and ozd with a
+    machine that has no file device (cadr).  The band's answer
     is taken from a checkpoint of this band and machine already made (its setup
     asked the band), else from the answers remembered under the cache, else
     from a probe: a cold boot that asks the band, once for each band and machine.
@@ -1539,7 +1611,10 @@ def choose_file_server(a):
                 os.replace(tmp, db)
         finally:
             lock.release()
-    mode = {'HOST': 'device', 'OZ': 'ozd'}.get(sys_host)
+    # each server's hosts (FILE_SERVERS), so a band whose SYS: is on FILES
+    # means device as one on HOST does; the map named HOST alone:
+    #   mode = {'HOST': 'device', 'OZ': 'ozd'}.get(sys_host)
+    mode = {h: m for m, c in FILE_SERVERS.items() for h in c.hosts}.get(sys_host)
     if mode is None:
         raise RunFailed("auto: the band's SYS: is on %s, which neither server serves" % sys_host)
     print("lispm-check: files served by %s: the band's SYS: is on %s (auto, from %s)"
