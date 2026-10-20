@@ -49,10 +49,11 @@ it, as Linux's own TCP:
            and the form answered once the machine goes on
 
 With --wall-base, T4's wall bound judges every echo session (the wall
-line): max(M x T0, T0 + 60 s), M 10 and at 20% loss --wall-m-high, runs of
-four or more failed transmissions of one segment not counted, and at 20%
-loss an early ending explained by the relay's --trace passes; README.md,
-"The wall bound".
+line): max(M x T0, T0 + 60 s), M 10, and at 20% loss max(M x T0, T0 +
+120 s) with M --wall-m-high, runs of four or more failed transmissions of
+one segment not counted, and at 20% loss an early ending explained by the
+relay's --trace passes; README.md, "The wall bound".  Its conditions: micro
+at 20 ns, unpaced, one wall-clocked run at a time.
 
 and at the end the fault relay, which checks every Ethernet frame the band
 sends with its own code, must have found none bad.  The test switch, each
@@ -519,8 +520,15 @@ def part_totals(band, control, opts, log):
 # time.monotonic() shares.
 
 RUN_EXCUSED = 4         # a run of this many failed transmissions of one segment, or more, is not counted
-ENDING_WINDOW = 100.0   # the endings clause looks at the relay's record's last 100 s
-WALL_FLOOR = 60.0       # each session's bound is max(M x T0, T0 + 60 s)
+ENDING_WINDOW = 100.0   # the endings clause looks at the 100 s before the sender's last transmission
+ENDING_RTO_MAX = 120.0  # the next RTO the endings clause allows that transmission's ACK, at most (Linux's cap)
+# each session's bound is max(M x T0, T0 + floor): the floor 60 s, and 120 s at
+# 20% loss (QUUX's Ethernet contract, section 9, T4).  At 20% loss on micro at
+# 20 ns a 64 KiB echo took up to 93.8 s counted on a correct stack, from Linux's
+# own RTO and backoff (its RTT samples taken from the band's late ACKs), which
+# the floor of 60 s, made for wall time, did not allow; M stays 14.
+WALL_FLOOR = 60.0
+WALL_FLOOR_HIGH = 120.0
 
 
 def read_trace(path, ports, t_lo, t_hi):
@@ -608,11 +616,13 @@ class Way:
         """The transmissions holding sequence number S, in time order."""
         return [x for x in self.tx if x[1] <= s < x[2]]
 
-    def failed(self, s, row, i):
+    def failed(self, s, row, i, end=None):
+        """Transmission I of ROW, segment S's, failed; the last one is judged
+        by the ACKs up to END (default the session's end)."""
         t, _, _, lost = row[i]
         if lost:
             return True
-        nxt = row[i + 1][0] if i + 1 < len(row) else self.end
+        nxt = row[i + 1][0] if i + 1 < len(row) else (self.end if end is None else end)
         a = self.acked_by(nxt)
         if a is not None and a > s:
             return False
@@ -646,20 +656,44 @@ class Way:
         return out
 
     def ending_explained(self):
-        """The endings clause: in the record's last ENDING_WINDOW seconds,
-        every transmission of the oldest unacknowledged segment failed, and
-        there was one.  Returns a description, or None."""
-        a = self.acked_by(self.end)
+        """The endings clause (QUUX's Ethernet contract, section 9, T4): the
+        sender's oldest unacknowledged segment, and every transmission of it
+        in the ENDING_WINDOW seconds up to its last one failed, an ACK counting
+        only up to that transmission's next RTO.  Returns a description, or
+        None.
+
+        The window ends at the sender's last transmission, not at the
+        session's end: the band's R2 closes it silently, and its peer may hear
+        of it hundreds of seconds later (a zero-window probe answered by RST);
+        an ACK that reached the sender after its R2 drew that RST and
+        acknowledged nothing it still held.  The next RTO is twice the gap
+        from the previous transmission of the same segment, at most
+        ENDING_RTO_MAX (and ENDING_RTO_MAX for a segment sent once).  Before,
+        the window was the record's last ENDING_WINDOW seconds, the ACKs
+        counted to the session's end:
+            a = self.acked_by(self.end)
+            ... f = [(t, x) for t, x in f if t >= self.end - ENDING_WINDOW]"""
+        if not self.tx:
+            return None
+        t_last, s_last = self.tx[-1][0], self.tx[-1][1]
+        before = [x[0] for x in self.holding(s_last) if x[0] < t_last]
+        rto = min(2 * (t_last - before[-1]), ENDING_RTO_MAX) if before else ENDING_RTO_MAX
+        horizon = min(self.end, t_last + rto)
+        a = self.acked_by(horizon)
         open_ = sorted(x[1] for x in self.tx if a is None or x[2] > a)
         if not open_:
             return None
         oldest = max(open_[0], a) if a is not None else open_[0]
-        row = self.holding(oldest)
-        f = [(row[i][0], self.failed(oldest, row, i)) for i in range(len(row))]
-        f = [(t, x) for t, x in f if t >= self.end - ENDING_WINDOW]
+        row = [x for x in self.holding(oldest) if x[0] <= horizon]
+        if not row:
+            return None
+        anchor = row[-1][0]
+        f = [(row[i][0], self.failed(oldest, row, i, horizon)) for i in range(len(row))]
+        f = [(t, x) for t, x in f if t >= anchor - ENDING_WINDOW]
         if f and all(x for _, x in f):
-            return '%s: its oldest unacknowledged segment, +%d, sent %d times in the last %d s, each lost or ' \
-                   'its ACK lost' % (self.way.replace('_', ' '), oldest, len(f), ENDING_WINDOW)
+            return '%s: its oldest unacknowledged segment, +%d, sent %d times in the %d s to its last ' \
+                   'transmission, each lost or its ACK lost' % (self.way.replace('_', ' '), oldest, len(f),
+                                                                ENDING_WINDOW)
         return None
 
 
@@ -690,11 +724,18 @@ def wall_m(opts):
     return opts.wall_m_high if fault_loss(opts.faults) >= 20 else opts.wall_m
 
 
+def wall_floor(opts):
+    """The bound's floor over T0: 120 s at 20% loss and above, else 60 s
+    (QUUX's Ethernet contract, section 9, T4)."""
+    return WALL_FLOOR_HIGH if fault_loss(opts.faults) >= 20 else WALL_FLOOR
+
+
 def judge_session(r, events, opts, base):
     """One session against the bound: (verdict, line)."""
     t0 = base[str(r['size'])]
     m = wall_m(opts)
-    bound = max(m * t0, t0 + WALL_FLOOR)
+    # before the floor of 120 s at 20% loss: bound = max(m * t0, t0 + WALL_FLOOR)
+    bound = max(m * t0, t0 + wall_floor(opts))
     end = r['t1']
     ways = [Way(events, w, end) for w in ('to_band', 'from_band')]
     runs = [x for w in ways for x in w.excused()]
@@ -719,8 +760,8 @@ def judge_session(r, events, opts, base):
 
 
 def wall_judge(control, opts):
-    """Every recorded session against max(M x T0, T0 + 60 s) (section 9, T4;
-    amendment 4)."""
+    """Every recorded session against max(M x T0, T0 + floor), the floor 60 s
+    and 120 s at 20% loss (section 9, T4; amendment 4)."""
     base = json.load(open(opts.wall_base))
     rs = control.sessions
     if not rs:
@@ -880,7 +921,8 @@ def main():
     p.add_argument('--wall-base', default=None,
                    help="T4's wall bound, on: a JSON file of T0, each size's median session time with no "
                         "faults (--wall-base-out of such a run); every echo session is then judged against "
-                        "max(M x T0, T0 + 60 s), its runs of 4 or more failed transmissions not counted")
+                        "max(M x T0, T0 + 60 s), T0 + 120 s at 20%% loss, its runs of 4 or more failed "
+                        "transmissions not counted")
     p.add_argument('--wall-m', type=float, default=10, help="M below 20%% loss [default: 10]")
     # M at 20% loss: M-loss's worst seed took 6.9 x T0 (both ways, seed 2),
     # and T4's 20% rows at most 6.8 x counted (8.1 x in all); about twice it

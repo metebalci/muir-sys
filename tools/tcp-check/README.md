@@ -81,19 +81,44 @@ T4's wall bound (section 9, "How the wall-clocked lanes are judged",
 amendment 4) is per session: one echo of one size. `--wall-base FILE` turns
 it on, FILE giving T0 of each size, the median of its sessions with no
 faults, which `--wall-base-out FILE` writes from a run with none. Each
-session must end within max(M x T0, T0 + 60 s): M is `--wall-m`, 10, and at
-20% loss `--wall-m-high`, 14: about twice M-loss's worst seed, 6.9 x T0
-(below, "Measured"). Not counted is the time inside a run of four or
+session must end within max(M x T0, T0 + 60 s), M `--wall-m`, 10; at 20%
+loss within max(M x T0, T0 + 120 s), M `--wall-m-high`, 14: about twice
+M-loss's worst seed, 6.9 x T0 (below, "Measured"). The floor of 120 s at 20%
+loss: on a correct stack a 64 KiB echo took up to 93.8 s counted there,
+Linux's own RTO and backoff after RTT samples taken from the band's late
+ACKs, against 61.4 s; a band whose backoff an ACK never clears took 132.7 s
+to 900 s, against 121.4 s. Not counted is the time inside a run of four or
 more failed transmissions of one segment, from the run's first to the
 segment's next transmission, a transmission failing when the relay lost it
 or when no ACK covering it reached its sender before the next. At 20% loss a
 session may also end early, by the band's R2 or by Linux's abort: such an
-ending passes when, in the relay's record's last 100 s, every transmission
-of the oldest unacknowledged segment, one way or the other, failed, and what
-was echoed before the end is exact. The record is the relay's trace
-(`--trace FILE`, the relay's `--trace`). The `wall` line judges every echo
-session of the run; `--wall-log` keeps each session's figures (its time, the
-time counted, the runs excused, the bound).
+ending passes when, in the 100 s up to the ending sender's last transmission
+of its oldest unacknowledged segment, every transmission of that segment
+failed, an ACK counting only up to that last transmission's next RTO (twice
+the gap from the transmission before it, at most 120 s), and what was echoed
+before the end is exact. The window ends at that transmission and not at the
+session's end, since the band's R2 is silent and its peer may hear of it much
+later: on seed 3 of loss20-both the band closed a 1 MiB echo by R2 at about
+132 s and Linux heard of it at 554 s, through a zero-window probe answered by
+RST, after an ACK of the band's segment had reached it too late. The record
+is the relay's trace (`--trace FILE`, the relay's `--trace`). The `wall` line
+judges every echo session of the run; `--wall-log` keeps each session's
+figures (its time, the time counted, the runs excused, the bound).
+
+**The conditions** the bound is set for: micro at 20 ns, unpaced, one
+wall-clocked run (T2 or a T4 row) at a time on the host. The band's timers run
+on its own clock, machine time, and Linux's on the host's; measured by the
+band's TSval against the relay's clock, micro at 20 ns ran at 0.76-0.78 of
+real time alone and at 0.61 beside other runs, micro at 48 ns at about 1.0,
+and rtl at 20 ns at 0.073.
+
+`tools/tcp-check/test` checks the judge itself on made-up relay records, with
+no machine: an ending by the band's R2 and one by Linux's abort, each
+explained only with the window at the sender's last transmission and the ACKs
+counted to its next RTO; one whose last transmission was acknowledged in time,
+not explained; and the floor and M at 20% and at 5% loss. Each of six partial
+changes (the window moved for one sender only, the ACKs counted to the end, the
+floor raised at every rate or at none, M dropped at 20%) fails a case.
 
 ```
 tools/tcp-check/run --parts echo,table --wall-base-out base.json --trace none.trace -- ...

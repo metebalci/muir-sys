@@ -2361,6 +2361,23 @@ and 7). Chaos stays beside it until the checks run over TCP (section 8).
   connection left by remote port and state. One count right after the echo
   part failed loss20-both on seed 1 on a connection rightly in LAST-ACK,
   whose last ACK the relay had lost and which the band closed 3.3 s later.
+- **T4's bound at 20% loss and its endings clause** (`tools/tcp-check/run`;
+  its README, "The wall bound"; QUUX's Ethernet contract, section 9, T4): at
+  20% loss the floor is T0 + 120 s, M staying 14 (`WALL_FLOOR_HIGH`, `:531`;
+  `wall_floor`, `:727`; `judge_session`, `:733`); below it the bound stays
+  max(10 x T0, T0 + 60 s). On a correct stack a 64 KiB echo at 20% loss took
+  up to 93.8 s counted, from Linux's own RTO and backoff, against 61.4 s; a
+  band whose backoff an ACK never clears still fails, at 132.7 s to 900 s. An
+  early ending is now judged in the 100 s up to the ending sender's last
+  transmission of its oldest unacknowledged segment, an ACK counting only up
+  to that transmission's next RTO, twice the gap before it and at most 120 s
+  (`Way.ending_explained`, `:658`; `ENDING_RTO_MAX`, `:524`): the band's R2
+  is silent, and Linux heard of one 420 s later through a zero-window probe
+  answered by RST, after an ACK of the band's segment had reached it too
+  late, so the record's last 100 s held nothing to explain it. The bound's
+  conditions are stated: micro at 20 ns, unpaced, one wall-clocked run at a
+  time, since the band's timers run on machine time and Linux's on the
+  host's. `tools/tcp-check/test` (new) checks the judge on made-up records.
 - **`tools/fault-relay/relay --trace FILE`**: a line for every frame at its
   arrival (`in`, `LOST`) and its sending (`out`), with TCP's ports, flags,
   numbers and length (`Trace`, `:402`).
