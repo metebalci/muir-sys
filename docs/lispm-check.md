@@ -11,7 +11,7 @@ tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
                   [--compile] [--file-server auto|device|ozd]
                   [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
                   [--ozd-file-dates mit|utc] [--ozd-timezone N]
-                  [--network chaos|tcp] CASES
+                  [--network chaos|tcp|files] CASES
 ```
 
 ## The machine
@@ -144,13 +144,15 @@ tool asks the machine which revision it runs once for each build and value of
 wrapper's flags for rtl alone (`--memory-timing`, `--cache`) are taken; quux's
 own engine is rtl.
 
-`--network chaos|tcp` (or `LISPM_CHECK_NETWORK`) says what carries the TELNET
-session:
+`--network chaos|tcp|files` (or `LISPM_CHECK_NETWORK`) says what carries the
+session: TELNET over Chaos or over TCP, or no network at all, the session
+going through files on the file device's host ([`files`](#--network-files)):
 
 | `--network` | The session | The machine's Chaos | ozd |
 |---|---|---|---|
 | `chaos` | ozd's TCP gateway to the band's Chaos TELNET server | `--chaos-address 177201` and its cable, `--chaos-udp` to ozd | started |
 | `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | none: no address, no cable and no peer (until R3, `--chaos-address 177201` alone) | not started |
+| `files` | request and answer files in `/home/lispm/` on the file device's host, which HC-SERVE, a loop at the band's listener, reads and writes | none, and no tap on revision 16 | not started |
 
 **The default** (the contract, section 8 R2): a run that names no network,
 by the flag or the variable, takes `tcp` on revision 16, whose band has the
@@ -159,7 +161,7 @@ Chaos as released. So a check on revision 16 starts no ozd unless it asks
 for `chaos`. Until R2 every run's default was `chaos`. A band without the
 network on revision 16 (a band from before Ethernet, or a check that wants
 the device to itself, as microcode-check's `ethernet-stray`) wants
-`--network chaos`: over TCP its setup waits for a TELNET server that never
+`--network chaos`, or `files`: over TCP its setup waits for a TELNET server that never
 answers, until `--setup-limit`, and then ends as a hang (status 3) whose
 message asks whether the band starts its network. The tap line of a run that took the default says so:
 
@@ -221,6 +223,84 @@ lispm-check: tap quux1, QUUX at 169.254.101.2, TELNET over tcp
 
 The relay's socket is under the cache (`sockets/`), or under the system's
 temporary directory when the cache's path is too long for a UNIX socket.
+
+### `--network files`
+
+`files` checks a band without its network (QUUX's Ethernet contract, section
+18, Q-N13 (a)): on revision 15, whose band has had no Chaos and no Ethernet
+device since R3, and on revision 16 when the check is to run without a tap.
+It is never the default; a run names it. It needs a machine with a file
+device, so the CADR is refused, and the files served by the device
+(`--file-server device`; `auto` means `device`, with no probe). No tap is
+taken on revision 16 and `LISPM_CHECK_TAPS` is not used (the run says so);
+ozd is not started. The tools that drive TELNET sessions of their own
+through `harness_network` (`tools/system-check/warm-boot`,
+`tools/cross-build/run`'s sessions) refuse `LISPM_CHECK_NETWORK=files`.
+
+**The session.** Request K is the form, written whole to `hc-K.req` in the
+login's home of the served copy. HC-SERVE (`tools/lispm-check-lisp/hc-serve.lisp`)
+reads it by `READ` in the listener's package and base, `USER` and 10, runs
+it through the same helper a TELNET session calls, `LISPM-CHECK-CASE`, keeps
+what it printed in a string, writes that to `hc-K.ans`, and then writes
+`hc-K.done`. The tool reads the answer only once `hc-K.done` is there: a
+form may write files of its own meanwhile, and the self-test's
+`early-answer` case writes a false `hc-K.ans` while it runs. The answer
+carries the same markers a TELNET answer does, so the verdicts are made by
+the same code.
+
+**The setup.** The band is booted cold with no network and a glass TTY
+(muir-sim's `--glass-tty`, on the free TCP port TELNET would take). The
+helper and HC-SERVE are laid out as the login's init file,
+`/home/lispm/lispm.init`, and two short forms are typed at the console,
+`(login "LISPM")`, which logs in on the associated machine and loads the
+init file, and `(hc-serve)`, which must run at the listener rather than
+inside a `LOAD`, whose stream would stay open. They are typed blind, since
+the glass TTY reads this band's screen as `?`, once the machine has run 20
+million microcycles (`HC_TYPE_AFTER`, asked at its prompt with `pc`), past
+the boot's first microcode: one setup that typed as soon as the glass TTY
+took a connection stopped itself there (`HALT-CONS` at PC 32063, at 0.75
+million), though four more that typed as early did not. The band keeps only
+the first 40-odd characters typed before its listener runs, so the start is
+kept short (three longer forms typed early left half a form at the
+listener); these two were kept in all 38 boots that typed them blind, from
+2.5 to 300 million microcycles in, so they are typed once, with no retype
+that could leave a second `(hc-serve)` queued.
+The setup then waits for `hc-ready.txt`, asks the band's `SYS:` host as the
+first request, and takes the checkpoint at the machine's prompt
+(`checkpoint FILE`) while HC-SERVE waits; the JSON beside it records the
+network and `hc_next`, the number of the first request a check sends, since
+HC-SERVE's count is in the checkpoint. A check resumes it with its own copy
+served and types nothing.
+
+**The checkpoint while HC-SERVE waits.** The file device refuses a
+checkpoint while it has a handle open or a command queued (muir-sim
+`src/file_device.rs`, `checkpoint_refusal`); the refusal is not a wait: the
+machine says `not written` and runs on. Between two polls HC-SERVE holds no
+file open and sits in `PROCESS-SLEEP` for 6 ticks of the band's 60 Hz clock,
+100 ms of the machine's own time; its one command is the poll's `PROBEF`,
+20 us of the machine's time. A poll measured 1.92 million microcycles on
+micro at revision 15, not the 11.8 million that 100 ms makes at 8.5 ns a
+microcycle, because the machine's clock runs ahead of its microcycles: it
+counts memory waits too, about 60 ns a microcycle on average over a wait
+(5.56 s of the machine's clock in 92.1 million microcycles; 48 polls in it,
+116 ms each). So a checkpoint meets a command in flight about once in a
+thousand tries or fewer (0 of 848 in the measurement). A refusal for a
+command queued with no handle open is taken again after 0.1-0.5 s, up to
+20 times (`CHECKPOINT_TRIES`); a refusal for a handle open is HC-SERVE's
+fault and fails the setup at once (status 2). The checkpoint's key ends
+`-files-` and the first 8 digits of HC-SERVE's sha256, so a changed HC-SERVE
+makes its checkpoint again:
+
+```
+<band sha256>-<quux sha256>-1-micro-device-files-<HC-SERVE sha256>.chk   (each sha256 its first 16 digits, HC-SERVE's 8)
+```
+
+**What differs from TELNET.** A bare `(Y or N)` asked without `FQUERY`, and an
+error the helper does not catch, wait at the console listener, where nothing
+answers them: the request gets no answer and the run fails at `--timeout`
+(status 2), where TELNET answers No. Output to `TERMINAL-IO` is not in the
+answer. A form is read from a file by `READ`, not typed at a listener, in the
+same package, base and readtable.
 
 ## ozd's dates
 
@@ -387,9 +467,11 @@ carries and the machine's flags that plug the band into them) is in the classes
 `OzdFileServer` and `DeviceFileServer` in the tool; a third way of serving the
 tree is a class with the same methods, named in `FILE_SERVERS`. The network
 that carries the session is a key of `NETWORKS`, which the same classes
-branch on (`machine_flags`, `_open`, `close_session`); the third, `host`, a
-session through quux's file device for a band without its network, is to
-come there. `options` and `prepare` are the command line and everything
+branch on (`machine_flags`, `_open`, `connect_listener`, `close_session`);
+the third, `files`, is the session through quux's file device for a band
+without its network: `FileSession` beside `Session`, and `setup_files`,
+`take_checkpoint` and `type_at_console` for its setup, with HC-SERVE in
+`tools/lispm-check-lisp/hc-serve.lisp`. `options` and `prepare` are the command line and everything
 before the check (the revision, the file server, the tap, the checkpoint),
 which `tools/tcp-check/run` takes from the tool.
 
@@ -455,7 +537,24 @@ so the Chaos cases, `chaos-own`, `rev15-chaos`, `variable` and
 (revision 16) and `LISPM_CHECK_TEST_CHAOS_QUUX15`; without it they are
 skipped. `LISPM_CHECK_TEST_TOOL` names
 another copy of the tool to test, a planted one say. About 5 minutes on
-micro.
+micro. Last it runs `files.sh` with the same arguments.
+
+`tools/lispm-check-test/files.sh` is the self-test of
+[`--network files`](#--network-files), which needs no tap and runs alone too:
+`files-15` (revision 15, `LISPM_CHECK_TEST_QUUX15`, with `LISPM_CHECK_TAPS`
+naming no tap: status 1 with every verdict of `expected-files.txt` for
+`files.cases`; the setup typed at the glass TTY and took its checkpoint at
+the prompt, neither machine had a network flag, the check's no glass TTY, no
+ozd, the tap pool not used, the key ending `-files-`), `files-15-again` (the
+checkpoint resumed, no setup), `files-16` (the same on revision 16, no tap),
+`files-15-rtl` (revision 15 on rtl), and the plants: `held`, an HC-SERVE that
+holds a file open around its loop (`hc-serve-held.lisp` appended), whose
+setup must fail on the checkpoint refused for a handle open; `early`, a tool
+whose `FileSession` takes `hc-K.ans` without waiting for `hc-K.done`, which
+`files.cases`'s `early-answer` case must catch; then `cadr` (`--network files`
+refused on the CADR's copy of the tool), `ozd-server` (refused with
+`--file-server ozd`) and `harness` (`LISPM_CHECK_NETWORK=files` refused by
+`harness_network`). About 4 minutes on micro, and 10 more for the rtl lane.
 
 `tools/lispm-check-test/harnesses.sh W16 W15 DISK UBIN OZD [ENGINE]` checks
 the default of the tools that take the network through `harness_network`:

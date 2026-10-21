@@ -7,7 +7,7 @@ Usage:
                     [--compile] [--file-server auto|device|ozd]
                     [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
                     [--ozd-file-dates mit|utc] [--ozd-timezone N]
-                    [--network chaos|tcp] CASES
+                    [--network chaos|tcp|files] CASES
 
 The band runs on the simulator's executable for this line's system, MACHINE
 below: quux on main, QUUX's system (--quux), and cadr on the cadr branch, the
@@ -168,15 +168,46 @@ MUIR_QUUX_REVISION), and remembered under the cache.
                     whose band does not close is a failed run.  The default
                     on revision 16 (the contract, section 8 R2), so a run
                     there starts no ozd unless it asks for chaos; a band
-                    without the network wants --network chaos
+                    without the network wants --network chaos, or files
+  --network files   no network at all: the session goes through files on
+                    the file device's host (QUUX's Ethernet contract,
+                    section 18, Q-N13 (a)), for a band checked without its
+                    network, on revision 15, whose band has no Chaos and no
+                    Ethernet device since R3, or on 16 without a tap; it is
+                    never the default.  A request is a form in
+                    /home/lispm/hc-K.req; HC-SERVE, a loop at the band's
+                    listener (tools/lispm-check-lisp/hc-serve.lisp), runs it
+                    through the same helper, writes what it printed to
+                    hc-K.ans and then hc-K.done, and the answer is read once
+                    hc-K.done is there.  The setup lays HC-SERVE and the
+                    helper out as the login's init file, lispm.init, types
+                    (login "LISPM") and (hc-serve) at the console through
+                    the machine's glass TTY, waits for hc-ready.txt, asks
+                    the band's SYS: host as the first request, and takes the
+                    checkpoint at the machine's prompt while HC-SERVE waits:
+                    a checkpoint the file device refuses for a command in
+                    flight (the poll's PROBEF) is taken again, up to
+                    CHECKPOINT_TRIES times; one refused for a handle open
+                    fails the setup.  A check resumes it with its own copy
+                    served and types nothing.  It needs a machine with a
+                    file device, so the CADR is refused, and the device as
+                    the file server (auto means device); no tap is taken on
+                    revision 16, LISPM_CHECK_TAPS is not used, and ozd is
+                    not started.  Unlike TELNET, a bare "(Y or N)" asked
+                    without FQUERY, or an error the helper does not catch,
+                    waits at the console: the case gets no answer and the run
+                    fails at --timeout (exit 2); output to TERMINAL-IO is not
+                    seen
 The tools that build their own sessions from these classes
 (tools/system-check/warm-boot, tools/cross-build/run's sessions) take the
-network and the tap through harness_network, below, with the same default.
+network and the tap through harness_network, below, with the same default;
+they refuse files, which is this tool's alone.
 Each network has its own checkpoint on revision 16: since step R3 of the
 contract's section 8 the band has no NCP, so tcp gives the machine no
 --chaos-address, and chaos does, and the checkpoint holds the Chaosnet
 interface's switches (until R3 --chaos-address was given in both, and one
-checkpoint served both networks).
+checkpoint served both networks).  files has its own on every revision: its
+checkpoint holds HC-SERVE running at the listener.
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
@@ -186,6 +217,9 @@ import argparse, fcntl, glob, hashlib, json, os, random, re, shutil, signal, soc
 import subprocess, sys, time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+# HC-SERVE, the band's side of --network files: a loop at the listener that
+# runs the requests it finds in files (FileSession, setup_files)
+HC_SERVE = os.path.join(TOOL_DIR, 'lispm-check-lisp', 'hc-serve.lisp')
 # The simulator's executable this line's system runs on, which also names
 # its flag and variable (--quux, LISPM_CHECK_QUUX): quux on main, QUUX's
 # system, and cadr on the cadr branch, the CADR's.  The one line in which the
@@ -617,6 +651,10 @@ def resolve_network(network, revision):
     if chosen == 'tcp' and (revision is None or revision < 16):
         raise RunFailed('--network tcp: %s runs %s, which has no Ethernet device; revision 16 has'
                         % (MACHINE, 'revision %d' % revision if revision else 'the CADR'))
+    # files goes through QUUX's file device, which the CADR has not
+    if chosen == 'files' and revision is None:
+        raise RunFailed('--network files: %s runs the CADR, which has no file device; the session'
+                        ' goes through QUUX\'s' % MACHINE)
     return chosen
 
 
@@ -637,8 +675,15 @@ def harness_network(exe, setup_limit=SETUP_LIMIT):
         pass
     a = Exe()
     a.exe = os.path.abspath(exe)
-    revision = machine_revision(a, sha256_cached(a.exe))
+    # these tools drive TELNET sessions of their own (Session); the session
+    # through files (FileSession) is this tool's alone, refused before the
+    # machine is asked anything.  The revision was asked first:
+    #   revision = machine_revision(a, sha256_cached(a.exe))
     named = os.environ.get('LISPM_CHECK_NETWORK') or None
+    if named == 'files':
+        raise RunFailed('LISPM_CHECK_NETWORK=files: %s drives a TELNET session of its own; files is'
+                        ' tools/lispm-check\'s alone (chaos or tcp here)' % os.path.basename(sys.argv[0]))
+    revision = machine_revision(a, sha256_cached(a.exe))
     if named is not None and named not in NETWORKS:
         raise RunFailed('LISPM_CHECK_NETWORK: %r is not one of %s' % (named, ', '.join(NETWORKS)))
     network = resolve_network(named, revision)
@@ -690,12 +735,15 @@ def stop_process(p, stdin_command=None, wait=10):
 # when the device serves the files.  LINK is revision 16's tap (TapLink), or
 # None, and its flags are the machine's in either network.
 
-# The networks that carry the TELNET session (--network), each with whether
-# it needs ozd as the gateway.  A third, files (a transport through the file
-# device's pathname host, the session through quux's file device, for a band
-# without its network), is to come, as another entry here and another branch
-# in connect_listener, network_flags and close_session.
-NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}}
+# The networks that carry the session (--network), each with whether it
+# needs ozd as the gateway: chaos and tcp carry TELNET; files carries no
+# network at all, the session going through request and answer files on the
+# file device's host (FileSession, HC-SERVE), for a band checked without its
+# network (QUUX's Ethernet contract, section 18, Q-N13 (a)).  It branches in
+# machine_flags, connect_listener and close_session below, in the setup
+# (setup_files) and in check.  Before it this read:
+#   NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}}
+NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}, 'files': {'ozd': False}}
 TELNET_PORT = 23
 # The clean close's wait for the band's FIN after ours, and then for the last
 # ACK (the contract, section 7): wall seconds.
@@ -723,6 +771,9 @@ class OzdFileServer:
         self.network, self.link = network, link
         if network == 'tcp' and link is None:
             raise RunFailed('--network tcp needs a tap, and so revision 16')
+        # --network files: the glass TTY's port, at the setup alone, where
+        # the start forms are typed at the console (setup_files)
+        self.glass = None
 
     def login(self):
         return '(login "LISPM" "%s" t)' % self.login_host
@@ -796,6 +847,10 @@ class OzdFileServer:
         if self.network == 'tcp':
             # until R3: flags = ['--chaos-address', CHAOS_LISPM]
             flags = []
+        elif self.network == 'files':
+            # no network at all: no Chaos, and no link (no tap is taken);
+            # at the setup the glass TTY, to type HC-SERVE's start
+            flags = ['--glass-tty', '127.0.0.1:%d' % self.glass] if self.glass else []
         else:
             flags = ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
                      '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
@@ -837,6 +892,10 @@ class OzdFileServer:
         """Connect to the band's TELNET listener, through the network, and
         return the socket and the text read up to its banner.  With PROGRESS
         (the setup's cold boot), its check() ends the wait, not DEADLINE."""
+        if self.network == 'files':
+            # no connection: HC-SERVE runs in the resumed world, and the
+            # session is files (FileSession); the setup starts it itself
+            return None, ''
         if progress:
             deadline = progress.end
         while now() < deadline:
@@ -880,7 +939,10 @@ class OzdFileServer:
         that a checkpoint written after it holds no open connection and, in
         the normal case, no TIME-WAIT.  STRICT (the setup): a band that sends
         no EOF within CLOSE_WAIT s, or resets the connection, fails the run.
-        Over Chaos the socket to ozd is closed, as before."""
+        Over Chaos the socket to ozd is closed, as before; over files there
+        is nothing to close."""
+        if self.network == 'files':
+            return
         if self.network != 'tcp':
             sock.close()
             return
@@ -967,6 +1029,25 @@ class DeviceFileServer(OzdFileServer):
     def ozd_roots(self):
         return ['--root', '%s/no-files,ro' % self.run_dir]
 
+    def home(self):
+        """The login's home in the copy, /home/lispm/ on the band's host,
+        where --network files' requests and answers are."""
+        return os.path.join(self.root, 'home', 'lispm')
+
+    def lay_out_hc(self):
+        """--network files' setup: the helper and HC-SERVE as the login's
+        init file, which (login "LISPM") loads (sys/sys2/login.lisp; the
+        band names it FILES: /home/lispm/lispm.init, measured), so that the
+        forms typed at the console stay two short ones (setup_files)."""
+        with open(HC_SERVE, encoding='latin-1') as f:
+            serve = f.read()
+        with open(os.path.join(self.home(), 'lispm.init'), 'w', encoding='latin-1') as f:
+            f.write(';;; -*- Mode:LISP; Package:USER; Base:10 -*-\n'
+                    ';;; written by tools/lispm-check for --network files: its helper, then %s\n'
+                    % os.path.basename(HC_SERVE))
+            f.write(HELPER + '\n(compile \'lispm-check-case)\n')
+            f.write(serve)
+
     def machine_flags(self):
         return super().machine_flags() + ['--file-root', self.root]
 
@@ -1033,6 +1114,19 @@ class Machine:
     def stop(self, wait=10):
         stop_process(self.proc, b'quit\n', wait)
 
+    def say(self, line):
+        """A command to the machine's prompt, on its standard input: the
+        setup of --network files takes its checkpoint so (take_checkpoint)."""
+        self.proc.stdin.write((line + '\n').encode())
+        self.proc.stdin.flush()
+
+    def log_from(self, mark):
+        """The machine's log from byte MARK on, and the log's size."""
+        with open(os.path.join(self.run_dir, MACHINE + '.log'), 'rb') as f:
+            f.seek(mark)
+            text = f.read()
+        return text.decode('latin-1'), mark + len(text)
+
 
 # --------------------------------------------------------------------------
 # The session: forms over TELNET, each wrapped to print its value between
@@ -1059,6 +1153,9 @@ SETUP_VERSION = '2'
 # R3), and a run over Chaos on revision 16 has its own key, -chaos
 #SETUP_VERSION_TAP = '3'
 SETUP_VERSION_TAP = '4'
+# --network files' setup (setup_files): HC-SERVE started, the checkpoint
+# taken while it waits; its keys end -files
+SETUP_VERSION_FILES = '1'
 
 ERROR_RE = re.compile(r'(?:^|[\r\n])(>>(?:ERROR|TRAP)[^\r\n]*)')
 # The second line of defence, for a question the FQUERY clause does not see
@@ -1205,6 +1302,67 @@ class Session:
             self._read()
 
 
+# --network files: the session through files on the file device's host.
+# How often FileSession looks for an answer, wall seconds.
+FILES_POLL = 0.02
+
+
+class FileSession:
+    """The session of --network files: request K is the form, written to
+    hc-K.req in the login's home of the served copy (HOME); HC-SERVE, at the
+    band's listener (tools/lispm-check-lisp/hc-serve.lisp), runs it through
+    LISPM-CHECK-CASE, the helper a TELNET session calls, writes what it
+    printed to hc-K.ans and then hc-K.done.  The answer is read once hc-K.done
+    is there, never on hc-K.ans alone: .done is written after .ans is closed,
+    and a form may write files of its own meanwhile (the self-test's
+    early-answer case writes a false hc-K.ans while it runs).  run() returns
+    what Session.run does, but for 'question': a bare question, or an error
+    the helper does not catch, waits at the console, and the request gets no
+    answer.  FIRST is the number of the first request: a check's is the one
+    after the setup's last, since HC-SERVE's count is in the checkpoint."""
+
+    def __init__(self, home, log, machine, first=1):
+        self.home, self.log, self.machine = home, log, machine
+        self.k = first - 1
+
+    def path(self, k, kind):
+        return os.path.join(self.home, 'hc-%d.%s' % (k, kind))
+
+    def run(self, form, timeout, progress=None):
+        deadline = progress.end if progress else now() + timeout
+        self.k += 1
+        k = self.k
+        self.log.write('\n=== %.2f %s\n' % (now(), form))
+        # written whole, then renamed: HC-SERVE never reads half a request
+        tmp = self.path(k, 'tmp')
+        with open(tmp, 'w', encoding='latin-1') as f:
+            f.write(form + '\n')
+        os.replace(tmp, self.path(k, 'req'))
+        done = self.path(k, 'done')
+        while not os.path.exists(done):
+            if not self.machine.alive():
+                raise RunFailed('%s exited before answering request %d, %s'
+                                % (MACHINE, k, oneline(form)[:100]))
+            if progress:
+                progress.check()
+            elif now() > deadline:
+                raise RunFailed('no answer in %g s to %s (request %d over --network files: a bare'
+                                ' question or an error the helper does not catch waits at the console)'
+                                % (timeout, oneline(form), k))
+            time.sleep(FILES_POLL)
+        with open(self.path(k, 'ans'), encoding='latin-1') as f:
+            text = f.read()
+        self.log.write(text)
+        m = re.search(r'\{%d([{!?])(.*?)[}!?]%d\}' % (k, k), text, re.S)
+        if not m:
+            raise RunFailed('request %d, %s: no answer between its markers in hc-%d.ans: %s'
+                            % (k, oneline(form)[:100], k, normal(text)[:200]))
+        if progress:
+            self.log.write('\n=== %.2f answered in %.1f s, %.1f s of the machine\'s CPU time\n'
+                           % ((now(),) + progress.used()))
+        return {'{': 'value', '!': 'error', '?': 'asked'}[m.group(1)], m.group(2), text[:m.start()]
+
+
 def oneline(form):
     return ' '.join(form.split())
 
@@ -1292,6 +1450,154 @@ def checkpoint_path(key):
     return os.path.join(cache_dir(), 'checkpoints', key + '.chk')
 
 
+# --network files' setup.  The start forms typed at the console: two short
+# ones, since the band keeps only the first 40-odd characters typed before
+# its listener runs and drops the rest (measured: three longer forms typed
+# 1 s after the start kept 42 characters, and the listener was left with
+# half a form).  These 27 were kept in every boot that typed them blind,
+# from 2.5 to 300 million microcycles into it on revisions 15 and 16 (38
+# boots; the listener comes at about 237 million on micro), so they are
+# typed once, with no retype that could leave a second (hc-serve) queued,
+# and hc-ready.txt is waited for within --setup-limit.  (login "LISPM") logs
+# in on the associated machine, the device's host, and loads the init file,
+# which holds the helper and HC-SERVE (lay_out_hc); (hc-serve) runs at the
+# listener, not inside a load, whose stream would stay open.
+HC_START = '(login "LISPM")\r(hc-serve)\r'
+# They are typed once the machine has run this many microcycles, read at its
+# prompt (pc), past the boot's first microcode: one setup that typed as soon
+# as the glass TTY took a connection stopped itself there (HALT-CONS at PC
+# 32063, near BEG0000, at 745 thousand microcycles), though four more that
+# typed as early, still in the PROM, did not, so the cause is not
+# established; every boot that typed from 2.5 million on went on.  A count of
+# the machine's own work, not wall time, so that a loaded host types no
+# earlier in the boot.
+HC_TYPE_AFTER = 20000000
+# The checkpoint at the prompt is refused while the file device has a command
+# queued or a handle open (muir-sim src/file_device.rs, checkpoint_refusal).
+# Between two polls HC-SERVE holds neither; the one window is the poll's
+# PROBEF, a command of 20 us of the machine's time in a period of 6 ticks,
+# 100 ms of its clock: of the order of one checkpoint in a thousand.  Such a
+# refusal is taken again after a short wait, up to this many times; one for
+# a handle open is HC-SERVE's fault and fails the setup at once.
+CHECKPOINT_TRIES = 20
+
+
+def machine_cycles(machine, progress):
+    """The microcycles the machine has run, asked at its prompt (pc),
+    which answers while it runs."""
+    _, mark = machine.log_from(0)
+    machine.say('pc')
+    seen = ''
+    while True:
+        more, mark = machine.log_from(mark)
+        seen += more
+        m = re.search(r'PC [0-7]+[^;\n]*; (\d+) microcycles', seen)
+        if m:
+            return int(m.group(1))
+        if not machine.alive():
+            raise RunFailed('%s exited during its boot (see %s/%s.log)' % (MACHINE, machine.run_dir, MACHINE))
+        progress.check()
+        time.sleep(0.05)
+
+
+def type_at_console(port, text, progress):
+    """TEXT typed at the machine's glass TTY on PORT (muir-sim's
+    --glass-tty: what is typed there goes to the machine's keyboard), once
+    its port takes a connection.  Returns the socket, which stays open until
+    the setup ends: what was sent is read by the machine at its pace."""
+    while True:
+        progress.check()
+        try:
+            s = socket.create_connection(('127.0.0.1', port), timeout=5)
+            break
+        except OSError:
+            time.sleep(0.1)
+    for ch in text:
+        s.sendall(ch.encode('latin-1'))
+        time.sleep(0.01)
+    return s
+
+
+def take_checkpoint(machine, path, progress, log):
+    """The machine's state to PATH by its prompt's checkpoint command, the
+    machine running on.  A refusal for a command queued with no handle open
+    is taken again after a short wait, up to CHECKPOINT_TRIES times; any
+    other refusal fails the run.  Returns the number of tries."""
+    pattern = re.compile(r'checkpoint: %s (at \d+ microcycles[^\n]*|not written: ([^\n]*)|could not write[^\n]*)'
+                         % re.escape(path))
+    _, mark = machine.log_from(0)
+    for attempt in range(1, CHECKPOINT_TRIES + 1):
+        machine.say('checkpoint %s' % path)
+        seen = ''
+        while True:
+            more, mark = machine.log_from(mark)
+            seen += more
+            m = pattern.search(seen)
+            if m:
+                break
+            if not machine.alive():
+                raise RunFailed('%s exited while taking the checkpoint' % MACHINE)
+            progress.check()
+            time.sleep(0.05)
+        log.write('\n=== %.2f checkpoint, try %d: %s\n' % (now(), attempt, m.group(1)))
+        if m.group(1).startswith('at '):
+            return attempt
+        why = m.group(2)
+        q = why and re.search(r'has (\d+) handles? open and (\d+) commands? queued', why)
+        if not q:
+            raise RunFailed('the checkpoint was not written: %s' % m.group(1))
+        if int(q.group(1)) != 0:
+            raise RunFailed('the checkpoint was refused: %s (HC-SERVE must hold no file open while it'
+                            ' waits)' % why)
+        time.sleep(random.uniform(0.1, 0.5))
+    raise RunFailed('the checkpoint was refused %d times for a command queued: %s'
+                    % (CHECKPOINT_TRIES, why))
+
+
+def setup_files(a, server, machine, log, tmp, end, ports):
+    """--network files' setup, the copy laid out: HC-SERVE in the login's
+    init file, the machine booted cold with a glass TTY (the free TCP port
+    that TELNET would take), the start typed, hc-ready.txt waited for, the
+    band's SYS: host asked as the first request, and the checkpoint taken
+    at the prompt while HC-SERVE waits.  Returns (the SYS: host, the number
+    of the next request)."""
+    server.lay_out_hc()
+    server.glass = ports[2]
+    server.start()
+    machine.start()
+    # not before HC_TYPE_AFTER microcycles, past the boot's first microcode,
+    # where a setup that typed at once was seen to halt
+    progress = Progress(machine, 'the boot, to %d microcycles' % HC_TYPE_AFTER, end)
+    while machine_cycles(machine, progress) < HC_TYPE_AFTER:
+        time.sleep(0.2)
+    tty = type_at_console(ports[2], HC_START, Progress(machine, 'the glass TTY', end))
+    try:
+        log.write('\n=== %.2f typed at the console: %s\n' % (now(), HC_START.replace('\r', ' ')))
+        ready = os.path.join(server.home(), 'hc-ready.txt')
+        progress = Progress(machine, "HC-SERVE's start (hc-ready.txt; the forms %s, typed at the"
+                            " console)" % HC_START.replace('\r', ' ').strip(), end)
+        while not os.path.exists(ready):
+            if not machine.alive():
+                raise RunFailed('%s exited before HC-SERVE started (see %s/%s.log)'
+                                % (MACHINE, machine.run_dir, MACHINE))
+            progress.check()
+            time.sleep(0.1)
+        log.write('\n=== %.2f HC-SERVE started\n' % now())
+        sess = FileSession(server.home(), log, machine)
+        r = sess.run(SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
+        if r[0] != 'value':
+            raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
+        sys_host = r[1].strip('"')
+        server.learn_host(sys_host)
+        tries = take_checkpoint(machine, tmp, Progress(machine, 'the checkpoint', end), log)
+        if tries > 1:
+            print('lispm-check: the checkpoint taken at try %d' % tries, flush=True)
+    finally:
+        tty.close()
+    machine.stop(wait=120)
+    return sys_host, sess.k + 1
+
+
 def ensure_checkpoint(a, key, link=None):
     chk = checkpoint_path(key)
     if os.path.exists(chk):
@@ -1306,7 +1612,8 @@ def ensure_checkpoint(a, key, link=None):
         t0 = now()
         print('lispm-check: setting up a checkpoint for this band and %s, files served by %s,'
               ' engine %s%s (cold boot)' % (MACHINE, a.file_server, a.engine,
-                                         ', tap index %d, over %s' % (link.index, a.network) if link else ''),
+                                         ', tap index %d, over %s' % (link.index, a.network) if link
+                                         else ', over files' if a.network == 'files' else ''),
               flush=True)
         run_dir = run_dir_new('setup')
         end = now() + a.setup_limit
@@ -1317,59 +1624,66 @@ def ensure_checkpoint(a, key, link=None):
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
             server.lay_out(a.tree, a.ubin)
-            server.start()
-            machine.start(checkpoint_out=tmp)
-            try:
-                sock, _ = server.connect_listener(
-                    machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
-            except RunFailed as e:
-                if getattr(e, 'stopped', False):
-                    raise
-                # A band whose SYS: is on the file device's host (HOST or
-                # FILES) waits at boot, with no TELNET server, when its files
-                # are not on quux's file device.
-                # Or the band is not one this machine runs: a System 1002 band
-                # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
-                # on quux revision 11 and later, which moved block-disk off
-                # 17377774, and so gives no sign but this.
-                # Over TCP a band without the network, or one whose
-                # address is not its tap's, gives the same sign.
-                raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
-                              ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
-                              % (e, a.file_server, ' or '.join(server.hosts), MACHINE,
-                                 ' (a System 1002 band does not run on quux revision 11 and later)'
-                                 if MACHINE == 'quux' else '',
-                                 ' Over TCP: does the band start its network, and answer at %s, port %d,'
-                                 ' behind %s? (--network chaos needs no network)'
-                                 % (link.quux, TELNET_PORT, link.tap) if a.network == 'tcp' else ''))
-            sock.settimeout(0.2)
-            sess = Session(sock, log, helper=False)
-            # The server must be the one the band reads SYS: from: a band
-            # whose SYS: is on OZ boots with the tree on the file device too,
-            # but would then load every SYS: file from nowhere.
-            r = sess.run(SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
-            if r[0] != 'value':
-                raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
-            sys_host = r[1].strip('"')
-            # A host the server serves, which the login and the served files
-            # then name: the device's either name, HOST or FILES, as the band
-            # answers.  The check compared it with the server's one constant
-            # host, which refused a band whose SYS: is on FILES:
-            #   if sys_host != server.login_host:
-            #       raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
-            #                       % (sys_host, a.file_server, server.login_host))
-            server.learn_host(sys_host)
-            # Log in, define and compile the helper, then close the band's file connection, so the first file
-            # access after a resume opens a new one rather than using a
-            # connection whose ozd has gone (which closed the TELNET session).
-            for form in (server.login(), HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
-                r = sess.run(form, None, Progress(machine, oneline(form), end))
+            # --network files: HC-SERVE started at the console and the
+            # checkpoint taken at the prompt while it waits (setup_files);
+            # TELNET's setup, below, was the only one
+            hc_next = None
+            if a.network == 'files':
+                sys_host, hc_next = setup_files(a, server, machine, log, tmp, end, ports)
+            else:
+                server.start()
+                machine.start(checkpoint_out=tmp)
+                try:
+                    sock, _ = server.connect_listener(
+                        machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
+                except RunFailed as e:
+                    if getattr(e, 'stopped', False):
+                        raise
+                    # A band whose SYS: is on the file device's host (HOST or
+                    # FILES) waits at boot, with no TELNET server, when its files
+                    # are not on quux's file device.
+                    # Or the band is not one this machine runs: a System 1002 band
+                    # for QUUX (microcode 1000) waits for ever at DISK-AWAIT-READY
+                    # on quux revision 11 and later, which moved block-disk off
+                    # 17377774, and so gives no sign but this.
+                    # Over TCP a band without the network, or one whose
+                    # address is not its tap's, gives the same sign.
+                    raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
+                                  ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
+                                  % (e, a.file_server, ' or '.join(server.hosts), MACHINE,
+                                     ' (a System 1002 band does not run on quux revision 11 and later)'
+                                     if MACHINE == 'quux' else '',
+                                     ' Over TCP: does the band start its network, and answer at %s, port %d,'
+                                     ' behind %s? (--network chaos needs no network)'
+                                     % (link.quux, TELNET_PORT, link.tap) if a.network == 'tcp' else ''))
+                sock.settimeout(0.2)
+                sess = Session(sock, log, helper=False)
+                # The server must be the one the band reads SYS: from: a band
+                # whose SYS: is on OZ boots with the tree on the file device too,
+                # but would then load every SYS: file from nowhere.
+                r = sess.run(SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
                 if r[0] != 'value':
-                    raise RunFailed('setup: %s: %s' % (form, r[1]))
-            # over TCP a clean close, so that the checkpoint holds no
-            # connection (the contract, sections 2.9 and 7)
-            server.close_session(sock, True, Progress(machine, 'the clean close', end))
-            machine.stop(wait=120)
+                    raise RunFailed('setup: %s: %s' % (SYS_HOST, r[1]))
+                sys_host = r[1].strip('"')
+                # A host the server serves, which the login and the served files
+                # then name: the device's either name, HOST or FILES, as the band
+                # answers.  The check compared it with the server's one constant
+                # host, which refused a band whose SYS: is on FILES:
+                #   if sys_host != server.login_host:
+                #       raise RunFailed("the band's SYS: is on %s, but --file-server %s serves %s"
+                #                       % (sys_host, a.file_server, server.login_host))
+                server.learn_host(sys_host)
+                # Log in, define and compile the helper, then close the band's file connection, so the first file
+                # access after a resume opens a new one rather than using a
+                # connection whose ozd has gone (which closed the TELNET session).
+                for form in (server.login(), HELPER, "(compile 'lispm-check-case)", '(fs:reset-file-access)'):
+                    r = sess.run(form, None, Progress(machine, oneline(form), end))
+                    if r[0] != 'value':
+                        raise RunFailed('setup: %s: %s' % (form, r[1]))
+                # over TCP a clean close, so that the checkpoint holds no
+                # connection (the contract, sections 2.9 and 7)
+                server.close_session(sock, True, Progress(machine, 'the clean close', end))
+                machine.stop(wait=120)
             if machine.proc.returncode != 0 or not os.path.exists(tmp):
                 raise RunFailed('%s wrote no checkpoint (see %s/%s.log)' % (MACHINE, run_dir, MACHINE))
             os.replace(tmp, chk)
@@ -1386,6 +1700,10 @@ def ensure_checkpoint(a, key, link=None):
                     made.update(revision=a.revision, tap=link.tap, tap_index=link.index,
                                 ip_address='%s/%s' % (link.quux, link.prefix), ip_gateway=link.gateway,
                                 network=a.network)
+                if a.network == 'files':
+                    # the network, and the number of the first request a check
+                    # sends: HC-SERVE's count is in the checkpoint
+                    made.update(revision=a.revision, network=a.network, hc_next=hc_next)
                 json.dump(made, f, indent=1)
         finally:
             machine.stop(wait=5)
@@ -1421,6 +1739,20 @@ def checkpoint_host(chk):
     return host
 
 
+def checkpoint_hc_next(chk):
+    """--network files: the number of the first request a check of the
+    checkpoint CHK sends (its JSON's hc_next), the setup's having been
+    answered before it was taken."""
+    try:
+        with open(chk[:-4] + '.json') as f:
+            k = json.load(f).get('hc_next')
+    except (OSError, ValueError) as e:
+        raise RunFailed('%s: no record of HC-SERVE\'s next request (%s)' % (chk, e))
+    if not isinstance(k, int):
+        raise RunFailed('%s: no record of HC-SERVE\'s next request: not made over --network files' % chk)
+    return k
+
+
 def check(a, chk, cases, link=None):
     # the host the setup's band answered, which the served files are named on
     # (the device's HOST or FILES); the server was made knowing only its own:
@@ -1440,8 +1772,13 @@ def check(a, chk, cases, link=None):
         server.start()
         machine.start(resume=chk)
         sock, _ = server.connect_listener(machine.alive, now() + 60)
-        sock.settimeout(0.2)
-        sess = Session(sock, log, helper=True)
+        if a.network == 'files':
+            # the session through files: HC-SERVE waits in the resumed world,
+            # its next request the one the setup recorded
+            sess = FileSession(server.home(), log, machine, first=checkpoint_hc_next(chk))
+        else:
+            sock.settimeout(0.2)
+            sess = Session(sock, log, helper=True)
         t_banner = now() - t0
         for (name, logical), path in zip(loads, a.files):
             t1 = now()
@@ -1579,6 +1916,11 @@ def choose_file_server(a):
         # a band whose SYS: is on OZ is refused by the setup's check
         print('lispm-check: files served by device: the session is over TCP (auto)')
         return 'device'
+    if a.network == 'files':
+        # the session itself goes through the file device; no probe, which
+        # would ask the band over TELNET
+        print('lispm-check: files served by device: the session is through files (auto)')
+        return 'device'
     pair = '%s-%s' % (a.band_sha[:16], a.exe_sha[:16])
     sys_host, source = None, None
     for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
@@ -1671,8 +2013,9 @@ def options(argv=None):
     #   default=os.environ.get('LISPM_CHECK_NETWORK') or 'chaos',
     p.add_argument('--network', metavar='{%s}' % ','.join(NETWORKS),
                    default=os.environ.get('LISPM_CHECK_NETWORK') or None,
-                   help="what carries the TELNET session: chaos, through ozd, or tcp, the build"
-                        " host's TCP to the band behind its tap; by default tcp on revision 16"
+                   help="what carries the session: chaos, TELNET through ozd; tcp, TELNET over the"
+                        " build host's TCP to the band behind its tap; or files, no network, the"
+                        " session through files on the file device; by default tcp on revision 16"
                         " and chaos on revisions 13-15 and the CADR")
     p.add_argument('--ozd-timezone', type=int,
                    default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
@@ -1730,14 +2073,19 @@ def prepare(a):
         # the network named, or the default for the revision (section 8 R2)
         a.network_named = a.network is not None
         a.network = resolve_network(a.network, a.revision)
-        # started only over Chaos or for an OZ band, which TCP refuses
-        if a.network != 'tcp' and not os.path.isfile(a.ozd):
+        # started only over Chaos or for an OZ band, which TCP and files
+        # refuse; it read: if a.network != 'tcp' and not os.path.isfile(a.ozd):
+        if a.network not in ('tcp', 'files') and not os.path.isfile(a.ozd):
             raise RunFailed('no ozd at %s' % a.ozd)
         a.file_server = choose_file_server(a)
         if a.network == 'tcp' and a.file_server != 'device':
             raise RunFailed('--network tcp%s: ozd serves the files over Chaos; a band whose SYS: is on OZ'
                             ' wants --network chaos'
                             % ('' if a.network_named else ', the default on revision 16'))
+        if a.network == 'files' and a.file_server != 'device':
+            raise RunFailed('--network files: the session goes through quux\'s file device, so the files'
+                            ' are served by it (--file-server device); a band whose SYS: is on OZ wants'
+                            ' --network chaos')
         # The key names the file server, since the setup logs in to that
         # server's host.  The device's folders are not in it: a checkpoint
         # carries none, quux mounting each check's own copy from its flags.
@@ -1745,10 +2093,26 @@ def prepare(a):
         # engine is in it too, since the machine resumes a checkpoint only on the
         # engine that wrote it: one made on micro must not be taken for a
         # check on rtl (so the checkpoints made before it are made again).
-        tapped = a.revision is not None and a.revision >= 16
-        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION_TAP if tapped else SETUP_VERSION,
-                               a.engine)
+        # --network files takes no tap on revision 16 either: its point is
+        # a band checked without its network; LISPM_CHECK_TAPS is not used
+        tapped = a.revision is not None and a.revision >= 16 and a.network != 'files'
+        if a.network == 'files':
+            print('lispm-check: no network: the session through files on the file device%s'
+                  % (' (LISPM_CHECK_TAPS not used)' if os.environ.get('LISPM_CHECK_TAPS') else ''))
+        version = (SETUP_VERSION_FILES if a.network == 'files'
+                   else SETUP_VERSION_TAP if tapped else SETUP_VERSION)
+        key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], version, a.engine)
+        # before files:
+        #   key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION_TAP if tapped else SETUP_VERSION,
+        #                          a.engine)
         key = key if a.file_server == 'ozd' else key + '-' + a.file_server
+        # files' checkpoint holds HC-SERVE running: a key of its own, which
+        # names HC-SERVE's file by its sha256, so that a changed HC-SERVE
+        # makes its checkpoint again
+        if a.network == 'files':
+            if not os.path.isfile(HC_SERVE):
+                raise RunFailed('--network files: no HC-SERVE at %s' % HC_SERVE)
+            key += '-files-' + sha256_cached(HC_SERVE)[:8]
         # revision 16's two networks give the machine different Chaos
         # switches since R3 (machine_flags), so each has its own checkpoint
         if tapped and a.network == 'chaos':

@@ -1125,6 +1125,11 @@ def main():
     a = lc.options(rest + [os.devnull])
     link, results, kept = None, [], None
     try:
+        # T2's sessions are TELNET over the band's TCP: lispm-check's files
+        # network carries none, and its setup would be made for nothing
+        if a.network == 'files':
+            raise lc.RunFailed('--network files: T2 drives TELNET sessions over the band\'s TCP, which'
+                               ' files does without (chaos or tcp)')
         link, chk, t_setup = lc.prepare(a)
         if link is None:
             raise lc.RunFailed('T2 wants revision 16, which takes a tap')

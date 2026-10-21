@@ -16,6 +16,8 @@
 # that a planted copy can be run against it.  Every run uses a cache of its
 # own, made empty here, so that the first one sets up over TCP; it is kept
 # with the runs' files, and the end says where.  About 5 minutes on micro.
+# Last it runs files.sh, the lanes of --network files, with the same
+# arguments; it needs no tap and runs alone too.
 # Since step R3 of section 8 the band has no Chaos, so the Chaos cases
 # (chaos-own, rev15-chaos, variable, rev15-default) run on a band from before
 # R3 with both networks, LISPM_CHECK_TEST_CHAOS_BAND, its ubin/
@@ -277,6 +279,10 @@ if [ -n "$q16" ]; then
 else
     echo "skip rtl-flags: no --quux given"
 fi
+
+# --network files, which needs no tap: its own script, with the same
+# arguments (and LISPM_CHECK_TEST_QUUX15, LISPM_CHECK_TEST_TOOL)
+"$here/files.sh" "$@" || fails=$((fails+1))
 
 [ "$fails" = 0 ] && echo "network self-test passed" || echo "network self-test FAILED ($fails)"
 [ "$fails" = 0 ]

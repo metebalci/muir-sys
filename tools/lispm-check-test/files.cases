@@ -1,0 +1,24 @@
+; tools/lispm-check's self-test of --network files (network.sh's files lanes):
+; each of the tool's verdicts through HC-SERVE, in a world resumed from a
+; checkpoint taken while HC-SERVE waited.  Exit 1: two cases fail and one
+; errs on purpose; expected-files.txt holds every verdict.
+; a value as expected, and a wrong expectation
+(+ 1 2) => 3
+(+ 1 2) => 4
+; errors expected: any, and one with its message
+(car 5) =>!
+(ferror nil "boom ~D" 7) =>! boom 7
+; an error not expected
+(car 5)
+; a question through FQUERY: the helper ends the form there
+(y-or-n-p "Continue? ")
+; output before the value, and a string with a slash (characters are numbers)
+(progn (format t "hello~%there") 9) => 9
+(list "a // b" #\a 'sym) => ("a // b" 97 SYM)
+; the file device in the resumed world: the check's own copy, read and written
+(not (null (probef "SYS: SYS; SYSDCL LISP"))) => T
+(progn (hc-write (hc-path 0 "w") "w" t) (with-open-file (s (hc-path 0 "w")) (readline s))) => "w"
+; early-answer: the form writes a false answer to its own request's hc-K.ans,
+; then waits 2 s; HC-SERVE then supersedes it with the true one, and writes
+; .done.  A session that read hc-K.ans before hc-K.done would take EARLY.
+(progn (hc-write (hc-path *hc-k* "ans") (format nil "~%{~D{EARLY}~D}~%" *hc-k* *hc-k*) t) (process-sleep 120) 42) => 42

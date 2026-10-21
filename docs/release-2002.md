@@ -2653,3 +2653,34 @@ and then left the band and the microcode (step R3, below).
   walking every structure region, nor in the initialization lists' forms; on
   a band from before the step it finds 9 files, 3,525 (FEF, symbol) pairs
   over 14,670 FEFs and 22 initializations.
+- **`tools/lispm-check --network files`** (QUUX's Ethernet contract, section
+  18, Q-N13 (a); `docs/lispm-check.md`, "`--network files`"): a third network,
+  for a band checked without its network, on revision 15, whose band has no
+  Chaos and no Ethernet device since R3, and on 16 with no tap
+  (`tools/lispm-check:746`). The session goes through request and answer
+  files in the login's home on the file device's host: `FileSession`
+  (`:1310`) writes `hc-K.req` and reads `hc-K.ans` once `hc-K.done` is there;
+  HC-SERVE (`tools/lispm-check-lisp/hc-serve.lisp`, new), a loop at the
+  band's listener, runs each request through the tool's own helper and holds
+  no file open between its polls. The setup (`setup_files`, `:1557`) lays the
+  helper and HC-SERVE out as the login's init file (`:1037`), types
+  `(login "LISPM")` and `(hc-serve)` at the console through muir-sim's glass
+  TTY once the machine has run 20 million microcycles (`:1465-1474`), waits
+  for `hc-ready.txt`, and takes the checkpoint at the machine's prompt while
+  HC-SERVE waits (`take_checkpoint`, `:1521`): a refusal for a command
+  queued is taken again, up to 20 times (`:1482`), and one for a handle open
+  fails the setup. A check resumes it and types nothing, its first request
+  the one the setup's JSON names (`:1742`, `:1778`). Its key ends `-files-`
+  and HC-SERVE's sha256 (`:2115`); no tap is taken (`:2098`); the CADR
+  (`:655`), `--file-server ozd` (`:2086`), the tools that take their network
+  through `harness_network` (`:683`) and `tools/tcp-check/run` (`:1131`)
+  refuse it. Its self-test is `tools/lispm-check-test/files.sh` (new, with
+  `files.cases`, `expected-files.txt` and the plant `hc-serve-held.lisp`),
+  which `network.sh` runs last: revision 15 and 16 on micro and 15 on rtl,
+  each with the 11 verdicts of `files.cases`, and the plants, an HC-SERVE
+  holding a file open (the setup must fail) and a session that reads the
+  answer before `.done` (`files.cases`'s `early-answer` must catch it). Of
+  three mutants of the tool, a retry on a handle open, a tap taken under
+  `files` and the requests numbered from 1 in a check, each fails a lane;
+  the tool before the change fails all 8 lanes run on it (the rtl lane
+  skipped).

@@ -1,0 +1,11 @@
+PASS (+ 1 2)  -> 3
+FAIL (+ 1 2)  -> 3, expected 4
+PASS (car 5)
+PASS (ferror nil "boom ~D" 7)  -> boom 7
+ERROR (car 5)
+FAIL (y-or-n-p "Continue? ")  -> asked Continue?, the form ended there
+PASS (progn (format t "hello~%there") 9)  -> 9
+PASS (list "a // b" #\a 'sym)  -> ("a // b" 97 SYM)
+PASS (not (null (probef "SYS: SYS; SYSDCL LISP")))  -> T
+PASS (progn (hc-write (hc-path 0 "w") "w" t) (with-open-file (s (hc-path 0 "w")) (readline s)))  -> "w"
+PASS (progn (hc-write (hc-path *hc-k* "ans") (format nil "~%{~D{EARLY}~D}~%" *hc-k* *hc-k*) t) (process-sleep 120) 42)  -> 42

@@ -21,8 +21,9 @@ control session before the parts), and it takes a tap and resumes that index's c
 as lispm-check does, making it first when there is none. The machine must be
 revision 16 and the band one with the network. The control session is a
 TELNET session over lispm-check's `--network`, `tcp` unless another is
-given, on which it turns the test echo service on (`IP:*TEST-ECHO-SERVICE*`)
-and reads the band's connections and TIME-WAIT records. Then, from sockets
+given (`files`, which carries no TELNET, is refused), on which it turns
+the test echo service on (`IP:*TEST-ECHO-SERVICE*`) and reads the band's
+connections and TIME-WAIT records. Then, from sockets
 bound to the run's tap to QUUX's address behind it:
 
 | Part | It checks |
