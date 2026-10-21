@@ -621,6 +621,28 @@ file carries a comment in that file saying why.
   it all pass; with only LESSP changed 23 fail, without the change to `<=`
   and `>=` 10, with `<`'s optimizer unchanged 3, with ARITHEXP unchanged 2,
   and without the functions' check of one argument 18.
+- **ODDP and EVENP are functions** (`sys/sys2/numer.lisp:393-408`). They
+  are misc instructions declared as no Lisp functions
+  (`sys/cold/defmic.lisp:98-99`), so the cold load gave them no function
+  cell and nothing defined one: `(fboundp 'oddp)` was NIL, and every
+  interpreted call, FUNCALL, APPLY and `#'oddp` signalled "The function ODDP
+  is undefined." on every band; compiled calls, the misc instruction itself,
+  worked. So `tools/system-check`'s `float-round-trip`, `format-float-digits`
+  and `format-float-fixed` erred when run without `--compile`. Now
+  `numer.lisp` defines both, MIT's definitions from its patches (System
+  98.44, 99.10), never put in its sources: compiled, each body is the misc
+  instruction (`MOVE D-PDL ARG|0`, `(MISC) ODDP D-RETURN`), not a call of
+  itself. MIT's patch first removed a `COMPILER:P1` property of each; in this
+  tree that handler is commented out (`sys/sys/qcp1.lisp:2808-2812`) and the
+  band holds no `P1` and no optimizer for either, so no `REMPROP` is needed.
+  MIT's documentation string for ODDP, which `DOCUMENTATION` gives over the
+  DEFUN's, read "T is NUMBER is odd." and now reads "T if NUMBER is odd."
+  (`sys/cold/docmic.lisp:311-315`). `tools/system-check` gains
+  `oddp-evenp`, 26 cases, run without `--compile`: without the change 2 pass
+  (the controls), with it all pass, with the ODDP definition alone the 12
+  EVENP cases fail, and without the change to `docmic.lisp` ODDP's
+  documentation case fails; with the change the three float checks pass
+  without `--compile`. The CADR's line has the same bug.
 - **The microcode takes revision 16's Ethernet device: its interrupt as a
   stray, and a wait for it to be quiet at reset** (QUUX's Ethernet
   contract, sections 2.6, 2.7 and 10; step E3). One microcode runs on

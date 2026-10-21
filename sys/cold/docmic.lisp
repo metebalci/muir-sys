@@ -308,8 +308,10 @@ Other kinds of arrays, however, are compared with EQ.")
   "Returns T if X is not a CONS.")
 ;arglist = (X)
 
+;; the string read "T is NUMBER is odd.", and (documentation 'oddp 'function)
+;; gives this one over the defun's in sys/sys2/numer.lisp, so it showed the typo.
 (SETF (DOCUMENTATION 'ODDP 'FUNCTION)
-  "T is NUMBER is odd.")
+  "T if NUMBER is odd.")
 ;arglist = (NUMBER)
 
 (SETF (DOCUMENTATION 'EVENP 'FUNCTION)

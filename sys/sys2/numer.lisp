@@ -390,6 +390,23 @@ ARRAY can be an array used for data by the random number generator (and updated)
 
 ;;;; Special floating arithmetic functions.
 
+;;; oddp and evenp as functions.  sys/cold/defmic.lisp declares them misc
+;;; instructions (344, 345) that are not lisp functions, so the cold load gave
+;;; them no function cell, and the interpreter, funcall, apply and #'oddp
+;;; signalled "The function ODDP is undefined." on every band; compiled calls
+;;; worked, being the misc instruction.  These definitions give them their
+;;; cells.  Compiled, the call in each body is the misc instruction itself, not
+;;; a call of the function, as in float below; MIT did the same in a patch
+;;; (System 98.44, 99.10) and never in its sources.  Loaded as source, the
+;;; body would call itself without end: this file is always compiled.
+(defun oddp (number)
+  "T if NUMBER is odd."
+  (oddp number))
+
+(defun evenp (number)
+  "T if NUMBER is even."
+  (evenp number))
+
 (defun float (number &optional other)
   "Convert NUMBER to floating point, of same precision as OTHER.
 If OTHER is omitted, a full size flonum is returned."

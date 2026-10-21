@@ -1,0 +1,41 @@
+; ODDP and EVENP are functions: interpreted, through FUNCALL and APPLY, and
+; as #'ODDP (sys/sys2/numer.lisp, their DEFUNs).  sys/cold/defmic.lisp
+; declares both misc instructions that are not Lisp functions, so the cold
+; load gave them no function cell and every interpreted call signalled "The
+; function ODDP is undefined."; compiled calls, the misc instruction, worked.
+; Each case is evaluated by the interpreter, so run it WITHOUT --compile for
+; its own forms; the change itself must be compiled into the band, since
+; numer.lisp loaded as source would make each body call itself.  The cases
+; marked "control" pass without the change.  The documentation cases want
+; sys/cold/docmic.lisp loaded too, as source or compiled.
+;
+(fboundp 'oddp) => T
+(fboundp 'evenp) => T
+(eval '(oddp 3)) => T
+(eval '(oddp 2)) => NIL
+(eval '(evenp 2)) => T
+(eval '(evenp 3)) => NIL
+(eval '(oddp -3)) => T
+(eval '(oddp -2)) => NIL
+(eval '(evenp -2)) => T
+(eval '(evenp -3)) => NIL
+(eval '(oddp 0)) => NIL
+(eval '(evenp 0)) => T
+(eval '(oddp (1+ (expt 2 40)))) => T
+(eval '(evenp (1+ (expt 2 40)))) => NIL
+(eval '(evenp (- (expt 2 40)))) => T
+(eval '(oddp (- 1 (expt 2 40)))) => T
+(funcall #'evenp 4) => T
+(funcall #'oddp 4) => NIL
+(apply 'oddp '(7)) => T
+(apply 'evenp '(7)) => NIL
+(mapcar 'evenp '(1 2 3 4)) => (NIL T NIL T)
+; the documentation, which sys/cold/docmic.lisp's string gives over the DEFUN's;
+; ODDP's read "T is NUMBER is odd."  EVENP's is a control.
+(documentation 'oddp 'function) => "T if NUMBER is odd."
+(documentation 'evenp 'function) => "T if NUMBER is even."
+; a number that is not an integer is refused, as by the misc instruction
+(eval '(oddp 1.5)) =>! The argument to ODDP, 1.5, was of the wrong type
+(eval '(evenp 1.5)) =>! The argument to EVENP, 1.5, was of the wrong type
+; control: a compiled call, the misc instruction, worked before the change
+(funcall (compile nil '(lambda (x) (list (oddp x) (evenp x)))) 5) => (T NIL)
