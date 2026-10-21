@@ -8,6 +8,12 @@
 ; lispm-check's --compile (tools/microcode-check/run generational --
 ; --compile ...): compiled, the whole file takes about a minute on micro.
 ;
+; the file is compiled (--compile): interpreted, gen-c7b's 300 frames take about
+; 189 PDL words each against 5 compiled, and overflow the PDL, a failure that
+; looks like the microcode's; this case comes first so that an uncompiled run's
+; first failure is here, with that reason, before any case that would pass
+(compiled-function-p #'si:gen-c7b-deep) => T
+;
 ; setup: collection off, the test areas made; the microcode is the collector's
 (si:gen-setup) => T
 ; item 7: A 143 and 144 hold fixnums, A 145 the pretenuring threshold, 32768
