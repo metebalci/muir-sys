@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""tools/system-check/warm-boot-debugger: a warm boot while a process waits in
+the debugger, as a harness.
+
+    tools/system-check/warm-boot-debugger --out DIR --band DISK --ubin UBIN
+        [--quux QUUX] [--ozd OZD] [--engine micro|rtl] [--files F1,F2...]
+
+The band boots cold with its files served by quux's file device; a TELNET
+session compiles and loads the --files (a changed source on a band built
+before it, in the order given) and lisp/process-debugger.lisp, and starts a
+PROCESS-RUN-FUNCTION process that waits in the debugger of a microcode error,
+in the error handler's stack group, with an UNWIND-PROTECT around the error;
+the machine is warm-booted from its keyboard (Control-Meta-Return, through
+its RFB terminal); a new TELNET session then checks that the warm boot's
+action for that process (sys/sys2/proces.lisp,
+PROCESS-RUN-FUNCTION-WARM-BOOT-RESET: preset to kill itself, then reset)
+unwound its initial stack group, the cleanup run, and ended it, and that
+the band answers and fresh processes run.  The kill happens in the
+process's initial stack group, reached from the debugger's by the reset's
+unwind and not through the scheduler, so the process's STACK-GROUP slot
+still names the error handler's group: a kill that judges the stack group
+it runs in by that slot alone unwinds its own running group and halts the
+machine, and the second session gets no banner.
+
+The ports come from LISPM_CHECK_PORTS and the tap from LISPM_CHECK_TAPS, as
+lispm-check's do (its harness_network: over TCP on revision 16, over Chaos
+through ozd below).  A warm boot that lands while a process other than the
+scheduler runs asks "Reset it?" on the console; as tools/system-check/
+warm-boot does, the harness gives the TELNET server 5 s to end before the
+warm boot (60 s on rtl) and answers Yes when no banner comes in a quarter of
+the time a check may take.  Exit status 0 when every check passes; the last
+line is RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's
+log, and the screen at the warm boot and at a failure.
+"""
+import argparse, os, socket, struct, sys, time, zlib
+from importlib.machinery import SourceFileLoader
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+TREE = os.path.dirname(os.path.dirname(HERE))
+lc = SourceFileLoader('lispm_check', os.path.join(TREE, 'tools', 'lispm-check')).load_module()
+
+p = argparse.ArgumentParser(description='A warm boot while a process waits in the debugger.')
+p.add_argument('--out', required=True)
+p.add_argument('--band', required=True)
+p.add_argument('--ubin', required=True)
+p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
+p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+p.add_argument('--engine', default='micro', choices=('micro', 'rtl'))
+p.add_argument('--files', default='', help='files compiled and loaded first, comma-separated')
+a = p.parse_args()
+up = os.path.dirname(TREE)
+quux = os.path.abspath(a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux'))
+ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
+out = os.path.abspath(a.out)
+os.makedirs(out, exist_ok=True)
+log = open(os.path.join(out, 'telnet.log'), 'w', buffering=1)
+T = 3600 if a.engine == 'rtl' else 1200
+files = [os.path.abspath(f) for f in a.files.split(',') if f]
+files.append(os.path.join(HERE, 'lisp', 'process-debugger.lisp'))
+try:
+    network, link = lc.harness_network(quux)
+except lc.RunFailed as e:
+    print('FAILED: %s' % e, flush=True)
+    print('RESULT FAIL', flush=True)
+    sys.exit(1)
+try:
+    lock, pts = lc.take_ports()
+except BaseException:
+    if link:
+        link.stop()
+    raise
+server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
+machine = lc.Machine(quux, os.path.abspath(a.band), out, pts[3], server, a.engine)
+ok = True
+
+
+def say(*x):
+    print(*x, flush=True)
+
+
+# The console, through quux's RFB terminal (RFC 6143, no password), as
+# tools/system-check/warm-boot types it.
+def rfb(keys, png):
+    """Types KEYS, each a keysym with its modifiers' keysyms, on the RFB
+    terminal, then writes the screen to PNG, grey levels."""
+    s = socket.create_connection(('127.0.0.1', pts[3]), timeout=30)
+
+    def recvn(n):
+        b = b''
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise EOFError
+            b += c
+        return b
+    recvn(12)
+    s.sendall(b'RFB 003.008\n')
+    recvn(recvn(1)[0])
+    s.sendall(b'\x01')
+    assert struct.unpack('>I', recvn(4))[0] == 0
+    s.sendall(b'\x01')
+    w, h = struct.unpack('>HH', recvn(4))
+    recvn(16)
+    recvn(struct.unpack('>I', recvn(4))[0])
+
+    def key(sym, down):
+        s.sendall(struct.pack('>BBxxI', 4, 1 if down else 0, sym))
+        time.sleep(0.05)
+    for sym, mods in keys:
+        for m in mods:
+            key(m, True)
+        key(sym, True)
+        key(sym, False)
+        for m in reversed(mods):
+            key(m, False)
+        time.sleep(0.15)
+    time.sleep(5)
+    s.sendall(struct.pack('>BxxxBBBBHHHBBBxxx', 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))
+    s.sendall(struct.pack('>BxH', 2, 1) + struct.pack('>i', 0))
+    s.sendall(struct.pack('>BBHHHH', 3, 0, 0, 0, w, h))
+    fb, got = bytearray(w * h), 0
+    while got < w * h:
+        if recvn(1)[0] != 0:
+            continue
+        recvn(1)
+        for _ in range(struct.unpack('>H', recvn(2))[0]):
+            x, y, rw, rh, _enc = struct.unpack('>HHHHi', recvn(12))
+            data = recvn(rw * rh * 4)
+            for j in range(rh):
+                for i in range(rw):
+                    fb[(y + j) * w + x + i] = max(data[(j * rw + i) * 4:(j * rw + i) * 4 + 3])
+            got += rw * rh
+    s.close()
+    raw = b''.join(b'\x00' + bytes(fb[j * w:(j + 1) * w]) for j in range(h))
+
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    open(png, 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 0, 0, 0, 0))
+                          + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
+CONTROL, META, RETURN = 0xffe3, 0xffe9, 0xff0d
+
+
+def check(sess, form, want=None, timeout=T):
+    global ok
+    r = sess.run(form, timeout)
+    good = r[0] == 'value' and (want is None or lc.normal(r[1]) == lc.normal(want))
+    if want is not None and not good:
+        ok = False
+    say('%s  %s  -> %s %s%s' % ('PASS' if good else 'FAIL', form, r[0], r[1][:300],
+                                '' if want is None else ', expected %s' % want))
+    return r
+
+
+def halted():
+    """The machine's own line when it stopped itself (a halt), else None: its
+    log says so, and no banner will come."""
+    try:
+        with open(os.path.join(out, lc.MACHINE + '.log'), 'rb') as f:
+            for line in f.read().decode('latin-1').splitlines():
+                if 'the machine stopped itself' in line:
+                    return line.strip()
+    except OSError:
+        pass
+    return None
+
+
+def session(limit=T):
+    # a halted machine runs on as a program and answers no more: the wait ends
+    sock, _ = server.connect_listener(lambda: machine.alive() and not halted(), lc.now() + limit)
+    sock.settimeout(0.2)
+    s = lc.Session(sock, log, False)
+    check(s, server.login())
+    return s
+
+
+try:
+    server.lay_out(TREE, os.path.abspath(a.ubin))
+    server.start()
+    machine.start()
+    s = session()
+    r = check(s, lc.SYS_HOST)
+    server.learn_host(r[1].strip('"') if r[0] == 'value' else None)
+    for f in files:
+        name, logical = server.place(f, TREE)
+        kind = ' LISP' if logical else '.lisp'
+        r = check(s, '(progn (let ((si:inhibit-fdefine-warnings :just-warn)) (qc-file-load "%s%s")) t)'
+                  % (name, kind), 'T')
+        if r[0] != 'value':
+            raise lc.RunFailed('%s did not load' % f)
+    # the victim, in the debugger of a microcode error, its STACK-GROUP slot
+    # the error handler's group
+    check(s, "(pdb-start #'(lambda () (unwind-protect (car 'x) (push :cleanup *pdb-log*))))", '(T NIL)')
+    server.close_session(s.s, False)
+    time.sleep(60 if a.engine == 'rtl' else 5)
+    say('warm boot: Control-Meta-Return on the RFB terminal')
+    rfb([(RETURN, (CONTROL, META))], os.path.join(out, 'warm-boot.png'))
+    for attempt in range(4):
+        try:
+            s = session(T // 4)
+            break
+        except Exception as e:
+            if halted():
+                raise lc.RunFailed('no banner after the warm boot: %s' % halted())
+            if attempt == 3:
+                raise
+            say('no banner yet (%s): Yes on the RFB terminal' % e)
+            rfb([(ord('Y'), (0xffe1,)), (ord('e'), ()), (ord('s'), ()), (RETURN, ())],
+                os.path.join(out, 'answer-%d.png' % attempt))
+    # the warm boot's action (PROCESS-RUN-FUNCTION-WARM-BOOT-RESET): the victim
+    # unwound, its cleanup run, and gone.  Its process is then a spare, which
+    # the TELNET server's next session takes (this one, measured): the victim
+    # is told by its name, not by its process
+    check(s, "(progn (process-wait-with-timeout \"PDB gone\" 300. #'(lambda () (not (pdb-victim-alive))))"
+          " (list (pdb-victim-alive) *pdb-log*))", '(NIL (:CLEANUP))')
+    check(s, '(+ 1 2)', '3')
+    check(s, '(pdb-fresh-processes)', '(:RAN :RAN2)')
+    check(s, '(pdb-left)', 'NIL')
+except Exception as e:
+    ok = False
+    say('FAILED: %s' % e)
+    try:
+        rfb([], os.path.join(out, 'failed.png'))
+    except Exception:
+        pass
+finally:
+    machine.stop(wait=30)
+    server.stop()
+    lock.release()
+    if link:
+        link.stop(out)
+say('RESULT %s' % ('PASS' if ok else 'FAIL'))
+sys.exit(0 if ok else 1)

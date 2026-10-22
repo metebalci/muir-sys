@@ -1,0 +1,27 @@
+; A kill of a process that runs in another stack group than its initial one
+; unwinds the initial one too, as a reset does (sys/sys2/proces.lisp,
+; (PROCESS :RESET) with KILL).  The debugger of a microcode error runs in the
+; error handler's stack group, so a process killed there kept its initial
+; stack group's UNWIND-PROTECTs unrun: a TELNET session killed in the debugger
+; left its connection open, a lock held stayed held.  Without the change the
+; kills in the debugger and from a coroutine fail (NIL for the cleanup, the
+; lock still held); a kill in the initial stack group and a plain reset in
+; the debugger are controls.
+; a process killed while in the debugger, in the error handler's stack group, unwinds its initial stack group
+(progn (defvar user::*pk-cleaned* nil) (defvar user::*pk-proc* nil) (setq user::*pk-cleaned* nil) (setq user::*pk-proc* (process-run-function "pk victim" (function (lambda () (unwind-protect (car 'x) (setq user::*pk-cleaned* :done)))))) t) => T
+(progn (process-sleep 120) (list (eq (send user::*pk-proc* :stack-group) (send user::*pk-proc* :initial-stack-group)) user::*pk-cleaned*)) => (NIL NIL)
+(progn (send user::*pk-proc* :kill) (process-sleep 120) (list user::*pk-cleaned* (not (null (memq user::*pk-proc* si:all-processes))))) => (:DONE NIL)
+; the same in the initial stack group (waiting), as before
+(progn (setq user::*pk-cleaned* nil) (setq user::*pk-proc* (process-run-function "pk sleeper" (function (lambda () (unwind-protect (process-sleep 100000) (setq user::*pk-cleaned* :done)))))) (process-sleep 60) (send user::*pk-proc* :kill) (process-sleep 120) (list user::*pk-cleaned* (not (null (memq user::*pk-proc* si:all-processes))))) => (:DONE NIL)
+; a plain reset of a process in the debugger still restarts it (MIT's path, unchanged)
+(progn (setq user::*pk-cleaned* nil) (setq user::*pk-proc* (process-run-function '(:name "pk resetter" :restart-after-reset t) (function (lambda () (unwind-protect (progn (process-sleep 30) (car 'x)) (push :unwound user::*pk-cleaned*)))))) (process-sleep 120) (send user::*pk-proc* :reset) (process-sleep 120) (prog1 (list (not (null (memq user::*pk-proc* si:all-processes))) (car user::*pk-cleaned*)) (send user::*pk-proc* :kill))) => (T :UNWOUND)
+; a kill from a coroutine stack group; a kill of a process in the debugger holding a lock; a cleanup that errs after a kill in the debugger
+(progn (defvar user::*pk-log* nil) (defvar user::*pk-proc* nil) (defvar user::*pk-ran* nil) (defvar user::*pk-lock* (list nil)) (setq user::*pk-log* nil) t) => T
+(progn (setq user::*pk-proc* (process-run-function "pk aux kill" (function (lambda () (unwind-protect (let ((sg (make-stack-group "pk aux sg2"))) (stack-group-preset sg (function (lambda () (process-sleep 10) (send current-process :kill)))) (funcall sg)) (push :cleanup user::*pk-log*)))))) (process-sleep 120) (list user::*pk-log* (not (null (memq user::*pk-proc* si:all-processes))))) => ((:CLEANUP) NIL)
+(progn (setq user::*pk-log* nil) (setf (car user::*pk-lock*) nil) (setq user::*pk-proc* (process-run-function "pk lock holder" (function (lambda () (with-lock ((car user::*pk-lock*)) (car 'x)))))) (process-sleep 120) (list (eq (car user::*pk-lock*) user::*pk-proc*) (eq (send user::*pk-proc* :stack-group) (send user::*pk-proc* :initial-stack-group)))) => (T NIL)
+(progn (send user::*pk-proc* :kill) (process-sleep 120) (list (car user::*pk-lock*) (not (null (memq user::*pk-proc* si:all-processes))))) => (NIL NIL)
+(progn (setq user::*pk-log* nil) (setq user::*pk-proc* (process-run-function "pk bad cleanup" (function (lambda () (unwind-protect (car 'x) (push :cleanup user::*pk-log*) (car 'y) (push :after user::*pk-log*)))))) (process-sleep 120) (send user::*pk-proc* :kill) (process-sleep 120) (list user::*pk-log* (not (null (memq user::*pk-proc* si:all-processes))) (eq (send user::*pk-proc* :stack-group) (send user::*pk-proc* :initial-stack-group)))) => ((:CLEANUP) T NIL)
+(progn (send user::*pk-proc* :kill) (process-sleep 120) (list user::*pk-log* (not (null (memq user::*pk-proc* si:all-processes))))) => ((:CLEANUP) NIL)
+(+ 1 2) => 3
+(progn (setq user::*pk-ran* nil) (process-run-function "pk next" (function (lambda () (setq user::*pk-ran* :ran)))) (process-sleep 60) user::*pk-ran*) => :RAN
+(loop for p in si:all-processes when (string-search "pk " (send p :name)) collect (send p :name)) => NIL

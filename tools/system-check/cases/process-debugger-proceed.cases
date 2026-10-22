@@ -1,0 +1,17 @@
+; lisp: process-debugger.lisp
+; A PROCESS-RUN-FUNCTION process proceeded from the debugger (Resume) that
+; then ends: its function returns and the process kills itself
+; (sys/sys2/proces.lisp, PROCESS-RUN-FUNCTION-INTERNAL-FLUSH-PROCESS) in its
+; initial stack group, while its STACK-GROUP slot still names the error
+; handler's group, where it waited for the Resume
+; (lisp/process-debugger.lisp).  A kill that judges the stack group it runs
+; in by that slot alone unwinds its own running group and halts the machine:
+; the cases after the first then get no answer.
+; the victim waits in the debugger of a proceedable error (CERROR), in another stack group
+(pdb-start #'(lambda () (unwind-protect (progn (cerror :yes nil nil "A planted proceedable error.") (push :proceeded *pdb-log*)) (push :cleanup *pdb-log*)))) => (T NIL)
+; Resume: it proceeds, ends, its cleanup runs and it is gone, killed
+(pdb-type #/resume) => (NIL "Killed" (:CLEANUP :PROCEEDED))
+; the band answers, and two fresh processes run
+(+ 1 2) => 3
+(pdb-fresh-processes) => (:RAN :RAN2)
+(pdb-left) => NIL

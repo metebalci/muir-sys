@@ -2361,6 +2361,39 @@ and then left the band and the microcode (step R3, below).
   before it the first fails before the change (the session in the debugger, the
   control session never answering again), both pass with it, and a partial
   fix that frees the lock but leaves the session in the debugger fails.
+- **A killed TELNET session no longer leaks its connection.** A session's
+  process killed with `(send p :kill)`, in `READ-LINE`, in the debugger or
+  holding `NETWORK-LOCK`, left its connection `ESTABLISHED`, and once the
+  band's 8 connections were used port 23 refused. Two faults, two changes.
+  The server dispatch now runs every server inside an `UNWIND-PROTECT` that
+  closes its connection with abort (`TCP-SERVER-RUN` and `TCP-SERVER-START`,
+  `sys/network/ip/servers.lisp:142`, `:148`), the layer at which the chaos
+  servers close (`WITH-OPEN-STREAM`, `sys/network/chaos/chsaux.lisp:1246`):
+  the TELNET server's own abort close was not in one, and the test echo
+  server has none; after a server's own close `TCP-CLOSE` sends nothing.
+  And a kill of a process that runs in another stack group than its initial
+  one unwinds the initial one too, as a reset does, and dies there
+  (`(PROCESS :RESET)`, `sys/sys2/proces.lisp:217`): MIT's kill restarted
+  that other stack group, the error handler's for a process in the
+  debugger, in `PROCESS-KILL-TOP-LEVEL`, so none of the initial one's
+  `UNWIND-PROTECT`s ran. For the current process the stack group it runs in
+  is taken from `%CURRENT-STACK-GROUP`, not from its `STACK-GROUP` slot,
+  which only the scheduler sets: after a return to the initial stack group
+  that did not pass through the scheduler (Resume in the debugger, a
+  reset's unwind, a coroutine's return) the slot is stale, and a kill
+  judged by it unwinds the stack group it runs in and halts the machine
+  (HALT-CONS). `tools/tcp-check`'s new part `kill` (`kill.py`) kills
+  sessions in `READ-LINE` (K1), in the debugger (K2), under the network
+  lock (K7), the test echo server (E1) and a session killing itself at the
+  debugger (S1), with a clean close as a control (C2); `tools/system-check`
+  gains `process-kill-debugger`, `process-kill-stale-slot`,
+  `process-reset-debugger`, `process-debugger-abort`,
+  `process-debugger-proceed` and `warm-boot-debugger`. Before the change
+  every kill case but C2 fails and `process-kill-debugger` passes 9 of 14;
+  with the dispatch's close alone K2 and `process-kill-debugger` still fail;
+  with both, all pass; a kill judged by the slot alone halts the machine in
+  S1, `process-kill-stale-slot`, `process-reset-debugger`,
+  `process-debugger-proceed` and `warm-boot-debugger`.
 - **Chaos leaves QUUX's band** (QUUX's Ethernet contract, section 8, step R3).
   The NCP and its services are no longer loaded; their files stay in the tree,
   their loading commented out in place. The CHAOS system, CONVERSE (SEND over

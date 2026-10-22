@@ -7,7 +7,7 @@ usage:
                       [--echo-times 10] [--connections 1000] [--stall 30,180]
                       [--faults 'RELAY-FLAGS'] [--transfer-timeout S] [--trace FILE]
                       [--wall-base FILE] [--wall-m 10] [--wall-m-high 14] [--wall-base-out FILE]
-                      [--wall-log FILE] [--mloss-size N] [--ss-log FILE]
+                      [--wall-log FILE] [--mloss-size N] [--ss-log FILE] [--kill-cases K1,K2,...]
                       [-- LISPM-CHECK-ARGS...]
 
 It takes a tap and resumes that index's checkpoint as tools/lispm-check does
@@ -53,6 +53,13 @@ it, as Linux's own TCP:
            lockerror-lisp a Lisp error): the band closes that session, frees
            the lock, ends its process and connection and records the error,
            and a new session answers
+  kill     run only when named: a live session's process killed, in
+           READ-LINE (K1), in the debugger (K2), holding NETWORK-LOCK (K7),
+           the test echo server (E1), killing itself at the debugger (S1),
+           and a clean close in the debugger as a control (C2), as
+           --kill-cases names them: within 15 s the client sees EOF or RST,
+           the process and its connection are gone and the lock is free
+           (kill.py)
   stall    M-tap's stall test (section 15, Q8), run only when named: the
            machine stopped for each of --stall's seconds (30 and 180) with a
            form in flight on a TELNET session over TCP; the session is kept
@@ -1062,12 +1069,24 @@ def part_lockerror(band, control, opts, log, name='lockerror'):
             ' passes advanced; a new session answers' % (closed, err))
 
 
+def part_kill(band, control, opts, log):
+    """A live session's process killed: its connection must not be left behind
+    (kill.py beside this file, which takes this module for its helpers)."""
+    path = os.path.join(HERE, 'kill.py')
+    loader = importlib.machinery.SourceFileLoader('tcp_check_kill', path)
+    spec = importlib.util.spec_from_loader('tcp_check_kill', loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m.part_kill(band, control, opts, log, sys.modules[__name__])
+
+
 # The parts run by default are T2's; stall is M-tap's, and table and totals
-# T4's, each run when named.
+# T4's, each run when named; kill too.
 PARTS = {'telnet': part_telnet, 'echo': part_echo, 'churn': part_churn, 'limit': part_limit,
          'stall': part_stall, 'table': part_table, 'totals': part_totals, 'mloss': part_mloss,
          'lockerror': part_lockerror,
-         'lockerror-lisp': lambda *a: part_lockerror(*a, name='lockerror-lisp')}
+         'lockerror-lisp': lambda *a: part_lockerror(*a, name='lockerror-lisp'),
+         'kill': part_kill}
 T2_PARTS = ('telnet', 'echo', 'churn', 'limit')
 
 
@@ -1102,6 +1121,8 @@ def main():
     p.add_argument('--wall-log', default=None, help="each session's figures against the bound")
     p.add_argument('--mloss-size', type=int, default=1048576, help="M-loss's echo [default: 1 MiB]")
     p.add_argument('--ss-log', default=None, help="M-loss's ss -tnio samples")
+    p.add_argument('--kill-cases', default='K1,K2,K7,E1,C2,S1',
+                   help="kill's cases, in order (kill.py) [default: K1,K2,K7,E1,C2,S1]")
     opts = p.parse_args(argv)
     if opts.faults is not None or opts.trace:
         # armed once the control session has read the band's totals, so
@@ -1116,6 +1137,10 @@ def main():
         signal.signal(sig, on_signal)
     opts.echo_sizes = [int(x) for x in opts.echo_sizes.split(',') if x]
     opts.stall = [int(x) for x in opts.stall.split(',') if x]
+    opts.kill_cases = [x for x in opts.kill_cases.split(',') if x]
+    bad = [x for x in opts.kill_cases if x not in ('K1', 'K2', 'K7', 'E1', 'C2', 'S1')]
+    if bad:
+        p.error('--kill-cases: %s not among K1, K2, K7, E1, C2, S1' % ', '.join(bad))
     parts = [x for x in opts.parts.split(',') if x]
     for x in parts:
         if x not in PARTS:

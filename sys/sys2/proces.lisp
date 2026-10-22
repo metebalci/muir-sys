@@ -200,8 +200,26 @@ the stack group is either in the current process or is the current stack group;
 :ALWAYS, always unwinds the stack.  KILL is T to kill the process after optionally
 unwinding it."
   (WITHOUT-INTERRUPTS
+    ;; a kill of a process that runs in another stack group than its initial
+    ;; one unwinds the initial one too, as a reset does, and dies there.  the
+    ;; kill used to restart that other stack group, the error handler's for a
+    ;; process in the debugger, in PROCESS-KILL-TOP-LEVEL, so the initial
+    ;; one's UNWIND-PROTECTs never ran: a TELNET session killed in the
+    ;; debugger kept its connection open and a lock it held stayed held.
+    ;; for the current process the stack group it runs in is
+    ;; %CURRENT-STACK-GROUP: its STACK-GROUP slot is set only when it enters
+    ;; the scheduler, so it is stale after a return to the initial stack
+    ;; group that did not pass through the scheduler (a debugger's Resume, a
+    ;; reset's unwind, a coroutine's return), and a kill judged by the slot
+    ;; there unwound the very stack group it ran in and halted the machine.
     (SETQ RESTART-FUN
-	  (COND (KILL #'PROCESS-KILL-TOP-LEVEL)
+;	  (COND (KILL #'PROCESS-KILL-TOP-LEVEL)
+	  (cond ((and kill (neq (if (eq self current-process) %current-stack-group stack-group)
+				initial-stack-group))
+		 #'(lambda (&rest ignore)	;unwind the initial sg, then die in it
+		     (eh::unwind-sg (process-initial-stack-group current-process)
+				    #'process-kill-top-level nil nil)))
+		(kill #'process-kill-top-level)
 		((EQ STACK-GROUP INITIAL-STACK-GROUP) #'PROCESS-TOP-LEVEL)
 		(T #'(LAMBDA (&REST IGNORE)	;Unwind and switch SG's
 		       (EH::UNWIND-SG (PROCESS-INITIAL-STACK-GROUP CURRENT-PROCESS)

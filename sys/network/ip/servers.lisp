@@ -129,12 +129,29 @@ connection in a process of its own; while SWITCH, a variable, is NIL the port is
   (setq tcp-listeners (cons (list port name function switch)
 			    (del #'(lambda (p l) (= p (car l))) port tcp-listeners))))
 
+;; every server runs inside an unwind-protect that closes its connection with
+;; abort.  a server's process killed with (send p :kill), in READ-LINE, in
+;; the debugger or holding NETWORK-LOCK, ran no close of its own, and its
+;; connection stayed ESTABLISHED until the band's connections were all used
+;; and port 23 refused; the TELNET server's own close was not in an
+;; unwind-protect, and the test echo server has none.  the chaos servers
+;; close at the same layer, a WITH-OPEN-STREAM around each server's body
+;; (SYS: NETWORK; CHAOS; CHSAUX).  after the
+;; server's own close, TCP-CLOSE sends nothing, so only a server that ends
+;; without closing, a kill's unwind among them, sends RST.
+(defun tcp-server-run (function c)
+  "Run FUNCTION, a server, on connection C; however it ends, close C with abort."
+  (unwind-protect
+      (funcall function c)
+    (tcp-close c t)))
+
 (defun tcp-server-start (c)
-  "C is ESTABLISHED on a listening port: run its server."
+  "C is ESTABLISHED on a listening port: run its server (TCP-SERVER-RUN)."
   (let ((l (assoc (tcb-lport c) tcp-listeners)))
     (when l
       (setf (tcb-server-process c)
-	    (process-run-function (string-append (second l) " Server") (third l) c)))))
+;	    (process-run-function (string-append (second l) " Server") (third l) c)
+	    (process-run-function (string-append (second l) " Server") 'tcp-server-run (third l) c)))))
 
 ;;;; The TELNET server (section 7)
 

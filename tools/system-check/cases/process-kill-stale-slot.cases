@@ -1,0 +1,15 @@
+; A process whose STACK-GROUP slot is stale ends by itself
+; (sys/sys2/proces.lisp, PROCESS-RUN-FUNCTION-INTERNAL-FLUSH-PROCESS's
+; self-kill): it last waited in a coroutine stack group of its own, then
+; returned to its initial one without passing through the scheduler, which
+; alone sets the slot, so the slot still names the coroutine's group when the
+; process, its function done, kills itself.  A kill that judges the stack
+; group it runs in by that slot alone unwinds its own running group and halts
+; the machine (HALT-CONS, measured on micro): the second case then gets no
+; answer.
+(progn (defvar user::*pk-log* nil) (defvar user::*pk-proc* nil) (defvar user::*pk-ran* nil) (setq user::*pk-log* nil) t) => T
+(progn (setq user::*pk-proc* (process-run-function "pk aux" (function (lambda () (let ((sg (make-stack-group "pk aux sg"))) (stack-group-preset sg (function (lambda () (process-sleep 30) (stack-group-return :back)))) (push (funcall sg) user::*pk-log*)) (push (eq (send current-process :stack-group) (send current-process :initial-stack-group)) user::*pk-log*))))) (process-sleep 120) (list user::*pk-log* (not (null (memq user::*pk-proc* si:all-processes))) (si:process-wait-whostate user::*pk-proc*))) => ((NIL :BACK) NIL "Killed")
+(+ 1 2) => 3
+(progn (setq user::*pk-ran* nil) (process-run-function "pk next" (function (lambda () (setq user::*pk-ran* :ran)))) (process-sleep 60) user::*pk-ran*) => :RAN
+(progn (setq user::*pk-ran* nil) (process-run-function "pk next2" (function (lambda () (setq user::*pk-ran* :ran2)))) (process-sleep 60) user::*pk-ran*) => :RAN2
+(loop for p in si:all-processes when (string-search "pk " (send p :name)) collect (send p :name)) => NIL

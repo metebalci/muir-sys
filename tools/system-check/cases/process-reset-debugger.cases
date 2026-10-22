@@ -1,0 +1,15 @@
+; A plain reset of a PROCESS-RUN-FUNCTION process, not restartable, waiting in
+; the debugger (sys/sys2/proces.lisp, (PROCESS :RESET)): MIT's reset unwinds
+; the initial stack group, whose UNWIND-PROTECTs run, and the process, preset
+; to PROCESS-RUN-FUNCTION-INTERNAL-FLUSH-PROCESS, then kills itself in its
+; initial stack group while its STACK-GROUP slot still names the debugger's.
+; A kill that judges the stack group it runs in by that slot alone must not
+; unwind its own running group here; the band answers after it and fresh
+; processes run.
+(progn (defvar user::*pk-log* nil) (defvar user::*pk-proc* nil) (defvar user::*pk-ran* nil) (setq user::*pk-log* nil) t) => T
+(progn (setq user::*pk-proc* (process-run-function "pk reset victim" (function (lambda () (unwind-protect (car 'x) (push :cleanup user::*pk-log*)))))) (process-sleep 120) (list (eq (send user::*pk-proc* :stack-group) (send user::*pk-proc* :initial-stack-group)) user::*pk-log*)) => (NIL NIL)
+(progn (send user::*pk-proc* :reset) (process-sleep 120) (list user::*pk-log* (not (null (memq user::*pk-proc* si:all-processes))) (si:process-wait-whostate user::*pk-proc*))) => ((:CLEANUP) NIL "Killed")
+(+ 1 2) => 3
+(progn (setq user::*pk-ran* nil) (process-run-function "pk next" (function (lambda () (setq user::*pk-ran* :ran)))) (process-sleep 60) user::*pk-ran*) => :RAN
+(progn (setq user::*pk-ran* nil) (process-run-function "pk next2" (function (lambda () (setq user::*pk-ran* :ran2)))) (process-sleep 60) user::*pk-ran*) => :RAN2
+(loop for p in si:all-processes when (string-search "pk " (send p :name)) collect (send p :name)) => NIL

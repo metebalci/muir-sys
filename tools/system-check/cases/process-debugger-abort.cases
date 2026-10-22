@@ -1,0 +1,16 @@
+; lisp: process-debugger.lisp
+; Abort typed at the debugger of a PROCESS-RUN-FUNCTION process gives
+; "Terminate and free process" (sys/sys2/proces.lisp, PROCESS-RUN-FUNCTION-
+; INTERNAL's restart; sys/eh/ehc.lisp, COM-TOP-LEVEL-THROW): the process
+; unwinds, its cleanup runs, and it kills itself and is freed; the band
+; answers and fresh processes run (lisp/process-debugger.lisp).  A change to
+; the kill of a process that runs in another stack group must keep this path:
+; the process waited for the Abort in the error handler's stack group.
+; the victim waits in the debugger of a microcode error, in another stack group
+(pdb-start #'(lambda () (unwind-protect (car 'x) (push :cleanup *pdb-log*)))) => (T NIL)
+; Abort: the cleanup ran, the process is gone, killed
+(pdb-type #/abort) => (NIL "Killed" (:CLEANUP))
+; the band answers, and two fresh processes run
+(+ 1 2) => 3
+(pdb-fresh-processes) => (:RAN :RAN2)
+(pdb-left) => NIL
