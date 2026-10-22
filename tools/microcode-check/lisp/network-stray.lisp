@@ -1,13 +1,14 @@
 ;;; -*- Mode:LISP; Package:USER; Base:10; Lowercase:T -*-
 
 ;;; The network's interrupt, word 100 <6>, taken as a stray
-;;; (tools/microcode-check/README.md, cases/network-stray.cases; QUUX's
+;;; (tools/microcode-check/README.md, cases-15/network-stray.cases; QUUX's
 ;;; Ethernet contract, section 8, step R3).  Word 100 <6> is the Chaosnet
 ;;; interface's request, up while its CSR, word 140, has Receive Done and the
 ;;; receive interrupt enable (<4>), or Transmit Done (<7>, up while the
 ;;; transmitter is idle) and the transmit interrupt enable (<5>): a level.
 ;;; With the NCP gone from the band nothing sets those enables, but the
-;;; microcode still runs on revisions 15 and 16, which have the interface; its
+;;; microcode still runs on revision 15, which has the interface (step R4 took
+;;; it from revision 16, where the check is skipped: cases-15/); its
 ;;; stray (INTR-NETWORK-STRAY, sys/ucadr/uc-interrupt.lisp) writes the CSR 0,
 ;;; which turns both enables off and drops the level, and dismisses the
 ;;; interrupt.  Microcode without it dismisses the interrupt untouched, and the

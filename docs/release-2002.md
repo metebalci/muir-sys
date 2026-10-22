@@ -2441,6 +2441,17 @@ and then left the band and the microcode (step R3, below).
 
 ### The checks
 
+- **`tools/microcode-check`'s `network-stray` runs on revision 15 alone**
+  (QUUX's Ethernet contract, section 8, step R4): R4 took the Chaosnet
+  interface from revision 16, whose words 140-157 are reserved and whose
+  word 100 `<6>` is never set, so on 16 the check's CSR reads 0 and its 6
+  cases failed. It moves to `cases-15/` (`cases-15/network-stray.cases`),
+  run only when named as `cases-2mw/`'s and `cases-16/`'s are, and `run`
+  skips a check of `cases-15/` on another revision in one line, asking the
+  `--quux` machine its revision as lispm-check does
+  (`tools/microcode-check/run:42-56`). On revision 15 it passes 6 of 6 and
+  its planted control fails 3 as before; the stray it checks,
+  `INTR-NETWORK-STRAY`, is still reachable there.
 - **`tools/segment-check`**: the control forms name the stack's functions
   and variables (`scripts.py`, `CONTROL`); the pass latency is 7 ms, from the
   band's measured timers (`PASS_LATENCY`; `README.md`); `ping` also pings the

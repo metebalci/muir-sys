@@ -3,9 +3,12 @@
 ; enables off and drops the level (sys/ucadr/uc-interrupt.lisp,
 ; INTR-NETWORK-STRAY; QUUX's Ethernet contract, section 8, step R3).  Load
 ; lisp/network-stray.lisp first; it wants a band without the NCP, on revision
-; 15 or 16, which have the interface.  Microcode without the stray dismisses
-; the interrupt untouched, and the level, never cleared, interrupts again at
-; once for ever: the case that enables the transmit interrupt never answers.
+; 15, which has the interface: step R4 took it from revision 16, whose 140-157
+; are reserved and whose word 100 <6> is never set, so the check is in
+; cases-15/ and run skips it on another revision.  Microcode without the
+; stray dismisses the interrupt untouched, and the level, never cleared,
+; interrupts again at once for ever: the case that enables the transmit
+; interrupt never answers.
 ; NTS-STATE is (the CSR's enables <5:4>, its Transmit Done <7>, word 100 <6>).
 ;
 ; Precondition: the enables off, the transmitter idle (Transmit Done up), no
