@@ -2777,3 +2777,53 @@ and then left the band and the microcode (step R3, below).
   `files` and the requests numbered from 1 in a check, each fails a lane;
   the tool before the change fails all 8 lanes run on it (the rtl lane
   skipped).
+- **The builder and the assembly run on revision 16, over TCP, and the
+  guards on 16** (the removal of revisions 13-15, step 1;
+  `tools/cross-build/run`, `tools/cross-build/guards.py`). The route's
+  builder was System 2002's revision-14 hand-over, renamed, at
+  `--builder-revision 14`, and the assembly ran on the hand-over at
+  `--asm-revision 14`, each over Chaos through ozd; the guards booted
+  revisions 13, 14 and 15. Now the builder is a band of an earlier route, its
+  native6, and it and the assembling band run at the route's revision
+  (`MACHINE_REVISION`, `:78`; `builder_check`, `:366`; the cross step's
+  `LISPM_CHECK_QUUX`, `:716`), so every run of the route takes a tap and goes
+  over TCP. `--builder-revision`, `--asm-revision` and `--asm-quux` are
+  commented out (`:1113`-`:1116`), and the wrapper's revision 0, the older
+  quux's default, with them; `--builder-prom` defaults to `--builder-ubin`'s
+  `promh.mcr`, since revision 16 has no built-in boot PROM; `--ozd` is no
+  longer needed (`:1151`). The guards keep A15b.1's lines that ran on
+  revision 15, on 16 (`run_all_16`, `guards.py:438`): quux refuses the old
+  PROMs, revision 14's and 2001, naming the file's revision (`:528`); the
+  hand-over's revision-14 disk halts at `ERROR-MCR-FORMAT`, the route's
+  microcode with section 6 saying 14 at `ERROR-MICROCODE-NOT-REVISION-15`,
+  C27's band formats at their halts, each with the route's disk as its
+  control; the route's disk runs. The lines on revisions 13, 14 and 15
+  (`prom15-file-rev14`, `prom15-file-rev13`, `disk15-rev14`,
+  `disk15-rev13`, `step2-on-rev14`, `cold-on-rev14`, the checkpoints of 14
+  and 15, and A14.13's guards, `run_all_14`, `:201`) are commented out, and
+  `run_all` (`:169`) refuses a microcode that is not revision 15's. The
+  revision-14 pieces the builder gave are `--rev14-band` and `--rev14-ubin`
+  (`:1141`), the hand-over's, asked for with `--previous-band` and
+  `--previous-ubin` before a run that includes the guards (`:1195`).
+  `raw_copy` makes its copy writable (`:431`): cp gives a new file its
+  source's mode, so a read-only builder gave read-only disks and the first
+  zeroing failed. `tools/cross-build/test` checks the builder's, the cross
+  step's, the assembly's and the guards' runs at revision 16 over TCP, and
+  every start of its stand-in at 16 alone; five mutants, each putting one of
+  the builder's, the cross step's, the assembly's or the guards' runs back
+  on revision 14 or 15, each fail it. Measured before the change, with the
+  last clean route's native6 as builder and assembling band on revision 16,
+  on that route's sources: `ucadr.mcr`, `.tbl`, `.locs` and every `promh`
+  file equal that route's byte for byte, and `ucadr.sym` differs only in its
+  22 truenames' host, FILES where the hand-over wrote HOST; check 3's
+  QFASLs equal the old builder's after `same40.py`'s normalisation, and its
+  cold load differs only in what records the compiling band, its machine
+  name (each QFASL's attribute list, one word shorter, which moves every
+  later string) and its generated symbols' numbers, and in the dates; band4
+  then holds 3,346,432 words, as the native bands did, where the old
+  builder's band4 held 3,344,384. One clean route on revision 16 with the
+  change passed every step in 7 h 52 min (`assemble` 9 min 24 s, `cross`
+  2 h 6 min 57 s, `band4` 15 min, `native5` 2 h 8 min 31 s, `native6` 2 h 7
+  min 9 s, `checks` 22 min 2 s, `guards` 8 min 18 s, `high` 5 min 35 s,
+  `incremental` 13 min 5 s, `built` 15 min 56 s), its assembly equal to the
+  microcode's own byte for byte but for `ucadr.sym`'s host, as above.

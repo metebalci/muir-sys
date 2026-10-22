@@ -5,7 +5,8 @@ section 7; contract G3 revision 14, 10.6), and the route's checks.
 
 Usage:
   tools/cross-build/run --out DIR --builder DISK --builder-ubin DIR
-      --base-tree TARBALL --quux PATH --ozd PATH --ports LO-HI
+      --base-tree TARBALL --quux PATH --ports LO-HI
+      --previous-band DISK --previous-ubin DIR --rev14-band DISK --rev14-ubin DIR
       [--commit SHA] [--work DIR] [--ubin-ref DIR] [--from STEP] [--to STEP]
   tools/cross-build/run --list
 
@@ -23,7 +24,8 @@ step does and what it needs.  The steps, in order:
   native5   step 5: band4 compiles the system, MAKE-COLD, QLD, DISK-SAVE
   native6   step 6: the same from native5's band
   checks    G2 section 7's checks (a)-(d), (b) as amended
-  guards    A14.13's guards, each with a control that does not fire
+  guards    the guards on revision 16 (guards.py), each with a control that
+            does not fire
   high      the high band (contract G3 revision 14, 10.11): native6's band with
             the region floor one quantum below 2^31, a full collection, a
             region across 2^31, saved
@@ -66,9 +68,13 @@ SYSTEM, MICROCODE = 2002, 2002
 # 19 Oct): its machine runs at revision 16, which has the Ethernet device, so
 # that its sessions and checks go over TCP; the microcode and PROM are
 # assembled for revision 15, which revision 16 runs (there is no assembly
-# target for 16).  The builder stays at --builder-revision, its own band's,
-# over Chaos.  Before, one revision, 14, was both:
+# target for 16).  Before, one revision, 14, was both:
 #   SYSTEM, MICROCODE, REVISION = 2002, 2002, 14
+# The builder and the assembling band run at MACHINE_REVISION too, over TCP
+# (the removal of revisions 13-15, step 1): the builder is a band of an
+# earlier route, which revision 16 runs.  They ran at --builder-revision and
+# --asm-revision, their own bands' revisions, over Chaos through ozd, while
+# the builder was System 2002's revision-14 hand-over.
 MACHINE_REVISION, ASM_TARGET = 16, 15
 BAND_GUID = uuid.UUID('a3b30470-c5d4-41c1-87a8-d26590424cb8').bytes_le
 # the band formats the microcode writes: saved, incremental, cold load (A14.13)
@@ -188,9 +194,11 @@ class Run:
         text = ['#!/bin/sh', '# quux %s' % sha256(q)]
         if prom:
             text.append('# prom %s' % sha256(prom))
-        # revision 0: the executable's own default (an older quux, as for
-        # System 2000's band, which assembles)
-        text += ['export MUIR_QUUX_REVISION=%d' % rev if rev else 'unset MUIR_QUUX_REVISION']
+        # every run names its revision: revision 0, the executable's own
+        # default, was for an older quux running System 2000's band, which
+        # assembled, and went with --asm-revision and --asm-quux:
+        #   text += ['export MUIR_QUUX_REVISION=%d' % rev if rev else 'unset MUIR_QUUX_REVISION']
+        text += ['export MUIR_QUUX_REVISION=%d' % rev]
         if rw:
             # the disk opened read-write: lispm-check passes it read-only
             text += ['for a in "$@"; do shift; set -- "$@" "${a%,ro}"; done']
@@ -221,9 +229,12 @@ class Run:
                    XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
         # the run's engine, as its sessions and boots have it: without it every
         # lispm-check of a run on rtl (a saved band's boot, the save checks')
-        # ran on micro, lispm-check's default
+        # ran on micro, lispm-check's default.  ozd only when given: every run
+        # is at revision 16, over TCP, which starts none (it was always given:
+        #   '--ozd', self.a.ozd,)
+        ozd = ['--ozd', self.a.ozd] if getattr(self.a, 'ozd', None) else []
         cmd = [sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--band', band,
-               '--ubin', ubin, '--quux', quux, '--ozd', self.a.ozd, '--tree', tree,
+               '--ubin', ubin, '--quux', quux] + ozd + ['--tree', tree,
                '--engine', self.a.engine,
                '--timeout', str(timeout), '--keep'] + list(extra) + [cf]
         log = os.path.join(where, 'lispm-check.out')
@@ -282,7 +293,9 @@ class Run:
             if link:
                 link.stop()
             raise
-        server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log, (), network, link)
+        # ozd may be none (--ozd is not needed since every run is at revision
+        # 16); a session over TCP starts none
+        server = lc.DeviceFileServer(getattr(self.a, 'ozd', None), run_dir, ports, log, (), network, link)
         machine = lc.Machine(quux, disk, run_dir, ports[3], server, self.a.engine)
         results = []
         try:
@@ -351,12 +364,14 @@ class Run:
         return results
 
     def builder_check(self, where, cases, tree, timeout, keep=('home',), prime=True):
-        """lispm-check on the builder band at its revision, primed for the
-        cross build first (tools/cross-check/cases/prime.cases)."""
+        """lispm-check on the builder band at MACHINE_REVISION, over TCP,
+        primed for the cross build first (tools/cross-check/cases/prime.cases).
+        It ran at --builder-revision, the builder's own, over Chaos:
+          self.wrapper(self.a.builder_revision, self.a.builder_prom)"""
         body = (open(os.path.join(TREE, 'tools', 'cross-check', 'cases', 'prime.cases')).read()
                 if prime else '') + cases
         return self.lispm_check(where, body, self.a.builder, self.a.builder_ubin,
-                                self.wrapper(self.a.builder_revision, self.a.builder_prom),
+                                self.wrapper(MACHINE_REVISION, self.a.builder_prom),
                                 tree, timeout, keep)
 
     # ----------------------------------------------------------- disks
@@ -410,6 +425,10 @@ class Run:
             subprocess.run(['qemu-img', 'convert', '-f', 'vpc', '-O', 'raw', src, dest], check=True)
         else:
             subprocess.run(['cp', '--sparse=always', src, dest], check=True)
+        # the copy writable: cp gives a new file its source's mode, so a
+        # builder kept read-only, as a band of an earlier route is, gave
+        # read-only disks, and make_disk's first zeroing failed
+        os.chmod(dest, 0o644)
 
     @staticmethod
     def zero(img, p):
@@ -645,12 +664,13 @@ class Run:
             for d in ('sys', 'site'):
                 shutil.copytree(os.path.join(self.src, d), os.path.join(tree, d), symlinks=True)
             # the assembling band's PROM: --asm-prom, or the builder's when the
-            # builder assembles (a revision-14 band needs PROM 2002)
+            # builder assembles; the band runs at MACHINE_REVISION, over TCP,
+            # on the route's quux.  It ran at --asm-revision on --asm-quux:
+            #   self.wrapper(self.a.asm_revision, self.a.asm_prom, self.a.asm_quux)
             tail = [breaches] if self.a.oa_select_check == 'report' else []
             rc, text = self.lispm_check(where, '\n'.join(head + [last] + tail) + '\n', self.a.asm_band,
-                                        self.a.asm_ubin, self.wrapper(self.a.asm_revision,
-                                                                      self.a.asm_prom,
-                                                                      self.a.asm_quux),
+                                        self.a.asm_ubin, self.wrapper(MACHINE_REVISION,
+                                                                      self.a.asm_prom),
                                         tree, 4000, keep=(keep,))
             results[name] = rc
             shutil.rmtree(tree, ignore_errors=True)
@@ -688,10 +708,16 @@ class Run:
 
     def step_cross(self):
         X = os.path.join(self.out, 'cross')
+        # the builder at MACHINE_REVISION, over TCP; it was at
+        # --builder-revision, over Chaos through ozd:
+        #   LISPM_CHECK_QUUX=self.wrapper(self.a.builder_revision, self.a.builder_prom),
+        #   LISPM_CHECK_OZD=self.a.ozd,
         env = dict(os.environ, LISPM_CHECK_BAND=self.a.builder, LISPM_CHECK_UBIN=self.a.builder_ubin,
-                   LISPM_CHECK_QUUX=self.wrapper(self.a.builder_revision, self.a.builder_prom),
-                   LISPM_CHECK_OZD=self.a.ozd, LISPM_CHECK_PORTS=self.lc_ports,
+                   LISPM_CHECK_QUUX=self.wrapper(MACHINE_REVISION, self.a.builder_prom),
+                   LISPM_CHECK_PORTS=self.lc_ports,
                    XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
+        if self.a.ozd:
+            env['LISPM_CHECK_OZD'] = self.a.ozd
         results = {}
 
         def checks():
@@ -1077,16 +1103,21 @@ def main():
                    help="the builder's disk, raw or VHD: the previous system's band current")
     p.add_argument('--builder-ubin', default=env('builder-ubin'),
                    help="the builder's microcode's sys/ubin/ (its UCADR TBL)")
+    # revision 16 has no built-in boot PROM, so the builder's is always one
+    # file: its ubin's promh.mcr unless given (it was quux's own unless given)
     p.add_argument('--builder-prom', default=env('builder-prom'),
-                   help="the builder's PROM (none: quux's own)")
-    p.add_argument('--builder-revision', type=int, default=int(env('builder-revision', '13')))
+                   help="the builder's PROM (default --builder-ubin's promh.mcr)")
+    # The builder, and the band that assembles, run at MACHINE_REVISION (the
+    # removal of revisions 13-15, step 1); their revisions and the older quux
+    # of System 2000's band went:
+    #   p.add_argument('--builder-revision', type=int, default=int(env('builder-revision', '13')))
+    #   p.add_argument('--asm-revision', type=int, default=int(env('asm-revision', '13')),
+    #                  help="--asm-band's revision; 0, --asm-quux's default")
+    #   p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
     p.add_argument('--base-tree', default=env('base-tree'),
                    help="the builder's own tree with its QFASLs, a tarball (cross-check's --base-tree)")
     p.add_argument('--asm-band', default=env('asm-band'), help='the band that assembles (the builder)')
     p.add_argument('--asm-ubin', default=env('asm-ubin'))
-    p.add_argument('--asm-revision', type=int, default=int(env('asm-revision', '13')),
-                   help="--asm-band's revision; 0, --asm-quux's default")
-    p.add_argument('--asm-quux', default=env('asm-quux'), help='the quux that runs --asm-band')
     p.add_argument('--asm-target', type=int, default=int(env('asm-target', '0')),
                    help='the hardware revision the microcode and PROM are assembled for'
                         ' (default %d)' % ASM_TARGET)
@@ -1094,18 +1125,30 @@ def main():
                    default=env('oa-select-check', 'refuse'),
                    help="revision 15's OA select check: refuse (a build) or report (a measurement)")
     p.add_argument('--asm-prom', default=env('asm-prom'),
-                   help="--asm-band's PROM (default the builder's when the builder assembles)")
-    # contract G3 revision 14's guards (A14.13) boot revision 13's pieces beside
-    # the builder's, which for step 2's route is itself revision 14's
+                   help="--asm-band's PROM (default the builder's when the builder assembles,"
+                        " else --asm-ubin's promh.mcr)")
+    # The guards' old pieces, each booted on revision 16 as a disk or band a
+    # user can still meet: System 2001's (revision 13's) and System 2002's
+    # revision-14 hand-over's.  The hand-over's were the builder's own while
+    # it was the builder (--builder, --builder-ubin, --builder-prom).
+    # Contract G3 revision 14's guards (A14.13) booted revision 13's pieces
+    # beside the builder's, which for step 2's route was itself revision 14's:
+    #   help="revision 13's disk, System 2001's, for A14.13's guards"
     p.add_argument('--previous-band', default=env('previous-band'),
-                   help="revision 13's disk, System 2001's, for A14.13's guards")
+                   help="revision 13's disk, System 2001's, for the guards")
     p.add_argument('--previous-ubin', default=env('previous-ubin'),
                    help="that disk's sys/ubin/ (microcode and PROM 2001)")
+    p.add_argument('--rev14-band', default=env('rev14-band'),
+                   help="revision 14's disk, System 2002's revision-14 hand-over's, for the guards")
+    p.add_argument('--rev14-ubin', default=env('rev14-ubin'),
+                   help="that disk's sys/ubin/ (microcode 2002 and PROM 2002 for revision 14)")
     p.add_argument('--ubin-ref', default=env('ubin-ref'),
                    help='a sys/ubin/ the assembly must equal (.mcr, .tbl, .locs)')
     p.add_argument('--quux', default=env('quux'),
                    help="muir-sim's quux, with revision %d, the route's machine" % MACHINE_REVISION)
-    p.add_argument('--ozd', default=env('ozd'))
+    # not needed: every run is at revision 16, over TCP, and starts no ozd;
+    # passed on to lispm-check when given
+    p.add_argument('--ozd', default=env('ozd'), help='ozd, for lispm-check (not needed)')
     p.add_argument('--ports', default=env('ports'), help='LO-HI, at least 64 ports')
     p.add_argument('--engine', default=env('engine', 'micro'))
     p.add_argument('--from', dest='start', default=env('from'))
@@ -1115,27 +1158,44 @@ def main():
     if a.list:
         print('\n'.join(STEPS))
         return 0
-    for k in ('out', 'builder', 'builder_ubin', 'base_tree', 'quux', 'ozd', 'ports'):
+    # --ozd is no longer needed (it was: 'quux', 'ozd', 'ports')
+    for k in ('out', 'builder', 'builder_ubin', 'base_tree', 'quux', 'ports'):
         if not getattr(a, k):
             p.error('--%s is needed' % k.replace('_', '-'))
     a.out = os.path.abspath(a.out)
     a.work = os.path.abspath(a.work or os.path.join(
         os.environ.get('XDG_CACHE_HOME', os.path.join(os.path.expanduser('~'), '.cache')), 'cross-build',
         os.path.basename(a.out)))
-    for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'ozd', 'asm_band', 'asm_quux',
-              'asm_ubin', 'ubin_ref', 'asm_prom', 'previous_band', 'previous_ubin'):
+    # (the list named 'asm_quux' after 'asm_band' too)
+    for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'ozd', 'asm_band',
+              'asm_ubin', 'ubin_ref', 'asm_prom', 'previous_band', 'previous_ubin', 'rev14_band',
+              'rev14_ubin'):
         if getattr(a, k):
             setattr(a, k, os.path.abspath(getattr(a, k)))
+    # the PROMs: revision 16 has none of its own, so each band's is a file,
+    # its ubin's unless given
+    a.builder_prom = a.builder_prom or os.path.join(a.builder_ubin, 'promh.mcr')
     if not a.asm_band or a.asm_band == a.builder:
         a.asm_prom = a.asm_prom or a.builder_prom
     a.asm_band = a.asm_band or a.builder
     a.asm_ubin = a.asm_ubin or a.builder_ubin
+    a.asm_prom = a.asm_prom or os.path.join(a.asm_ubin, 'promh.mcr')
+    for k in ('builder_prom', 'asm_prom'):
+        if not os.path.isfile(getattr(a, k)):
+            p.error('--%s: no PROM at %s (revision 16 has no built-in boot PROM)'
+                    % (k.replace('_', '-'), getattr(a, k)))
     lo, hi = (int(x) for x in a.ports.split('-'))
     if hi - lo < 63:
         p.error('--ports: at least 64 ports')
     a.ports = (lo, hi)
     start = STEPS.index(a.start) if a.start else 0
     end = STEPS.index(a.to) + 1 if a.to else len(STEPS)
+    # the guards' old pieces, asked for before the route's hours rather than
+    # at its guards step
+    if 'guards' in STEPS[start:end]:
+        for k in ('previous_band', 'previous_ubin', 'rev14_band', 'rev14_ubin'):
+            if not getattr(a, k):
+                p.error('--%s is needed for the step guards' % k.replace('_', '-'))
     os.makedirs(a.out, exist_ok=True)
     os.makedirs(a.work, exist_ok=True)
     r = Run(a)

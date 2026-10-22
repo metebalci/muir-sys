@@ -13,11 +13,22 @@ with is checked:
                   high, incremental, built): the same, through lispm-check
   route-qld       Run.qld, the cold load's QLD (band4, native5, native6):
                   revision 16
-  builder-check   Run.builder_check (cross, checks): the builder at its
-                  --builder-revision, 14 here, over Chaos: --chaos-udp, no
-                  --ethernet-socket, ozd started
+  builder-check   Run.builder_check (cross, checks): the builder at revision
+                  16, over TCP, and no ozd started (it was at its
+                  --builder-revision, 14 here, over Chaos, ozd started)
   assemble        step assemble: ua:*hardware-revision* 15, the target, by
-                  default, on the assembling band at its --asm-revision, 14
+                  default, on the assembling band at revision 16 (it was at
+                  its --asm-revision, 14)
+  guards          step guards, on made-up pieces: every machine at revision
+                  16, with no network, and no ozd started (they booted
+                  revisions 13, 14 and 15 beside it)
+  cross           step cross: the builder's cross-check (its LISPM_CHECK_QUUX)
+                  and its site and WORMCH sessions at revision 16
+  revisions       every start of the stand-in quux, lispm-check's questions
+                  included: revision 16, and no other
+
+The removal of revisions 13-15 (step 1) put the builder, the assembly and
+the guards on revision 16; "revisions" fails on any start at another.
 
     LISPM_CHECK_TAPS=16-17 LISPM_CHECK_PORTS=44000-44099 tools/cross-build/test [TREE]
 
@@ -36,11 +47,20 @@ from importlib.machinery import SourceFileLoader
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 TREE = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(HERE))
-WANT_MACHINE, WANT_TARGET, BUILDER = 16, 15, 14
+# the builder ran at revision 14 (BUILDER), over Chaos; it runs at the
+# route's revision since the removal of revisions 13-15, step 1:
+#   WANT_MACHINE, WANT_TARGET, BUILDER = 16, 15, 14
+WANT_MACHINE, WANT_TARGET = 16, 15
+BUILDER = WANT_MACHINE
+# the band partition's type, and a revision-15 .mcr's first word
+BAND_TYPE = 'A3B30470-C5D4-41C1-87A8-D26590424CB8'
+FORMAT_WORD_15 = bytes([0x01, 0x00, 0x55, 0x51])
 
 STAND_IN_QUUX = r'''#!/bin/sh
-# the stand-in quux: note the start, answer what lispm-check asks, exit
+# the stand-in quux: note the start (in the case's log and in the log of
+# every start), answer what lispm-check asks, exit
 echo "MUIR_QUUX_REVISION=${MUIR_QUUX_REVISION:-} $*" >> %(log)s
+echo "MUIR_QUUX_REVISION=${MUIR_QUUX_REVISION:-} $*" >> %(all)s
 case " $* " in
   *" -V "*) echo "muir stand-in"; exit 0 ;;
   *" --help "*) echo "--file-root"; exit 0 ;;
@@ -59,22 +79,43 @@ def main():
     work = tempfile.mkdtemp(prefix='cross-build-test-')
     os.environ['XDG_CACHE_HOME'] = os.path.join(work, 'xdg')
     qlog, olog = os.path.join(work, 'quux.log'), os.path.join(work, 'ozd.log')
+    alllog = os.path.join(work, 'quux-all.log')
     quux, ozd = os.path.join(work, 'quux'), os.path.join(work, 'ozd')
-    open(quux, 'w').write(STAND_IN_QUUX % {'log': qlog})
+    open(quux, 'w').write(STAND_IN_QUUX % {'log': qlog, 'all': alllog})
     open(ozd, 'w').write(STAND_IN_OZD % {'log': olog})
     os.chmod(quux, 0o755)
     os.chmod(ozd, 0o755)
-    # a band, a ubin/ and a tree that exist, and nothing in them
+    # a band, a ubin/ and a tree that exist, and nothing in them; the
+    # ubin/'s .mcr files open with revision 15's format word and hold 15 at
+    # section 6's item, and its .sym files name the guards' halts, so that
+    # the guards' checks of their pieces pass and each guard is started
     ubin = os.path.join(work, 'ubin')
     os.makedirs(ubin)
-    for f in ('promh.mcr', 'ucadr.mcr', 'ucadr.tbl'):
-        open(os.path.join(ubin, f), 'wb').write(f.encode())
-    # a disk with a GPT and a LOD4, for QLD's watch of its save
+    for f in ('promh.mcr', 'ucadr.mcr'):
+        open(os.path.join(ubin, f), 'wb').write(FORMAT_WORD_15 + bytes(36) + (15).to_bytes(4, 'little')
+                                                + bytes(20))
+    open(os.path.join(ubin, 'ucadr.tbl'), 'wb').write(b'ucadr.tbl')
+    open(os.path.join(ubin, 'promh.sym'), 'w').write(
+        'ERROR-MCR-FORMAT I-MEM 36100 ERROR-MICROCODE-NOT-REVISION-15 I-MEM 36200\n')
+    open(os.path.join(ubin, 'ucadr.sym'), 'w').write(
+        'BAND-NOT-GENERATIONAL I-MEM 100 BAND-NOT-REVISION-14 I-MEM 200 MARK-BITMAP-MISSING I-MEM 300'
+        ' MARK-BITMAP-WRONG-SIZE I-MEM 400\n')
+    # the guards' old pieces' ubin/s: files that exist
+    olds = {}
+    for name in ('rev14', 'previous'):
+        olds[name] = os.path.join(work, name + '-ubin')
+        os.makedirs(olds[name])
+        for f in ('promh.mcr', 'ucadr.mcr', 'promh.sym', 'ucadr.sym'):
+            open(os.path.join(olds[name], f), 'wb').write(f.encode())
+    # a disk with a GPT: MCR1, a current LOD1 (the band partition's type,
+    # bit 48) and a LOD4, for QLD's watch of its save and for the guards'
+    # disks, which are made from the builder's
     band = os.path.join(work, 'band.img')
     with open(band, 'wb') as f:
         f.truncate(8 << 20)
-    subprocess.run(['sgdisk', '-n', '1:2048:+2M', '-c', '1:LOD4', band], check=True,
-                   stdout=subprocess.DEVNULL)
+    subprocess.run(['sgdisk', '-n', '1:2048:+512K', '-c', '1:MCR1', '-n', '2:0:+1M', '-c', '2:LOD1',
+                    '-t', '2:' + BAND_TYPE, '-A', '2:set:48', '-n', '3:0:+2M', '-c', '3:LOD4', band],
+                   check=True, stdout=subprocess.DEVNULL)
     tree = os.path.join(work, 'tree')
     for d in ('sys', 'site'):
         os.makedirs(os.path.join(tree, d))
@@ -87,9 +128,18 @@ def main():
         pass
     a = A()
     a.quux, a.ozd, a.engine = quux, ozd, 'micro'
-    a.builder, a.builder_ubin, a.builder_prom, a.builder_revision = band, ubin, None, BUILDER
-    a.asm_band, a.asm_ubin, a.asm_prom, a.asm_revision, a.asm_quux = band, ubin, None, BUILDER, None
+    # the PROMs are files (revision 16 has none of its own), as run's main
+    # makes them; the revisions and --asm-quux went with step 1:
+    #   a.builder, a.builder_ubin, a.builder_prom, a.builder_revision = band, ubin, None, BUILDER
+    #   a.asm_band, a.asm_ubin, a.asm_prom, a.asm_revision, a.asm_quux = band, ubin, None, BUILDER, None
+    prom = os.path.join(ubin, 'promh.mcr')
+    a.builder, a.builder_ubin, a.builder_prom = band, ubin, prom
+    a.asm_band, a.asm_ubin, a.asm_prom = band, ubin, prom
     a.asm_target, a.oa_select_check, a.ubin_ref = 0, 'refuse', None
+    a.previous_band, a.previous_ubin = band, olds['previous']
+    a.rev14_band, a.rev14_ubin = band, olds['rev14']
+    # cross-check's --base-tree, which the cross step names (never read here)
+    a.base_tree = os.path.join(work, 'base.tar.gz')
     lo, hi = (int(x) for x in os.environ['LISPM_CHECK_PORTS'].split('-'))
     a.ports = (lo, hi)
     a.out, a.work = os.path.join(work, 'out'), os.path.join(work, 'work')
@@ -165,10 +215,33 @@ def main():
         print('     (route-qld ended: %s)' % str(e)[:100])
     judge('route-qld', *starts(), WANT_MACHINE, None)
 
-    # builder-check: the builder's runs stay at its revision, over Chaos
-    rc, text = r.builder_check(os.path.join(a.out, 'builder'), '(+ 1 2) => 3\n', tree, 60, prime=False)
-    print('     (builder-check: lispm-check exit %d)' % rc)
-    judge('builder-check', *starts(), BUILDER, 'chaos')
+    # builder-check: the builder's runs at revision 16, over TCP (they
+    # stayed at its revision, over Chaos:
+    #   judge('builder-check', *starts(), BUILDER, 'chaos'))
+    try:
+        rc, text = r.builder_check(os.path.join(a.out, 'builder'), '(+ 1 2) => 3\n', tree, 60, prime=False)
+        print('     (builder-check: lispm-check exit %d)' % rc)
+    except Exception as e:
+        print('     (builder-check raised: %s: %s)' % (type(e).__name__, str(e)[:100]))
+    judge('builder-check', *starts(), BUILDER, 'tcp')
+
+    # guards: every guard's machine at revision 16, no network; the
+    # stand-in halts nowhere, so every guard fails, and only the starts count
+    r.bands = os.path.join(a.out, 'bands')
+    os.makedirs(r.bands)
+    shutil.copy(band, os.path.join(r.bands, 'band4.img'))
+    before = len(open(alllog).read().splitlines()) if os.path.exists(alllog) else 0
+    try:
+        r.step_guards()
+    except BaseException as e:            # guards.py stops by SystemExit
+        print('     (guards ended: %s)' % str(e)[:100])
+    q, o = starts()
+    # the guards' refusals run --stop-after 1, which starts() leaves out:
+    # taken from the starts since the guards began (the earlier cases'
+    # questions are their own)
+    q += [l for l in open(alllog).read().splitlines()[before:] if ' --prom ' in l
+          and '--stop-after 1' in l and l not in q]
+    judge('guards', q, o, WANT_MACHINE, None)
 
     # assemble: the target the microcode and PROM are assembled for
     seen = []
@@ -192,6 +265,56 @@ def main():
     print('%s assemble%s' % ('FAIL' if why else 'ok  ', ': ' + '; '.join(why) if why else ''))
     if why:
         fails.append('assemble')
+
+    # cross: the builder's runs of step cross, its cross-check (by the
+    # environment cross-check's lispm-check runs take) and its two cross
+    # sessions, at revision 16; nothing runs, the step fails after
+    del seen[:]
+    envs = []
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kw):
+        if any('cross-check' in str(c) for c in cmd):
+            envs.append(kw.get('env') or {})
+            return subprocess.CompletedProcess(cmd, 1)
+        return real_run(cmd, *args, **kw)
+    os.makedirs(os.path.join(a.out, 'cross'), exist_ok=True)
+    cb.subprocess.run = fake_run
+    try:
+        r.step_cross()
+    except Exception:
+        pass
+    finally:
+        cb.subprocess.run = real_run
+    wrappers = [w for _, w in seen] + [open(e['LISPM_CHECK_QUUX']).read() for e in envs
+                                       if e.get('LISPM_CHECK_QUUX')]
+    revs = [int(m) for w in wrappers for m in re.findall(r'MUIR_QUUX_REVISION=(\d+)', w)]
+    why = []
+    if len(envs) != 1 or len(seen) != 2:
+        why.append('%d cross-check runs and %d sessions, wanted 1 and 2' % (len(envs), len(seen)))
+    if set(revs) != {BUILDER} or len(revs) != len(wrappers):
+        why.append('the builder at revision %s, wanted %d' % (sorted(set(revs)), BUILDER))
+    print('%s cross%s' % ('FAIL' if why else 'ok  ', ': ' + '; '.join(why) if why else ''))
+    if why:
+        fails.append('cross')
+
+    # revisions: every start of the stand-in, each case's and lispm-check's
+    # questions, at revision 16 alone
+    every = open(alllog).read().splitlines() if os.path.exists(alllog) else []
+    got = {}
+    for line in every:
+        m = re.match(r'MUIR_QUUX_REVISION=(\d*) ', line)
+        got.setdefault(m.group(1) if m and m.group(1) else 'none', []).append(line)
+    why = ['%d at revision %s' % (len(v), k) for k, v in sorted(got.items()) if k != str(WANT_MACHINE)]
+    if not every:
+        why.append('no start')
+    print('%s revisions: %d starts%s' % ('FAIL' if why else 'ok  ', len(every),
+                                         ', ' + '; '.join(why) if why else ', all at revision %d' % WANT_MACHINE))
+    for k, v in sorted(got.items()):
+        if k != str(WANT_MACHINE):
+            print('     quux started: %s' % v[0][:300])
+    if why:
+        fails.append('revisions')
 
     # the scratch is under the system's temporary directory
     shutil.rmtree(work, ignore_errors=True)

@@ -40,20 +40,27 @@ more. The stages are the ones described under "The stages", and the cross
 build's are under "Cross-building for the 40-bit QUUX", "Loading the 40-bit
 cold load" and "The native rebuild"; what follows is where each one runs.
 
-**Two kinds of machine** (QUUX's Ethernet contract, section 8 R2). The
-builder runs at its own band's revision (`--builder-revision`, 14 for System
-2002's hand-over), on its own microcode and PROM, and is driven over Chaos,
-ozd carrying its TELNET session; it serves no file. The route's own
-machines run at revision 16 (`MACHINE_REVISION`, `tools/cross-build/run:72`),
-which has the Ethernet device: each run takes a tap of the pool
-(`LISPM_CHECK_TAPS`) and its TELNET session is the build host's own TCP to
-the band's server, with no ozd. The microcode and PROM are assembled for
-revision 15 (`ASM_TARGET`, `:72`; `--asm-target` overrides it), which
+**One kind of machine.** Every machine of the route runs at revision 16
+(`MACHINE_REVISION`, `tools/cross-build/run:78`), which has the Ethernet
+device: the builder, the band that assembles, and the route's own bands.
+Each run takes a tap of the pool (`LISPM_CHECK_TAPS`) and its TELNET session
+is the build host's own TCP to the band's server, with no ozd. The builder
+is a band of an earlier route, its native6, on its own microcode and PROM
+(`--builder-ubin`, and `--builder-prom` or that ubin's `promh.mcr`, since
+revision 16 has no built-in boot PROM); it assembles too unless
+`--asm-band` names another. The microcode and PROM are assembled for
+revision 15 (`ASM_TARGET`, `:78`; `--asm-target` overrides it), which
 revision 16 runs. Every machine's files are served by quux's file device
 (`--file-root`), its `SYS:` on FILES, the file device's pathname host.
-Systems 2000 and 2001, and System 2002's bands before the rename (the
-hand-over that is the builder among them), call it HOST; the route's builder
-is therefore the renamed builder ("The renamed builder", below).
+
+Until the removal of revisions 13-15 (its step 1) there were two kinds of
+machine (QUUX's Ethernet contract, section 8 R2): the builder ran at its own
+band's revision (`--builder-revision`, 14 for System 2002's hand-over), and
+the assembly at `--asm-revision`, each driven over Chaos with ozd carrying
+its TELNET session. Systems 2000 and 2001, and System 2002's bands before
+the rename (the hand-over among them), call the file device's host HOST, so
+that builder was the renamed builder ("The renamed builder", below), and the
+assembly ran on the hand-over itself.
 
 **The disk** is a GPT (docs/booting.md), made on the host from the
 builder's disk, so it has the builder's layout: MCR1, MCR2, PAGE and LOD1 to
@@ -87,8 +94,8 @@ LOD3 alone. The machine only reads its GPT.
 5. **The checks** (steps `checks` to `built`): G2 section 7's checks (a)-(d)
    compare the cross build with the native one and the two native ones with
    each other, the builder making the cross cold load once more from
-   native5's QFASLs; then the guards (A15b.1's for revision 15's
-   microcode, `guards.py`), the high band, an incremental save and
+   native5's QFASLs; then the guards (A15b.1's lines that ran on revision
+   15, on 16, `guards.py`), the high band, an incremental save and
    restore, and the built bands' RQBs and first-object tables. The high
    and incremental steps save a band from a session: the session gives no
    answer to `DISK-SAVE`, since the band's network stops as the save begins,
@@ -128,7 +135,21 @@ compiles load the network's QFASLs into the band they run on, over that
 band's own TCP session, and run on. No route session started ozd; the
 builder's runs did.
 
+**Measured on 2026-10-22**, with the builder and the assembly on revision 16
+(an earlier route's native6) and the guards on 16: one clean route of every
+step passed in 7 h 52 min, `cross` taking 2 h 7 min where the builder on
+revision 14 had taken 2 h 44 min; no run started ozd. The assembly equalled
+the microcode's own byte for byte, but for `ucadr.sym`'s truenames, which
+name FILES, the assembling band's host. Check 3's QFASLs equal those of the
+builder on revision 14 after `same40.py`'s normalisation: what differs
+records the compiling band, its machine name and its generated symbols'
+numbers.
+
 ### The renamed builder
+
+The route's builder until the removal of revisions 13-15 (step 1), when the
+builder moved to a band of the route itself, at revision 16; kept as the
+record of how that band was made.
 
 A QFASL records, in its source id, the name of the compiling band's file
 device host, and a cold load records it in its truenames; the route's checks
@@ -187,8 +208,8 @@ hand-over's band with the rename loaded into it and saved.
    as the route puts each band it makes (`band_disk`,
    `tools/cross-build/run`).
 
-The route takes it as `--builder`, with the hand-over's `--builder-ubin`,
-`--builder-prom` and `--builder-revision 14`. The assembly stays on the
+The route took it as `--builder`, with the hand-over's `--builder-ubin`,
+`--builder-prom` and `--builder-revision 14`. The assembly stayed on the
 hand-over itself, `--asm-band` its disk and `--asm-prom` its PROM, at
 `--asm-revision 14`: `ucadr.sym` records the assembling band's host, and
 assembled on the hand-over the microcode's files can equal `--ubin-ref`.
