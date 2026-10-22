@@ -57,6 +57,39 @@ microcode and assembles it, as `rev14-mutants` does (`--list`; `--src` for
 another tree); the machine must then be given a disk with that microcode in
 MCR1.
 
+`boot-keys` checks the boot's choice of a cold or a warm boot at location 6
+(`PROM`, `sys/ucadr/uc-cadr.lisp`) with words waiting in the keyboard's FIFO,
+by booting the machine with no session and no network:
+
+```
+tools/microcode-check/boot-keys --out DIR --disk DISK --ubin UBIN --quux QUUX \
+    --ports N [--engine micro|rtl] [CASE ...]
+```
+
+The keys are typed, on the glass TTY or the RFB terminal, while the machine
+is held at muir's prompt (`--no-auto-boot`, or a checkpoint of the band at
+its listener resumed and held), and then the prompt's `boot` presses the
+button, so the words are in the FIFO before location 6 reads it whatever the
+host's speed. The run stops at `BEG0000`: a warm boot reaches it within 3
+million microcycles of the press on micro (location 6 is at 736 thousand), a
+cold boot after the band's restore, 26.7 million; a second run goes on past
+it and must not halt. The cases: `no-key`, `key` (a key typed, as at the
+glass TTY's connect) and `rubout-power-on` (Control-Meta-Rubout) cold-boot
+after power-on; `return-power-on` (Control-Meta-Return) warm-boots and then
+halts at `ILLOP`, BEG0000's read of 4031 finding no band in memory, as MIT's
+does; `return-running` warm-boots the band at its listener, and
+`rubout-running` cold-boots it. MIT's test, one word read, takes `key` and
+both Rubout cases for warm boots, the key-downs coming before the boot word:
+on revision 16, micro, `key` and `rubout-power-on` halt at 32063 and
+`rubout-running` warm-boots. Of two partial fixes, the test without the
+FIFO's draining, the first word alone, fails `return-power-on` and
+`return-running` (cold boots, Control's key-down first), and the draining
+without the boot code's test fails both Rubout cases. On rtl the cold boot
+reaches `BEG0000` 225 million microcycles of the run after the press, and a
+halt at `HALT-CONS` is not reported, so `return-power-on`'s halt is recorded
+and not judged there. DISK is copied and booted read-only; the exit status
+is 0 when every case passes. Its head says more.
+
 Arguments after `--` go to every lispm-check run. The machine runs the
 microcode in the disk's MCR1, not the one in `ubin/`, so the disk must carry
 the microcode under test: write `sys/ubin/ucadr.mcr` over MCR1, which starts

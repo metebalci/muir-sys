@@ -234,10 +234,35 @@ PROM	(JUMP-NOT-EQUAL-XCT-NEXT Q-R A-ZERO PROM)    ;These 2 instructions duplicat
        ((VMA) (A-CONSTANT QUUX-KBD-STATUS-PHYSICAL-ADDRESS)) ;quux: word 120, not 764112
 	(JUMP-IF-BIT-CLEAR (BYTE-FIELD 1 0) MD	;If keyboard is not ready,
 		COLD-BOOT)			; assume we are supposed to cold-boot
-	(CALL-XCT-NEXT PHYS-MEM-READ)
-       ((VMA) (A-CONSTANT QUUX-KBD-DATA-PHYSICAL-ADDRESS)) ;quux: word 121, not 764100
-	((MD) (BYTE-FIELD 6 0) MD)		;Get keycode
-	(JUMP-EQUAL MD (A-CONSTANT 46) COLD-BOOT)	;This is cold-boot if key is RUBOUT
+;	(CALL-XCT-NEXT PHYS-MEM-READ)
+;       ((VMA) (A-CONSTANT QUUX-KBD-DATA-PHYSICAL-ADDRESS)) ;quux: word 121, not 764100
+;	((MD) (BYTE-FIELD 6 0) MD)		;Get keycode
+;	(JUMP-EQUAL MD (A-CONSTANT 46) COLD-BOOT)	;This is cold-boot if key is RUBOUT
+	;; quux: the keyboard is a fifo (contract q3: word 120 <0> says a word
+	;; waits, a read of word 121 takes the oldest), so it holds every word
+	;; typed since the band last read it, keys typed during the prom too,
+	;; and the boot word is the last of them: the keyboard sends it after
+	;; the key-downs and holds the key-ups back (ukbd.lisp, check-boot).
+	;; mit's test read one word, the cadr's one register, and took any word
+	;; but the cold boot word for a warm boot: a key typed early in the boot
+	;; after power-on, with no band in memory, then warm-booted, and
+	;; beg0000's read of 4031 faulted to illop, 32063 in the lights.  so the
+	;; fifo is read to its last word, and only the warm boot word, bits 13-6
+	;; 360 (the boot word, as the i/o board decodes it) with code 62 (the
+	;; boot code for return, ukbd.lisp), warm-boots, as the comment above
+	;; says; anything else, the boot word with rubout's code 46 among it,
+	;; cold-boots.
+prom-kbd-drain
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-kbd-data-physical-address)) ;word 121: the oldest word
+	((m-1) md)				;the last word so far
+	(call-xct-next phys-mem-read)
+       ((vma) (a-constant quux-kbd-status-physical-address)) ;word 120
+	(jump-if-bit-set (byte-field 1 0) md prom-kbd-drain) ;another word waits
+	((md) (byte-field 10 6) m-1)		;bits 13-6: 360 in a boot word
+	(jump-not-equal md (a-constant 360) cold-boot)
+	((md) (byte-field 6 0) m-1)		;the boot code: 62 warm, 46 cold
+	(jump-not-equal md (a-constant 62) cold-boot)
 	;; quux: standardize the mode: error stop, bit 0 of the register page's
 	;; word 102.  mit wrote 44, error stop and prom-disable, to unibus
 	;; 766012; quux's prom is never disabled.

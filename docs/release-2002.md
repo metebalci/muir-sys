@@ -809,6 +809,55 @@ file carries a comment in that file saying why.
   with the rename loaded and saved (`docs/building.md`, "The renamed
   builder"), since a QFASL's source id and a cold load's truenames record the
   compiling band's name for the host.
+- **A key typed early in the boot no longer halts the machine**
+  (`PROM`, location 6, `sys/ucadr/uc-cadr.lisp:237-264`). Location 6 chooses
+  between a cold boot and a warm boot by the keyboard: MIT's test read one
+  key word and took any word but the cold boot word, Rubout's, for a warm
+  boot. On QUUX the keyboard is a FIFO (contract Q3), which keeps every word
+  typed since the band last read it, so a key typed while the PROM ran, as a
+  client typing at the glass TTY's connect does, was taken for a warm boot
+  after power-on, with no band in memory: BEG0000's read of virtual 4031
+  faulted, and ILLOP halted the machine with 32063 in the lights. On
+  revision 16, micro, typing at the connect halted 10 boots in 10. Now
+  location 6 reads the FIFO to its last word, the boot word being the last
+  one the keyboard sends (it holds the key-ups back after it; `ukbd.lisp`'s
+  `check-boot`), and warm-boots only when that word is the warm boot word:
+  bits 13-6 360, as the I/O board decodes the boot word, with boot code 62,
+  Return's (`ukbd.lisp`: "5-0 46 (octal) if cold, 62 (octal) if warm"), as
+  MIT's comment above the test says. Any other word, the cold boot word
+  among them, and no word give a cold boot. A warm boot asked for with no
+  band in memory still halts at ILLOP, as MIT's does. Keys typed before
+  location 6 are read and dropped. `tools/microcode-check`'s new `boot-keys`
+  (its README) types the keys while the machine is held at muir's prompt,
+  then boots it: on revision 16, micro, MIT's test fails 3 of its 6 cases (a
+  key and Control-Meta-Rubout after power-on halt at 32063, and
+  Control-Meta-Rubout on the running band, the key-downs ahead of the boot
+  word, warm-boots), and the new one passes all 6, on micro and on rtl;
+  without the draining, the first word alone, the two Return cases
+  cold-boot, and without the boot code's test the two Rubout cases
+  warm-boot. Typing at the glass TTY's connect, 10 boots on micro: 10 halts
+  before, none after. `tools/assembler-check`'s `write-i-mem` and
+  `write-i-mem-slot` named the refused word by its address, I-MEM 56, which
+  the six words move to 64; they now name it by its label and offset,
+  `XWIPM-I-14+1`, as the map-after-start plants do
+  (`tools/assembler-check/run:115-120`, `:696-699`). On revision 16, micro,
+  System 2002's band on the new microcode passes `tools/microcode-check`'s
+  suite (684 cases; `network-stray` skipped there),
+  `tools/assembler-check`'s 30 checks (247 cases) and `tools/system-check`'s
+  `warm-boot`. The CADR's line has the same test, where its one register
+  keeps the last word. Microcode 2002's files changed again, 6 instructions
+  more at location 6, which move the words after them by 6, and from
+  `QMLP`, which `sys/ucadr/uc-macrocode.lisp` puts at a multiple of 4
+  (`MODULO 4`), by 8; A memory holds two more constants, 360 and 62:
+  `ucadr.mcr`
+  `28e08799204ca1134c9c19dcbb8ce95524e31177a304f370e6df538e227ef39a` with
+  `.tbl` `8d5de5f0bbc37f062957671cadab74be00681bc88cff51ef0c46406effaec16c`,
+  `.locs` `e599b17b8ef6d3c3755ad2dca6f6a27179802cb07cdc7eebcd19e41eb2064839`
+  and `.sym` `ffb0214b364f6eb5c31233f23c85155bb21a752dd18a532ede2a91e85e4a7df3`
+  (before, `ucadr.mcr`
+  `0292aac86ba39058fa323c70de564cff03ed83d13d43061b701407a95cbae581`);
+  `promh.mcr` is unchanged,
+  `3d93319a8e851f5f14a2fcd66cd1ed21abb33049c355edf8cc893c791fb4b124`.
 
 ## Revision 14
 

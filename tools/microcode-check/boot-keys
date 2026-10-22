@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""tools/microcode-check/boot-keys: the boot's choice between a cold boot and
+a warm boot by the keyboard's words, at the microcode's location 6 (PROM in
+sys/ucadr/uc-cadr.lisp), with keys waiting in the keyboard's FIFO
+(tools/microcode-check/README.md).
+
+Usage:
+  tools/microcode-check/boot-keys --out DIR --disk DISK --ubin UBIN
+      --quux QUUX --ports N [--engine micro|rtl] [--up CYCLES] [CASE ...]
+
+DISK holds a band current in LOD1 and the microcode under test in MCR1; it is
+copied once into the work directory (--work, DIR/work by default) and the
+copy booted read-only for every run, so neither is written; the copy and the
+running band's checkpoint are removed at the end.  UBIN is that microcode's sys/ubin/, read for the
+address of BEG0000 in its ucadr.sym; QUUX is muir-sim's quux or a wrapper
+that sets the revision and the boot PROM.  Each run takes the RFB terminal at
+port N and the glass TTY at N+1.
+
+The keys are typed while the machine is held at muir's prompt, so they are
+in the FIFO before the boot press, whatever the host's speed; then the
+prompt's boot presses the button.  A power-on case starts with
+--no-auto-boot; a running case resumes a checkpoint of the band taken UP
+microcycles after its own cold boot (by default 200 million on micro and 450
+million on rtl, its listener up) and holds at once.  The boot word typed while held presses the boot itself,
+as the keyboard does, and the prompt's boot presses it again; the FIFO is
+not touched by either.  Location 6 then reads the FIFO, and the run stops at
+BEG0000, where both boots go: a warm boot comes there straight from location
+6, within WARM microcycles of the press, and a cold boot after restoring the
+band from the disk, COLD_LO microcycles or more after it.  Each case is run
+twice from its start: once to BEG0000, to tell the two apart, and once on to
+AFTER microcycles past it (RUNNING_AFTER for a running case, the band's own
+start after the boot), which must not halt, but for return-power-on,
+whose warm boot finds no band in memory and halts at ILLOP as MIT's does.
+rtl reports no halt at HALT-CONS (the run goes on counting at the halted
+PC), so there return-power-on's halt is recorded and not judged.
+
+  no-key            power-on, nothing typed: cold
+  key               power-on, a key typed at the glass TTY: cold.  MIT's test
+                    took any waiting key word but the cold boot word as a
+                    warm boot; after power-on there is no band in memory, so
+                    BEG0000's read of virtual 4031 faults and ILLOP halts the
+                    machine with 32063 in the lights
+  rubout-power-on   power-on, Control-Meta-Rubout: the key-downs and the cold
+                    boot word (code 46) in the FIFO: cold
+  return-power-on   power-on, Control-Meta-Return: the key-downs and the warm
+                    boot word (code 62): warm, then the halt at ILLOP (the
+                    control that the warm path is still taken)
+  return-running    the running band, Control-Meta-Return: warm
+  rubout-running    the running band, Control-Meta-Rubout: cold
+
+Every case runs when none is named.  DIR gets record.txt, one line a run and
+a line a case, ending RESULT PASS or RESULT FAIL, and each run's quux log.
+Exit status 0 on PASS.
+"""
+import argparse
+import hashlib
+import os
+import re
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+sys.dont_write_bytecode = True
+
+# keysyms (X11), as muir-sim's built-in keyboard mapping takes them:
+# BackSpace is Rubout, Alt_L the Left Meta
+CONTROL, META, RETURN, RUBOUT = 0xffe3, 0xffe9, 0xff0d, 0xff08
+
+# microcycles of the run from the boot press, by engine: a warm boot reaches
+# BEG0000 within WARM (737 thousand on micro, 1.6 million on rtl), a cold
+# boot no sooner than COLD_LO and no later than LIMIT (26.7 million on micro,
+# 225 million on rtl, whose run counts its waits for the disk); AFTER more past BEG0000 must run without a halt, RUNNING_AFTER for
+# a running band's boot, which the band's own start then follows; UP, where
+# the band stands at its listener after a cold boot (the screen at 190
+# million on micro, 300 million on rtl)
+ENGINES = {
+    'micro': dict(WARM=3000000, COLD_LO=10000000, LIMIT=60000000, AFTER=5000000,
+                  RUNNING_AFTER=100000000, UP=200000000, T=600),
+    'rtl': dict(WARM=6000000, COLD_LO=10000000, LIMIT=1000000000, AFTER=5000000,
+                RUNNING_AFTER=100000000, UP=450000000, T=7200),
+}
+# while held, the keyboard hands the FIFO one word a turn of the prompt's
+# loop, 8 ms; a second leaves every word typed in it
+SETTLE = 1.0
+
+CASES = {
+    # name: (start, keys, want); keys: None, ('glass', text) or ('rfb', [(sym, mods)])
+    'no-key': ('power-on', None, 'cold'),
+    'key': ('power-on', ('glass', 'a'), 'cold'),
+    'rubout-power-on': ('power-on', ('rfb', [(RUBOUT, (CONTROL, META))]), 'cold'),
+    'return-power-on': ('power-on', ('rfb', [(RETURN, (CONTROL, META))]), 'warm-halts'),
+    'return-running': ('running', ('rfb', [(RETURN, (CONTROL, META))]), 'warm'),
+    'rubout-running': ('running', ('rfb', [(RUBOUT, (CONTROL, META))]), 'cold'),
+}
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def symbol(symfile, name):
+    """NAME's I-MEM address in SYMFILE, a ucadr.sym."""
+    text = open(symfile, encoding='latin-1').read()
+    m = re.search(r'(?:^|\s)' + re.escape(name) + r' I-MEM ([0-7]+)', text)
+    if not m:
+        raise SystemExit('boot-keys: no %s in %s' % (name, symfile))
+    return int(m.group(1), 8)
+
+
+class Machine:
+    """One quux run, its prompt on a pipe and its output in LOG."""
+
+    def __init__(self, cmd, log):
+        self.log = log
+        with open(log, 'w') as f:
+            f.write('# ' + ' '.join(cmd) + '\n')
+        self.lf = open(log, 'a')
+        self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=self.lf, stderr=subprocess.STDOUT)
+
+    def text(self):
+        return open(self.log, encoding='latin-1').read()
+
+    def say(self, line):
+        self.p.stdin.write((line + '\n').encode())
+        self.p.stdin.flush()
+
+    def wait(self, pattern, after, limit):
+        """The first match of PATTERN in the output past offset AFTER."""
+        end = time.monotonic() + limit
+        while True:
+            t = self.text()
+            m = re.compile(pattern).search(t, after)
+            if m:
+                return m
+            if self.p.poll() is not None or time.monotonic() > end:
+                raise RuntimeError('no %r in %s' % (pattern, self.log))
+            time.sleep(0.05)
+
+    def finish(self):
+        # a halted machine waits at the prompt; one that stopped has gone
+        for act in (lambda: self.say('quit'), self.p.stdin.close, self.p.stdin.close):
+            try:
+                act()
+            except OSError:
+                pass
+        try:
+            self.p.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
+            self.p.wait()
+        self.lf.close()
+
+
+def rfb(port, keys):
+    """KEYS, each a keysym with its modifiers' keysyms, typed on quux's RFB
+    terminal at PORT (RFC 6143, no password), as tools/system-check/warm-boot
+    types them."""
+    s = socket.create_connection(('127.0.0.1', port), timeout=30)
+
+    def recvn(n):
+        b = b''
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise EOFError
+            b += c
+        return b
+    recvn(12)
+    s.sendall(b'RFB 003.008\n')
+    recvn(recvn(1)[0])
+    s.sendall(b'\x01')
+    assert struct.unpack('>I', recvn(4))[0] == 0
+    s.sendall(b'\x01')
+    recvn(4)
+    recvn(16)
+    recvn(struct.unpack('>I', recvn(4))[0])
+
+    def key(sym, down):
+        s.sendall(struct.pack('>BBxxI', 4, 1 if down else 0, sym))
+        time.sleep(0.05)
+    for sym, mods in keys:
+        for m in mods:
+            key(m, True)
+        key(sym, True)
+        key(sym, False)
+        for m in reversed(mods):
+            key(m, False)
+    time.sleep(0.2)
+    s.close()
+
+
+def glass(port, text):
+    s = socket.create_connection(('127.0.0.1', port), timeout=30)
+    for ch in text:
+        s.sendall(ch.encode('latin-1'))
+        time.sleep(0.01)
+    time.sleep(0.2)
+    s.close()
+
+
+class Check:
+    def __init__(self, a):
+        self.a = a
+        self.e = ENGINES[a.engine]
+        self.rec = open(os.path.join(a.out, 'record.txt'), 'a', buffering=1)
+        self.beg = symbol(os.path.join(a.ubin, 'ucadr.sym'), 'BEG0000')
+        self.disk = os.path.join(a.work, 'disk.img')
+        self.chk = os.path.join(a.work, 'running.chk')
+
+    def record(self, text):
+        line = '%s %s' % (time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), text)
+        print(line, flush=True)
+        self.rec.write(line + '\n')
+
+    def cmd(self, start, stops):
+        c = [self.a.quux, '-c', '/dev/null', '--' + self.a.engine, '--video-size', '1280x1024',
+             '--disk-pack', self.disk + ',ro', '--terminal', '127.0.0.1:%d' % self.a.ports,
+             '--glass-tty', '127.0.0.1:%d' % (self.a.ports + 1)]
+        c += ['--no-auto-boot'] if start == 'power-on' else ['--resume', self.chk]
+        return c + stops
+
+    def running(self):
+        """The checkpoint of the band UP microcycles after its cold boot."""
+        if os.path.exists(self.chk):
+            return
+        m = Machine(self.cmd('power-on', ['--stop-after', str(self.a.up), '--checkpoint', self.chk]),
+                    os.path.join(self.a.out, 'running.log'))
+        m.wait(r'start: held', 0, 60)
+        m.say('boot')
+        r = m.wait(r'checkpoint: \S+ (at \d+ microcycles[^\n]*|not written[^\n]*|could not write[^\n]*)',
+                   0, self.e['T'])
+        m.finish()
+        self.record('running: %s' % r.group(1))
+        if not r.group(1).startswith('at '):
+            raise RuntimeError('no checkpoint of the running band')
+
+    def boot(self, name, stops):
+        """One run of case NAME: held, its keys typed, booted.  Returns the
+        run's count at the press and the output after it."""
+        start, keys, _ = CASES[name]
+        m = Machine(self.cmd(start, stops), os.path.join(self.a.out, '%s-%s.log' % (name, stops[-1])))
+        try:
+            if start == 'power-on':
+                m.wait(r'start: held', 0, 60)
+            else:
+                m.wait(r'\^C holds the machine', 0, 60)
+                mark = len(m.text())
+                m.say('hold')
+                m.wait(r'PC [0-7]+[^\n]*; \d+ this run', mark, 60)
+            if keys and keys[0] == 'glass':
+                m.wait(r'glass tty: telnet', 0, 60)
+                glass(self.a.ports + 1, keys[1])
+            elif keys:
+                rfb(self.a.ports, keys[1])
+            time.sleep(SETTLE)
+            mark = len(m.text())
+            m.say('boot')
+            b = m.wait(r'PC 36000 in the PROM; \d+ microcycles, \d+ ns; (\d+) this run', mark, 60)
+            base = int(b.group(1))
+            # the machine's own count, asked at the prompt as it runs: on rtl a
+            # halt at HALT-CONS is not reported, and the run goes on counting
+            # while the machine's count stands (a halt is one that stands
+            # while the run's count moves on)
+            ends = re.compile(r'stopped at PC [0-7]+ after \d+|stop not reached in \d+[^\n]*|ran out at \d+'
+                              r'[^\n]*|the machine stopped itself[^\n]*\n[^\n]*\nPC [0-7]+[^\n]*')
+            deadline = time.monotonic() + self.e['T']
+            seen = []
+            while True:
+                t = m.text()
+                end = ends.search(t, b.end())
+                if end:
+                    break
+                if m.p.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError('no end of the run in %s' % m.log)
+                seen = [(int(x), int(y)) for x, y in re.findall(
+                    r'PC [0-7]+[^\n;]*; (\d+) microcycles, \d+ ns; (\d+) this run', t[b.end():])]
+                m.say('pc')
+                time.sleep(0.3)
+            stood = len(seen) >= 2 and seen[-1][0] == seen[-2][0] and seen[-1][1] > seen[-2][1]
+            return base, end.group(0) + (' | the machine\'s count stood at %d' % seen[-1][0] if stood else '')
+        finally:
+            m.finish()
+
+    def case(self, name):
+        want = CASES[name][2]
+        base, out = self.boot(name, ['--stop-at', '%o' % self.beg, '--stop-after', str(self.e['LIMIT'])])
+        m = re.match(r'stopped at PC [0-7]+ after (\d+)', out)
+        at = int(m.group(1)) - base if m else None
+        self.record('%s: BEG0000 (%o) %s' % (name, self.beg, 'at %d after the press' % at if m
+                                              else 'not reached: ' + out.replace('\n', ' | ')))
+        if at is None:
+            got = 'none'
+        elif at <= self.e['WARM']:
+            got = 'warm'
+        elif self.e['COLD_LO'] <= at:
+            got = 'cold'
+        else:
+            got = 'between'
+        ok = got == want.split('-')[0]
+        if at is not None:
+            after = self.e['RUNNING_AFTER' if CASES[name][0] == 'running' else 'AFTER']
+            base2, out2 = self.boot(name, ['--stop-after', str(base + at + after)])
+            halted = 'stopped itself' in out2 or 'count stood' in out2
+            self.record('%s: on to %d past BEG0000: %s' % (name, after, out2.replace('\n', ' | ')))
+            if want == 'warm-halts' and not halted and self.a.engine == 'rtl':
+                # rtl reports no halt at HALT-CONS and its prompt stops
+                # answering, so the halt is not seen there: the warm boot is
+                # judged by BEG0000 alone
+                self.record('%s: the halt is not judged on rtl' % name)
+            else:
+                ok = ok and halted == (want == 'warm-halts')
+            if base2 != base:
+                self.record('%s: the press at %d, not %d as before' % (name, base2, base))
+        self.record('%s %s: %s, want %s' % ('PASS' if ok else 'FAIL', name, got, want))
+        return ok
+
+
+def main():
+    p = argparse.ArgumentParser(description='The boot\'s cold or warm choice with keys waiting.')
+    p.add_argument('--out', required=True)
+    p.add_argument('--disk', required=True)
+    p.add_argument('--ubin', required=True)
+    p.add_argument('--quux', required=True)
+    p.add_argument('--ports', required=True, type=int)
+    p.add_argument('--engine', default='micro', choices=sorted(ENGINES))
+    p.add_argument('--up', type=int)
+    p.add_argument('--work')
+    p.add_argument('cases', nargs='*')
+    a = p.parse_args()
+    for c in a.cases:
+        if c not in CASES:
+            raise SystemExit('boot-keys: no case %s (%s)' % (c, ', '.join(CASES)))
+    a.out = os.path.abspath(a.out)
+    a.work = os.path.abspath(a.work or os.path.join(a.out, 'work'))
+    a.ubin, a.quux, a.disk = os.path.abspath(a.ubin), os.path.abspath(a.quux), os.path.abspath(a.disk)
+    os.makedirs(a.out, exist_ok=True)
+    os.makedirs(a.work, exist_ok=True)
+    a.up = a.up or ENGINES[a.engine]['UP']
+    c = Check(a)
+    for f in (c.disk, c.chk):
+        if os.path.exists(f):
+            os.remove(f)
+    before = sha256(a.disk)
+    c.record('disk %s sha256 %s; engine %s; quux %s' % (a.disk, before, a.engine, a.quux))
+    subprocess.run(['cp', '--sparse=always', a.disk, c.disk], check=True)
+    os.chmod(c.disk, 0o644)
+    ok = True
+    for name in a.cases or list(CASES):
+        try:
+            if CASES[name][0] == 'running':
+                c.running()
+            ok = c.case(name) and ok
+        except (RuntimeError, OSError, EOFError, AssertionError) as e:
+            c.record('FAIL %s: %s' % (name, e))
+            ok = False
+    for path, want in ((a.disk, before), (c.disk, before)):
+        got = sha256(path)
+        if got != want:
+            c.record('FAIL %s changed: sha256 %s' % (path, got))
+            ok = False
+    for f in (c.disk, c.chk):
+        if os.path.exists(f):
+            os.remove(f)
+    c.record('RESULT %s' % ('PASS' if ok else 'FAIL'))
+    sys.exit(0 if ok else 1)
+
+
+main()

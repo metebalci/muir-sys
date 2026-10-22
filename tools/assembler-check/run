@@ -112,8 +112,12 @@ CHECKS = {
     # image beside XWIPM-I's second write, is found, with controls; and the
     # assembly refuses a write planted in a return's slot
     'write-i-mem': dict(rev=15, plant=None, refused=None),
+    # the refusal named by its label and offset alone, as the map-after-start
+    # plants are: its address, I-MEM 56, moved to 64 with location 6's six
+    # more words (the keyboard FIFO's drain), and the check failed on that
+    #                        refused='WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :AFTER-POPJ'),
     'write-i-mem-slot': dict(rev=15, plant='write-i-mem-slot',
-                             refused='WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :AFTER-POPJ'),
+                             refused='(XWIPM-I-14+1) breaks :AFTER-POPJ'),
     # the map-after-start check (no word that reads the map runs right after
     # a memory start): the tree's microcode and PROM pass it, and three
     # breaches planted in the microcode's image are found, each with a
@@ -690,7 +694,9 @@ def cases(check, names=None):
         # the check refuses what it finds
         lines += ["(let* ((loc (1+ (ua:i-mem-symbol-location 'ua:xwipm-i-14))) (old (aref ua:i-mem loc)))"
                   " (setf (aref ua:i-mem loc) (- old (expt 2 7.))) (unwind-protect (ua:check-write-i-mem)"
-                  " (setf (aref ua:i-mem loc) old))) =>! WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :FORM",
+                  # by label and offset alone, as write-i-mem-slot's (above); it was
+                  #   ... =>! WRITE-I-MEM check: I-MEM 56 (XWIPM-I-14+1) breaks :FORM
+                  " (setf (aref ua:i-mem loc) old))) =>! (XWIPM-I-14+1) breaks :FORM",
                   "(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL",
                   prom_form(version) + ' => T',
                   "(mapcar #'cadr (ua:write-i-mem-breaches)) => NIL"]

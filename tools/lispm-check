@@ -1466,11 +1466,16 @@ HC_START = '(login "LISPM")\r(hc-serve)\r'
 # They are typed once the machine has run this many microcycles, read at its
 # prompt (pc), past the boot's first microcode: one setup that typed as soon
 # as the glass TTY took a connection stopped itself there (HALT-CONS at PC
-# 32063, near BEG0000, at 745 thousand microcycles), though four more that
-# typed as early, still in the PROM, did not, so the cause is not
-# established; every boot that typed from 2.5 million on went on.  A count of
-# the machine's own work, not wall time, so that a loaded host types no
-# earlier in the boot.
+# 32063, near BEG0000, at 745 thousand microcycles).  The cause: location 6
+# (PROM, sys/ucadr/uc-cadr.lisp) took any key word waiting in the FIFO but
+# Rubout's boot word for a warm boot, and with no band in memory the warm
+# path's read of 4031 faulted and ILLOP halted the machine; a key typed
+# after location 6, 737 thousand microcycles in, did no harm.  This tree's
+# microcode cold-boots instead, reading the FIFO to its last word and
+# dropping the keys, so the wait stays: for bands on older microcode, which
+# halt, and so that none of the start is typed into the FIFO only to be
+# dropped.  A count of the machine's own work, not wall time, so that a
+# loaded host types no earlier in the boot.
 HC_TYPE_AFTER = 20000000
 # The checkpoint at the prompt is refused while the file device has a command
 # queued or a handle open (muir-sim src/file_device.rs, checkpoint_refusal).
