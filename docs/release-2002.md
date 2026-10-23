@@ -2920,3 +2920,25 @@ and then left the band and the microcode (step R3, below).
   the stand-in. Two mutants: `chaos` put back fails `network.sh`'s
   `chaos-refused`, `chaos-variable` and `harness-chaos`; ozd's start put
   back fails `run.sh`'s `no-ozd` (9 starts).
+- **`gen-pretenure` catches `pretenure-cache` over TCP**
+  (`tools/microcode-check/lisp/generational.lisp:200`). The case conses a
+  64 K-word array in an ephemeral area, which must be pretenured, then a
+  10-word one, which must land in eden, and a 1 K-word one. The cons cache
+  is the machine's, not the process's: big's `make-array`, which fills
+  64 K words, takes some 75 ms on micro, and a cons by another process in
+  another area in that window refilled the cache, so small took the full
+  path to eden even when big's pretenured cons had filled the cache. Over
+  TCP the network process ran in the window (the cache held
+  `EXTRA-PDL-AREA` after big), and a microcode whose pretenured cons fills
+  the cache passed; over `--network files` it was caught, though not every
+  time: in a sweep of delays the mutant was hidden in 5 of 11 runs over TCP
+  and 1 of 11 over files. The three conses are now made inside
+  `without-interrupts`, the area outside it (`:211`). Measured on the
+  default band with quux 509c671: before the change `pretenure-cache`
+  passed `generational` over TCP, 32 of 32, in 2 runs of 2; after it,
+  `pretenure-cache` fails it over TCP in 3 runs of 3 and over `--network
+  files` (`gen-pretenure` (0 NIL 0 NIL 1 T)), the delay sweep catches it in
+  22 of 22, and `none` passes it, 32 of 32, over both. The full
+  `generational-mutants` run catches all 25 partial fixes, and `none`
+  passes `generational`, `generational-2mw`, `generational-save`,
+  `warm-boot` and the 2010 and missing-bitmap halts.

@@ -200,13 +200,21 @@ symbol's value forwarded to its A location; else T."
 (defun gen-pretenure ()
   "A 64 K-word array in an ephemeral area, then a 10-word one and a 1 K-word one:
 each one's generation and whether it lies in ephemeral space (C12)."
-  (let* ((a (gen-make-ephemeral-area (gensym)))
-	 (big (make-array 65536 :area a))
-	 (small (make-array 10 :area a))
-	 (one-k (make-array 1024 :area a)))
-    (list (gen-generation big) (gen-in-ephemeral-space-p big)
-	  (gen-generation small) (gen-in-ephemeral-space-p small)
-	  (gen-generation one-k) (gen-in-ephemeral-space-p one-k))))
+  ;; the three conses are made with scheduling inhibited.  the cons cache is
+  ;; the machine's, not the process's: a cons by another process in another
+  ;; area between big's and small's (big's make-array, which fills 64 k words,
+  ;; takes some 75 ms on micro) refills it, and small then takes the full path
+  ;; to eden even when big's pretenured cons filled the cache.  over tcp the
+  ;; network process ran in that window, the cache held extra-pdl-area after
+  ;; big, and a microcode whose pretenured cons fills the cache passed.
+  (let ((a (gen-make-ephemeral-area (gensym))))
+    (without-interrupts
+      (let* ((big (make-array 65536 :area a))
+	     (small (make-array 10 :area a))
+	     (one-k (make-array 1024 :area a)))
+	(list (gen-generation big) (gen-in-ephemeral-space-p big)
+	      (gen-generation small) (gen-in-ephemeral-space-p small)
+	      (gen-generation one-k) (gen-in-ephemeral-space-p one-k))))))
 
 (defun gen-pretenure-edge ()
   "Arrays of 32768 and 32769 words (a long header and 32766 or 32767 elements): the
