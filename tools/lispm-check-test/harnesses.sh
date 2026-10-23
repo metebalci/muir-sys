@@ -2,36 +2,38 @@
 # The network of the tools that build their own sessions from lispm-check's
 # classes (QUUX's Ethernet contract, sections 3 and 8 R2): since R2's switch
 # they take a tap through lispm-check's helper and, with no network named,
-# carry the session over TCP on revision 16 and over Chaos on revisions 13-15.
+# carry the session over TCP on QUUX (and over Chaos on revisions 13-15,
+# until those left these tools).
 # Tested here: tools/system-check/warm-boot, and
 # tools/microcode-check/generational-save, whose session and whose boot's
 # lispm-check run are tools/cross-build/run's (Run.session, Run.lispm_check).
 #
 #   LISPM_CHECK_TAPS=16-17 LISPM_CHECK_PORTS=44000-44099 \
-#     tools/lispm-check-test/harnesses.sh W16 W15 DISK UBIN OZD [ENGINE]
+#     tools/lispm-check-test/harnesses.sh W16 DISK UBIN [ENGINE]
 #
-# W16 and W15 are machines of revisions 16 and 15 (wrappers that set
-# MUIR_QUUX_REVISION and give the boot PROM); DISK holds a band with the
-# network current in LOD1, with LOD2 free for generational-save's save, and
-# UBIN its ubin/ with the PROM's promh.mcr; OZD is ozd, for the Chaos runs;
-# ENGINE is micro (the default) or rtl.  LISPM_CHECK_TEST_TREE names the tree
+# W16 is QUUX's machine (a wrapper that gives the boot PROM; lispm-check sets
+# MUIR_QUUX_REVISION=16); DISK holds a band with the network current in
+# LOD1, with LOD2 free for generational-save's save, and UBIN its ubin/ with
+# the PROM's promh.mcr; ENGINE is micro (the default) or rtl.  It took
+# W16 W15 DISK UBIN OZD [ENGINE], W15 and OZD for the lanes on revision 15
+# over Chaos, until 15 left these tools.  LISPM_CHECK_TEST_TREE names the tree
 # whose tools are tested (default: this one), so that another tree's can be
 # run against the same checks.  Neither --network nor LISPM_CHECK_NETWORK is
-# given: what is checked is the default.  On revision 16 ozd is a stand-in
-# that notes each start and exits, so that any start of ozd fails the run and
-# is seen.  About 30 minutes on micro.
+# given: what is checked is the default.  ozd is a stand-in that notes each
+# start and exits, so that any start of ozd fails the run and is seen.  About
+# 15 minutes on micro.
 #
 #   warm-boot-16  RESULT PASS; the machine given --ethernet-socket and no
 #                 --chaos-udp; the stand-in ozd never started
 #   gsave-16      the same for generational-save's session and its boot
-#   warm-boot-15  RESULT PASS; the machine given --chaos-udp and no
-#                 --ethernet-socket; ozd started (its log)
-#   gsave-15      the same for generational-save's session and its boot
+#   (warm-boot-15 and gsave-15, the same over Chaos with ozd started, left
+#   with revision 15)
 here=$(cd "$(dirname "$0")" && pwd)
 tree=${LISPM_CHECK_TEST_TREE:-$(dirname "$(dirname "$here")")}
-w16=$1 w15=$2 disk=$3 ubin=$4 ozd=$5 engine=${6:-micro}
-if [ -z "$ozd" ] || [ -z "${LISPM_CHECK_TAPS:-}" ] || [ -z "${LISPM_CHECK_PORTS:-}" ]; then
-    echo "usage: LISPM_CHECK_TAPS=.. LISPM_CHECK_PORTS=LO-HI harnesses.sh W16 W15 DISK UBIN OZD [ENGINE]" >&2
+# it read: w16=$1 w15=$2 disk=$3 ubin=$4 ozd=$5 engine=${6:-micro}
+w16=$1 disk=$2 ubin=$3 engine=${4:-micro}
+if [ -z "$ubin" ] || [ -z "${LISPM_CHECK_TAPS:-}" ] || [ -z "${LISPM_CHECK_PORTS:-}" ]; then
+    echo "usage: LISPM_CHECK_TAPS=.. LISPM_CHECK_PORTS=LO-HI harnesses.sh W16 DISK UBIN [ENGINE]" >&2
     exit 2
 fi
 unset LISPM_CHECK_NETWORK
@@ -68,8 +70,11 @@ passed() {  # OUT STATUS: the harness's exit and its RESULT
 }
 lo=${LISPM_CHECK_PORTS%-*} hi=${LISPM_CHECK_PORTS#*-}
 
-for rev in 16 15; do
-    if [ "$rev" = 16 ]; then q=$w16 o=$trip; else q=$w15 o=$ozd; fi
+# it ran 16 and then 15, whose machine was W15 and whose ozd was OZD:
+#   for rev in 16 15; do
+#       if [ "$rev" = 16 ]; then q=$w16 o=$trip; else q=$w15 o=$ozd; fi
+for rev in 16; do
+    q=$w16 o=$trip
     rm -f "$trips"
 
     name=warm-boot-$rev d=$work/$name

@@ -87,9 +87,8 @@ Defaults, each overridden by its flag or an environment variable:
                             --micro or --rtl; any other value is refused
   --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
   --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
-  --network LISPM_CHECK_NETWORK  tcp on revision 16, chaos on revisions 13-15
-                            and the CADR: what carries the TELNET session,
-                            below
+  --network LISPM_CHECK_NETWORK  tcp on QUUX, chaos on the CADR: what
+                            carries the TELNET session, below
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   LISPM_CHECK_TAPS          the tap indexes it picks from, as N, LO-HI or a
                             comma-separated list of them: the pool's host-only
@@ -137,8 +136,8 @@ the zone's offset.  ozd refuses a zone under utc, and so does this tool.  The
 flags change only what ozd serves, not the checkpoint, whose setup reads no
 file.
 
-The network (QUUX's Ethernet contract, sections 3, 7 and 8 R1).  On QUUX's
-revision 16, which has the Ethernet device, every run takes a tap of the
+The network (QUUX's Ethernet contract, sections 3, 7 and 8 R1).  On QUUX,
+which has the Ethernet device, every run takes a tap of the
 pool (muir-sim's tools/quux-taps) through the fault relay
 (tools/fault-relay/relay) and gives the machine its addresses, so that the
 band always has its link: --ethernet-socket, --ip-address and --ip-gateway,
@@ -149,16 +148,21 @@ the next, and when all are held it waits for one, up to --setup-limit.  The
 tap is the lock: a band uses index N's address only while its run holds tap
 N.  A checkpoint is made for each tap index on its first use, and its key
 names QUUX's address behind that tap, since muir refuses a resume under other
-addresses.  Revision 15 and the CADR take no tap, and their keys are as
-before.  The revision is asked of the machine once for each build (and
-MUIR_QUUX_REVISION), and remembered under the cache.
+addresses.  The CADR takes no tap, and its keys are as before.
+One QUUX is current, the one quux runs; an earlier one runs from an earlier
+commit of this tree.  Every machine this tool starts is given
+MUIR_QUUX_REVISION=16 (muir-sim's quux takes 13 without it until it runs one
+QUUX alone), and a MUIR_QUUX_REVISION set to another value is refused.  The
+machine is asked once for each build what it runs, and the answer is
+remembered under the cache: a machine whose start names a revision other
+than 16 (an older quux, or a wrapper that sets another) is refused.
   --network chaos   ozd's TCP gateway carries the session to the band's
                     Chaos TELNET server, the band's cable being --chaos-udp
-                    to ozd: the default on revisions 13-15 and the CADR
+                    to ozd: the default on the CADR
   --network tcp     the session is the build host's own TCP, from a socket
                     bound to the tap, to the band's TELNET server on port 23
                     at QUUX's address; the machine is given no Chaos peer at
-                    all, and ozd is not started.  It needs revision 16, and a
+                    all, and ozd is not started.  It needs QUUX, and a
                     band whose SYS: is on the file device's host, HOST or
                     FILES (--file-server device; auto then means device).
                     At the end of a setup it half-closes the session and
@@ -166,17 +170,15 @@ MUIR_QUUX_REVISION), and remembered under the cache.
                     at the client's EOF, then waits 0.5 s for the last ACK,
                     so that the checkpoint holds no connection; a setup
                     whose band does not close is a failed run.  The default
-                    on revision 16 (the contract, section 8 R2), so a run
-                    there starts no ozd unless it asks for chaos; a band
-                    without the network wants --network chaos, or files
+                    on QUUX (the contract, section 8 R2), so a run there
+                    starts no ozd unless it asks for chaos; a band without
+                    the network wants --network chaos, or files
   --network files   no network at all: the session goes through files on
                     the file device's host (QUUX's Ethernet contract,
                     section 18, Q-N13 (a)), for a band checked without its
-                    network, on revision 15, whose band has no Chaos and no
-                    Ethernet device since R3, or on 16 without a tap; it is
-                    never the default.  A request is a form in
-                    /home/lispm/hc-K.req; HC-SERVE, a loop at the band's
-                    listener (tools/lispm-check-lisp/hc-serve.lisp), runs it
+                    network, or without a tap; it is never the default.  A
+                    request is a form in /home/lispm/hc-K.req; HC-SERVE, a
+                    loop at the band's listener (tools/lispm-check-lisp/hc-serve.lisp), runs it
                     through the same helper, writes what it printed to
                     hc-K.ans and then hc-K.done, and the answer is read once
                     hc-K.done is there.  The setup lays HC-SERVE and the
@@ -191,8 +193,8 @@ MUIR_QUUX_REVISION), and remembered under the cache.
                     fails the setup.  A check resumes it with its own copy
                     served and types nothing.  It needs a machine with a
                     file device, so the CADR is refused, and the device as
-                    the file server (auto means device); no tap is taken on
-                    revision 16, LISPM_CHECK_TAPS is not used, and ozd is
+                    the file server (auto means device); no tap is taken,
+                    LISPM_CHECK_TAPS is not used, and ozd is
                     not started.  Unlike TELNET, a bare "(Y or N)" asked
                     without FQUERY, or an error the helper does not catch,
                     waits at the console: the case gets no answer and the run
@@ -202,11 +204,11 @@ The tools that build their own sessions from these classes
 (tools/system-check/warm-boot, tools/cross-build/run's sessions) take the
 network and the tap through harness_network, below, with the same default;
 they refuse files, which is this tool's alone.
-Each network has its own checkpoint on revision 16: since step R3 of the
+Each network has its own checkpoint: since step R3 of the
 contract's section 8 the band has no NCP, so tcp gives the machine no
 --chaos-address, and chaos does, and the checkpoint holds the Chaosnet
 interface's switches (until R3 --chaos-address was given in both, and one
-checkpoint served both networks).  files has its own on every revision: its
+checkpoint served both networks).  files has its own too: its
 checkpoint holds HC-SERVE running at the listener.
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
@@ -589,6 +591,28 @@ class TapLink:
         shutil.rmtree(self.sock_dir, ignore_errors=True)
 
 
+# One QUUX is current: the revision quux runs, 16; an earlier one runs from an
+# earlier commit of this tree (the removal of revisions 13-15).  muir-sim's
+# quux runs revision 13 unless MUIR_QUUX_REVISION says another, until it runs
+# one QUUX alone, so every machine these tools start is given 16 through the
+# environment, which the machine and every wrapper inherit.  A value set to
+# another revision is refused rather than overridden, so that a wrapper or a
+# shell left set for an earlier revision is seen.
+QUUX_REVISION = '16'
+
+
+def quux_environment():
+    """Sets MUIR_QUUX_REVISION=16 for every machine this process starts, on
+    QUUX; RunFailed for a value set to another."""
+    if MACHINE != 'quux':
+        return
+    value = os.environ.get('MUIR_QUUX_REVISION')
+    if value not in (None, '', QUUX_REVISION):
+        raise RunFailed('MUIR_QUUX_REVISION=%s: these tools run the QUUX quux runs; an earlier one runs'
+                        ' from an earlier commit of this tree' % value)
+    os.environ['MUIR_QUUX_REVISION'] = QUUX_REVISION
+
+
 def machine_revision(a, exe_sha):
     """QUUX's revision the machine runs, asked of it once for each build and
     MUIR_QUUX_REVISION (a wrapper may set it), and remembered under the cache:
@@ -597,12 +621,17 @@ def machine_revision(a, exe_sha):
     no engine named, so that a wrapper's flags for one engine are taken: it
     was asked with --micro, which quux refuses for rtl's flags
     (--memory-timing, --cache, as the soak's rtl lanes give them), so every
-    run through such a wrapper failed here, and since the default network
-    follows the revision (QUUX's Ethernet contract, section 8 R2), none
-    could take it.  quux's own engine is rtl, and only rtl has flags of its
-    own; the asking takes about 4 ms on either engine."""
+    run through such a wrapper failed here.  quux's own engine is rtl, and
+    only rtl has flags of its own; the asking takes about 4 ms on either
+    engine.
+    The answer chose the network, tcp on 16 and chaos on 13-15, until
+    revisions 13-15 left these tools; now it only refuses a machine that
+    names a revision other than 16 (an older quux, or a wrapper that sets
+    another), and a start that names none, as quux's will once it runs one
+    QUUX alone, is taken for the current one: 16."""
     if MACHINE != 'quux':
         return None
+    quux_environment()
     pair = '%s-%s' % (exe_sha[:16], os.environ.get('MUIR_QUUX_REVISION', ''))
     db = os.path.join(cache_dir(), 'revisions.json')
     try:
@@ -610,47 +639,66 @@ def machine_revision(a, exe_sha):
             known = json.load(f)
     except (OSError, ValueError):
         known = {}
-    if pair in known:
-        return known[pair]
-    ports_lock, ports = take_ports()
-    try:
-        # before, the engine forced:
-        #   [a.exe, '-c', '/dev/null', '--micro', '--stop-after', '1', ...]
-        p = subprocess.run([a.exe, '-c', '/dev/null', '--stop-after', '1',
-                            '--terminal', '127.0.0.1:%d' % ports[3]],
-                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
-    finally:
-        ports_lock.release()
-    m = re.search(r'machine: quux, revision (\d+)|QUUX revision (\d+) has', p.stdout + p.stderr)
-    if not m:
-        raise RunFailed('%s did not say which revision it runs (%s -c /dev/null --stop-after 1): %s'
-                        % (MACHINE, a.exe, ' '.join((p.stdout + p.stderr).split())[-300:]))
-    known[pair] = int(m.group(1) or m.group(2))
-    tmp = '%s.%d' % (db, os.getpid())
-    with open(tmp, 'w') as f:
-        json.dump(known, f, indent=1)
-    os.replace(tmp, db)
+    if pair not in known:
+        ports_lock, ports = take_ports()
+        try:
+            # before, the engine forced:
+            #   [a.exe, '-c', '/dev/null', '--micro', '--stop-after', '1', ...]
+            p = subprocess.run([a.exe, '-c', '/dev/null', '--stop-after', '1',
+                                '--terminal', '127.0.0.1:%d' % ports[3]],
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+        finally:
+            ports_lock.release()
+        said = p.stdout + p.stderr
+        m = re.search(r'machine: quux, revision (\d+)|QUUX revision (\d+) has', said)
+        # a revision was needed, since it chose the network:
+        #   if not m:
+        #       raise RunFailed('%s did not say which revision it runs (%s -c /dev/null --stop-after 1): %s'
+        #                       % (MACHINE, a.exe, ' '.join((p.stdout + p.stderr).split())[-300:]))
+        #   known[pair] = int(m.group(1) or m.group(2))
+        if m:
+            known[pair] = int(m.group(1) or m.group(2))
+        elif re.search(r'machine: quux\b|QUUX has no built-in boot PROM', said):
+            known[pair] = int(QUUX_REVISION)
+        else:
+            raise RunFailed('%s did not start as quux (%s -c /dev/null --stop-after 1): %s'
+                            % (MACHINE, a.exe, ' '.join(said.split())[-300:]))
+        tmp = '%s.%d' % (db, os.getpid())
+        with open(tmp, 'w') as f:
+            json.dump(known, f, indent=1)
+        os.replace(tmp, db)
+    if known[pair] != int(QUUX_REVISION):
+        # the revision the machine named, the one fact that explains the refusal
+        raise RunFailed('%s says it runs QUUX revision %d; these tools run the QUUX quux runs, and an'
+                        ' earlier one runs from an earlier commit of this tree' % (a.exe, known[pair]))
     return known[pair]
 
 
 # The default network (QUUX's Ethernet contract, section 8 R2, the switch):
 # a run that names none, by --network or LISPM_CHECK_NETWORK, is carried over
-# TCP on revision 16, whose band has the network, and over Chaos on revisions
-# 13-15 and on the CADR, which keep their Chaos as released.  Before the
-# switch every run's default was chaos, so a run on revision 16 started ozd.
+# TCP on QUUX, whose band has the network, and over Chaos on the CADR, which
+# keeps its Chaos as released.  Before the switch every run's default was
+# chaos, so a run on revision 16 started ozd; until revisions 13-15 left these
+# tools, they took chaos too.
 
 def default_network(revision):
     """The network of a run on REVISION (None: the CADR) that names none."""
-    return 'tcp' if revision is not None and revision >= 16 else 'chaos'
+    # it followed the revision:
+    #   return 'tcp' if revision is not None and revision >= 16 else 'chaos'
+    return 'tcp' if revision is not None else 'chaos'
 
 
 def resolve_network(network, revision):
     """The network a run takes: NETWORK as named, or the default for REVISION
-    when NETWORK is None; RunFailed for tcp below revision 16."""
+    when NETWORK is None; RunFailed for tcp on the CADR."""
     chosen = network or default_network(revision)
-    if chosen == 'tcp' and (revision is None or revision < 16):
-        raise RunFailed('--network tcp: %s runs %s, which has no Ethernet device; revision 16 has'
-                        % (MACHINE, 'revision %d' % revision if revision else 'the CADR'))
+    # tcp was refused below revision 16 too:
+    #   if chosen == 'tcp' and (revision is None or revision < 16):
+    #       raise RunFailed('--network tcp: %s runs %s, which has no Ethernet device; revision 16 has'
+    #                       % (MACHINE, 'revision %d' % revision if revision else 'the CADR'))
+    if chosen == 'tcp' and revision is None:
+        raise RunFailed('--network tcp: %s runs the CADR, which has no Ethernet device; QUUX has'
+                        % MACHINE)
     # files goes through QUUX's file device, which the CADR has not
     if chosen == 'files' and revision is None:
         raise RunFailed('--network files: %s runs the CADR, which has no file device; the session'
@@ -663,10 +711,10 @@ def harness_network(exe, setup_limit=SETUP_LIMIT):
     from this tool's classes (tools/system-check/warm-boot, and
     tools/cross-build/run's sessions, which tools/microcode-check/
     generational-save takes): they take a tap through this helper (QUUX's
-    Ethernet contract, section 3, "Who takes a tap").  EXE's revision is
-    asked as a run asks it; the network is LISPM_CHECK_NETWORK's, or the
-    default for that revision; on revision 16 a tap of LISPM_CHECK_TAPS is
-    taken through the fault relay, waiting up to SETUP_LIMIT s for a free
+    Ethernet contract, section 3, "Who takes a tap").  EXE is asked what it
+    runs as a run asks it, and refused as a run is; the network is
+    LISPM_CHECK_NETWORK's, or the default; on QUUX a tap of LISPM_CHECK_TAPS
+    is taken through the fault relay, waiting up to SETUP_LIMIT s for a free
     one.  Returns
     (network, link): LINK a TapLink, which the caller stops after its
     machine, or None.  Before the switch these tools gave their file server
@@ -688,11 +736,13 @@ def harness_network(exe, setup_limit=SETUP_LIMIT):
         raise RunFailed('LISPM_CHECK_NETWORK: %r is not one of %s' % (named, ', '.join(NETWORKS)))
     network = resolve_network(named, revision)
     link = None
-    if revision is not None and revision >= 16:
+    # every QUUX run takes a tap; it read: if revision is not None and revision >= 16:
+    if revision is not None:
         link = TapLink(tap_range(), now() + setup_limit)
+        # the default named no revision before: ' (the default on revision 16)'
         print('%s: tap %s, QUUX at %s, TELNET over %s%s'
               % (os.path.basename(sys.argv[0]), link.tap, link.quux, network,
-                 '' if named else ' (the default on revision 16)'), flush=True)
+                 '' if named else ' (the default)'), flush=True)
     return network, link
 
 
@@ -770,7 +820,8 @@ class OzdFileServer:
         self.proc = None
         self.network, self.link = network, link
         if network == 'tcp' and link is None:
-            raise RunFailed('--network tcp needs a tap, and so revision 16')
+            # it named the revision: '--network tcp needs a tap, and so revision 16'
+            raise RunFailed('--network tcp needs a tap, and so QUUX')
         # --network files: the glass TTY's port, at the setup alone, where
         # the start forms are typed at the console (setup_files)
         self.glass = None
@@ -1656,7 +1707,8 @@ def ensure_checkpoint(a, key, link=None):
                     raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
                                   ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
                                   % (e, a.file_server, ' or '.join(server.hosts), MACHINE,
-                                     ' (a System 1002 band does not run on quux revision 11 and later)'
+                                     # it named the revision: ' (... on quux revision 11 and later)'
+                                     ' (a System 1002 band does not run on quux)'
                                      if MACHINE == 'quux' else '',
                                      ' Over TCP: does the band start its network, and answer at %s, port %d,'
                                      ' behind %s? (--network chaos needs no network)'
@@ -2012,16 +2064,16 @@ def options(argv=None):
     # Which network carries the TELNET session (the contract, section 8 R1):
     # checked below rather than by choices=, as --engine is.  None, when
     # neither the flag nor the variable names one, is resolved by the
-    # machine's revision in prepare (QUUX's Ethernet contract, section 8
-    # R2): tcp on 16, chaos below and on the CADR.  It was chaos for every
-    # run before the switch:
+    # machine in prepare (QUUX's Ethernet contract, section 8
+    # R2): tcp on QUUX, chaos on the CADR (and on revisions 13-15 until
+    # they left these tools).  It was chaos for every run before the switch:
     #   default=os.environ.get('LISPM_CHECK_NETWORK') or 'chaos',
     p.add_argument('--network', metavar='{%s}' % ','.join(NETWORKS),
                    default=os.environ.get('LISPM_CHECK_NETWORK') or None,
                    help="what carries the session: chaos, TELNET through ozd; tcp, TELNET over the"
                         " build host's TCP to the band behind its tap; or files, no network, the"
-                        " session through files on the file device; by default tcp on revision 16"
-                        " and chaos on revisions 13-15 and the CADR")
+                        " session through files on the file device; by default tcp on QUUX and"
+                        " chaos on the CADR")
     p.add_argument('--ozd-timezone', type=int,
                    default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
                    help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
@@ -2049,8 +2101,8 @@ def options(argv=None):
 
 
 def prepare(a):
-    """Everything before the check itself: the paths checked, the machine's
-    revision asked, the file server chosen, on revision 16 a tap taken, and
+    """Everything before the check itself: the paths checked, the machine
+    asked what it runs, the file server chosen, on QUUX a tap taken, and
     the checkpoint for this key made when there is none.  Returns (the tap's
     TapLink or None, the checkpoint, the setup's time or None); the caller
     stops the link after its machine.  RunFailed or RunHung otherwise, with
@@ -2058,7 +2110,7 @@ def prepare(a):
     link = None
     try:
         # ozd's path is checked once the network is known, below: the
-        # default network depends on the revision, asked of the machine
+        # default network depends on the machine, QUUX or the CADR
         for what, path in (('band', a.band), (MACHINE, a.exe)):
             if not os.path.isfile(path):
                 raise RunFailed('no %s at %s' % (what, path))
@@ -2073,9 +2125,10 @@ def prepare(a):
         a.band_sha = sha256_cached(a.band)
         a.exe_sha = sha256_cached(a.exe)
         a.exe_version = subprocess.run([a.exe, '-V'], capture_output=True, text=True).stdout.strip()
-        # revision 16 has the Ethernet device, and every run on it takes a tap
+        # QUUX has the Ethernet device, and every run on it takes a tap; a
+        # machine that names another revision than 16 is refused here
         a.revision = machine_revision(a, a.exe_sha)
-        # the network named, or the default for the revision (section 8 R2)
+        # the network named, or the default for the machine (section 8 R2)
         a.network_named = a.network is not None
         a.network = resolve_network(a.network, a.revision)
         # started only over Chaos or for an OZ band, which TCP and files
@@ -2086,7 +2139,7 @@ def prepare(a):
         if a.network == 'tcp' and a.file_server != 'device':
             raise RunFailed('--network tcp%s: ozd serves the files over Chaos; a band whose SYS: is on OZ'
                             ' wants --network chaos'
-                            % ('' if a.network_named else ', the default on revision 16'))
+                            % ('' if a.network_named else ', the default'))
         if a.network == 'files' and a.file_server != 'device':
             raise RunFailed('--network files: the session goes through quux\'s file device, so the files'
                             ' are served by it (--file-server device); a band whose SYS: is on OZ wants'
@@ -2098,9 +2151,10 @@ def prepare(a):
         # engine is in it too, since the machine resumes a checkpoint only on the
         # engine that wrote it: one made on micro must not be taken for a
         # check on rtl (so the checkpoints made before it are made again).
-        # --network files takes no tap on revision 16 either: its point is
+        # --network files takes no tap on QUUX either: its point is
         # a band checked without its network; LISPM_CHECK_TAPS is not used
-        tapped = a.revision is not None and a.revision >= 16 and a.network != 'files'
+        # it read: tapped = a.revision is not None and a.revision >= 16 and a.network != 'files'
+        tapped = a.revision is not None and a.network != 'files'
         if a.network == 'files':
             print('lispm-check: no network: the session through files on the file device%s'
                   % (' (LISPM_CHECK_TAPS not used)' if os.environ.get('LISPM_CHECK_TAPS') else ''))
@@ -2134,7 +2188,7 @@ def prepare(a):
             key += '-' + link.quux
             print('lispm-check: tap %s, QUUX at %s, TELNET over %s%s'
                   % (link.tap, link.quux, a.network,
-                     '' if a.network_named else ' (the default on revision 16)'))
+                     '' if a.network_named else ' (the default)'))
         chk, t_setup = ensure_checkpoint(a, key, link)
         return link, chk, t_setup
     except BaseException:

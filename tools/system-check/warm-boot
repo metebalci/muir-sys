@@ -17,10 +17,10 @@ RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's and
 ozd's, and the screen at the warm boot and at a failure.
 
 The network is lispm-check's (QUUX's Ethernet contract, sections 3 and 8
-R2), through its helper, harness_network: on revision 16 the run takes a tap
-of LISPM_CHECK_TAPS through the fault relay, and the sessions go over TCP
-unless LISPM_CHECK_NETWORK says chaos, with no ozd started; on revisions
-13-15 they go over Chaos through ozd, as before.  Over TCP the session
+R2), through its helper, harness_network: the run takes a tap of
+LISPM_CHECK_TAPS through the fault relay, and the sessions go over TCP
+unless LISPM_CHECK_NETWORK says chaos, with no ozd started (on revisions
+13-15 they went over Chaos through ozd, until those left these tools).  Over TCP the session
 before the warm boot is closed cleanly (to the band's EOF), and the band's
 network starts again at the warm boot; DIR also keeps the fault relay's
 report and log.

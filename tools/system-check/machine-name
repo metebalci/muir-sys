@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """tools/system-check/machine-name: the machine's name after step R3 of QUUX's
-Ethernet contract (section 5.6, "From R3"), as a harness, on revisions 15 and
-16 alike.
+Ethernet contract (section 5.6, "From R3"), as a harness.  It ran on
+revisions 15 and 16 alike, and runs on 16 alone since 15 left these tools.
 
     tools/system-check/machine-name --out DIR --band DISK --ubin UBIN --quux QUUX
         [--engine micro|rtl] [--plant FILE]
 
-QUUX is a wrapper that sets the revision (MUIR_QUUX_REVISION) and gives the
-boot PROM, as lispm-check's --quux.  Revision 15's band has no network for a
-TELNET session, so every boot is driven at the console, through quux's RFB
+QUUX is a wrapper that gives the boot PROM, as lispm-check's --quux
+(lispm-check sets MUIR_QUUX_REVISION, and refuses a machine that names
+another revision than 16).  Revision 15's band had no network for a TELNET
+session, so every boot is driven at the console, through quux's RFB
 terminal: the harness types (login ...), to the host the band's SYS: is on,
 loads lisp/machine-name.lisp from the login's home directory (the file
 device's /home/lispm/, on HOST or FILES as the band names it) and types a
@@ -29,7 +30,7 @@ save, which writes a copy of it in DIR.
   saved     the saved band booted with no file: LISPM-3
   both      the saved band booted with site/hostname "lispm-2": the file wins,
             LISPM-2
-  internet  revision 16 only: no file and no command, a site entry
+  internet  no file and no command, a site entry
             TEST-INTERNET whose INTERNET address is the device's (register
             255, link-local) defined, and the name found again: TEST-INTERNET
             wins over LOCALHOST
@@ -64,7 +65,13 @@ a = p.parse_args()
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 quux, band = os.path.abspath(a.quux), os.path.abspath(a.band)
-rev = lc.machine_revision(argparse.Namespace(exe=quux), hashlib.sha256(open(quux, 'rb').read()).hexdigest())
+# asked as lispm-check asks it, which refuses a machine that names another
+# revision than 16 and gives the machines it starts MUIR_QUUX_REVISION=16; the
+# answer chose the internet case, which revision 15 lacked
+try:
+    rev = lc.machine_revision(argparse.Namespace(exe=quux), hashlib.sha256(open(quux, 'rb').read()).hexdigest())
+except lc.RunFailed as e:
+    sys.exit('machine-name: %s' % e)
 ok = True
 
 
@@ -240,8 +247,9 @@ try:
     try:
         prepare(b)
         expect('none', b.answer('none', '(mn-write "none")'), 'LOCALHOST', 'localhost')
-        if rev is None or rev >= 16:
-            expect('internet', b.answer('internet', '(mn-internet "internet")'), 'TEST-INTERNET', 'Unknown')
+        # on revision 16 alone, which has the device; it is the one QUUX now:
+        #   if rev is None or rev >= 16:
+        expect('internet', b.answer('internet', '(mn-internet "internet")'), 'TEST-INTERNET', 'Unknown')
     finally:
         b.stop()
 

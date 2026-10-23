@@ -11,7 +11,8 @@ Usage:
 
 DISK holds a band of System 2002 current in LOD1 and the microcode under test in
 MCR1; it is copied, never written.  UBIN is that microcode's sys/ubin/ with
-PROM 2002's promh.mcr beside it; QUUX is muir-sim's quux, run at revision 14.
+PROM 2002's promh.mcr beside it; QUUX is muir-sim's quux, or a wrapper that
+gives the PROM, run at revision 16 (lispm-check sets MUIR_QUUX_REVISION).
 The tools of tools/cross-build (its sessions, disks and band headers) do the
 work:
 
@@ -40,14 +41,13 @@ the holders' marks and the lists stay.  The incremental compare makes RQBs in a
 fresh DISK-BUFFER-AREA region, so this mode needs the Lisp side's MAKE-DISK-RQB,
 which pads past the region's first-object table (clarification 11).
 
-The machine runs at revision 14 unless QUUX, a wrapper, sets another
-(MUIR_QUUX_REVISION, as the soak's lane wrappers do), and the network follows
-the revision it runs (QUUX's Ethernet contract, section 8 R2).  On revision
-16 the session and the boot each take a tap of LISPM_CHECK_TAPS and go over
-TCP unless LISPM_CHECK_NETWORK says chaos, with no ozd started
-(cross-build's Run.session, through lispm-check's harness_network, and
-lispm-check's own default); on revisions 13-15 over Chaos through ozd, as
-before.  Over TCP the save's connection goes silent rather than closing,
+The machine is the one QUUX the tools run, revision 16 (it ran at 14 unless
+a wrapper set another, and over Chaos on 13-15, until those left these
+tools); a machine that names another revision is refused (QUUX's Ethernet
+contract, section 8 R2).  The session and the boot each take a tap of
+LISPM_CHECK_TAPS and go over TCP unless LISPM_CHECK_NETWORK says chaos, with
+no ozd started (cross-build's Run.session, through lispm-check's
+harness_network, and lispm-check's own default).  Over TCP the save's connection goes silent rather than closing,
 since the band's network stops as the save begins; the save is judged by its
 partition alone, watched after 120 s.
 

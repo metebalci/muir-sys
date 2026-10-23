@@ -11,10 +11,11 @@
 # named (README.md).
 # The checks of cases-16/ want revision 16, with ethernet-peer behind its
 # Ethernet device, and also run only when named (README.md).
-# The checks of cases-15/ want revision 15 and run only when named; named on
-# another revision, each is skipped, saying so (README.md): network-stray's
-# Chaosnet interface is gone from revision 16 (QUUX's Ethernet contract,
-# section 8, step R4).
+# The checks of cases-15/ wanted revision 15 and ran only when named, each
+# skipped on another revision: network-stray, whose Chaosnet interface is gone
+# from revision 16 (QUUX's Ethernet contract, section 8, step R4).  They left
+# with revisions 13-15, and so did the probe of the machine's revision below;
+# no machine raises word 100 <6>.
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
 checks=() args=()
@@ -30,7 +31,7 @@ for c in "${checks[@]}"; do
     cases=$here/cases/$c.cases
     [ -f "$cases" ] || cases=$here/cases-2mw/$c.cases
     [ -f "$cases" ] || cases=$here/cases-16/$c.cases
-    [ -f "$cases" ] || cases=$here/cases-15/$c.cases
+    # [ -f "$cases" ] || cases=$here/cases-15/$c.cases
     [ -f "$cases" ] || { echo "microcode-check: no $here/cases/$c.cases" >&2; exit 2; }
     files=()
     [ -f "$here/lisp/$c.lisp" ] && files=(--files "$here/lisp/$c.lisp")
@@ -39,21 +40,21 @@ for c in "${checks[@]}"; do
     lisp=$(sed -n '1s/^; lisp: \(.*\)$/\1/p' "$cases")
     [ -n "$lisp" ] && files=(--files "$(echo "$lisp" | sed "s|\([^,]*\)|$here/lisp/\1|g")")
     echo "##### $c"
-    # A check of cases-15/ on another revision is skipped, in one line: the
-    # machine, --quux or lispm-check's default, is asked its revision as
+    # A check of cases-15/ on another revision was skipped, in one line: the
+    # machine, --quux or lispm-check's default, was asked its revision as
     # lispm-check's machine_revision asks it, by its start's line.
-    if [ "$cases" = "$here/cases-15/$c.cases" ]; then
-        exe=${LISPM_CHECK_QUUX:-$here/../../../muir-sim/target/release/quux}
-        for ((i = 0; i + 1 < ${#args[@]}; i++)); do
-            [ "${args[i]}" = --quux ] && exe=${args[i+1]}
-        done
-        rev=$("$exe" -c /dev/null --stop-after 1 --terminal 127.0.0.1:0 < /dev/null 2>&1 |
-            sed -n 's/.*machine: quux, revision \([0-9]*\).*/\1/p; s/.*QUUX revision \([0-9]*\) has.*/\1/p' | head -n 1)
-        if [ "$rev" != 15 ]; then
-            echo "microcode-check: $c skipped: it wants revision 15, and $exe runs ${rev:+revision }${rev:-no revision it names}"
-            continue
-        fi
-    fi
+    # if [ "$cases" = "$here/cases-15/$c.cases" ]; then
+    #     exe=${LISPM_CHECK_QUUX:-$here/../../../muir-sim/target/release/quux}
+    #     for ((i = 0; i + 1 < ${#args[@]}; i++)); do
+    #         [ "${args[i]}" = --quux ] && exe=${args[i+1]}
+    #     done
+    #     rev=$("$exe" -c /dev/null --stop-after 1 --terminal 127.0.0.1:0 < /dev/null 2>&1 |
+    #         sed -n 's/.*machine: quux, revision \([0-9]*\).*/\1/p; s/.*QUUX revision \([0-9]*\) has.*/\1/p' | head -n 1)
+    #     if [ "$rev" != 15 ]; then
+    #         echo "microcode-check: $c skipped: it wants revision 15, and $exe runs ${rev:+revision }${rev:-no revision it names}"
+    #         continue
+    #     fi
+    # fi
     python3 "$tool" "${files[@]}" "${args[@]}" "$cases"
     s=$?
     [ $s -ne 0 ] && [ $status -eq 0 ] && status=$s

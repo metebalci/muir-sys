@@ -2827,3 +2827,54 @@ and then left the band and the microcode (step R3, below).
   min 9 s, `checks` 22 min 2 s, `guards` 8 min 18 s, `high` 5 min 35 s,
   `incremental` 13 min 5 s, `built` 15 min 56 s), its assembly equal to the
   microcode's own byte for byte but for `ucadr.sym`'s host, as above.
+- **The tools run revision 16 alone** (the removal of revisions 13-15, step
+  2; `tools/lispm-check`, `tools/microcode-check`, `tools/assembler-check`,
+  `tools/system-check/machine-name`, `tools/lispm-check-test/`). One QUUX
+  is current, the one `quux` runs; an earlier revision runs from an earlier
+  commit. `tools/lispm-check` asked the machine its revision to choose the
+  network, `tcp` on 16 and `chaos` on 13-15 (`default_network`, `:684`);
+  now QUUX's default is `tcp` and the CADR's `chaos`, and the answer only
+  refuses a machine whose start names a revision other than 16, naming it
+  (`machine_revision`, `:616`), a start that names none being taken for the
+  current one, as `quux`'s will be once it runs one QUUX alone. Until then
+  every machine the tools start is given `MUIR_QUUX_REVISION=16`, and a
+  value set to another is refused rather than overridden
+  (`quux_environment`, `:604`); every QUUX run takes a tap but under `files`
+  (`:2157`), and its printed lines name no revision. `--network chaos`,
+  `--file-server ozd` and ozd stay for now. `tools/microcode-check`'s
+  `cases-15/` (`network-stray`, with `network-stray-plant` and
+  `lisp/network-stray.lisp`) and `run`'s probe of the revision (`run:43`)
+  go: no machine raises word 100 `<6>`. `tools/assembler-check`'s `rev13`,
+  `rev14` and `dual` go, and `--ref` and `--ucadr-ref`, which only they
+  read, are refused (`run:52`, `:1537`, `:1700`); `rev15` stays, the format
+  revision 16 runs. `rev14-mutants` and `generational-mutants` assemble at
+  revision 15 (`rev14-mutants:102`, `generational-mutants:218`), whose
+  `.mcr` revision 16 boots, and lose `--revision`. `machine-name` runs its
+  `internet` case always (`machine-name:252`); `network.sh`'s
+  `rev15-tcp`, `rev15-chaos` and `rev15-default` and `files.sh`'s
+  `files-15`, `files-15-again` and `files-15-rtl` go, their checks moved
+  to `files-16`, `files-16-again` and `files-16-rtl` (`files.sh:121`,
+  `:194`), and `network.sh` gains `other-revision`, `variable-set` and
+  `no-revision` (`:227`); `harnesses.sh` takes `W16 DISK UBIN [ENGINE]`
+  (`:76`). `tcp-check`'s refusal names QUUX (`tcp-check/run:1162`). The
+  default band, `run/check/band.img`, is a read-only copy of a revision-16
+  route's native6 with that route's `ubin/` (`docs/lispm-check.md`,
+  Defaults), where it was System 2001's on revision 13. Measured on it, with
+  quux 509c671, whose start names revision 16, and with a scratch build whose
+  start names none and which takes 16 by default: `run.sh` 8 of 8,
+  `network.sh` 18 lanes ok (3 skipped for want of a Chaos band and a CADR)
+  and `harnesses.sh` 2 of 2, the same with both; quux told 13, 14 or 15 by
+  its wrapper, and `MUIR_QUUX_REVISION=14`, refused. Four mutants of the
+  change (no refusal, the variable overridden, a start naming none refused,
+  the variable not set) each fail a `network.sh` lane. The suites over TCP
+  give 1,718 of 1,730 cases, every verdict as before the change (the 12
+  fails the self-test's own); the 13 cases fewer are `rev13`'s, `rev14`'s,
+  `dual`'s and `network-stray`'s. The mutants, assembled at 15 and booted on
+  16: `generational-mutants`' `none` assembles to the route's microcode
+  byte for byte and passes `generational`, `generational-2mw`,
+  `generational-save`, `warm-boot` and the 2010 and missing-bitmap halts;
+  the 6 of `rev14-mutants` and 24 of the 25 partial fixes fail their checks
+  (`warm-unarmed` now `warm-boot`'s C15). `pretenure-cache` passes
+  `generational` over TCP and fails it over `--network files`
+  (`gen-pretenure` (0 NIL 0 NIL 1 T)), as it failed on revision 14; why
+  TCP hides it is not yet measured.

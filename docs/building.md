@@ -1205,12 +1205,12 @@ fetch's, or a start in a return's slot (the map-after-start check,
 where it can run right after a memory start or the fetch's (the MD-after-start
 check), with `QMLP` to `QMLP+3`, where a return that asks for the fetch
 lands, held to both by name.
-`tools/assembler-check`'s `rev15`, `oa-select`, `dual`, `write-i-mem`,
+`tools/assembler-check`'s `rev15`, `oa-select`, `write-i-mem`,
 `map-after-start`, `md-after-start` and the plants (`oa-drop-low`, `popj-dispatch`,
 `return-table-drift`, `write-i-mem-slot`, `map-after-start-return-slot` and
-the others) check this; `dual` holds the revision-14
+the others) check this; `dual` held the revision-14
 and revision-15 assemblies of the tree's microcode to the same `<47:0>`, word
-for word. Boot PROM 2002 for revision 15 reads only revision 15's `.mcr` and
+for word, until revisions 13-15 left the tools (with `rev13` and `rev14`). Boot PROM 2002 for revision 15 reads only revision 15's `.mcr` and
 halts at `ERROR-NOT-REVISION-15` on an earlier machine.
 
 **The main-loop return check** (`check-main-loop-return-slots`,
@@ -1234,7 +1234,7 @@ also sets the PDL address field that A15b.2's rule gives the word itself. It
 prints and keeps the share of the profile's executions it covers
 (`(get 'ua:profile-pass 'ua:report)`), and `check-extension` then refuses an
 extension that breaks A15b.2's rules. Revision 14's assembly has no
-extension, so `dual`'s `<47:0>` rule holds. The profile is made again when
+extension, so `dual`'s `<47:0>` rule held. The profile is made again when
 the microcode changes, and its header records the microcode and muir-sim
 commits it came from; `tools/assembler-check`'s `profile` checks the pass
 with a hand-made one.

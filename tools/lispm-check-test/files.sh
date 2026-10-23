@@ -8,15 +8,16 @@
 #
 #   tools/lispm-check-test/files.sh --quux W16 --band DISK --ubin DIR ...
 #
-# The arguments are lispm-check's and go to every run; --quux must name a
-# machine of revision 16 and the band must be one whose SYS: is on the file
-# device's pathname host.  LISPM_CHECK_TEST_QUUX15, when set, names a machine
-# of revision 15 for the lanes that need one.  LISPM_CHECK_TEST_TOOL names the
+# The arguments are lispm-check's and go to every run; --quux must name
+# QUUX's machine and the band must be one whose SYS: is on the file device's
+# pathname host.  LISPM_CHECK_TEST_QUUX15, which named a machine of revision
+# 15 for the lanes that needed one, left with that revision: its lanes'
+# checks run on --quux's machine.  LISPM_CHECK_TEST_TOOL names the
 # tool tested (default: tools/lispm-check beside this directory).  Every run
 # uses a cache of this test's own, made empty here.  About 4 minutes on
 # micro, and 10 more for the rtl lane, which LISPM_CHECK_TEST_NO_RTL skips.
 #
-#   files-15        revision 15, LISPM_CHECK_TAPS naming no tap of the pool:
+#   files-16        LISPM_CHECK_TAPS naming no tap of the pool:
 #                   exit 1 with the verdicts of expected-files.txt (files.cases:
 #                   values, errors expected and not, a question through FQUERY,
 #                   output, the device in the resumed world, and early-answer,
@@ -25,10 +26,11 @@
 #                   checkpoint at the prompt, and its machine had no network
 #                   flag; the check's machine no glass TTY; no ozd; no tap and
 #                   "LISPM_CHECK_TAPS not used"; the key ends -files-<HC-SERVE>
-#   files-15-again  the same, its checkpoint resumed: no setup
-#   files-16        revision 16 (--quux): the same, with no tap and no
-#                   --ethernet-socket
-#   files-15-rtl    revision 15 on rtl: the same verdicts, its own checkpoint
+#   files-16-again  the same, its checkpoint resumed: no setup
+#   files-16-rtl    on rtl: the same verdicts, its own checkpoint
+#   (files-15, files-15-again and files-15-rtl were these on revision 15, and
+#   files-16 the first on 16 with no tap and no --ethernet-socket, until 15
+#   left these tools)
 #   held            a planted HC-SERVE (hc-serve-held.lisp appended) that holds
 #                   a file open around its loop: exit 2, the setup failing on
 #                   the checkpoint refused for a handle open, tried once
@@ -97,21 +99,30 @@ filekey() {  # filekey ENGINE: a checkpoint keyed -ENGINE-device-files-<8 hex>
 }
 
 cases=$here/files.cases
-q15=${LISPM_CHECK_TEST_QUUX15:-}
-if [ -n "$q15" ]; then
-    # LISPM_CHECK_TAPS naming no tap of the pool: tcp would fail on it
-    # (network.sh's no-tap), files must not use it
-    LISPM_CHECK_TAPS=63 run files-15 1 -- --network files --keep "$@" --quux "$q15" "$cases" \
-        && has "setting up a checkpoint" && has "over files (cold boot)" && has "(LISPM_CHECK_TAPS not used)" \
-        && hasnt "lispm-check: tap " && verdicts && machines && filekey micro && ok
-    run files-15-again 1 -- --network files "$@" --quux "$q15" "$cases" \
-        && hasnt "setting up a checkpoint" && verdicts && ok
-else
-    echo "skip files-15, files-15-again, files-15-rtl: no LISPM_CHECK_TEST_QUUX15"
-fi
-
-run files-16 1 -- --network files --keep "$@" "$cases" \
-    && has "setting up a checkpoint" && hasnt "lispm-check: tap " && verdicts && machines && ok
+# the lanes on revision 15, until it left these tools; their checks are
+# files-16's and files-16-again's below:
+# q15=${LISPM_CHECK_TEST_QUUX15:-}
+# if [ -n "$q15" ]; then
+#     # LISPM_CHECK_TAPS naming no tap of the pool: tcp would fail on it
+#     # (network.sh's no-tap), files must not use it
+#     LISPM_CHECK_TAPS=63 run files-15 1 -- --network files --keep "$@" --quux "$q15" "$cases" \
+#         && has "setting up a checkpoint" && has "over files (cold boot)" && has "(LISPM_CHECK_TAPS not used)" \
+#         && hasnt "lispm-check: tap " && verdicts && machines && filekey micro && ok
+#     run files-15-again 1 -- --network files "$@" --quux "$q15" "$cases" \
+#         && hasnt "setting up a checkpoint" && verdicts && ok
+# else
+#     echo "skip files-15, files-15-again, files-15-rtl: no LISPM_CHECK_TEST_QUUX15"
+# fi
+#
+# run files-16 1 -- --network files --keep "$@" "$cases" \
+#     && has "setting up a checkpoint" && hasnt "lispm-check: tap " && verdicts && machines && ok
+# LISPM_CHECK_TAPS naming no tap of the pool: tcp would fail on it
+# (network.sh's no-tap), files must not use it
+LISPM_CHECK_TAPS=63 run files-16 1 -- --network files --keep "$@" "$cases" \
+    && has "setting up a checkpoint" && has "over files (cold boot)" && has "(LISPM_CHECK_TAPS not used)" \
+    && hasnt "lispm-check: tap " && verdicts && machines && filekey micro && ok
+run files-16-again 1 -- --network files "$@" "$cases" \
+    && hasnt "setting up a checkpoint" && verdicts && ok
 
 # the plants: each tool copy beside its own lispm-check-lisp/, as the tree's
 plant() {  # plant DIR: a copy of the tool and of its HC-SERVE in DIR
@@ -119,8 +130,10 @@ plant() {  # plant DIR: a copy of the tool and of its HC-SERVE in DIR
     cp "$tool" "$1/lispm-check" && chmod +x "$1/lispm-check"
     cp "$(dirname "$tool")/lispm-check-lisp/hc-serve.lisp" "$1/lispm-check-lisp/hc-serve.lisp"
 }
-q=${q15:-}
-qarg=(); [ -n "$q" ] && qarg=(--quux "$q")
+# the plants ran on revision 15's machine when one was given:
+#   q=${q15:-}
+#   qarg=(); [ -n "$q" ] && qarg=(--quux "$q")
+qarg=()
 plant "$work/held"
 cat "$here/hc-serve-held.lisp" >> "$work/held/lispm-check-lisp/hc-serve.lisp"
 tool_was=$tool tool=$work/held/lispm-check
@@ -168,10 +181,17 @@ EOF
 then has "LISPM_CHECK_NETWORK=files: " && has "drives a TELNET session of its own" && ok
 else fail "harness_network took files"; fi
 
-if [ -n "$q15" ] && [ -n "${LISPM_CHECK_TEST_NO_RTL:-}" ]; then
-    echo "skip files-15-rtl: LISPM_CHECK_TEST_NO_RTL"
-elif [ -n "$q15" ]; then
-    run files-15-rtl 1 -- --network files --keep --engine rtl "$@" --quux "$q15" "$cases" \
+# on revision 15 until it left these tools:
+# if [ -n "$q15" ] && [ -n "${LISPM_CHECK_TEST_NO_RTL:-}" ]; then
+#     echo "skip files-15-rtl: LISPM_CHECK_TEST_NO_RTL"
+# elif [ -n "$q15" ]; then
+#     run files-15-rtl 1 -- --network files --keep --engine rtl "$@" --quux "$q15" "$cases" \
+#         && has "setting up a checkpoint" && verdicts && machines && filekey rtl && ok
+# fi
+if [ -n "${LISPM_CHECK_TEST_NO_RTL:-}" ]; then
+    echo "skip files-16-rtl: LISPM_CHECK_TEST_NO_RTL"
+else
+    run files-16-rtl 1 -- --network files --keep --engine rtl "$@" "$cases" \
         && has "setting up a checkpoint" && verdicts && machines && filekey rtl && ok
 fi
 

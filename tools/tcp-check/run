@@ -16,7 +16,7 @@ are lispm-check's: --band, --quux, --ubin, --tree, --engine, --file-server,
 --network and the rest, LISPM_CHECK_TAPS and LISPM_CHECK_PORTS too; its
 --files, with --compile, are loaded at the control session before the
 parts).  The
-machine must be revision 16 and the band one with the network.  It then
+machine must be QUUX and the band one with the network.  It then
 opens the control session, a TELNET session of its own over lispm-check's
 --network (tcp by default here), and turns the test echo service on.  Each
 part connects from sockets bound to the run's tap to QUUX's address behind
@@ -1156,8 +1156,10 @@ def main():
             raise lc.RunFailed('--network files: T2 drives TELNET sessions over the band\'s TCP, which'
                                ' files does without (chaos or tcp)')
         link, chk, t_setup = lc.prepare(a)
+        # no link is the CADR's alone now that every QUUX run takes a tap; it
+        # named the revision: 'T2 wants revision 16, which takes a tap'
         if link is None:
-            raise lc.RunFailed('T2 wants revision 16, which takes a tap')
+            raise lc.RunFailed('T2 wants QUUX, which takes a tap')
         if t_setup is not None:
             print('tcp-check: checkpoint made in %.1f s' % t_setup, flush=True)
         run_dir = lc.run_dir_new('t2')

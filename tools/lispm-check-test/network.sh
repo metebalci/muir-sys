@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # The self-test of tools/lispm-check's network (QUUX's Ethernet contract,
-# sections 3, 7 and 8 R1): a tap of the pool for every run on revision 16,
-# a checkpoint for each tap index, and --network tcp beside chaos.
+# sections 3, 7 and 8 R1): a tap of the pool for every run on QUUX, a
+# checkpoint for each tap index, and --network tcp beside chaos; and the
+# refusal of a machine that names another revision than 16.
 #
 #   LISPM_CHECK_TAPS=8-9 tools/lispm-check-test/network.sh --quux W16 --band DISK --ubin DIR ...
 #
-# The arguments are lispm-check's and go to every run; --quux must name a
-# machine of revision 16 (a wrapper that sets MUIR_QUUX_REVISION=16, say) and
-# the band must be one with the network, whose SYS: is on the file device's
-# pathname host (HOST or FILES, as the band names it).
+# The arguments are lispm-check's and go to every run; --quux must name
+# QUUX's machine (a wrapper that gives the boot PROM, say: the tool sets
+# MUIR_QUUX_REVISION=16) and the band must be one with the network, whose
+# SYS: is on the file device's pathname host (HOST or FILES, as the band
+# names it).
 # LISPM_CHECK_TAPS must name two host-only taps at least, of which the first
-# two, A and B, are used.  LISPM_CHECK_TEST_QUUX15, when set, names a machine
-# of revision 15 for the two runs that need one.  LISPM_CHECK_TEST_TOOL names
+# two, A and B, are used.  LISPM_CHECK_TEST_QUUX15, which named a machine of
+# revision 15 for the lanes that needed one, left with that revision (the
+# removal of revisions 13-15).  LISPM_CHECK_TEST_TOOL names
 # the tool tested (default: tools/lispm-check beside this directory), so
 # that a planted copy can be run against it.  Every run uses a cache of its
 # own, made empty here, so that the first one sets up over TCP; it is kept
@@ -19,11 +22,11 @@
 # Last it runs files.sh, the lanes of --network files, with the same
 # arguments; it needs no tap and runs alone too.
 # Since step R3 of section 8 the band has no Chaos, so the Chaos cases
-# (chaos-own, rev15-chaos, variable, rev15-default) run on a band from before
-# R3 with both networks, LISPM_CHECK_TEST_CHAOS_BAND, its ubin/
-# LISPM_CHECK_TEST_CHAOS_UBIN and its machines LISPM_CHECK_TEST_CHAOS_QUUX
-# (revision 16) and LISPM_CHECK_TEST_CHAOS_QUUX15, given after the arguments;
-# without that band they are skipped.
+# (chaos-own, variable) run on a band from before R3 with both networks,
+# LISPM_CHECK_TEST_CHAOS_BAND, its ubin/ LISPM_CHECK_TEST_CHAOS_UBIN and its
+# machine LISPM_CHECK_TEST_CHAOS_QUUX, given after the arguments; without
+# that band they are skipped.  (rev15-chaos and rev15-default took
+# LISPM_CHECK_TEST_CHAOS_QUUX15 too, until revision 15 left.)
 #
 #   tcp          --network tcp, tap A held by another program: exit 0 on
 #                tap B; the setup is made over TCP and closed cleanly, so the
@@ -44,8 +47,18 @@
 #   wait         A alone in the range and held for 5 s: the run says it
 #                waits, then takes A
 #   no-tap       LISPM_CHECK_TAPS naming no tap of the pool: exit 2
-#   rev15-tcp    --network tcp on revision 15: exit 2, no Ethernet device
-#   rev15-chaos  revision 15 over Chaos: no tap, and the key without one
+#   (rev15-tcp, --network tcp on revision 15, exit 2 for no Ethernet device,
+#   and rev15-chaos, revision 15 over Chaos with no tap, left with 15)
+#
+# The machine, asked once what it runs (no tap needed):
+#   other-revision  a stand-in quux whose start names revision 15, as an
+#                   older quux's or a wrapper's that sets 15 does: exit 2,
+#                   refused, naming it, before any setup
+#   variable-set    MUIR_QUUX_REVISION=15 in the environment: exit 2, refused
+#                   rather than overridden
+#   no-revision     a wrapper whose start names no revision, as quux's will
+#                   once it runs one QUUX alone, over --quux's machine: exit 0,
+#                   taken for the current one, over tcp on a tap
 #
 # The default, since R2's switch (section 8 R2): what a run gets when
 # neither --network nor LISPM_CHECK_NETWORK names a network.  ozd is given
@@ -55,7 +68,7 @@
 #                  stand-in ozd never started
 #   variable       LISPM_CHECK_NETWORK=chaos on revision 16: over chaos, as
 #                  --network chaos, ozd started
-#   rev15-default  revision 15: no tap, the Chaos cable, ozd started
+#   (rev15-default, revision 15 with no tap over Chaos, left with 15)
 #   cadr-default   the CADR, when LISPM_CHECK_TEST_CADR names muir-sim's cadr
 #                  and LISPM_CHECK_TEST_CADR_BAND a CADR band (its ubin/ beside
 #                  it; LISPM_CHECK_TEST_CADR_TREE its tree, by default this
@@ -64,8 +77,8 @@
 #                  and the session by ozd, over Chaos
 #   rtl-flags      revision 16 on rtl through a wrapper that adds the rtl-only
 #                  flags of the soak's rtl lanes (--memory-timing kria --cache
-#                  65536) to --quux's machine: the revision is still asked and
-#                  is 16, so the run goes over tcp, the stand-in ozd never
+#                  65536) to --quux's machine: the machine is still asked and
+#                  says 16, so the run goes over tcp, the stand-in ozd never
 #                  started.  The asking once forced --micro, which quux refuses
 #                  with those flags, and every such run failed (exit 2, "did
 #                  not say which revision it runs").  Its setup is on rtl:
@@ -193,14 +206,41 @@ wait; held=
 
 LISPM_CHECK_TAPS=63 run no-tap 2 -- --network tcp "$@" "$cases/tcp.cases" && has "no host-only tap of the pool" && ok
 
-if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
-    run rev15-tcp 2 -- --network tcp "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/tcp.cases" \
-        && has "which has no Ethernet device" && ok
-    chaos rev15-chaos "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && run rev15-chaos 0 -- --network chaos "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
-        && hasnt "lispm-check: tap " && { key | grep -E -- '-2-[a-z]+(-device)?\.chk$' > /dev/null \
-        || fail "no revision 15 checkpoint keyed as before: $(key)"; } && ok
+# rev15-tcp and rev15-chaos ran on LISPM_CHECK_TEST_QUUX15 until revision
+# 15 left these tools:
+# if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
+#     run rev15-tcp 2 -- --network tcp "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/tcp.cases" \
+#         && has "which has no Ethernet device" && ok
+#     chaos rev15-chaos "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && run rev15-chaos 0 -- --network chaos "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
+#         && hasnt "lispm-check: tap " && { key | grep -E -- '-2-[a-z]+(-device)?\.chk$' > /dev/null \
+#         || fail "no revision 15 checkpoint keyed as before: $(key)"; } && ok
+# else
+#     echo "skip rev15-tcp, rev15-chaos: no LISPM_CHECK_TEST_QUUX15"
+# fi
+
+# The machine asked what it runs: one QUUX is current, and a machine that
+# names another revision than 16 is refused before any setup.  The stand-in
+# prints an older quux's start and exits; given last, it is the --quux run.
+stand=$work/quux15-stand-in
+printf '#!/bin/sh\necho "machine: quux, revision 15: a stand-in"\nexit 0\n' > "$stand"
+chmod +x "$stand"
+run other-revision 2 -- "$@" --quux "$stand" "$cases/plain.cases" \
+    && has "says it runs QUUX revision 15" && hasnt "setting up a checkpoint" && ok
+MUIR_QUUX_REVISION=15 run variable-set 2 -- "$@" "$cases/plain.cases" \
+    && has "MUIR_QUUX_REVISION=15: " && hasnt "setting up a checkpoint" && ok
+# no-revision: a start naming no revision, over the caller's --quux, the last
+# one given; only the asking (-c /dev/null --stop-after 1) is answered by the
+# wrapper, every other start is the machine's own
+qn=
+prev=
+for x in "$@"; do [ "$prev" = --quux ] && qn=$x; case $x in --quux=*) qn=${x#--quux=} ;; esac; prev=$x; done
+if [ -n "$qn" ]; then
+    printf '#!/bin/sh\ncase " $* " in *" --stop-after 1 "*) echo "machine: quux: a stand-in naming no revision"; exit 0 ;; esac\nexec %s "$@"\n' "$qn" > "$work/quux-no-revision"
+    chmod +x "$work/quux-no-revision"
+    LISPM_CHECK_NETWORK= run no-revision 0 -- "$@" --quux "$work/quux-no-revision" "$cases/tcp.cases" \
+        && has "TELNET over tcp (the default)" && ok
 else
-    echo "skip rev15-tcp, rev15-chaos: no LISPM_CHECK_TEST_QUUX15"
+    echo "skip no-revision: no --quux given"
 fi
 
 # The default (section 8 R2).  The stand-in ozd notes its arguments and
@@ -233,12 +273,13 @@ fi
 chaos variable && LISPM_CHECK_NETWORK=chaos run variable 0 -- --keep "$@" "$cases/chaos.cases" \
     && has "TELNET over chaos" && chaos_cable && ok
 
-if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
-    chaos rev15-default "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && LISPM_CHECK_NETWORK= run rev15-default 0 -- --keep "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
-        && hasnt "lispm-check: tap " && chaos_cable && ok
-else
-    echo "skip rev15-default: no LISPM_CHECK_TEST_QUUX15"
-fi
+# rev15-default, until revision 15 left these tools:
+# if [ -n "${LISPM_CHECK_TEST_QUUX15:-}" ]; then
+#     chaos rev15-default "${LISPM_CHECK_TEST_CHAOS_QUUX15:-}" && LISPM_CHECK_NETWORK= run rev15-default 0 -- --keep "$@" --quux "$LISPM_CHECK_TEST_QUUX15" "$cases/plain.cases" \
+#         && hasnt "lispm-check: tap " && chaos_cable && ok
+# else
+#     echo "skip rev15-default: no LISPM_CHECK_TEST_QUUX15"
+# fi
 
 if [ -n "${LISPM_CHECK_TEST_CADR:-}" ] && [ -n "${LISPM_CHECK_TEST_CADR_BAND:-}" ]; then
     # the cadr line's copy of the tool differs in its MACHINE line alone
@@ -270,7 +311,7 @@ if [ -n "$q16" ]; then
     chmod +x "$work/q16-rtl-flags"
     rm -f "$trips"
     if LISPM_CHECK_NETWORK= run rtl-flags 0 -- --keep "$@" --quux "$work/q16-rtl-flags" --engine rtl \
-           --ozd "$trip" "$cases/tcp.cases" && has "TELNET over tcp (the default on revision 16)"; then
+           --ozd "$trip" "$cases/tcp.cases" && has "TELNET over tcp (the default)"; then
         d=$(kept)
         if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
         elif ! grep -q '^cache: 65536 words' "$d/quux.log"; then fail "the machine ran without the wrapper's flags (no 'cache: 65536 words' in its log)"
@@ -281,7 +322,7 @@ else
 fi
 
 # --network files, which needs no tap: its own script, with the same
-# arguments (and LISPM_CHECK_TEST_QUUX15, LISPM_CHECK_TEST_TOOL)
+# arguments (and LISPM_CHECK_TEST_TOOL)
 "$here/files.sh" "$@" || fails=$((fails+1))
 
 [ "$fails" = 0 ] && echo "network self-test passed" || echo "network self-test FAILED ($fails)"

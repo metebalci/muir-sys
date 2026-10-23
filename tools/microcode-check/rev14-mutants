@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""tools/microcode-check/rev14-mutants: revision 14's microcode with one fault
-planted, each assembled, so that the checks rev14-fiddles and rev14-paging can be
+"""tools/microcode-check/rev14-mutants: the microcode with one of revision 14's
+faults planted, each assembled, so that the checks rev14-fiddles and rev14-paging can be
 shown to fail under it (tools/microcode-check/README.md).
 
 Usage:
-  tools/microcode-check/rev14-mutants --out DIR [--revision R] [--jobs N] [MUTANT...]
+  tools/microcode-check/rev14-mutants --out DIR [--jobs N] [MUTANT...]
       [-- LISPM-CHECK-ARGS...]
   tools/microcode-check/rev14-mutants --list
 
 Each MUTANT (all of them when none is named) is a copy of this tree's sys/ and
-site/ with one change to sys/ucadr/, assembled at revision 14 as microcode 2002
+site/ with one change to sys/ucadr/, assembled at revision 15 (the format
+revision 16 runs; revision 14 until revisions 13-15 left) as microcode 2002
 on a band through tools/lispm-check (as tools/assembler-check does; its --band,
 --ubin and --quux after --, or LISPM_CHECK_BAND and the others), N at a time
 (--jobs, 2 by default).
 DIR/MUTANT/ gets ucadr.mcr, .tbl, .locs and .sym, the case file and
-lispm-check's output; DIR/MUTANT/plant.diff the change.  The machine's revision
-for --quux is its own unless --revision gives MUIR_QUUX_REVISION.
+lispm-check's output; DIR/MUTANT/plant.diff the change.  The machine is the
+one QUUX lispm-check runs (--revision, which set MUIR_QUUX_REVISION, went with
+revisions 13-15).
 
   fiddle-copies   the dump's early A 430 and 431 copies removed: the words of
                   a dump whose fiddle is evicted go into the PDL buffer, not
@@ -94,7 +96,10 @@ def build(name, out, extra, env, results):
     open(os.path.join(d, 'plant.diff'), 'w').write(plant(name, copy))
     lines = ['; tools/microcode-check/rev14-mutants: %s' % name,
              "(progn (make-system 'cadr-micro-assembler :compile :noconfirm :nowarn) t) => T",
-             '(setq ua:*word-width* 40.) => 40', '(setq ua:*hardware-revision* 14.) => 14',
+             # at revision 15, the microinstruction's format, which revision 16
+             # runs; it was 14, whose .mcr no machine of these tools runs now:
+             #   '(setq ua:*hardware-revision* 14.) => 14',
+             '(setq ua:*word-width* 40.) => 40', '(setq ua:*hardware-revision* 15.) => 15',
              '(setq ua:version-number 2002.) => 2002', AC.assemble_form(2002) + ' => T']
     cases = os.path.join(d, 'cases.cases')
     open(cases, 'w').write('\n'.join(lines) + '\n')
@@ -128,8 +133,11 @@ def main():
             out = os.path.abspath(argv.pop(0))
         elif a == '--jobs':
             jobs = int(argv.pop(0))
-        elif a == '--revision':
-            env['MUIR_QUUX_REVISION'] = argv.pop(0)
+        # --revision set MUIR_QUUX_REVISION for the machine; the mutants run on
+        # the one QUUX, which tools/lispm-check sets (the removal of revisions
+        # 13-15):
+        #   elif a == '--revision':
+        #       env['MUIR_QUUX_REVISION'] = argv.pop(0)
         elif a == '--list':
             print('\n'.join(MUTANTS))
             return 0

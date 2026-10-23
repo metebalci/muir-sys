@@ -1,4 +1,4 @@
-# The micro-assembler's checks for revisions 14 and 15
+# The micro-assembler's checks
 
 Cases that check what the micro-assembler (`sys/sys/cadrlp.lisp`,
 `sys/sys/cadsym.lisp`, `sys/sys/qwmcr.lisp`) does for QUUX's revision 14,
@@ -8,26 +8,19 @@ on a band through `tools/lispm-check`, and the runner then reads what the
 assembler wrote.
 
 ```
-tools/assembler-check/run --ref UBIN                    # every check, at once
-tools/assembler-check/run --ref UBIN rev13 pinned       # some of them
-tools/assembler-check/run --ref UBIN rev14 -- --engine rtl
+tools/assembler-check/run                       # every check, at once
+tools/assembler-check/run rev15 pinned          # some of them
+tools/assembler-check/run tree -- --engine rtl
 ```
 
-`UBIN` holds the outputs microcode 2001 assembles to at revision 13,
-`ucadr.mcr`, `.sym`, `.tbl` and `.locs`: the release's `sys/ubin/`. The
-checks `rev13` and `rev14` assemble that microcode, whose sources
-`--ucadr-ref SRC` names: a directory laid out as the tree, with release-2001's
-`sys/ucadr/` and the two files the micro-assembler reads for the microcode's
-constants, `sys/cold/qcom.lisp` and `sys/cold/defmic.lisp`
-(`git archive release-2001 sys/ucadr sys/cold | tar -x -C SRC`), so that the
-release's microcode is assembled with the release's constants, and from the
-files its own `sys/ucadr/ucode.lisp` lists (release-2001's has `UC-CHAOS`,
-which the tree's has not had since step R3 of QUUX's Ethernet contract). Revision 14's
-`qcom.lisp` no longer defines the page hash table's names, and its area
-numbers are two lower from `ADDRESS-SPACE-MAP` on. Without `--ucadr-ref` they
-assemble the tree's own microcode, which held microcode 2001 until revision
-14's microcode replaced it. The check
-`tree` assembles the tree's own microcode, whatever `--ucadr-ref` says. Arguments after `--` go to every lispm-check run. Each check takes
+The checks `rev13` and `rev14` assembled release-2001's microcode at
+revisions 13 and 14 and held it to the release's outputs, `--ref UBIN` (its
+`sys/ubin/`) and its sources, `--ucadr-ref SRC`, and `dual` held the tree's
+microcode at 14 and at 15 to each other. They left with revisions 13-15 (the
+removal of revisions 13-15, step 2), and `--ref` and `--ucadr-ref` with them:
+given, they are refused. `rev15` assembles the microinstruction's format
+that revision 16 runs; `tree` and the planted checks of revision 14's rules
+assemble at 14, the assembler's target until it leaves too. Arguments after `--` go to every lispm-check run. Each check takes
 16 ports from `--ports N` on (47300 by default) and writes
 `run/assembler-check/CHECK/` (git-ignored; `--out DIR` for another place):
 `cases.cases`, `lispm-check.out`, the outputs it read, and `result.txt`,
@@ -38,14 +31,15 @@ status is 0 when every check given passes.
 lispm-check's band, `ubin/`, quux and ozd are this tree's defaults
 (`run/check/band.img` beside `run/check/ubin/`, `../muir-sim` and `../ozd`),
 since the copies are not where those defaults are found; `LISPM_CHECK_BAND`
-and the others choose others. The band is System 2000's, whose builder loads
-the micro-assembler from the copy with `make-system`.
+and the others choose others. The band is System 2002's for revision 16
+(`docs/lispm-check.md`, Defaults), which loads the micro-assembler from the
+copy with `make-system`; it was System 2000's, then System 2001's.
 
 | Check | Assembles | Passes when |
 |---|---|---|
-| `rev13` | the microcode at revision 13 | the four outputs equal `UBIN`'s byte for byte, but for the `.mcr`'s symbol area, which equals `UBIN`'s by value (below): nothing else changes for a revision-13 build |
+| `rev13` (gone with revision 13) | the microcode at revision 13 | the four outputs equal `UBIN`'s byte for byte, but for the `.mcr`'s symbol area, which equals `UBIN`'s by value (below): nothing else changes for a revision-13 build |
 | `tree` | the tree's own microcode at revision 14 | it assembles (the planted checks' controls for revision 14's microcode); the `.mcr`'s first section is section 6, start 0, one word, 14, and there is no other |
-| `rev14` | the microcode at revision 14 | it assembles (the three checks below pass on it); the `.mcr`'s first section is section 6, start 0, one word, 14, and there is no other; every other section equals `UBIN`'s, the main-memory section's relative disk block aside, and the symbol area equals `UBIN`'s by value (below); the `.sym`, `.tbl` and `.locs` equal `UBIN`'s |
+| `rev14` (gone with revision 14) | the microcode at revision 14 | it assembles (the three checks below pass on it); the `.mcr`'s first section is section 6, start 0, one word, 14, and there is no other; every other section equals `UBIN`'s, the main-memory section's relative disk block aside, and the symbol area equals `UBIN`'s by value (below); the `.sym`, `.tbl` and `.locs` equal `UBIN`'s |
 | `bits` | `lisp/y1bits.lisp`, a few words in revision 14's names, with `ua:assemble` | at revision 13 the assembly is refused ("revision 14"); at revision 14 each word has appendix A14's bits as muir-sim's revision 14 decodes them: condition 12's jumps, calls and returns (`IR<5>` 1, `IR<4:0>` 12, `IR<6>` the inverse), the write-map operations' constants in `VMA<33:32>` (0 none, 1 direct write, 2 invalidate, 3 empty), the operation and entry fields, `pointer-type-register-0-31` and `-32-63` (register-page words 222 and 223) as the bits of A14.5's 19 types numbered by the tree's `Q-DATA-TYPES`, and section 6 |
 | `pinned` | the microcode at revision 14 with a variable inserted before `A-PDL-BUFFER-VIRTUAL-ADDRESS` | the assembly is refused, naming `A-PDL-BUFFER-VIRTUAL-ADDRESS` (appendix A14.7) |
 | `a-memory-head-room` | the microcode at revision 14 with 200 words of A memory variables planted after `a-region-area-map`, which run the constants past the mouse's arrays at 1600 | the assembly is refused, naming the end and the arrays' first location (`check-a-memory-head-room`); `tree` is the control |
@@ -64,7 +58,7 @@ the micro-assembler from the copy with `make-system`.
 | `oa-no-writer` | the tree's microcode with an `oa-low-select` on `XLDB3+1`, which no write precedes | refused, naming `XLDB3+1` and rule 2 |
 | `popj-dispatch` | the tree's microcode at revision 15 with `XEVC+3` written as MIT had it, `(POPJ-AFTER-NEXT DISPATCH TRANSPORT-IVC MD)` | refused, naming `XEVC+3`: a dispatch that pushes its own address may not carry POPJ on revision 15, since `TRANS-DROP-THROUGH` goes on at the word after it (`check-returning-dispatches`) |
 | `return-table-drift` | the tree's microcode at revision 15 with `D-TRANSPORT`'s entry for SYMBOL, map bit 1, made a call to `TRANS-OLD` and its copy left | it assembles, and `return_tables` finds that entry, `D-TRANSPORT` 7, alone unlike `D-TRANSPORT-RETURN`'s; `rev15` is the control, where every entry of both copies is its original's, a drop-through made a return |
-| `dual` | the tree's microcode at revision 14 and at 15, in two sessions | it assembles at both, and at 14 it and `PROMH` pass the WRITE-I-MEM, map-after-start and MD-after-start checks, which only revision 15 runs as it assembles; the control store's `<47:0>`, the dispatch memory, A memory and the symbol area are equal word for word (revision 15's `<63:48>` is `rev15`'s to hold), but for the revision checks' two words, `RESET-DEVICES+4` and `PROM-ENTRY-READ+3` (`uc-cold-disk.lisp`'s `(max 14. *hardware-revision*)`), each of which must differ in its A source alone, naming the constant 14 at 14 and 15 at 15; a change planted in another word's `<47:0>` is caught, and so is one planted in a revision check's word outside its A source |
+| `dual` (gone with revision 14) | the tree's microcode at revision 14 and at 15, in two sessions | it assembles at both, and at 14 it and `PROMH` pass the WRITE-I-MEM, map-after-start and MD-after-start checks, which only revision 15 runs as it assembles; the control store's `<47:0>`, the dispatch memory, A memory and the symbol area are equal word for word (revision 15's `<63:48>` is `rev15`'s to hold), but for the revision checks' two words, `RESET-DEVICES+4` and `PROM-ENTRY-READ+3` (`uc-cold-disk.lisp`'s `(max 14. *hardware-revision*)`), each of which must differ in its A source alone, naming the constant 14 at 14 and 15 at 15; a change planted in another word's `<47:0>` is caught, and so is one planted in a revision check's word outside its A source |
 | `write-i-mem` | the tree's microcode and `PROMH` at revision 15, the WRITE-I-MEM check's breaches (appendix A15b.2) | none in either; planted in the microcode's image beside `XWIPM-I-14+1`'s write, each is found by its reason: N cleared, inverted and conditional (`:FORM`), POPJ on the write (`:POPJ`), a jump and a call with N clear before it (`:AFTER-N-CLEAR`), POPJ on the word before (`:AFTER-POPJ`), a dispatch before (`:AFTER-DISPATCH`); a jump with N set before it passes; the check refuses what it finds |
 | `write-i-mem-slot` | the tree's microcode at revision 15 with `XWIPM-I-14`'s BYTE word made `POPJ-AFTER-NEXT`, the write in a return's slot | refused, naming `XWIPM-I-14+1` and `:AFTER-POPJ`; `rev15` is the control |
 | `profile` | the tree's microcode at revision 15 with `profile/hand.text` as its profile (`sys/ucadr/ucadr-profile.text`; appendix A15b.8) | the profile pass sets H on the two conditional jumps whose line says 1 and not on the one that says 0, the predicted targets of a call, a jump and a return, and nothing for a drop-through; a key not found, a target not found, and keys on a word of another class (a dispatch, an ALU word, a jump) give zero; the PDL address field is set from the word (B and D checked at three words); the report is the share of executions covered, 1800 of 1930 and 750 of 840, and 82 fields; `extension-breaches` finds nothing, and finds each of three planted breaches (H on an unconditional jump, E on a word the rule does not give it, an address on a drop-through); the file holds 2 hints and 3 predictions and breaks no rule (`extension_census`) |
@@ -79,7 +73,7 @@ System 2000's 32-bit band, whose `.mcr` writer added that world's fixnum tag,
 `DTP-FIX` in `<29:25>`, to each word of the microcode symbol area. The writer
 now puts out each word's value alone for a 40-bit target, on purpose (the fix
 recorded in `docs/release-2002.md`, "The microcode symbol area holds plain
-addresses"). So `rev13` and `rev14` compare the symbol area word by word with
+addresses"). So `rev13` and `rev14` compared the symbol area word by word with
 that tag stripped (`symbol_area_values`), and every other part of the `.mcr`,
 and the `.tbl` and `.locs`, byte for byte as before. Each run also plants a
 change in one symbol area value of the assembled file, not in its tag, and
@@ -99,7 +93,7 @@ compare exactly.
 
 `oa-select`'s `control` is the control for its variants, and `rev15` for the `oa-` plants: the same assembly, unplanted, passes the check.
 
-`tree` is the control for `fiddle`; `rev13` and `rev14` are the controls for the five planted checks: the same
-assembly, unplanted, is not refused. Until release-2002 the tree's microcode assembles for revisions 14
+`tree` is the control for `fiddle` and for the five planted checks (`rev13` and `rev14` were too, until
+they left): the same assembly, unplanted, is not refused. Until release-2002 the tree's microcode assembles for revisions 14
 and 15: its OA selects assemble as nothing at 14, where IMOD ors the register (the review of MP3b, D4),
 and `dual` holds the two assemblies to each other.
