@@ -44,7 +44,10 @@ cold load" and "The native rebuild"; what follows is where each one runs.
 (`MACHINE_REVISION`, `tools/cross-build/run:78`), which has the Ethernet
 device: the builder, the band that assembles, and the route's own bands.
 Each run takes a tap of the pool (`LISPM_CHECK_TAPS`) and its TELNET session
-is the build host's own TCP to the band's server, with no ozd. The builder
+is the build host's own TCP to the band's server, with no ozd: main's tools
+start none, their Chaos and ozd path having left them (`--network chaos` and
+`--file-server ozd` are refused by name, QUUX having no Chaosnet interface;
+`docs/lispm-check.md`). The builder
 is a band of an earlier route, its native6, on its own microcode and PROM
 (`--builder-ubin`, and `--builder-prom` or that ubin's `promh.mcr`, since
 revision 16 has no built-in boot PROM); it assembles too unless

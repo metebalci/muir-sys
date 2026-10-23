@@ -20,8 +20,10 @@
 # whose tools are tested (default: this one), so that another tree's can be
 # run against the same checks.  Neither --network nor LISPM_CHECK_NETWORK is
 # given: what is checked is the default.  ozd is a stand-in that notes each
-# start and exits, so that any start of ozd fails the run and is seen.  About
-# 15 minutes on micro.
+# start and exits, so that any start of ozd fails the run and is seen: given
+# to the harnesses as --ozd until ozd left main's tools, and now to every
+# process as LISPM_CHECK_OZD and as the first ozd on PATH.  About 15 minutes
+# on micro.
 #
 #   warm-boot-16  RESULT PASS; the machine given --ethernet-socket and no
 #                 --chaos-udp; the stand-in ozd never started
@@ -40,9 +42,12 @@ unset LISPM_CHECK_NETWORK
 mkdir -p "$here/../../run" && work=$(mktemp -d "$here/../../run/lispm-check-harnesses-test.XXXXXX")
 echo "harnesses.sh: tree $tree, outputs in $work"
 export XDG_CACHE_HOME=$work/cache
-trip=$work/ozd-stand-in trips=$work/ozd-stand-in.log
+# it read: trip=$work/ozd-stand-in trips=$work/ozd-stand-in.log
+trip=$work/ozd-bin/ozd trips=$work/ozd-stand-in.log
+mkdir -p "$work/ozd-bin"
 printf '#!/bin/sh\necho "$*" >> %s\nexit 1\n' "$trips" > "$trip"
 chmod +x "$trip"
+export LISPM_CHECK_OZD=$trip PATH=$work/ozd-bin:$PATH
 fails=0
 fail() { echo "FAIL $name: $*"; fails=$((fails+1)); }
 ok() { echo "ok   $name"; }
@@ -56,14 +61,16 @@ tcp_machine() {  # LOG: a revision 16 machine over TCP
     else return 0; fi
     return 1
 }
-chaos_machine() {  # LOG OZDLOG: a machine over Chaos, ozd started
-    if [ ! -f "$1" ]; then fail "no machine log $1"
-    elif ! head1 "$1" | grep -qF -- '--chaos-udp'; then fail "$1: the machine has no Chaos cable"
-    elif head1 "$1" | grep -qF -- '--ethernet-socket'; then fail "$1: the machine was given --ethernet-socket"
-    elif [ ! -e "$2" ]; then fail "ozd was not started (no $2)"
-    else return 0; fi
-    return 1
-}
+# chaos_machine LOG OZDLOG, a machine over Chaos with ozd started, left with
+# main's Chaos and ozd path:
+#   chaos_machine() {
+#       if [ ! -f "$1" ]; then fail "no machine log $1"
+#       elif ! head1 "$1" | grep -qF -- '--chaos-udp'; then fail "$1: the machine has no Chaos cable"
+#       elif head1 "$1" | grep -qF -- '--ethernet-socket'; then fail "$1: the machine was given --ethernet-socket"
+#       elif [ ! -e "$2" ]; then fail "ozd was not started (no $2)"
+#       else return 0; fi
+#       return 1
+#   }
 passed() {  # OUT STATUS: the harness's exit and its RESULT
     if [ "$2" != 0 ]; then fail "exit $2; the end of its output:"; tail -5 "$1" | sed 's/^/    /'; return 1; fi
     grep -q '^RESULT PASS' "$1" || grep -q 'RESULT PASS$' "$1" || { fail "no RESULT PASS in $1"; return 1; }
@@ -73,35 +80,34 @@ lo=${LISPM_CHECK_PORTS%-*} hi=${LISPM_CHECK_PORTS#*-}
 # it ran 16 and then 15, whose machine was W15 and whose ozd was OZD:
 #   for rev in 16 15; do
 #       if [ "$rev" = 16 ]; then q=$w16 o=$trip; else q=$w15 o=$ozd; fi
+# The harnesses were given --ozd "$o" (warm-boot's and generational-save's
+# flag), the stand-in on 16, until ozd left main's tools; the runs over Chaos
+# (chaos_machine) went with 15.
 for rev in 16; do
-    q=$w16 o=$trip
+    q=$w16
     rm -f "$trips"
 
     name=warm-boot-$rev d=$work/$name
     python3 "$tree/tools/system-check/warm-boot" --out "$d" --band "$disk" --ubin "$ubin" --quux "$q" \
-        --ozd "$o" --engine "$engine" > "$work/$name.out" 2>&1
+        --engine "$engine" > "$work/$name.out" 2>&1
     rc=$?
     if passed "$work/$name.out" $rc; then
-        if [ "$rev" = 16 ]; then
-            if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
-            else tcp_machine "$d/quux.log" && ok; fi
-        else chaos_machine "$d/quux.log" "$d/ozd.log" && ok; fi
+        if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
+        elif [ -e "$d/ozd.log" ]; then fail "ozd was started (its log in $d)"
+        else tcp_machine "$d/quux.log" && ok; fi
     fi
 
     name=gsave-$rev d=$work/$name
     rm -f "$trips"
     python3 "$tree/tools/microcode-check/generational-save" --out "$d" --work "$work/gsave-work-$rev" \
-        --disk "$disk" --ubin "$ubin" --quux "$q" --ozd "$o" --ports "$lo-$hi" --engine "$engine" \
+        --disk "$disk" --ubin "$ubin" --quux "$q" --ports "$lo-$hi" --engine "$engine" \
         > "$work/$name.out" 2>&1
     rc=$?
     if passed "$work/$name.out" $rc; then
-        if [ "$rev" = 16 ]; then
-            if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
-            elif tcp_machine "$d/session/session/quux.log" && tcp_machine "$d/boot/quux.log"; then
-                grep -q 'TELNET over tcp' "$d/boot/lispm-check.out" && ok || fail "the boot's run was not over tcp"
-            fi
-        elif chaos_machine "$d/session/session/quux.log" "$d/session/session/ozd.log" \
-             && chaos_machine "$d/boot/quux.log" "$d/boot/ozd.log"; then ok; fi
+        if [ -e "$trips" ]; then fail "ozd was started: $(cat "$trips")"
+        elif tcp_machine "$d/session/session/quux.log" && tcp_machine "$d/boot/quux.log"; then
+            grep -q 'TELNET over tcp' "$d/boot/lispm-check.out" && ok || fail "the boot's run was not over tcp"
+        fi
     fi
 done
 

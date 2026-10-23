@@ -44,12 +44,12 @@ every check given passes. Each check writes `run/cross-check/CHECK/` (git-ignore
 | `manifest.txt` | the sha256 of the cross build's sources the run used |
 | `home/` | what the run left in FILES's home: QFASLs, logs, tables, images |
 | `served/` | the run's served `sys/`, with the QFASLs it made (checks 3 and 2) |
-| `*.log` | the machine's, ozd's and the TELNET session's logs |
+| `*.log` | the machine's and the TELNET session's logs (and ozd's, until ozd left lispm-check) |
 
 ## What it needs
 
 - The builder band: lispm-check's default, `run/check/band.img`, with its
-  `ubin/`, quux and ozd: System 2001's for revision 14 (muir-sim's
+  `ubin/` and quux (and ozd, until ozd left lispm-check): System 2001's for revision 14 (muir-sim's
   `ref/band-2001-81b3973`), System 2000's for G2.
   Since each check serves a copy of the tree, the driver passes these defaults
   of this tree to lispm-check (`LISPM_CHECK_BAND` and the others, set unless

@@ -3,7 +3,7 @@
 warm boot in the middle of a young collection, as a harness.
 
     tools/system-check/warm-boot --out DIR --band DISK --ubin UBIN
-        [--quux QUUX] [--ozd OZD] [--engine micro|rtl] [--no-wait] [--no-answer]
+        [--quux QUUX] [--engine micro|rtl] [--no-wait] [--no-answer]
 
 The band boots cold with its files served by quux's file device; a TELNET
 session loads lisp/generational-collector.lisp and lisp/warm-boot.lisp and
@@ -11,16 +11,18 @@ stops a young collection mid-walk, the scavenger inhibited; the machine is
 warm-booted from its keyboard (Control-Meta-Return, through its RFB terminal);
 a new TELNET session finishes the collection under the reclaim checker (b)
 and checks word 221 and a young list stored into a tenured holder (a).  The
-ports come from LISPM_CHECK_PORTS, as lispm-check's do; QUUX and OZD default
-as lispm-check's.  Exit status 0 when every check passes; the last line is
-RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's and
-ozd's, and the screen at the warm boot and at a failure.
+ports come from LISPM_CHECK_PORTS, as lispm-check's do; QUUX defaults as
+lispm-check's.  Exit status 0 when every check passes; the last line is
+RESULT PASS or RESULT FAIL.  DIR keeps the TELNET log, the machine's, and
+the screen at the warm boot and at a failure.  (--ozd, and ozd's log, went
+with main's Chaos and ozd path.)
 
 The network is lispm-check's (QUUX's Ethernet contract, sections 3 and 8
 R2), through its helper, harness_network: the run takes a tap of
-LISPM_CHECK_TAPS through the fault relay, and the sessions go over TCP
-unless LISPM_CHECK_NETWORK says chaos, with no ozd started (on revisions
-13-15 they went over Chaos through ozd, until those left these tools).  Over TCP the session
+LISPM_CHECK_TAPS through the fault relay, and the sessions go over TCP,
+with no ozd started (on revisions 13-15 they went over Chaos through ozd,
+until those left these tools, and with LISPM_CHECK_NETWORK=chaos, until
+main's Chaos path left them; lispm-check refuses it now).  The session
 before the warm boot is closed cleanly (to the band's EOF), and the band's
 network starts again at the warm boot; DIR also keeps the fault relay's
 report and log.
@@ -50,22 +52,24 @@ p.add_argument('--out', required=True)
 p.add_argument('--band', required=True)
 p.add_argument('--ubin', required=True)
 p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
-p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+# --ozd, ozd's path, went with main's Chaos and ozd path (QUUX has no
+# Chaosnet interface):
+#   p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
 p.add_argument('--engine', default='micro', choices=('micro', 'rtl'))
 p.add_argument('--no-wait', action='store_true')
 p.add_argument('--no-answer', action='store_true')
 a = p.parse_args()
 up = os.path.dirname(TREE)
 quux = os.path.abspath(a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux'))
-ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
+#   ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 log = open(os.path.join(out, 'telnet.log'), 'w', buffering=1)
 T = 3600 if a.engine == 'rtl' else 1200
-# The network (QUUX's Ethernet contract, section 8 R2): over TCP on a tap on
-# revision 16 unless LISPM_CHECK_NETWORK says chaos, over Chaos below; before
-# the switch the server was given no network, so every run went over Chaos
-# through ozd:
+# The network (QUUX's Ethernet contract, section 8 R2): over TCP on a tap
+# (or over Chaos, when LISPM_CHECK_NETWORK said chaos, until main's Chaos
+# path left these tools); before the switch the server was given no
+# network, so every run went over Chaos through ozd:
 #   server = lc.DeviceFileServer(ozd, out, pts, log)
 try:
     network, link = lc.harness_network(quux)
@@ -80,7 +84,8 @@ except BaseException:
     if link:
         link.stop()
     raise
-server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
+# it read: server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
+server = lc.DeviceFileServer(out, pts, log, network, link)
 machine = lc.Machine(quux, os.path.abspath(a.band), out, pts[3], server, a.engine)
 ok = True
 
@@ -194,7 +199,8 @@ try:
     check(s, '(c15-b-setup)', '(NIL T)')
     check(s, '(si:feature-page-field #o221 #o0001)', '1')
     # over TCP a clean close, to the band's EOF, so that its TELNET server
-    # ends as over Chaos; over Chaos the socket to ozd is closed, as before
+    # ends as over Chaos (where the socket to ozd was closed, until Chaos
+    # left these tools)
     server.close_session(s.s, False)
     # the TELNET server's process ends before the warm boot, or the band asks
     # whether to reset it

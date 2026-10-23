@@ -28,8 +28,9 @@ ending `CHECK PASS` or `CHECK FAIL`. An assembly takes about six minutes on
 the micro engine; run the checks detached (`setsid nohup ... &`). The exit
 status is 0 when every check given passes.
 
-lispm-check's band, `ubin/`, quux and ozd are this tree's defaults
-(`run/check/band.img` beside `run/check/ubin/`, `../muir-sim` and `../ozd`),
+lispm-check's band, `ubin/` and quux are this tree's defaults
+(`run/check/band.img` beside `run/check/ubin/`, `../muir-sim`; ozd's,
+`../ozd`, until ozd left lispm-check),
 since the copies are not where those defaults are found; `LISPM_CHECK_BAND`
 and the others choose others. The band is System 2002's for revision 16
 (`docs/lispm-check.md`, Defaults), which loads the micro-assembler from the

@@ -2,18 +2,19 @@
 """lispm-check: check a Lisp change on a band in seconds.
 
 Usage:
-  tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
+  tools/lispm-check [--band PACK] [--quux PATH]
                     [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
-                    [--compile] [--file-server auto|device|ozd]
+                    [--compile] [--file-server auto|device]
                     [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
-                    [--ozd-file-dates mit|utc] [--ozd-timezone N]
-                    [--network chaos|tcp|files] CASES
+                    [--network tcp|files] CASES
 
-The band runs on the simulator's executable for this line's system, MACHINE
-below: quux on main, QUUX's system (--quux), and cadr on the cadr branch, the
-CADR's (--cadr; --quux is taken there too, as the same flag, so that one
-command line serves both lines).  MACHINE is the one line of this file that
-differs between the two lines; "the machine" below is that executable.
+The band runs on the simulator's quux, QUUX's (--quux), MACHINE below; "the
+machine" below is that executable.  The cadr line's copy of this tool is its
+own, for the CADR (its cadr, --cadr), and keeps the Chaos and ozd path that
+left this one: QUUX has no Chaosnet interface, so --network chaos,
+--file-server ozd, --ozd, --ozd-file-dates and --ozd-timezone are refused
+here by name, as are LISPM_CHECK_NETWORK=chaos and
+LISPM_CHECK_FILE_SERVER=ozd, and no ozd is ever started.
 
 It resumes a checkpoint of the band booted to its TELNET prompt, lays the
 changed files over a private copy of the tree, loads them (or compiles them
@@ -53,17 +54,18 @@ Exit status: 0 if every case passes, 1 if any fails or errors, 2 if the run
 itself failed (bad arguments, a boot, a file that would not load or compile,
 where a compiler heading "<< Error ..." counts as not compiling, or a case
 that did not answer within --timeout), 3 if the machine hung in the setup's
-cold boot (or the probe's): stopped, with no CPU time for 60 s, or running
+cold boot (or the probe's, until --file-server auto's probe left): stopped, with no CPU time for 60 s, or running
 without answering until --setup-limit (1800 s), the hard limit on the setup's
 wall clock, within which it waits as long as the machine runs, however loaded
-the host.  A failed run keeps its run directory (TELNET, the machine's and
-ozd's logs) under the cache and says where; --keep keeps it always.
+the host.  A failed run keeps its run directory (the TELNET session's and the
+machine's logs, the fault relay's) under the cache and says where; --keep
+keeps it always.
 
 --files takes paths, comma separated.  A file inside the tree's sys/ is served
 at its own place and loaded by its logical name (sys/io1/time.lisp as
 "SYS: IO1; TIME LISP"), so the world sees the same source file; any other file
-is served in the login's home directory (OZ: /lispm/, or /home/lispm/ on the
-file device's pathname host, HOST: or FILES: as the band names it).
+is served in the login's home directory (/home/lispm/ on the file device's
+pathname host, HOST: or FILES: as the band names it).
 The tree itself is never written:
 the machine is served a copy under the cache, so QFASLs land there.  Some sys
 files do not load as source, since they use functions only the compiler opens
@@ -76,19 +78,12 @@ Defaults, each overridden by its flag or an environment variable:
   --ubin  LISPM_CHECK_UBIN  ubin/ beside the band: the sys/ubin/ the band's
                             microcode was assembled into; the cold boot reads
                             its ucadr.tbl
-  --quux  LISPM_CHECK_QUUX  on main: ../muir-sim/target/release/quux beside
-                            the tree
-  --cadr  LISPM_CHECK_CADR  on cadr: ../muir-sim/target/release/cadr beside
-                            the tree
-  --ozd   LISPM_CHECK_OZD   ../ozd/target/release/ozd beside the tree
+  --quux  LISPM_CHECK_QUUX  ../muir-sim/target/release/quux beside the tree
   --tree  LISPM_CHECK_TREE  the tree this tool is in
   --file-server  LISPM_CHECK_FILE_SERVER  auto: see below
   --engine  LISPM_CHECK_ENGINE  micro: the machine's engine, passed to it as
                             --micro or --rtl; any other value is refused
-  --ozd-file-dates  LISPM_CHECK_OZD_FILE_DATES  none given: ozd's own default
-  --ozd-timezone    LISPM_CHECK_OZD_TIMEZONE    none given: ozd's own default
-  --network LISPM_CHECK_NETWORK  tcp on QUUX, chaos on the CADR: what
-                            carries the TELNET session, below
+  --network LISPM_CHECK_NETWORK  tcp: what carries the session, below
   LISPM_CHECK_PORTS         the port range it picks from, 44000-44999
   LISPM_CHECK_TAPS          the tap indexes it picks from, as N, LO-HI or a
                             comma-separated list of them: the pool's host-only
@@ -100,41 +95,26 @@ The band is opened read-only (,ro) and never written: a boot's writes live in
 the checkpoint, so any number of checks, also at once, resume one checkpoint
 on one band.  A checkpoint is keyed by the band's and the machine's sha256,
 the file server and the engine, and made again when one changes: the machine
-resumes a checkpoint only on the engine that wrote it.  Every run takes four
-free ports of its own (ozd's UDP, the machine's UDP, TELNET and the machine's
-RFB) under a lock, so parallel runs never meet, and it stops everything it
-started before it exits.
+resumes a checkpoint only on the engine that wrote it.  Every run takes a
+block of four free ports of its own under a lock, so parallel runs never
+meet (the third is the glass TTY's under --network files, the fourth the
+machine's RFB; the first two were ozd's and the machine's Chaos UDP), and it
+stops everything it started before it exits.
 
-The copy is served the way the band reads its SYS: files.  With
---file-server ozd, by ozd (the class OzdFileServer), for a band whose SYS: is
-on OZ; the setup logs in to OZ.  With --file-server device, by quux's own file
-device (DeviceFileServer), for a band whose SYS: is on the file device's
-pathname host, which a band names HOST (Systems 2000 and 2001, and the bands
-of 2002 built before the name changed) or FILES (after it): quux mounts the
-copy as that host's / (--file-root), ozd serves no file and is only the
-TELNET gateway, and the setup logs in to the host the band named.  The file
-device serves either name alike, its paths carrying no host.  The file device
-is QUUX's: cadr has none, so on the cadr line the files are always served by
-ozd.  A band boots to
-its prompt only with its SYS: host served.  auto, the default, takes the host
-the band's SYS: is on from a checkpoint of this band and machine (its setup
-asked the band), else from the answers remembered under the cache, else from a
-probe (a cold boot with the copy served both ways, about 15 s, once for each
-band and machine); a machine without a file device means ozd.  Every run says
-which it chose and why.  A setup checks that the band's SYS: is on a host the
-chosen server serves, and keeps the band's answer in the checkpoint, from
-which every check takes the host it names files on.  Everything that knows
-how the tree is served is in these classes.
-
---ozd-file-dates mit|utc and --ozd-timezone N are passed to ozd as its
---file-dates and --timezone: how FILE writes and reads its dates.  ozd's
-default is utc, plain UTC, as Systems 1002 and 2000 read them; a band of
-Systems 100 to 1001 reads them at its site's zone, so it wants
---ozd-file-dates mit --ozd-timezone <that zone> (-1 for System 1001's
-release band, 5 for System 100's site), or every file date it reads is off by
-the zone's offset.  ozd refuses a zone under utc, and so does this tool.  The
-flags change only what ozd serves, not the checkpoint, whose setup reads no
-file.
+The copy is served by quux's own file device (DeviceFileServer), for a band
+whose SYS: is on the file device's pathname host, which a band names HOST
+(Systems 2000 and 2001, and the bands of 2002 built before the name changed)
+or FILES (after it): quux mounts the copy as that host's / (--file-root), and
+the setup logs in to the host the band named.  The file device serves either
+name alike, its paths carrying no host.  --file-server auto, the default,
+and device mean the same: the device is the one file server, and a quux
+without it (no --file-root) is refused.  A band whose SYS: is on OZ was
+served by ozd (--file-server ozd), and auto asked a band which it was by a
+probe, until ozd left main's tools; such a band does not boot to its prompt
+with its files on the device, and the setup says so.  A setup checks that
+the band's SYS: is on a host the device serves, and keeps the band's answer
+in the checkpoint, from which every check takes the host it names files on.
+Everything that knows how the tree is served is in these classes.
 
 The network (QUUX's Ethernet contract, sections 3, 7 and 8 R1).  On QUUX,
 which has the Ethernet device, every run takes a tap of the
@@ -148,7 +128,7 @@ the next, and when all are held it waits for one, up to --setup-limit.  The
 tap is the lock: a band uses index N's address only while its run holds tap
 N.  A checkpoint is made for each tap index on its first use, and its key
 names QUUX's address behind that tap, since muir refuses a resume under other
-addresses.  The CADR takes no tap, and its keys are as before.
+addresses.
 One QUUX is current, the one quux runs; an earlier one runs from an earlier
 commit of this tree.  Every machine this tool starts is given
 MUIR_QUUX_REVISION=16 (muir-sim's quux takes 13 without it until it runs one
@@ -156,23 +136,18 @@ QUUX alone), and a MUIR_QUUX_REVISION set to another value is refused.  The
 machine is asked once for each build what it runs, and the answer is
 remembered under the cache: a machine whose start names a revision other
 than 16 (an older quux, or a wrapper that sets another) is refused.
-  --network chaos   ozd's TCP gateway carries the session to the band's
-                    Chaos TELNET server, the band's cable being --chaos-udp
-                    to ozd: the default on the CADR
   --network tcp     the session is the build host's own TCP, from a socket
                     bound to the tap, to the band's TELNET server on port 23
                     at QUUX's address; the machine is given no Chaos peer at
-                    all, and ozd is not started.  It needs QUUX, and a
-                    band whose SYS: is on the file device's host, HOST or
-                    FILES (--file-server device; auto then means device).
+                    all.  It needs a band whose SYS: is on the file
+                    device's host, HOST or FILES.
                     At the end of a setup it half-closes the session and
                     reads to the band's EOF, which the band's server sends
                     at the client's EOF, then waits 0.5 s for the last ACK,
                     so that the checkpoint holds no connection; a setup
                     whose band does not close is a failed run.  The default
-                    on QUUX (the contract, section 8 R2), so a run there
-                    starts no ozd unless it asks for chaos; a band without
-                    the network wants --network chaos, or files
+                    (the contract, section 8 R2); a band without the network
+                    wants --network files
   --network files   no network at all: the session goes through files on
                     the file device's host (QUUX's Ethernet contract,
                     section 18, Q-N13 (a)), for a band checked without its
@@ -191,11 +166,9 @@ than 16 (an older quux, or a wrapper that sets another) is refused.
                     flight (the poll's PROBEF) is taken again, up to
                     CHECKPOINT_TRIES times; one refused for a handle open
                     fails the setup.  A check resumes it with its own copy
-                    served and types nothing.  It needs a machine with a
-                    file device, so the CADR is refused, and the device as
-                    the file server (auto means device); no tap is taken,
-                    LISPM_CHECK_TAPS is not used, and ozd is
-                    not started.  Unlike TELNET, a bare "(Y or N)" asked
+                    served and types nothing.  No tap is taken, and
+                    LISPM_CHECK_TAPS is not used.  Unlike TELNET, a bare
+                    "(Y or N)" asked
                     without FQUERY, or an error the helper does not catch,
                     waits at the console: the case gets no answer and the run
                     fails at --timeout (exit 2); output to TERMINAL-IO is not
@@ -204,12 +177,10 @@ The tools that build their own sessions from these classes
 (tools/system-check/warm-boot, tools/cross-build/run's sessions) take the
 network and the tap through harness_network, below, with the same default;
 they refuse files, which is this tool's alone.
-Each network has its own checkpoint: since step R3 of the
-contract's section 8 the band has no NCP, so tcp gives the machine no
---chaos-address, and chaos does, and the checkpoint holds the Chaosnet
-interface's switches (until R3 --chaos-address was given in both, and one
-checkpoint served both networks).  files has its own too: its
-checkpoint holds HC-SERVE running at the listener.
+Each network has its own checkpoint: files' holds HC-SERVE running at the
+listener.  (--network chaos, which carried the session through ozd's TCP
+gateway to the band's Chaos TELNET server, had its own too, keyed -chaos,
+until main's Chaos and ozd path left these tools.)
 
 The self-test is tools/lispm-check-test/run.sh, which takes this tool's flags.
 docs/lispm-check.md has the same usage.
@@ -223,16 +194,25 @@ TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 # runs the requests it finds in files (FileSession, setup_files)
 HC_SERVE = os.path.join(TOOL_DIR, 'lispm-check-lisp', 'hc-serve.lisp')
 # The simulator's executable this line's system runs on, which also names
-# its flag and variable (--quux, LISPM_CHECK_QUUX): quux on main, QUUX's
-# system, and cadr on the cadr branch, the CADR's.  The one line in which the
-# two lines' copies of this tool differ.
+# its flag and variable (--quux, LISPM_CHECK_QUUX): quux, QUUX's.  It was the
+# one line in which main's and the cadr line's copies of this tool differed
+# (cadr on the cadr line) until main's Chaos and ozd path left this copy and
+# the CADR with it; the cadr line keeps its own copy.
 MACHINE = 'quux'
-CHAOS_HOST, CHAOS_LISPM = '177200', '177201'   # ozd's and the band's addresses
-TV_SIZE = '1280x1024'   # QUUX's video controller (--video-size); cadr has none
+# ozd's and the band's Chaos addresses, for --network chaos, which left with
+# main's Chaos path (QUUX has no Chaosnet interface):
+#   CHAOS_HOST, CHAOS_LISPM = '177200', '177201'
+TV_SIZE = '1280x1024'   # QUUX's video controller (--video-size)
+# The refusal of Chaos and ozd, by name (CHAOS_REFUSED's words after the
+# name): --network chaos, --file-server ozd and ozd's flags, and their
+# variables.  They went through ozd, which carried the session and served
+# files over Chaos.
+CHAOS_REFUSED = ('QUUX has no Chaosnet interface, and these tools start no ozd: the session goes'
+                 ' over tcp, the default, or through files, and quux\'s file device serves the files')
 # The host SYS: translates to in the band: the file device's pathname host,
-# HOST or FILES, when the band reads its sources through quux's file device,
-# OZ when through ozd.  Asked before the login, since a translation opens no
-# file.
+# HOST or FILES, as the band reads its sources through quux's file device
+# (or OZ, through ozd, until ozd left these tools).  Asked before the login,
+# since a translation opens no file.
 SYS_HOST = ('(send (send (send (fs:parse-pathname "SYS: SYS; SYSDCL LISP")'
             ' :translated-pathname) :host) :name)')
 # The login to the host SYS: is on, whatever the band names it, as QLD's own
@@ -398,7 +378,10 @@ def port_free(port, kind):
 
 def take_ports():
     """Four ports in a block of four within LISPM_CHECK_PORTS, every one free
-    and the block locked: (ozd UDP, the machine's UDP, TELNET TCP, RFB TCP)."""
+    and the block locked: (UDP, UDP, TCP, the machine's RFB TCP).  The two
+    UDP ports were ozd's and the machine's Chaos cable's, and the third
+    ozd's TELNET gateway, until ozd left these tools; the third is the glass
+    TTY's under --network files, and the block keeps its shape."""
     lo, hi = (int(x) for x in os.environ.get('LISPM_CHECK_PORTS', '44000-44999').split('-'))
     bases = list(range(lo - lo % 4 + (4 if lo % 4 else 0), hi - 2, 4))
     random.shuffle(bases)
@@ -602,10 +585,11 @@ QUUX_REVISION = '16'
 
 
 def quux_environment():
-    """Sets MUIR_QUUX_REVISION=16 for every machine this process starts, on
-    QUUX; RunFailed for a value set to another."""
-    if MACHINE != 'quux':
-        return
+    """Sets MUIR_QUUX_REVISION=16 for every machine this process starts;
+    RunFailed for a value set to another.  It did so on QUUX alone:
+        if MACHINE != 'quux':
+            return
+    until main's tools stopped offering the CADR."""
     value = os.environ.get('MUIR_QUUX_REVISION')
     if value not in (None, '', QUUX_REVISION):
         raise RunFailed('MUIR_QUUX_REVISION=%s: these tools run the QUUX quux runs; an earlier one runs'
@@ -617,7 +601,8 @@ def machine_revision(a, exe_sha):
     """QUUX's revision the machine runs, asked of it once for each build and
     MUIR_QUUX_REVISION (a wrapper may set it), and remembered under the cache:
     its start names it ("machine: quux, revision 16"), or its refusal to run
-    without a boot PROM does.  None for the CADR.  The machine is asked with
+    without a boot PROM does (and None for the CADR, until main's tools
+    stopped offering it).  The machine is asked with
     no engine named, so that a wrapper's flags for one engine are taken: it
     was asked with --micro, which quux refuses for rtl's flags
     (--memory-timing, --cache, as the soak's rtl lanes give them), so every
@@ -629,8 +614,9 @@ def machine_revision(a, exe_sha):
     names a revision other than 16 (an older quux, or a wrapper that sets
     another), and a start that names none, as quux's will once it runs one
     QUUX alone, is taken for the current one: 16."""
-    if MACHINE != 'quux':
-        return None
+    # the CADR's, until main's tools stopped offering it:
+    #   if MACHINE != 'quux':
+    #       return None
     quux_environment()
     pair = '%s-%s' % (exe_sha[:16], os.environ.get('MUIR_QUUX_REVISION', ''))
     db = os.path.join(cache_dir(), 'revisions.json')
@@ -676,33 +662,36 @@ def machine_revision(a, exe_sha):
 
 # The default network (QUUX's Ethernet contract, section 8 R2, the switch):
 # a run that names none, by --network or LISPM_CHECK_NETWORK, is carried over
-# TCP on QUUX, whose band has the network, and over Chaos on the CADR, which
-# keeps its Chaos as released.  Before the switch every run's default was
-# chaos, so a run on revision 16 started ozd; until revisions 13-15 left these
-# tools, they took chaos too.
+# TCP, QUUX's band having the network.  Before the switch every run's default
+# was chaos, so a run on revision 16 started ozd; until revisions 13-15 left
+# these tools, they took chaos too, and the CADR did until main's tools
+# stopped offering it.
 
 def default_network(revision):
-    """The network of a run on REVISION (None: the CADR) that names none."""
+    """The network of a run that names none: tcp.  REVISION, the machine's,
+    chose it, chaos for the CADR (None):
+        return 'tcp' if revision is not None else 'chaos'"""
     # it followed the revision:
     #   return 'tcp' if revision is not None and revision >= 16 else 'chaos'
-    return 'tcp' if revision is not None else 'chaos'
+    return 'tcp'
 
 
 def resolve_network(network, revision):
-    """The network a run takes: NETWORK as named, or the default for REVISION
-    when NETWORK is None; RunFailed for tcp on the CADR."""
+    """The network a run takes: NETWORK as named, or the default when
+    NETWORK is None.  chaos is refused before it comes here (options,
+    harness_network); tcp and files were refused for the CADR (REVISION
+    None), which main's tools no longer offer:
+        if chosen == 'tcp' and revision is None:
+            raise RunFailed('--network tcp: %s runs the CADR, which has no Ethernet device; QUUX has'
+                            % MACHINE)
+        if chosen == 'files' and revision is None:
+            raise RunFailed('--network files: %s runs the CADR, which has no file device; the session'
+                            ' goes through QUUX\'s' % MACHINE)"""
     chosen = network or default_network(revision)
     # tcp was refused below revision 16 too:
     #   if chosen == 'tcp' and (revision is None or revision < 16):
     #       raise RunFailed('--network tcp: %s runs %s, which has no Ethernet device; revision 16 has'
     #                       % (MACHINE, 'revision %d' % revision if revision else 'the CADR'))
-    if chosen == 'tcp' and revision is None:
-        raise RunFailed('--network tcp: %s runs the CADR, which has no Ethernet device; QUUX has'
-                        % MACHINE)
-    # files goes through QUUX's file device, which the CADR has not
-    if chosen == 'files' and revision is None:
-        raise RunFailed('--network files: %s runs the CADR, which has no file device; the session'
-                        ' goes through QUUX\'s' % MACHINE)
     return chosen
 
 
@@ -717,7 +706,8 @@ def harness_network(exe, setup_limit=SETUP_LIMIT):
     is taken through the fault relay, waiting up to SETUP_LIMIT s for a free
     one.  Returns
     (network, link): LINK a TapLink, which the caller stops after its
-    machine, or None.  Before the switch these tools gave their file server
+    machine (or None for the CADR, until main's tools stopped offering it).
+    Before the switch these tools gave their file server
     no network and no link, so every session went over Chaos through ozd."""
     class Exe:
         pass
@@ -728,21 +718,24 @@ def harness_network(exe, setup_limit=SETUP_LIMIT):
     # machine is asked anything.  The revision was asked first:
     #   revision = machine_revision(a, sha256_cached(a.exe))
     named = os.environ.get('LISPM_CHECK_NETWORK') or None
+    # chaos, refused by name before the machine is asked (CHAOS_REFUSED)
+    if named == 'chaos':
+        raise RunFailed('LISPM_CHECK_NETWORK=chaos: %s' % CHAOS_REFUSED)
     if named == 'files':
+        # it read "(chaos or tcp here)" until chaos left these tools
         raise RunFailed('LISPM_CHECK_NETWORK=files: %s drives a TELNET session of its own; files is'
-                        ' tools/lispm-check\'s alone (chaos or tcp here)' % os.path.basename(sys.argv[0]))
+                        ' tools/lispm-check\'s alone (tcp here)' % os.path.basename(sys.argv[0]))
     revision = machine_revision(a, sha256_cached(a.exe))
     if named is not None and named not in NETWORKS:
         raise RunFailed('LISPM_CHECK_NETWORK: %r is not one of %s' % (named, ', '.join(NETWORKS)))
     network = resolve_network(named, revision)
-    link = None
-    # every QUUX run takes a tap; it read: if revision is not None and revision >= 16:
-    if revision is not None:
-        link = TapLink(tap_range(), now() + setup_limit)
-        # the default named no revision before: ' (the default on revision 16)'
-        print('%s: tap %s, QUUX at %s, TELNET over %s%s'
-              % (os.path.basename(sys.argv[0]), link.tap, link.quux, network,
-                 '' if named else ' (the default)'), flush=True)
+    # every run takes a tap; it read: if revision is not None and revision >= 16:
+    # and then, while the CADR (None, no tap) was offered: if revision is not None:
+    link = TapLink(tap_range(), now() + setup_limit)
+    # the default named no revision before: ' (the default on revision 16)'
+    print('%s: tap %s, QUUX at %s, TELNET over %s%s'
+          % (os.path.basename(sys.argv[0]), link.tap, link.quux, network,
+             '' if named else ' (the default)'), flush=True)
     return network, link
 
 
@@ -775,48 +768,64 @@ def stop_process(p, stdin_command=None, wait=10):
 
 # --------------------------------------------------------------------------
 # The file servers.  Everything that knows how the tree is served is here:
-# ozd's flags, the copy of the tree and its layout, the pathnames the band uses
-# for served files, the TELNET listener ozd carries to the band in either
-# mode, and the machine's flags that plug the band into them.  OzdFileServer serves
-# the copy by ozd, DeviceFileServer by quux's file device; a third way is a
-# class with the same methods, named in FILE_SERVERS.  The TELNET session is
-# carried by the network, --network (NETWORKS): over Chaos through ozd, or
-# over the build host's TCP to the band behind its tap, with no ozd at all
-# when the device serves the files.  LINK is revision 16's tap (TapLink), or
-# None, and its flags are the machine's in either network.
+# the copy of the tree and its layout, the pathnames the band uses for served
+# files, the TELNET listener, and the machine's flags that plug the band into
+# them.  DeviceFileServer serves the copy by quux's file device; a second way
+# is a class with the same methods, named in FILE_SERVERS.  The TELNET
+# session is carried by the network, --network (NETWORKS): over the build
+# host's TCP to the band behind its tap, or none at all (files).  LINK is the
+# run's tap (TapLink), or None, and its flags are the machine's.
+# OzdFileServer served the copy by ozd, and ozd carried the session over
+# Chaos (--network chaos), until main's Chaos and ozd path left these tools:
+# QUUX has no Chaosnet interface.  Its parts that every server shares are
+# FileServer's now, below; those that only served ozd are commented out in
+# place.
 
-# The networks that carry the session (--network), each with whether it
-# needs ozd as the gateway: chaos and tcp carry TELNET; files carries no
-# network at all, the session going through request and answer files on the
-# file device's host (FileSession, HC-SERVE), for a band checked without its
-# network (QUUX's Ethernet contract, section 18, Q-N13 (a)).  It branches in
-# machine_flags, connect_listener and close_session below, in the setup
-# (setup_files) and in check.  Before it this read:
+# The networks that carry the session (--network): tcp carries TELNET; files
+# carries no network at all, the session going through request and answer
+# files on the file device's host (FileSession, HC-SERVE), for a band checked
+# without its network (QUUX's Ethernet contract, section 18, Q-N13 (a)).  It
+# branches in machine_flags, connect_listener and close_session below, in the
+# setup (setup_files) and in check.  Each named whether it needed ozd as the
+# gateway; before files this read:
 #   NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}}
-NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}, 'files': {'ozd': False}}
+# and then, until chaos left:
+#   NETWORKS = {'chaos': {'ozd': True}, 'tcp': {'ozd': False}, 'files': {'ozd': False}}
+NETWORKS = ('tcp', 'files')
 TELNET_PORT = 23
 # The clean close's wait for the band's FIN after ours, and then for the last
 # ACK (the contract, section 7): wall seconds.
 CLOSE_WAIT, LAST_ACK_WAIT = 60, 0.5
 
 
-class OzdFileServer:
-    # the --file-server name, the host the setup logs in to, and the hosts a
-    # band's SYS: may be on for this server: the band's files and the login's
-    # home are on OZ
-    mode, login_host, hosts = 'ozd', 'OZ', ('OZ',)
+# It was class OzdFileServer, the tree served by ozd, whose parts the device's
+# server took by inheritance:
+#   class OzdFileServer:
+#       # the --file-server name, the host the setup logs in to, and the hosts a
+#       # band's SYS: may be on for this server: the band's files and the login's
+#       # home are on OZ
+#       mode, login_host, hosts = 'ozd', 'OZ', ('OZ',)
+class FileServer:
+    """What every file server shares: the copy of the tree, the login, the
+    machine's network flags and the TELNET session's ends.  A server class
+    names its --file-server mode, the host the setup logs in to, and the
+    hosts a band's SYS: may be on for it."""
 
-    def __init__(self, ozd, run_dir, ports, log, ozd_flags=(), network='chaos', link=None, host=None):
+    # it read: def __init__(self, ozd, run_dir, ports, log, ozd_flags=(), network='chaos', link=None, host=None):
+    def __init__(self, run_dir, ports, log, network='tcp', link=None, host=None):
         # HOST: the band's answer to SYS_HOST, when known (a checkpoint keeps
-        # it); OzdFileServer has one host, and takes it only to check it
+        # it); a server with one host takes it only to check it
         if host is not None:
             self.learn_host(host)
-        self.ozd, self.run_dir, self.log = ozd, run_dir, log
-        # --file-dates and --timezone for ozd, as --ozd-file-dates and
-        # --ozd-timezone give them; none, ozd's defaults
-        self.ozd_flags = list(ozd_flags)
-        self.udp, self.machine_udp, self.telnet = ports[0], ports[1], ports[2]
+        # ozd's path, and its --file-dates and --timezone as --ozd-file-dates
+        # and --ozd-timezone gave them, and its UDP port, the machine's Chaos
+        # cable's and its TELNET gateway's, until ozd left these tools:
+        #   self.ozd, self.run_dir, self.log = ozd, run_dir, log
+        #   self.ozd_flags = list(ozd_flags)
+        #   self.udp, self.machine_udp, self.telnet = ports[0], ports[1], ports[2]
+        self.run_dir, self.log = run_dir, log
         self.root = os.path.join(run_dir, 'served')
+        # the process the server started: ozd's, until it left; none now
         self.proc = None
         self.network, self.link = network, link
         if network == 'tcp' and link is None:
@@ -840,18 +849,21 @@ class OzdFileServer:
     def lay_out(self, tree, ubin=None):
         """Copy the tree's sys/ and site/ to be served (the tree is never
         served itself, so a compile writes its QFASLs into the copy), with
-        ubin/ as sys/ubin/ when given, and an empty home for the login."""
+        ubin/ as sys/ubin/ when given; the server makes the login's home."""
         for d in ('sys', 'site'):
             shutil.copytree(os.path.join(tree, d), os.path.join(self.root, d), symlinks=True)
         if ubin:
             dest = os.path.join(self.root, 'sys', 'ubin')
             shutil.rmtree(dest, ignore_errors=True)
             shutil.copytree(ubin, dest)
-        os.makedirs(os.path.join(self.root, 'lispm'))
+        # ozd's home for the login, OZ: /lispm/, which the device's server
+        # took away again for its own:
+        #   os.makedirs(os.path.join(self.root, 'lispm'))
 
     def place(self, path, tree):
         """Serve the file at path and return the pathname the band loads it
-        by, without its type, and whether that is a logical SYS: name."""
+        by, without its type, and whether that is a logical SYS: name: a sys/
+        file at its own place; any other is the server's (place_other)."""
         rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
         if rel.startswith('sys' + os.sep):
             dest = os.path.join(self.root, rel)
@@ -862,82 +874,87 @@ class OzdFileServer:
             parts = rel.split(os.sep)[1:]
             name = os.path.splitext(parts[-1])[0]
             return 'SYS: ' + ''.join(d.upper() + '; ' for d in parts[:-1]) + name.upper(), True
-        name = os.path.basename(path)
-        shutil.copyfile(path, os.path.join(self.root, 'lispm', name))
-        return 'OZ: //lispm//' + os.path.splitext(name)[0], False
+        # ozd's, OZ: /lispm/:
+        #   name = os.path.basename(path)
+        #   shutil.copyfile(path, os.path.join(self.root, 'lispm', name))
+        #   return 'OZ: //lispm//' + os.path.splitext(name)[0], False
+        return self.place_other(path)
 
-    def ozd_roots(self):
-        return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
-                '--root', 'lispm=%s/lispm' % self.root]
-
+    # ozd's roots and its start, as the TELNET gateway (and the files'
+    # server, for an OZ band), until ozd left these tools:
+    #   def ozd_roots(self):
+    #       return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
+    #               '--root', 'lispm=%s/lispm' % self.root]
+    #
+    #   def start(self):
+    #       if not NETWORKS[self.network]['ozd'] and self.mode == 'device':
+    #           return None
+    #       self.logfile = open(os.path.join(self.run_dir, 'ozd.log'), 'wb')
+    #       cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
+    #              '--listen', '127.0.0.1:%d' % self.udp] + self.ozd_roots() + [
+    #              '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
+    #              '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.machine_udp),
+    #              '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
+    #              '--log-file', '--log-simple'] + self.ozd_flags
+    #       self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.DEVNULL,
+    #                                    stdout=self.logfile, stderr=self.logfile,
+    #                                    start_new_session=True)
+    #       return self.proc.pid
     def start(self):
-        """Start ozd, when the network needs it as the TELNET gateway or the
-        server serves the files by it; else nothing (--network tcp with the
-        files on the device: the machine is given no Chaos peer at all)."""
-        if not NETWORKS[self.network]['ozd'] and self.mode == 'device':
-            return None
-        self.logfile = open(os.path.join(self.run_dir, 'ozd.log'), 'wb')
-        cmd = [self.ozd, '-c', '/dev/null', '--address', CHAOS_HOST, '--name', 'OZ,system=UNIX',
-               '--listen', '127.0.0.1:%d' % self.udp] + self.ozd_roots() + [
-               '--host', '%s,LISPM-1,system=LISPM' % CHAOS_LISPM,
-               '--peer', '%s@127.0.0.1:%d' % (CHAOS_LISPM, self.machine_udp),
-               '--tcp', '127.0.0.1:%d,TELNET@%s' % (self.telnet, CHAOS_LISPM),
-               '--log-file', '--log-simple'] + self.ozd_flags
-        self.proc = subprocess.Popen(cmd, cwd=self.run_dir, stdin=subprocess.DEVNULL,
-                                     stdout=self.logfile, stderr=self.logfile,
-                                     start_new_session=True)
-        return self.proc.pid
+        """Start what the server needs beside the machine: nothing, since
+        ozd left these tools (it was the TELNET gateway over Chaos)."""
+        return None
 
     def machine_flags(self):
-        """The network's flags, and revision 16's link's.  Over TCP the
-        machine has no Chaos cable and, since the NCP left the band (the
-        contract's section 8, R3), no Chaos address: until R3 --chaos-address
-        was given in both networks, so that one checkpoint served both, and
-        the band behind the pool was LISPM-1.  Over Chaos it has both, and a
-        checkpoint of its own (the key's -chaos, prepare below)."""
+        """The network's flags, and the link's.  Over TCP the machine has no
+        Chaos cable and, since the NCP left the band (the contract's section
+        8, R3), no Chaos address: until R3 --chaos-address was given in both
+        networks, so that one checkpoint served both, and the band behind
+        the pool was LISPM-1.  Over Chaos it had both, and a checkpoint of
+        its own (the key's -chaos), until chaos left these tools."""
         if self.network == 'tcp':
             # until R3: flags = ['--chaos-address', CHAOS_LISPM]
             flags = []
-        elif self.network == 'files':
-            # no network at all: no Chaos, and no link (no tap is taken);
-            # at the setup the glass TTY, to type HC-SERVE's start
-            flags = ['--glass-tty', '127.0.0.1:%d' % self.glass] if self.glass else []
         else:
-            flags = ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
-                     '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
-                     '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
+            # files: no network at all: no Chaos, and no link (no tap is
+            # taken); at the setup the glass TTY, to type HC-SERVE's start.
+            # It was elif self.network == 'files':, and chaos's the else:
+            #   flags = ['--chaos-address', CHAOS_LISPM, '--chaos-udp', '127.0.0.1:%d' % self.machine_udp,
+            #            '--chaos-udp-peer', '%s@127.0.0.1:%d' % (CHAOS_HOST, self.udp),
+            #            '--chaos-udp-default-peer', '127.0.0.1:%d' % self.udp]
+            flags = ['--glass-tty', '127.0.0.1:%d' % self.glass] if self.glass else []
         return flags + (self.link.machine_flags() if self.link else [])
 
     def _open(self, machine_alive):
         """One attempt at the band's TELNET listener: a socket, or None to try
-        again.  Over Chaos, a TCP connection to ozd's gateway once ozd itself
-        holds the listening port (so that it reaches this run's ozd and no
-        other); over TCP, a connection from a socket bound to this run's tap
-        to QUUX's address, port 23, which reaches this run's band alone, the
-        run holding the tap."""
-        if self.network == 'tcp':
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                s.setsockopt(socket.SOL_SOCKET, SO_BINDTODEVICE, self.link.tap.encode())
-                s.settimeout(5)
-                s.connect((self.link.quux, TELNET_PORT))
-                return s
-            except OSError:
-                # before the band's network is up: no ARP answer (EHOSTUNREACH
-                # after Linux's 3 s), or an RST from a band not yet listening
-                s.close()
-                time.sleep(0.5)
-                return None
-        if self.proc.poll() is not None:
-            raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
-        if not listener_owned_by(self.telnet, self.proc.pid):
-            time.sleep(0.05)
-            return None
+        again.  A connection from a socket bound to this run's tap to QUUX's
+        address, port 23, which reaches this run's band alone, the run
+        holding the tap.  Over Chaos it was a TCP connection to ozd's gateway
+        once ozd itself held the listening port, until chaos left these
+        tools."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            return socket.create_connection(('127.0.0.1', self.telnet), timeout=5)
+            s.setsockopt(socket.SOL_SOCKET, SO_BINDTODEVICE, self.link.tap.encode())
+            s.settimeout(5)
+            s.connect((self.link.quux, TELNET_PORT))
+            return s
         except OSError:
-            time.sleep(0.1)
+            # before the band's network is up: no ARP answer (EHOSTUNREACH
+            # after Linux's 3 s), or an RST from a band not yet listening
+            s.close()
+            time.sleep(0.5)
             return None
+        # ozd's gateway, after the tcp branch above (if self.network == 'tcp':):
+        #   if self.proc.poll() is not None:
+        #       raise RunFailed('ozd exited (see %s/ozd.log)' % self.run_dir)
+        #   if not listener_owned_by(self.telnet, self.proc.pid):
+        #       time.sleep(0.05)
+        #       return None
+        #   try:
+        #       return socket.create_connection(('127.0.0.1', self.telnet), timeout=5)
+        #   except OSError:
+        #       time.sleep(0.1)
+        #       return None
 
     def connect_listener(self, machine_alive, deadline, progress=None):
         """Connect to the band's TELNET listener, through the network, and
@@ -959,8 +976,9 @@ class OzdFileServer:
                 continue
             s.settimeout(0.2)
             # A connection that stays silent is given up after 30 s and made
-            # again; in the setup it is kept until ozd closes it (refused, or
-            # the band not heard for 180 s), so that a slow banner is not cut
+            # again; in the setup it is kept until the band closes it, so
+            # that a slow banner is not cut (ozd closed it, refused or the
+            # band not heard for 180 s, until ozd left these tools)
             text, until = '', deadline if progress else min(deadline, now() + 30)
             while now() < until:
                 if progress:
@@ -990,13 +1008,14 @@ class OzdFileServer:
         that a checkpoint written after it holds no open connection and, in
         the normal case, no TIME-WAIT.  STRICT (the setup): a band that sends
         no EOF within CLOSE_WAIT s, or resets the connection, fails the run.
-        Over Chaos the socket to ozd is closed, as before; over files there
-        is nothing to close."""
+        Over files there is nothing to close.  (Over Chaos the socket to ozd
+        was closed, until chaos left these tools.)"""
         if self.network == 'files':
             return
-        if self.network != 'tcp':
-            sock.close()
-            return
+        # chaos's:
+        #   if self.network != 'tcp':
+        #       sock.close()
+        #       return
         why = None
         try:
             sock.shutdown(socket.SHUT_WR)
@@ -1026,17 +1045,16 @@ class OzdFileServer:
         stop_process(self.proc)
 
 
-class DeviceFileServer(OzdFileServer):
+# It read: class DeviceFileServer(OzdFileServer):
+class DeviceFileServer(FileServer):
     """The tree served by quux's own file device, for a band whose SYS: is on
     the file device's pathname host.  Against such a band OzdFileServer never
-    reaches the prompt: the boot reads SYS: through the device, which with
+    reached the prompt: the boot reads SYS: through the device, which with
     nothing mounted serves an empty /, and ozd saw only "No server for this
     contact name" from the band's TELNET contact for minutes.  Here quux
     mounts the private copy as the host's / (sys/, site/ and home/lispm/,
-    --file-root), and ozd stays only as the TELNET gateway: its one root is
-    an empty read-only folder, since ozd wants one, so it serves no file.
-    The copy is laid out and written as OzdFileServer's is; only the folders
-    and the pathnames differ.
+    --file-root).  ozd stayed only as the TELNET gateway over Chaos, its one
+    root an empty read-only folder (no-files/), until it left these tools.
 
     The host's name is the band's: HOST in Systems 2000 and 2001 and the
     bands of 2002 built before the name changed, FILES after it; the device
@@ -1058,17 +1076,21 @@ class DeviceFileServer(OzdFileServer):
         """The copy as the host's /: sys/ and site/ of the tree (ubin/ as
         sys/ubin/ when given) and an empty home/lispm/ for the login."""
         super().lay_out(tree, ubin)
-        os.rmdir(os.path.join(self.root, 'lispm'))
+        # it took away ozd's home, laid out by the base, and made ozd's
+        # empty root:
+        #   os.rmdir(os.path.join(self.root, 'lispm'))
         os.makedirs(os.path.join(self.root, 'home', 'lispm'))
-        os.makedirs(os.path.join(self.run_dir, 'no-files'))
+        #   os.makedirs(os.path.join(self.run_dir, 'no-files'))
 
-    def place(self, path, tree):
-        """A sys/ file as OzdFileServer places it (SYS: translates to the
-        file device's host in the band); any other in the login's home,
-        /home/lispm/ on the host the band named (HOST: or FILES:)."""
-        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
-        if rel.startswith('sys' + os.sep):
-            return super().place(path, tree)
+    # it read: def place(self, path, tree):
+    def place_other(self, path):
+        """A file outside the tree's sys/ in the login's home, /home/lispm/
+        on the host the band named (HOST: or FILES:); a sys/ file the base
+        places (SYS: translates to the file device's host in the band)."""
+        # place() took the sys/ files from the base, and the rest here:
+        #   rel = os.path.relpath(os.path.realpath(path), os.path.realpath(tree))
+        #   if rel.startswith('sys' + os.sep):
+        #       return super().place(path, tree)
         if self.login_host is None:
             raise RunFailed('%s: not known which host the band names its home on (host=)' % path)
         name = os.path.basename(path)
@@ -1077,8 +1099,9 @@ class DeviceFileServer(OzdFileServer):
         #   return 'HOST: //home//lispm//' + os.path.splitext(name)[0], False
         return '%s: //home//lispm//%s' % (self.login_host, os.path.splitext(name)[0]), False
 
-    def ozd_roots(self):
-        return ['--root', '%s/no-files,ro' % self.run_dir]
+    # ozd's one root, an empty read-only folder, as the TELNET gateway:
+    #   def ozd_roots(self):
+    #       return ['--root', '%s/no-files,ro' % self.run_dir]
 
     def home(self):
         """The login's home in the copy, /home/lispm/ on the band's host,
@@ -1103,22 +1126,20 @@ class DeviceFileServer(OzdFileServer):
         return super().machine_flags() + ['--file-root', self.root]
 
 
-class ProbeFileServer(DeviceFileServer):
-    """Only for --file-server auto's probe: the copy served both ways at once,
-    on the device and as ozd's roots, so that a band boots to its prompt
-    whichever host its SYS: is on and can be asked which that is.  A band
-    boots only with its SYS: host served: one on OZ served by the device alone,
-    or a band whose SYS: is on the file device's host (HOST or FILES)
-    served by ozd alone, waits at boot with no TELNET server.  Nothing is
-    checked in a probe's boot."""
-    mode = 'probe'
-
-    def ozd_roots(self):
-        return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
-                '--root', 'lispm=%s/home/lispm' % self.root]
+# ProbeFileServer, --file-server auto's probe: the copy served both ways at
+# once, on the device and as ozd's roots, so that a band booted to its prompt
+# whichever host its SYS: was on and could be asked which; with ozd gone the
+# device is the one server, and auto asks nothing:
+#   class ProbeFileServer(DeviceFileServer):
+#       mode = 'probe'
+#
+#       def ozd_roots(self):
+#           return ['--root', 'sys=%s/sys' % self.root, '--root', 'site=%s/site' % self.root,
+#                   '--root', 'lispm=%s/home/lispm' % self.root]
 
 
-FILE_SERVERS = {c.mode: c for c in (OzdFileServer, DeviceFileServer)}
+# it read: FILE_SERVERS = {c.mode: c for c in (OzdFileServer, DeviceFileServer)}
+FILE_SERVERS = {c.mode: c for c in (DeviceFileServer,)}
 
 
 # --------------------------------------------------------------------------
@@ -1675,7 +1696,8 @@ def ensure_checkpoint(a, key, link=None):
         end = now() + a.setup_limit
         ports_lock, ports = take_ports()
         log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-        server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+        # it read: server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
+        server = FILE_SERVERS[a.file_server](run_dir, ports, log, a.network, link)
         machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
         tmp = chk + '.%d.tmp' % os.getpid()
         try:
@@ -1704,14 +1726,18 @@ def ensure_checkpoint(a, key, link=None):
                     # 17377774, and so gives no sign but this.
                     # Over TCP a band without the network, or one whose
                     # address is not its tap's, gives the same sign.
+                    # A band whose SYS: is on OZ, served by ozd until it
+                    # left these tools, gives the same sign.  The hint named
+                    # --network chaos as needing no network, and the System
+                    # 1002 band only on quux (MACHINE == 'quux'), until main's
+                    # Chaos path and the CADR left these tools.
                     raise type(e)('%s: the band did not reach its TELNET prompt with its files served'
                                   ' by %s; is its SYS: on %s? (--file-server) Is it a band %s runs?%s%s'
                                   % (e, a.file_server, ' or '.join(server.hosts), MACHINE,
                                      # it named the revision: ' (... on quux revision 11 and later)'
-                                     ' (a System 1002 band does not run on quux)'
-                                     if MACHINE == 'quux' else '',
+                                     ' (a System 1002 band does not run on quux)',
                                      ' Over TCP: does the band start its network, and answer at %s, port %d,'
-                                     ' behind %s? (--network chaos needs no network)'
+                                     ' behind %s? (--network files needs no network)'
                                      % (link.quux, TELNET_PORT, link.tap) if a.network == 'tcp' else ''))
                 sock.settimeout(0.2)
                 sess = Session(sock, log, helper=False)
@@ -1818,8 +1844,10 @@ def check(a, chk, cases, link=None):
     run_dir = run_dir_new('check')
     ports_lock, ports = take_ports()
     log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
-                                         host=host)
+    # and then, until ozd left these tools:
+    #   server = FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
+    #                                        host=host)
+    server = FILE_SERVERS[a.file_server](run_dir, ports, log, a.network, link, host=host)
     machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
     results, t0 = [], now()
     ok_run = False
@@ -1901,7 +1929,8 @@ def check(a, chk, cases, link=None):
         machine.stop()
         log.write('\n=== %.2f %s stopped (rc %s)\n' % (now(), MACHINE, machine.proc and machine.proc.returncode))
         server.stop()
-        log.write('\n=== %.2f ozd stopped\n' % now())
+        # it read 'ozd stopped', the one server process there was
+        log.write('\n=== %.2f the file server stopped\n' % now())
         ports_lock.release()
         if ok_run and not a.keep:
             shutil.rmtree(run_dir, ignore_errors=True)
@@ -1914,111 +1943,128 @@ def check(a, chk, cases, link=None):
 
 
 def has_file_device(exe):
-    # quux's file device; cadr has none
+    # quux's file device (cadr has none; a quux without one is older)
     return '--file-root' in subprocess.run([exe, '--help'], capture_output=True, text=True).stdout
 
 
-def probe_sys_host(a):
-    """Boot the band cold with the tree served both ways and ask it which
-    host its SYS: is on (about 15 s)."""
-    run_dir = run_dir_new('probe')
-    end = now() + a.setup_limit
-    ports_lock, ports = take_ports()
-    log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
-    server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
-    machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
-    ok = False
-    try:
-        server.lay_out(a.tree, a.ubin)
-        server.start()
-        machine.start()
-        sock, _ = server.connect_listener(
-            machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
-        sock.settimeout(0.2)
-        r = Session(sock, log, helper=False).run(
-            SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
-        sock.close()
-        if r[0] != 'value':
-            raise RunFailed('probe: %s: %s' % (SYS_HOST, r[1]))
-        ok = True
-        return r[1].strip('"')
-    finally:
-        machine.stop(wait=5)
-        server.stop()
-        ports_lock.release()
-        if ok:
-            shutil.rmtree(run_dir, ignore_errors=True)
-        else:
-            print('lispm-check: probe files kept in %s' % run_dir, file=sys.stderr)
+# probe_sys_host, --file-server auto's probe, a cold boot with the tree served
+# both ways (ProbeFileServer) that asked the band which host its SYS: was
+# on, went with ozd: the device is the one server.
+#   def probe_sys_host(a):
+#       """Boot the band cold with the tree served both ways and ask it which
+#       host its SYS: is on (about 15 s)."""
+#       run_dir = run_dir_new('probe')
+#       end = now() + a.setup_limit
+#       ports_lock, ports = take_ports()
+#       log = open(os.path.join(run_dir, 'telnet.log'), 'w', buffering=1)
+#       server = ProbeFileServer(a.ozd, run_dir, ports, log, a.ozd_flags)
+#       machine = Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
+#       ok = False
+#       try:
+#           server.lay_out(a.tree, a.ubin)
+#           server.start()
+#           machine.start()
+#           sock, _ = server.connect_listener(
+#               machine.alive, None, Progress(machine, 'the boot (the TELNET banner)', end))
+#           sock.settimeout(0.2)
+#           r = Session(sock, log, helper=False).run(
+#               SYS_HOST, None, Progress(machine, oneline(SYS_HOST), end))
+#           sock.close()
+#           if r[0] != 'value':
+#               raise RunFailed('probe: %s: %s' % (SYS_HOST, r[1]))
+#           ok = True
+#           return r[1].strip('"')
+#       finally:
+#           machine.stop(wait=5)
+#           server.stop()
+#           ports_lock.release()
+#           if ok:
+#               shutil.rmtree(run_dir, ignore_errors=True)
+#           else:
+#               print('lispm-check: probe files kept in %s' % run_dir, file=sys.stderr)
 
 
 def choose_file_server(a):
-    """--file-server auto: device when the band's SYS: is on the file
-    device's host, HOST or FILES, ozd when it is on OZ, and ozd with a
-    machine that has no file device (cadr).  The band's answer
-    is taken from a checkpoint of this band and machine already made (its setup
-    asked the band), else from the answers remembered under the cache, else
-    from a probe: a cold boot that asks the band, once for each band and machine.
-    Every run says which server it chose and why."""
-    has_device = has_file_device(a.exe)
-    if a.file_server == 'device' and not has_device:
-        raise RunFailed('--file-server device: %s has no file device (no --file-root)' % a.exe)
-    if a.file_server != 'auto':
-        return a.file_server
-    if not has_device:
-        print('lispm-check: files served by ozd: %s has no file device (auto)' % MACHINE)
-        return 'ozd'
-    if a.network == 'tcp':
-        # ozd serves its files over Chaos, which a TCP session does without;
-        # a band whose SYS: is on OZ is refused by the setup's check
-        print('lispm-check: files served by device: the session is over TCP (auto)')
+    """--file-server auto or device: quux's file device, the one file server
+    since ozd left these tools; a quux without one (no --file-root, an
+    older muir-sim) is refused.  Every run says which server it chose and
+    why.  auto chose ozd for an OZ band, or for a machine without a file
+    device (cadr), by the band's answer from a checkpoint, the answers
+    remembered under the cache or a probe; that choice is kept below,
+    commented out."""
+    if not has_file_device(a.exe):
+        raise RunFailed('--file-server %s: %s has no file device (no --file-root)' % (a.file_server, a.exe))
+    if a.file_server == 'device':
         return 'device'
-    if a.network == 'files':
-        # the session itself goes through the file device; no probe, which
-        # would ask the band over TELNET
-        print('lispm-check: files served by device: the session is through files (auto)')
-        return 'device'
-    pair = '%s-%s' % (a.band_sha[:16], a.exe_sha[:16])
-    sys_host, source = None, None
-    for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
-        try:
-            with open(chk_json) as f:
-                sys_host, source = json.load(f).get('sys_host'), 'its checkpoint'
-        except (OSError, ValueError):
-            continue
-        if sys_host:
-            break
-    db = os.path.join(cache_dir(), 'sys-hosts.json')
-    if not sys_host:
-        lock = Lock('probe-' + pair)
-        try:
-            try:
-                with open(db) as f:
-                    known = json.load(f)
-            except (OSError, ValueError):
-                known = {}
-            sys_host, source = known.get(pair, {}).get('sys_host'), 'the probe remembered'
-            if not sys_host:
-                print("lispm-check: asking the band where its SYS: is (auto; a cold boot, once)", flush=True)
-                t0 = now()
-                sys_host, source = probe_sys_host(a), 'the probe, %.1f s' % (now() - t0)
-                known[pair] = {'band': os.path.abspath(a.band), MACHINE: a.exe,
-                               'sys_host': sys_host, 'asked': time.strftime('%Y-%m-%d %H:%M:%S')}
-                tmp = '%s.%d' % (db, os.getpid())
-                with open(tmp, 'w') as f:
-                    json.dump(known, f, indent=1)
-                os.replace(tmp, db)
-        finally:
-            lock.release()
-    # each server's hosts (FILE_SERVERS), so a band whose SYS: is on FILES
-    # means device as one on HOST does; the map named HOST alone:
-    #   mode = {'HOST': 'device', 'OZ': 'ozd'}.get(sys_host)
-    mode = {h: m for m, c in FILE_SERVERS.items() for h in c.hosts}.get(sys_host)
-    if mode is None:
-        raise RunFailed("auto: the band's SYS: is on %s, which neither server serves" % sys_host)
-    print("lispm-check: files served by %s: the band's SYS: is on %s (auto, from %s)"
-          % (mode, sys_host, source))
-    return mode
+    print('lispm-check: files served by device: quux\'s file device, the one server (auto)')
+    return 'device'
+    # The choice, until ozd left these tools:
+    #   """--file-server auto: device when the band's SYS: is on the file
+    #   device's host, HOST or FILES, ozd when it is on OZ, and ozd with a
+    #   machine that has no file device (cadr).  The band's answer
+    #   is taken from a checkpoint of this band and machine already made (its setup
+    #   asked the band), else from the answers remembered under the cache, else
+    #   from a probe: a cold boot that asks the band, once for each band and machine.
+    #   Every run says which server it chose and why."""
+    #   has_device = has_file_device(a.exe)
+    #   if a.file_server == 'device' and not has_device:
+    #       raise RunFailed('--file-server device: %s has no file device (no --file-root)' % a.exe)
+    #   if a.file_server != 'auto':
+    #       return a.file_server
+    #   if not has_device:
+    #       print('lispm-check: files served by ozd: %s has no file device (auto)' % MACHINE)
+    #       return 'ozd'
+    #   if a.network == 'tcp':
+    #       # ozd serves its files over Chaos, which a TCP session does without;
+    #       # a band whose SYS: is on OZ is refused by the setup's check
+    #       print('lispm-check: files served by device: the session is over TCP (auto)')
+    #       return 'device'
+    #   if a.network == 'files':
+    #       # the session itself goes through the file device; no probe, which
+    #       # would ask the band over TELNET
+    #       print('lispm-check: files served by device: the session is through files (auto)')
+    #       return 'device'
+    #   pair = '%s-%s' % (a.band_sha[:16], a.exe_sha[:16])
+    #   sys_host, source = None, None
+    #   for chk_json in sorted(glob.glob(os.path.join(cache_dir(), 'checkpoints', pair + '-*.json'))):
+    #       try:
+    #           with open(chk_json) as f:
+    #               sys_host, source = json.load(f).get('sys_host'), 'its checkpoint'
+    #       except (OSError, ValueError):
+    #           continue
+    #       if sys_host:
+    #           break
+    #   db = os.path.join(cache_dir(), 'sys-hosts.json')
+    #   if not sys_host:
+    #       lock = Lock('probe-' + pair)
+    #       try:
+    #           try:
+    #               with open(db) as f:
+    #                   known = json.load(f)
+    #           except (OSError, ValueError):
+    #               known = {}
+    #           sys_host, source = known.get(pair, {}).get('sys_host'), 'the probe remembered'
+    #           if not sys_host:
+    #               print("lispm-check: asking the band where its SYS: is (auto; a cold boot, once)", flush=True)
+    #               t0 = now()
+    #               sys_host, source = probe_sys_host(a), 'the probe, %.1f s' % (now() - t0)
+    #               known[pair] = {'band': os.path.abspath(a.band), MACHINE: a.exe,
+    #                              'sys_host': sys_host, 'asked': time.strftime('%Y-%m-%d %H:%M:%S')}
+    #               tmp = '%s.%d' % (db, os.getpid())
+    #               with open(tmp, 'w') as f:
+    #                   json.dump(known, f, indent=1)
+    #               os.replace(tmp, db)
+    #       finally:
+    #           lock.release()
+    #   # each server's hosts (FILE_SERVERS), so a band whose SYS: is on FILES
+    #   # means device as one on HOST does; the map named HOST alone:
+    #   #   mode = {'HOST': 'device', 'OZ': 'ozd'}.get(sys_host)
+    #   mode = {h: m for m, c in FILE_SERVERS.items() for h in c.hosts}.get(sys_host)
+    #   if mode is None:
+    #       raise RunFailed("auto: the band's SYS: is on %s, which neither server serves" % sys_host)
+    #   print("lispm-check: files served by %s: the band's SYS: is on %s (auto, from %s)"
+    #         % (mode, sys_host, source))
+    #   return mode
 
 
 def options(argv=None):
@@ -2032,17 +2078,27 @@ def options(argv=None):
     p.add_argument('--tree', default=tree_default)
     p.add_argument('--band', default=os.environ.get('LISPM_CHECK_BAND'))
     p.add_argument('--ubin', default=os.environ.get('LISPM_CHECK_UBIN'))
-    # --quux on main, --cadr on the cadr line; there --quux is taken as well,
-    # as the same flag, so that a command line written for main still runs
-    names = ['--' + MACHINE] + (['--quux'] if MACHINE != 'quux' else [])
-    p.add_argument(*names, dest='exe', metavar='PATH',
+    # --quux; the cadr line's copy takes --cadr, and --quux as the same flag,
+    # which this copy did while it offered the CADR:
+    #   names = ['--' + MACHINE] + (['--quux'] if MACHINE != 'quux' else [])
+    p.add_argument('--' + MACHINE, dest='exe', metavar='PATH',
                    default=os.environ.get('LISPM_CHECK_' + MACHINE.upper()),
                    help="the simulator's %s executable" % MACHINE)
-    p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+    # ozd's path, and its --file-dates and --timezone (--ozd-file-dates,
+    # --ozd-timezone, below), until ozd left these tools: each is refused by
+    # name now (CHAOS_REFUSED), and its variable is not read.  It read:
+    #   p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+    for flag in ('--ozd', '--ozd-file-dates', '--ozd-timezone'):
+        p.add_argument(flag, dest='refused_' + flag[2:].replace('-', '_'), help=argparse.SUPPRESS)
     p.add_argument('--files', default='')
-    p.add_argument('--file-server', choices=('auto', 'device', 'ozd'),
-                   default=os.environ.get('LISPM_CHECK_FILE_SERVER', 'auto'),
-                   help="how the tree is served: quux's file device, ozd, or auto")
+    # auto and device are the same, the device being the one server; ozd
+    # left with main's Chaos and ozd path and is refused by name below, as
+    # is LISPM_CHECK_FILE_SERVER=ozd.  It read:
+    #   p.add_argument('--file-server', choices=('auto', 'device', 'ozd'),
+    #                  default=os.environ.get('LISPM_CHECK_FILE_SERVER', 'auto'),
+    #                  help="how the tree is served: quux's file device, ozd, or auto")
+    p.add_argument('--file-server', metavar='{auto,device}', default=None,
+                   help="how the tree is served: quux's file device (device, or auto, the default)")
     # Checked below rather than by choices=, since argparse does not check a
     # default, and the default may come from LISPM_CHECK_ENGINE.
     p.add_argument('--engine', metavar='{micro,rtl}',
@@ -2053,50 +2109,75 @@ def options(argv=None):
     p.add_argument('--file-timeout', type=float, default=900,
                    help='seconds a file may take to compile or load')
     p.add_argument('--keep', action='store_true', help='keep the run directory')
+    # the help named the probe's cold boot too, until auto's probe left
     p.add_argument('--setup-limit', type=float,
                    default=float(os.environ.get('LISPM_CHECK_SETUP_LIMIT') or SETUP_LIMIT),
-                   help="the hard limit in wall seconds on the setup's and the probe's cold"
-                        " boot; within it they wait as long as the machine runs (exit 3 past it)")
-    p.add_argument('--ozd-file-dates', choices=('mit', 'utc'),
-                   default=os.environ.get('LISPM_CHECK_OZD_FILE_DATES') or None,
-                   help="ozd's --file-dates: FILE's dates in UTC (ozd's default), or at"
-                        " --ozd-timezone as Systems 100 to 1001 read them (mit)")
+                   help="the hard limit in wall seconds on the setup's cold boot; within it the"
+                        " setup waits as long as the machine runs (exit 3 past it)")
+    # (--ozd-file-dates, ozd's --file-dates, refused above:)
+    #   p.add_argument('--ozd-file-dates', choices=('mit', 'utc'),
+    #                  default=os.environ.get('LISPM_CHECK_OZD_FILE_DATES') or None,
+    #                  help="ozd's --file-dates: FILE's dates in UTC (ozd's default), or at"
+    #                       " --ozd-timezone as Systems 100 to 1001 read them (mit)")
     # Which network carries the TELNET session (the contract, section 8 R1):
     # checked below rather than by choices=, as --engine is.  None, when
     # neither the flag nor the variable names one, is resolved by the
     # machine in prepare (QUUX's Ethernet contract, section 8
-    # R2): tcp on QUUX, chaos on the CADR (and on revisions 13-15 until
-    # they left these tools).  It was chaos for every run before the switch:
+    # R2): tcp (chaos on the CADR, and on revisions 13-15, until they left
+    # these tools).  It was chaos for every run before the switch:
     #   default=os.environ.get('LISPM_CHECK_NETWORK') or 'chaos',
-    p.add_argument('--network', metavar='{%s}' % ','.join(NETWORKS),
-                   default=os.environ.get('LISPM_CHECK_NETWORK') or None,
-                   help="what carries the session: chaos, TELNET through ozd; tcp, TELNET over the"
-                        " build host's TCP to the band behind its tap; or files, no network, the"
-                        " session through files on the file device; by default tcp on QUUX and"
-                        " chaos on the CADR")
-    p.add_argument('--ozd-timezone', type=int,
-                   default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
-                   help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
-                        " hours west of Greenwich")
+    # The variable is read below, so that a refusal names what gave chaos.
+    # Its help named chaos, TELNET through ozd, and the CADR's default,
+    # until main's Chaos path left these tools.
+    p.add_argument('--network', metavar='{%s}' % ','.join(NETWORKS), default=None,
+                   help="what carries the session: tcp, TELNET over the build host's TCP to the band"
+                        " behind its tap, the default; or files, no network, the session through"
+                        " files on the file device")
+    # (--ozd-timezone, ozd's --timezone, refused above:)
+    #   p.add_argument('--ozd-timezone', type=int,
+    #                  default=os.environ.get('LISPM_CHECK_OZD_TIMEZONE') or None,
+    #                  help="ozd's --timezone under --ozd-file-dates mit: the band's site zone,"
+    #                       " hours west of Greenwich")
     a = p.parse_args(argv)
     if a.engine not in ('micro', 'rtl'):
         p.error("--engine (or LISPM_CHECK_ENGINE): %r is neither micro nor rtl" % a.engine)
+    # Chaos and ozd, refused by name, each by what named it: the flag or its
+    # variable (CHAOS_REFUSED)
+    for flag in ('--ozd', '--ozd-file-dates', '--ozd-timezone'):
+        if getattr(a, 'refused_' + flag[2:].replace('-', '_')) is not None:
+            p.error('%s: %s' % (flag, CHAOS_REFUSED))
+    for flag, var, default in (('--network', 'LISPM_CHECK_NETWORK', None),
+                               ('--file-server', 'LISPM_CHECK_FILE_SERVER', 'auto')):
+        dest = flag[2:].replace('-', '_')
+        if getattr(a, dest) is not None:
+            named = '%s %s' % (flag, getattr(a, dest))
+        else:
+            setattr(a, dest, os.environ.get(var) or default)
+            named = '%s=%s' % (var, getattr(a, dest))
+        if getattr(a, dest) in ('chaos', 'ozd'):
+            p.error('%s: %s' % (named, CHAOS_REFUSED))
     if a.network is not None and a.network not in NETWORKS:
         p.error("--network (or LISPM_CHECK_NETWORK): %r is not one of %s" % (a.network, ', '.join(NETWORKS)))
+    # argparse's choices= checked it, and took ozd; the variable's value
+    # is checked here too now
+    if a.file_server not in ('auto', 'device'):
+        p.error("--file-server (or LISPM_CHECK_FILE_SERVER): %r is neither auto nor device" % a.file_server)
     a.tree = os.path.abspath(a.tree)
     up = os.path.dirname(a.tree)
     a.band = a.band or os.path.join(a.tree, 'run', 'check', 'band.img')
     a.ubin = a.ubin or os.path.join(os.path.dirname(a.band), 'ubin')
     a.exe = a.exe or os.path.join(up, 'muir-sim', 'target', 'release', MACHINE)
-    a.ozd = a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd')
-    # the machine and ozd run in the run directory, so every path is made absolute
-    a.band, a.ubin, a.exe, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.exe, a.ozd))
+    # ozd's path and flags, until ozd left these tools:
+    #   a.ozd = a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd')
+    #   a.band, a.ubin, a.exe, a.ozd = (os.path.abspath(x) for x in (a.band, a.ubin, a.exe, a.ozd))
+    #   a.ozd_flags = []
+    #   if a.ozd_file_dates:
+    #       a.ozd_flags += ['--file-dates', a.ozd_file_dates]
+    #   if a.ozd_timezone is not None:
+    #       a.ozd_flags += ['--timezone', str(a.ozd_timezone)]
+    # the machine runs in the run directory, so every path is made absolute
+    a.band, a.ubin, a.exe = (os.path.abspath(x) for x in (a.band, a.ubin, a.exe))
     a.files = [os.path.abspath(f) for f in a.files.split(',') if f]
-    a.ozd_flags = []
-    if a.ozd_file_dates:
-        a.ozd_flags += ['--file-dates', a.ozd_file_dates]
-    if a.ozd_timezone is not None:
-        a.ozd_flags += ['--timezone', str(a.ozd_timezone)]
     return a
 
 
@@ -2109,41 +2190,43 @@ def prepare(a):
     the link stopped."""
     link = None
     try:
-        # ozd's path is checked once the network is known, below: the
-        # default network depends on the machine, QUUX or the CADR
+        # (ozd's path was checked once the network was known, until ozd
+        # left these tools)
         for what, path in (('band', a.band), (MACHINE, a.exe)):
             if not os.path.isfile(path):
                 raise RunFailed('no %s at %s' % (what, path))
         for f in a.files:
             if not os.path.isfile(f):
                 raise RunFailed('no file %s' % f)
-        # ozd refuses a zone under utc, its default; said here rather than
-        # left to ozd's log
-        if a.ozd_timezone is not None and a.ozd_file_dates != 'mit':
-            raise RunFailed('--ozd-timezone needs --ozd-file-dates mit: ozd refuses a zone'
-                            ' under utc, its default')
+        # ozd's zone was checked here, until ozd left these tools:
+        #   if a.ozd_timezone is not None and a.ozd_file_dates != 'mit':
+        #       raise RunFailed('--ozd-timezone needs --ozd-file-dates mit: ozd refuses a zone'
+        #                       ' under utc, its default')
         a.band_sha = sha256_cached(a.band)
         a.exe_sha = sha256_cached(a.exe)
         a.exe_version = subprocess.run([a.exe, '-V'], capture_output=True, text=True).stdout.strip()
-        # QUUX has the Ethernet device, and every run on it takes a tap; a
-        # machine that names another revision than 16 is refused here
+        # QUUX has the Ethernet device, and every run takes a tap but
+        # files'; a machine that names another revision than 16 is refused
+        # here
         a.revision = machine_revision(a, a.exe_sha)
         # the network named, or the default for the machine (section 8 R2)
         a.network_named = a.network is not None
         a.network = resolve_network(a.network, a.revision)
-        # started only over Chaos or for an OZ band, which TCP and files
-        # refuse; it read: if a.network != 'tcp' and not os.path.isfile(a.ozd):
-        if a.network not in ('tcp', 'files') and not os.path.isfile(a.ozd):
-            raise RunFailed('no ozd at %s' % a.ozd)
+        # ozd was started only over Chaos or for an OZ band, which TCP and
+        # files refused, until it left these tools; it read:
+        #   if a.network not in ('tcp', 'files') and not os.path.isfile(a.ozd):
+        #       raise RunFailed('no ozd at %s' % a.ozd)
         a.file_server = choose_file_server(a)
-        if a.network == 'tcp' and a.file_server != 'device':
-            raise RunFailed('--network tcp%s: ozd serves the files over Chaos; a band whose SYS: is on OZ'
-                            ' wants --network chaos'
-                            % ('' if a.network_named else ', the default'))
-        if a.network == 'files' and a.file_server != 'device':
-            raise RunFailed('--network files: the session goes through quux\'s file device, so the files'
-                            ' are served by it (--file-server device); a band whose SYS: is on OZ wants'
-                            ' --network chaos')
+        # and tcp and files refused a server other than the device, which
+        # is the one server now:
+        #   if a.network == 'tcp' and a.file_server != 'device':
+        #       raise RunFailed('--network tcp%s: ozd serves the files over Chaos; a band whose SYS: is on OZ'
+        #                       ' wants --network chaos'
+        #                       % ('' if a.network_named else ', the default'))
+        #   if a.network == 'files' and a.file_server != 'device':
+        #       raise RunFailed('--network files: the session goes through quux\'s file device, so the files'
+        #                       ' are served by it (--file-server device); a band whose SYS: is on OZ wants'
+        #                       ' --network chaos')
         # The key names the file server, since the setup logs in to that
         # server's host.  The device's folders are not in it: a checkpoint
         # carries none, quux mounting each check's own copy from its flags.
@@ -2154,7 +2237,9 @@ def prepare(a):
         # --network files takes no tap on QUUX either: its point is
         # a band checked without its network; LISPM_CHECK_TAPS is not used
         # it read: tapped = a.revision is not None and a.revision >= 16 and a.network != 'files'
-        tapped = a.revision is not None and a.network != 'files'
+        # and then, while the CADR (None) was offered:
+        #   tapped = a.revision is not None and a.network != 'files'
+        tapped = a.network != 'files'
         if a.network == 'files':
             print('lispm-check: no network: the session through files on the file device%s'
                   % (' (LISPM_CHECK_TAPS not used)' if os.environ.get('LISPM_CHECK_TAPS') else ''))
@@ -2164,7 +2249,10 @@ def prepare(a):
         # before files:
         #   key = '%s-%s-%s-%s' % (a.band_sha[:16], a.exe_sha[:16], SETUP_VERSION_TAP if tapped else SETUP_VERSION,
         #                          a.engine)
-        key = key if a.file_server == 'ozd' else key + '-' + a.file_server
+        # ozd's key had no suffix; the device's, the one server now, keeps
+        # its own, so that its checkpoints made before stay valid:
+        #   key = key if a.file_server == 'ozd' else key + '-' + a.file_server
+        key = key + '-' + a.file_server
         # files' checkpoint holds HC-SERVE running: a key of its own, which
         # names HC-SERVE's file by its sha256, so that a changed HC-SERVE
         # makes its checkpoint again
@@ -2172,10 +2260,11 @@ def prepare(a):
             if not os.path.isfile(HC_SERVE):
                 raise RunFailed('--network files: no HC-SERVE at %s' % HC_SERVE)
             key += '-files-' + sha256_cached(HC_SERVE)[:8]
-        # revision 16's two networks give the machine different Chaos
-        # switches since R3 (machine_flags), so each has its own checkpoint
-        if tapped and a.network == 'chaos':
-            key += '-chaos'
+        # revision 16's two networks gave the machine different Chaos
+        # switches since R3 (machine_flags), so each had its own checkpoint,
+        # until chaos left these tools:
+        #   if tapped and a.network == 'chaos':
+        #       key += '-chaos'
         if tapped:
             # A checkpoint for each tap index, keyed by QUUX's address behind
             # it (the contract, amendment 2, 5.1); the taps tried are those

@@ -21,8 +21,9 @@ and --ref and --ucadr-ref with them (now refused).  rev15 assembles the
 format revision 16 runs.  The check tree assembles the tree's own microcode
 at revision 14.
 
-lispm-check's band, ubin/, quux and ozd are this tree's defaults
-(run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
+lispm-check's band, ubin/ and quux are this tree's defaults
+(run/check/band.img beside run/check/ubin/, ../muir-sim; ../ozd until ozd
+left lispm-check), since the
 copies are not where those defaults are found; LISPM_CHECK_BAND and the
 others, or arguments after --, choose others.
 """
@@ -1507,7 +1508,8 @@ def environment():
         env['LISPM_CHECK_BAND'] = os.path.join(TREE, 'run', 'check', 'band.img')
         env.setdefault('LISPM_CHECK_UBIN', os.path.join(TREE, 'run', 'check', 'ubin'))
     env.setdefault('LISPM_CHECK_QUUX', os.path.join(TREE, '..', 'muir-sim', 'target', 'release', 'quux'))
-    env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
+    # and LISPM_CHECK_OZD, ozd beside the tree, until ozd left lispm-check:
+    #   env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
     return env
 
 

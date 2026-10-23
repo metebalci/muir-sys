@@ -6,7 +6,7 @@ boot (tools/microcode-check/README.md).
 
 Usage:
   tools/microcode-check/generational-save --out DIR --disk DISK --ubin UBIN
-      --quux QUUX --ozd OZD --ports LO-HI [--save LODn] [--engine micro|rtl]
+      --quux QUUX --ports LO-HI [--save LODn] [--engine micro|rtl]
       [--incremental]
 
 DISK holds a band of System 2002 current in LOD1 and the microcode under test in
@@ -45,9 +45,10 @@ The machine is the one QUUX the tools run, revision 16 (it ran at 14 unless
 a wrapper set another, and over Chaos on 13-15, until those left these
 tools); a machine that names another revision is refused (QUUX's Ethernet
 contract, section 8 R2).  The session and the boot each take a tap of
-LISPM_CHECK_TAPS and go over TCP unless LISPM_CHECK_NETWORK says chaos, with
-no ozd started (cross-build's Run.session, through lispm-check's
-harness_network, and lispm-check's own default).  Over TCP the save's connection goes silent rather than closing,
+LISPM_CHECK_TAPS and go over TCP, with no ozd started (cross-build's
+Run.session, through lispm-check's harness_network, and lispm-check's own
+default).  --ozd, which they needed for Chaos (LISPM_CHECK_NETWORK=chaos),
+went with main's Chaos and ozd path.  Over TCP the save's connection goes silent rather than closing,
 since the band's network stops as the save begins; the save is judged by its
 partition alone, watched after 120 s.
 
@@ -107,7 +108,8 @@ def main():
     p.add_argument('--disk', required=True)
     p.add_argument('--ubin', required=True)
     p.add_argument('--quux', required=True)
-    p.add_argument('--ozd', required=True)
+    # --ozd went with main's Chaos and ozd path:
+    #   p.add_argument('--ozd', required=True)
     p.add_argument('--ports', required=True)
     p.add_argument('--save', default='LOD2')
     p.add_argument('--engine', default='micro')
@@ -119,8 +121,10 @@ def main():
     a.out = os.path.abspath(x.out)
     a.work = os.path.abspath(x.work or os.path.join(os.path.expanduser('~'), '.cache',
                                                    'generational-save', os.path.basename(a.out)))
-    a.ubin, a.quux, a.ozd, a.engine = (os.path.abspath(x.ubin), os.path.abspath(x.quux),
-                                       os.path.abspath(x.ozd), x.engine)
+    # it read:
+    #   a.ubin, a.quux, a.ozd, a.engine = (os.path.abspath(x.ubin), os.path.abspath(x.quux),
+    #                                      os.path.abspath(x.ozd), x.engine)
+    a.ubin, a.quux, a.engine = os.path.abspath(x.ubin), os.path.abspath(x.quux), x.engine
     a.ports = tuple(int(v) for v in x.ports.split('-'))
     a.builder = None
     os.makedirs(a.out, exist_ok=True)

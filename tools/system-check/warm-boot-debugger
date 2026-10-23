@@ -3,7 +3,7 @@
 the debugger, as a harness.
 
     tools/system-check/warm-boot-debugger --out DIR --band DISK --ubin UBIN
-        [--quux QUUX] [--ozd OZD] [--engine micro|rtl] [--files F1,F2...]
+        [--quux QUUX] [--engine micro|rtl] [--files F1,F2...]
 
 The band boots cold with its files served by quux's file device; a TELNET
 session compiles and loads the --files (a changed source on a band built
@@ -23,8 +23,9 @@ it runs in by that slot alone unwinds its own running group and halts the
 machine, and the second session gets no banner.
 
 The ports come from LISPM_CHECK_PORTS and the tap from LISPM_CHECK_TAPS, as
-lispm-check's do (its harness_network: over TCP on revision 16, over Chaos
-through ozd below).  A warm boot that lands while a process other than the
+lispm-check's do (its harness_network: over TCP; over Chaos through ozd
+below revision 16, and when LISPM_CHECK_NETWORK said chaos, until main's
+Chaos and ozd path left these tools, with --ozd).  A warm boot that lands while a process other than the
 scheduler runs asks "Reset it?" on the console; as tools/system-check/
 warm-boot does, the harness gives the TELNET server 5 s to end before the
 warm boot (60 s on rtl) and answers Yes when no banner comes in a quarter of
@@ -45,13 +46,15 @@ p.add_argument('--out', required=True)
 p.add_argument('--band', required=True)
 p.add_argument('--ubin', required=True)
 p.add_argument('--quux', default=os.environ.get('LISPM_CHECK_QUUX'))
-p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
+# --ozd, ozd's path, went with main's Chaos and ozd path (QUUX has no
+# Chaosnet interface):
+#   p.add_argument('--ozd', default=os.environ.get('LISPM_CHECK_OZD'))
 p.add_argument('--engine', default='micro', choices=('micro', 'rtl'))
 p.add_argument('--files', default='', help='files compiled and loaded first, comma-separated')
 a = p.parse_args()
 up = os.path.dirname(TREE)
 quux = os.path.abspath(a.quux or os.path.join(up, 'muir-sim', 'target', 'release', 'quux'))
-ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
+#   ozd = os.path.abspath(a.ozd or os.path.join(up, 'ozd', 'target', 'release', 'ozd'))
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 log = open(os.path.join(out, 'telnet.log'), 'w', buffering=1)
@@ -70,7 +73,8 @@ except BaseException:
     if link:
         link.stop()
     raise
-server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
+# it read: server = lc.DeviceFileServer(ozd, out, pts, log, (), network, link)
+server = lc.DeviceFileServer(out, pts, log, network, link)
 machine = lc.Machine(quux, os.path.abspath(a.band), out, pts[3], server, a.engine)
 ok = True
 

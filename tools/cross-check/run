@@ -31,8 +31,9 @@ QFASLs, muir-sim's ref/band-2001-81b3973/handover-2001-81b3973-sys.tar.gz
 system (contract G3 revision 14, 10.6).  G2's cross build had System 2000's;
 --tree-2000 and CROSS_CHECK_TREE_2000 are older names of the same.
 
-lispm-check's band, ubin/, quux and ozd are this tree's defaults
-(run/check/band.img beside run/check/ubin/, ../muir-sim and ../ozd), since the
+lispm-check's band, ubin/ and quux are this tree's defaults
+(run/check/band.img beside run/check/ubin/, ../muir-sim; ../ozd until ozd
+left lispm-check), since the
 copies are not where those defaults are found; LISPM_CHECK_BAND and the others,
 or arguments after --, choose others.  LISPM_CHECK_PORTS chooses the ports.
 """
@@ -121,7 +122,8 @@ def environment():
         env['LISPM_CHECK_BAND'] = os.path.join(TREE, 'run', 'check', 'band.img')
         env.setdefault('LISPM_CHECK_UBIN', os.path.join(TREE, 'run', 'check', 'ubin'))
     env.setdefault('LISPM_CHECK_QUUX', os.path.join(TREE, '..', 'muir-sim', 'target', 'release', 'quux'))
-    env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
+    # and LISPM_CHECK_OZD, ozd beside the tree, until ozd left lispm-check:
+    #   env.setdefault('LISPM_CHECK_OZD', os.path.join(TREE, '..', 'ozd', 'target', 'release', 'ozd'))
     return env
 
 

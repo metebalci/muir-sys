@@ -3,8 +3,10 @@
 runs (QUUX's Ethernet contract, section 8 R2, clarified 19 Oct), dry: no band
 boots.  A stand-in quux notes each start (MUIR_QUUX_REVISION and its
 arguments), says its revision when asked, and exits; a stand-in ozd notes
-each start and exits.  So every run fails at once, and what each was started
-with is checked:
+each start and exits, given to every process as LISPM_CHECK_OZD and as the
+first ozd on PATH (it was given as --ozd, which left with main's Chaos and
+ozd path).  So every run fails at once, and what each was started with is
+checked:
 
   route-session   Run.session, the route's own sessions (high, incremental,
                   generational-save's): the machine at revision 16, with
@@ -26,6 +28,7 @@ with is checked:
                   and its site and WORMCH sessions at revision 16
   revisions       every start of the stand-in quux, lispm-check's questions
                   included: revision 16, and no other
+  no-ozd          every start of the stand-in ozd, over all the cases: none
 
 The removal of revisions 13-15 (step 1) put the builder, the assembly and
 the guards on revision 16; "revisions" fails on any start at another.
@@ -68,7 +71,10 @@ esac
 echo "machine: quux, revision ${MUIR_QUUX_REVISION:-13}"
 exit 1
 '''
-STAND_IN_OZD = '#!/bin/sh\necho "$*" >> %(log)s\nexit 1\n'
+# the stand-in ozd notes each start in the case's log and in the log of
+# every start; it had the case's alone:
+#   STAND_IN_OZD = '#!/bin/sh\necho "$*" >> %(log)s\nexit 1\n'
+STAND_IN_OZD = '#!/bin/sh\necho "$*" >> %(log)s\necho "$*" >> %(all)s\nexit 1\n'
 
 
 def main():
@@ -80,11 +86,19 @@ def main():
     os.environ['XDG_CACHE_HOME'] = os.path.join(work, 'xdg')
     qlog, olog = os.path.join(work, 'quux.log'), os.path.join(work, 'ozd.log')
     alllog = os.path.join(work, 'quux-all.log')
-    quux, ozd = os.path.join(work, 'quux'), os.path.join(work, 'ozd')
+    # ozd's starts over all the cases, which starts() leaves (no-ozd)
+    oalllog = os.path.join(work, 'ozd-all.log')
+    # the stand-in ozd in a folder of its own, put first on PATH; it was
+    # beside the stand-in quux, given as a.ozd:
+    #   quux, ozd = os.path.join(work, 'quux'), os.path.join(work, 'ozd')
+    os.makedirs(os.path.join(work, 'ozd-bin'))
+    quux, ozd = os.path.join(work, 'quux'), os.path.join(work, 'ozd-bin', 'ozd')
     open(quux, 'w').write(STAND_IN_QUUX % {'log': qlog, 'all': alllog})
-    open(ozd, 'w').write(STAND_IN_OZD % {'log': olog})
+    open(ozd, 'w').write(STAND_IN_OZD % {'log': olog, 'all': oalllog})
     os.chmod(quux, 0o755)
     os.chmod(ozd, 0o755)
+    os.environ['LISPM_CHECK_OZD'] = ozd
+    os.environ['PATH'] = os.path.dirname(ozd) + os.pathsep + os.environ.get('PATH', '')
     # a band, a ubin/ and a tree that exist, and nothing in them; the
     # ubin/'s .mcr files open with revision 15's format word and hold 15 at
     # section 6's item, and its .sym files name the guards' halts, so that
@@ -127,7 +141,9 @@ def main():
     class A:
         pass
     a = A()
-    a.quux, a.ozd, a.engine = quux, ozd, 'micro'
+    # a.ozd went with --ozd (main's Chaos and ozd path):
+    #   a.quux, a.ozd, a.engine = quux, ozd, 'micro'
+    a.quux, a.engine = quux, 'micro'
     # the PROMs are files (revision 16 has none of its own), as run's main
     # makes them; the revisions and --asm-quux went with step 1:
     #   a.builder, a.builder_ubin, a.builder_prom, a.builder_revision = band, ubin, None, BUILDER
@@ -174,15 +190,19 @@ def main():
                 why.append('given --chaos-udp')
             if network == 'tcp' and '--ethernet-socket' not in line:
                 why.append('given no --ethernet-socket')
-            if network == 'chaos' and '--chaos-udp' not in line:
-                why.append('given no --chaos-udp')
-            if network == 'chaos' and '--ethernet-socket' in line:
-                why.append('given --ethernet-socket')
-        if network == 'tcp' and o:
-            why.append('ozd started: %s' % o[0][:120])
-        if network == 'chaos' and not o:
-            why.append('ozd not started')
-        if network is None and o:
+            # a run over Chaos, until main's Chaos path left these tools:
+            #   if network == 'chaos' and '--chaos-udp' not in line:
+            #       why.append('given no --chaos-udp')
+            #   if network == 'chaos' and '--ethernet-socket' in line:
+            #       why.append('given --ethernet-socket')
+            if '--chaos-udp' in line:
+                why.append('given --chaos-udp')
+        # ozd is never started now; it read:
+        #   if network == 'tcp' and o: ...
+        #   if network == 'chaos' and not o:
+        #       why.append('ozd not started')
+        #   if network is None and o: ...
+        if o:
             why.append('ozd started: %s' % o[0][:120])
         why = sorted(set(why))
         print('%s %s%s' % ('FAIL' if why else 'ok  ', name, ': ' + '; '.join(why) if why else ''),
@@ -315,6 +335,13 @@ def main():
             print('     quux started: %s' % v[0][:300])
     if why:
         fails.append('revisions')
+
+    # no-ozd: the stand-in ozd's starts over every case above
+    ozds = open(oalllog).read().splitlines() if os.path.exists(oalllog) else []
+    print('%s no-ozd%s' % ('FAIL' if ozds else 'ok  ',
+                           ': %d starts of ozd, the first: %s' % (len(ozds), ozds[0][:200]) if ozds else ''))
+    if ozds:
+        fails.append('no-ozd')
 
     # the scratch is under the system's temporary directory
     shutil.rmtree(work, ignore_errors=True)

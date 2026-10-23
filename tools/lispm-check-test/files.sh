@@ -37,9 +37,12 @@
 #   early           a planted tool whose FileSession takes hc-K.ans without
 #                   waiting for hc-K.done: early-answer's verdict must be
 #                   EARLY, so the lanes' comparison catches the plant
-#   cadr            the tool as the cadr line's copy (MACHINE cadr): --network
-#                   files refused, exit 2, the CADR having no file device
-#   ozd-server      --file-server ozd under --network files: refused, exit 2
+#   (cadr, the tool as the cadr line's copy (MACHINE cadr) refusing --network
+#   files for the CADR's want of a file device, left when main's tools
+#   stopped offering the CADR: the cadr line keeps its own copy)
+#   ozd-server      --file-server ozd under --network files: refused, exit 2,
+#                   by name, as for any network: QUUX has no Chaosnet
+#                   interface, and its files are served by quux's file device
 #   harness         LISPM_CHECK_NETWORK=files through harness_network (the
 #                   tools that drive TELNET sessions of their own): refused
 here=$(cd "$(dirname "$0")" && pwd)
@@ -152,15 +155,19 @@ else
     tool=$tool_was
 fi
 
-# the cadr line's copy differs in its MACHINE line alone; any executable will
-# do as --cadr, since the refusal comes before the machine runs
-mkdir -p "$work/cadr"
-sed "s/^MACHINE = 'quux'\$/MACHINE = 'cadr'/" "$tool" > "$work/cadr/lispm-check" && chmod +x "$work/cadr/lispm-check"
-tool=$work/cadr/lispm-check
-run cadr 2 -- --tree "$tree" --network files "$@" --cadr /bin/true "$cases" && has "which has no file device" && ok
-tool=$tool_was
+# cadr ran the tool as the cadr line's copy, until main's tools stopped
+# offering the CADR (the cadr line keeps its own copy, and its own test):
+#   mkdir -p "$work/cadr"
+#   sed "s/^MACHINE = 'quux'\$/MACHINE = 'cadr'/" "$tool" > "$work/cadr/lispm-check" && chmod +x "$work/cadr/lispm-check"
+#   tool=$work/cadr/lispm-check
+#   run cadr 2 -- --tree "$tree" --network files "$@" --cadr /bin/true "$cases" && has "which has no file device" && ok
+#   tool=$tool_was
 
-run ozd-server 2 -- --network files --file-server ozd "$@" "$cases" && has "--network files: the session goes through" && ok
+# --file-server ozd is refused by name since ozd left main's tools; under
+# files it was refused for the session's want of the device:
+#   ... && has "--network files: the session goes through" && ok
+run ozd-server 2 -- --network files --file-server ozd "$@" "$cases" \
+    && has "--file-server ozd: QUUX has no Chaosnet interface" && hasnt "setting up a checkpoint" && ok
 
 name=harness
 if python3 - "$tool" > "$out" 2>&1 <<'EOF'

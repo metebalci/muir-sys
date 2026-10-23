@@ -1153,8 +1153,9 @@ def main():
         # T2's sessions are TELNET over the band's TCP: lispm-check's files
         # network carries none, and its setup would be made for nothing
         if a.network == 'files':
+            # it read "(chaos or tcp)" until chaos left these tools
             raise lc.RunFailed('--network files: T2 drives TELNET sessions over the band\'s TCP, which'
-                               ' files does without (chaos or tcp)')
+                               ' files does without (tcp)')
         link, chk, t_setup = lc.prepare(a)
         # no link is the CADR's alone now that every QUUX run takes a tap; it
         # named the revision: 'T2 wants revision 16, which takes a tap'
@@ -1169,7 +1170,10 @@ def main():
         # FILES), which --files are named on, as lispm-check's own check
         # does; made without it, the server had one host, HOST, as a constant:
         #   server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link)
-        server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
+        # and then, until ozd left these tools:
+        #   server = lc.FILE_SERVERS[a.file_server](a.ozd, run_dir, ports, log, a.ozd_flags, a.network, link,
+        #                                           host=lc.checkpoint_host(chk))
+        server = lc.FILE_SERVERS[a.file_server](run_dir, ports, log, a.network, link,
                                                 host=lc.checkpoint_host(chk))
         machine = lc.Machine(a.exe, a.band, run_dir, ports[3], server, a.engine)
         ok_run = False

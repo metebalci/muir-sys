@@ -2878,3 +2878,45 @@ and then left the band and the microcode (step R3, below).
   `generational` over TCP and fails it over `--network files`
   (`gen-pretenure` (0 NIL 0 NIL 1 T)), as it failed on revision 14; why
   TCP hides it is not yet measured.
+- **Main's Chaos and ozd path leaves the tools** (the removal of revisions
+  13-15, step 2; `tools/lispm-check`, `tools/lispm-check-test/`,
+  `tools/cross-build/`, `tools/system-check/warm-boot`,
+  `tools/system-check/warm-boot-debugger`,
+  `tools/microcode-check/generational-save`, `tools/tcp-check/run`,
+  `tools/cross-check/run`, `tools/assembler-check/run`). QUUX has no
+  Chaosnet interface, and nothing on this line runs the CADR, so no tool here
+  starts ozd. `tools/lispm-check` refuses `--network chaos`, `--file-server
+  ozd`, `--ozd`, `--ozd-file-dates` and `--ozd-timezone` by name, and
+  `LISPM_CHECK_NETWORK=chaos` and `LISPM_CHECK_FILE_SERVER=ozd` as well,
+  before it asks the machine anything ("QUUX has no Chaosnet interface",
+  `CHAOS_REFUSED`, `:210`; `options`, `:2146`, `:2157`;
+  `harness_network`, `:722`). `NETWORKS` is `tcp` and `files` (`:794`).
+  `OzdFileServer` is now `FileServer` (`:808`), whose `start` starts nothing
+  (`:903`), and quux's file device is the one file server (`FILE_SERVERS`,
+  `:1142`): `--file-server auto` means `device`, with no probe
+  (`choose_file_server`, `:1987`; `probe_sys_host` and `ProbeFileServer`
+  are commented out, `:1950`). The device's checkpoint keys are as before
+  (`:2255`). Main's copy of the tool no longer offers the CADR: `--cadr`,
+  the CADR's network defaults and refusals, and its machine flags go
+  (`default_network`, `:670`; `resolve_network`, `:679`); the cadr line
+  keeps its own copy. `warm-boot`, `warm-boot-debugger` and
+  `generational-save` lose `--ozd`, and `cross-build/run` its `--ozd` and
+  `LISPM_CHECK_OZD`. The self-tests give every run a stand-in ozd that notes
+  each start, as `LISPM_CHECK_OZD` and as the first `ozd` on `PATH`:
+  `run.sh` and `cross-build/test` gain `no-ozd`, and `network.sh` gains
+  `chaos-refused`, `chaos-variable`, `harness-chaos`, `ozd-refused`,
+  `ozd-variable`, `ozd-flags` (three runs) and `no-ozd` (`:239`, `:389`);
+  `chaos-own`, `variable` and `cadr-default`, and `files.sh`'s `cadr`, go,
+  and `files.sh`'s `ozd-server` wants the refusal by name (`:169`).
+  `tools/gtcp/`, the gate of TCP against Chaos, goes. Measured on the default band
+  with quux 509c671 and with a build whose start names no revision, both
+  the same: `run.sh` 8 of 8 and `no-ozd`, `network.sh` 26 lanes ok (the 18
+  before less `files.sh`'s `cadr`, plus the 8 refusals and `no-ozd`; none
+  skipped), `harnesses.sh` 2 of 2, `cross-build/test` 10 of 10 (`no-ozd`
+  added), and `warm-boot-debugger` and `tcp-check`'s `telnet` part passing;
+  the stand-in ozd never started, and no process named `ozd` was executed
+  under any of them (every `execve` traced). Before the change the 5
+  refusals of `chaos` and `ozd` each failed, and a run over `chaos` started
+  the stand-in. Two mutants: `chaos` put back fails `network.sh`'s
+  `chaos-refused`, `chaos-variable` and `harness-chaos`; ozd's start put
+  back fails `run.sh`'s `no-ozd` (9 starts).

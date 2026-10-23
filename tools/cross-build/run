@@ -229,12 +229,13 @@ class Run:
                    XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
         # the run's engine, as its sessions and boots have it: without it every
         # lispm-check of a run on rtl (a saved band's boot, the save checks')
-        # ran on micro, lispm-check's default.  ozd only when given: every run
-        # is at revision 16, over TCP, which starts none (it was always given:
-        #   '--ozd', self.a.ozd,)
-        ozd = ['--ozd', self.a.ozd] if getattr(self.a, 'ozd', None) else []
+        # ran on micro, lispm-check's default.  ozd was given when given to
+        # this tool (and always before that: '--ozd', self.a.ozd,), until
+        # main's Chaos and ozd path left these tools, lispm-check refusing
+        # --ozd now:
+        #   ozd = ['--ozd', self.a.ozd] if getattr(self.a, 'ozd', None) else []
         cmd = [sys.executable, os.path.join(TREE, 'tools', 'lispm-check'), '--band', band,
-               '--ubin', ubin, '--quux', quux] + ozd + ['--tree', tree,
+               '--ubin', ubin, '--quux', quux] + ['--tree', tree,
                '--engine', self.a.engine,
                '--timeout', str(timeout), '--keep'] + list(extra) + [cf]
         log = os.path.join(where, 'lispm-check.out')
@@ -263,8 +264,8 @@ class Run:
         with TREE on the file device, log in, and run FORMS, each (form,
         timeout), in one TELNET session, through lispm-check's own classes;
         FILES are served in the login's home.  With SAVE_PART, (si:disk-save
-        SAVE_PART t) is typed last, the session's connection closing (over
-        Chaos) or going silent (over TCP) as the save begins, and the save is
+        SAVE_PART t) is typed last, the session's connection going silent
+        (over TCP; over Chaos it closed) as the save begins, and the save is
         waited for until SAVE_PART holds a band that stays the same for 60 s,
         before the machine is stopped.  Returns [(form, kind, text)]."""
         from importlib.machinery import SourceFileLoader
@@ -278,9 +279,10 @@ class Run:
         quux = self.wrapper(MACHINE_REVISION, os.path.join(self.ubin, 'promh.mcr'), rw=True)
         # The network, by lispm-check's helper (QUUX's Ethernet contract,
         # sections 3 and 8 R2): the machine's own revision decides, as the
-        # wrapper's quux may set another than MACHINE_REVISION.  On revision
-        # 16 a tap and TCP unless LISPM_CHECK_NETWORK says chaos; below, Chaos
-        # through ozd, as every session went before the switch:
+        # wrapper's quux may set another than MACHINE_REVISION, which it
+        # refuses.  A tap and TCP (Chaos through ozd below revision 16, and
+        # when LISPM_CHECK_NETWORK said chaos, until main's Chaos and ozd
+        # path left these tools), as every session went before the switch:
         #   server = lc.DeviceFileServer(self.a.ozd, run_dir, ports, log)
         try:
             network, link = lc.harness_network(quux)
@@ -293,9 +295,10 @@ class Run:
             if link:
                 link.stop()
             raise
-        # ozd may be none (--ozd is not needed since every run is at revision
-        # 16); a session over TCP starts none
-        server = lc.DeviceFileServer(getattr(self.a, 'ozd', None), run_dir, ports, log, (), network, link)
+        # ozd was given when given to this tool, a session over TCP starting
+        # none, until ozd left these tools:
+        #   server = lc.DeviceFileServer(getattr(self.a, 'ozd', None), run_dir, ports, log, (), network, link)
+        server = lc.DeviceFileServer(run_dir, ports, log, network, link)
         machine = lc.Machine(quux, disk, run_dir, ports[3], server, self.a.engine)
         results = []
         try:
@@ -716,8 +719,9 @@ class Run:
                    LISPM_CHECK_QUUX=self.wrapper(MACHINE_REVISION, self.a.builder_prom),
                    LISPM_CHECK_PORTS=self.lc_ports,
                    XDG_CACHE_HOME=os.path.join(self.work, 'xdg'))
-        if self.a.ozd:
-            env['LISPM_CHECK_OZD'] = self.a.ozd
+        # and LISPM_CHECK_OZD when --ozd was given, until ozd left these tools:
+        #   if self.a.ozd:
+        #       env['LISPM_CHECK_OZD'] = self.a.ozd
         results = {}
 
         def checks():
@@ -1146,9 +1150,10 @@ def main():
                    help='a sys/ubin/ the assembly must equal (.mcr, .tbl, .locs)')
     p.add_argument('--quux', default=env('quux'),
                    help="muir-sim's quux, with revision %d, the route's machine" % MACHINE_REVISION)
-    # not needed: every run is at revision 16, over TCP, and starts no ozd;
-    # passed on to lispm-check when given
-    p.add_argument('--ozd', default=env('ozd'), help='ozd, for lispm-check (not needed)')
+    # --ozd was not needed, every run at revision 16 being over TCP and
+    # starting no ozd, and was passed on to lispm-check when given, until
+    # main's Chaos and ozd path left these tools:
+    #   p.add_argument('--ozd', default=env('ozd'), help='ozd, for lispm-check (not needed)')
     p.add_argument('--ports', default=env('ports'), help='LO-HI, at least 64 ports')
     p.add_argument('--engine', default=env('engine', 'micro'))
     p.add_argument('--from', dest='start', default=env('from'))
@@ -1166,8 +1171,9 @@ def main():
     a.work = os.path.abspath(a.work or os.path.join(
         os.environ.get('XDG_CACHE_HOME', os.path.join(os.path.expanduser('~'), '.cache')), 'cross-build',
         os.path.basename(a.out)))
-    # (the list named 'asm_quux' after 'asm_band' too)
-    for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'ozd', 'asm_band',
+    # (the list named 'asm_quux' after 'asm_band' too, and 'ozd' after 'quux'
+    # until --ozd went)
+    for k in ('builder', 'builder_ubin', 'builder_prom', 'base_tree', 'quux', 'asm_band',
               'asm_ubin', 'ubin_ref', 'asm_prom', 'previous_band', 'previous_ubin', 'rev14_band',
               'rev14_ubin'):
         if getattr(a, k):

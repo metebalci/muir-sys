@@ -6,32 +6,30 @@ to its TELNET prompt, loads or compiles the changed files, and runs a file of
 cases in one listener session, printing one line per case.
 
 ```
-tools/lispm-check [--band PACK] [--quux PATH | --cadr PATH] [--ozd PATH]
+tools/lispm-check [--band PACK] [--quux PATH]
                   [--ubin DIR] [--tree DIR] [--files a.lisp,b.lisp]
-                  [--compile] [--file-server auto|device|ozd]
+                  [--compile] [--file-server auto|device]
                   [--engine micro|rtl] [--timeout S] [--setup-limit S] [--keep]
-                  [--ozd-file-dates mit|utc] [--ozd-timezone N]
-                  [--network chaos|tcp|files] CASES
+                  [--network tcp|files] CASES
 ```
 
 ## The machine
 
-The band runs on muir-sim's executable for the line's system, named by
-`MACHINE` at the top of the tool, the one line in which the two lines' copies
-of the tool differ:
+The band runs on muir-sim's `quux` (`--quux`, `LISPM_CHECK_QUUX`, by default
+`../muir-sim/target/release/quux` beside the tree), named by `MACHINE` at the
+top of the tool and given the video controller's size, `--video-size
+1280x1024`. Below, "the machine" is that executable. This is `main`'s copy of
+the tool, for QUUX alone; the `cadr` line keeps its own copy and its own
+page, for the CADR (`--cadr`), with ozd and Chaos.
 
-| Line | System | `MACHINE` | Flag | Variable | Default |
-|---|---|---|---|---|---|
-| `main` | QUUX's, System 2000 | `quux` | `--quux` | `LISPM_CHECK_QUUX` | `../muir-sim/target/release/quux` |
-| `cadr` | the CADR's, System 1002 | `cadr` | `--cadr`, and `--quux` as the same flag | `LISPM_CHECK_CADR` | `../muir-sim/target/release/cadr` |
+QUUX has no Chaosnet interface, and this copy starts no ozd. `--network
+chaos`, `--file-server ozd`, `--ozd`, `--ozd-file-dates` and `--ozd-timezone`,
+and `LISPM_CHECK_NETWORK=chaos` and `LISPM_CHECK_FILE_SERVER=ozd`, are each
+refused by name before anything starts (status 2):
 
-On the `cadr` line `--quux` is kept as another name of `--cadr`, so that a
-command line written for `main` still runs; `LISPM_CHECK_QUUX` is not read
-there, since it names a quux. The flags differ by machine: quux is given the
-video controller's size, `--video-size 1280x1024`; cadr has no video
-controller and refuses that flag, and is given `--no-debug-cable-listen`,
-since on rtl it otherwise listens for a debugger's cable on a TCP port. Below,
-"the machine" is that executable.
+```
+lispm-check: error: --network chaos: QUUX has no Chaosnet interface, and these tools start no ozd: the session goes over tcp, the default, or through files, and quux's file device serves the files
+```
 
 ## What it does
 
@@ -49,15 +47,14 @@ since on rtl it otherwise listens for a debugger's cable on a TCP port. Below,
    machine runs, gives up as a hang (exit status 3) when the machine gets no
    CPU time at all for 60 s (stopped), and has one hard limit on its wall
    clock, `--setup-limit` (1800 s), which ends a machine that runs but never
-   answers, also as a hang. The probe of [the file server](#the-file-server)
-   waits the same way.
+   answers, also as a hang.
 2. **Each check** takes four free ports of its own, serves a copy of the
-   tree's `sys/` and `site/` with the changed files laid over it, starts a
-   private ozd, resumes the checkpoint, and loads each file (`load` of the
-   source, or with `--compile`, `qc-file` and `load` of the QFASL). It then
-   runs every case, stops the machine and ozd, and exits. With either file server a
-   check takes about 0.6 s with no files, and a small file adds about 0.8 s
-   to load it or 1.6 s to compile and load it.
+   tree's `sys/` and `site/` with the changed files laid over it, resumes
+   the checkpoint, and loads each file (`load` of the source, or with
+   `--compile`, `qc-file` and `load` of the QFASL). It then runs every case,
+   stops the machine, and exits. A check takes about 0.6 s with no files,
+   and a small file adds about 0.8 s to load it or 1.6 s to compile and load
+   it.
 
 The band is always opened read-only (`--disk-pack PACK,ro`): the writes of the
 boot live in the checkpoint, so the band file never changes, and any number
@@ -67,7 +64,7 @@ is never written either; QFASLs land in the copy.
 A file inside the tree's `sys/` is served in its own place and loaded by its
 logical name, `sys/io1/time.lisp` as `SYS: IO1; TIME LISP`, so the world sees
 the source file it already knows. Any other file is served in the login's home
-directory, `OZ: /lispm/`, or `/home/lispm/` on the file device's host:
+directory, `/home/lispm/` on the file device's host:
 `FILES: /home/lispm/`, `HOST: /home/lispm/` in a band that names it HOST
 (Systems 2000 and 2001, and the bands before the rename). Some `sys/` files do not
 load as source because they use functions only the compiler open-codes
@@ -79,50 +76,39 @@ A compiler file patched alone into a band built before the cross build (System
 
 ## The file server
 
-The copy is served the way the band reads its `SYS:` files, since a band
-boots to its prompt only with its `SYS:` host served: a band whose `SYS:` is
-on OZ served by the file device alone, or one whose `SYS:` is on the file
-device's host (FILES, or HOST in the bands before the rename) served by ozd
-alone, waits at boot with no TELNET server, and ozd logs "No server
-for this contact name" until the setup gives up at `--setup-limit` and
-reports a hang (exit status 3). So does a band
-the machine cannot run: a System 1002 band for QUUX (microcode 1000) on quux
-revision 11 or later (see [Defaults](#defaults)).
-
-| `--file-server` | For a band whose `SYS:` is on | The copy is served by | The setup logs in to |
-|---|---|---|---|
-| `ozd` | OZ | ozd: its roots `sys`, `site` and `lispm` | `OZ` |
-| `device` | FILES or HOST, the file device's host as the band names it | quux's file device: the copy is that host's `/` (`--file-root`), holding `sys/`, `site/` and `home/lispm/` | the band's name for it, `FILES` or `HOST` |
-
-In both, ozd carries the band's TELNET listener; with `device` that is all it
-does: its one root is an empty read-only folder (ozd wants one), so it serves
-no file. A checkpoint carries none of the device's folders (quux takes the
+The copy is served by quux's file device, for a band whose `SYS:` is on the
+file device's host, FILES (or HOST in the bands before the rename): the copy
+is that host's `/` (`--file-root`), holding `sys/`, `site/` and
+`home/lispm/`, and the setup logs in to the band's name for it, `FILES` or
+`HOST`. A checkpoint carries none of the device's folders (quux takes the
 mounts from its flags on every resume), so each check mounts its own copy.
 
-The file device is QUUX's: cadr has none, so on the `cadr` line the files are
-always served by ozd, and `--file-server device` is refused.
-
-`auto`, the default, chooses by the host the band's `SYS:` is on: `device`
-for FILES or HOST, `ozd` for OZ. It takes that from a checkpoint of this band and
-machine already made, whose setup asked the band; else from the answers remembered in
-`sys-hosts.json` under the cache; else from a probe, a cold boot with the copy
-served both ways that only asks the band (about 15 s, once for each band and
-machine). A machine without a file device (no `--file-root` in its `--help`,
-as cadr) means `ozd`. Every run says which server it chose and why:
+`--file-server device` and `auto`, the default, mean the same: the device is
+the one file server, and a machine without it (no `--file-root` in its
+`--help`) is refused. Every run says so:
 
 ```
-lispm-check: files served by device: the band's SYS: is on FILES (auto, from its checkpoint)
+lispm-check: files served by device: quux's file device, the one server (auto)
 ```
+
+A band boots to its prompt only with its `SYS:` host served, so a band whose
+`SYS:` is on OZ waits at boot with no TELNET server until the setup gives up
+at `--setup-limit` and reports a hang (exit status 3). So does a band the
+machine cannot run: a System 1002 band for QUUX (microcode 1000) on quux
+revision 11 or later (see [Defaults](#defaults)). Until ozd left these tools,
+`--file-server ozd` served an OZ band by ozd, and `auto` chose between the two
+by the host the band's `SYS:` was on, asked by a probe, a cold boot with the
+copy served both ways.
 
 ## The engine
 
 `--engine micro|rtl` (or `LISPM_CHECK_ENGINE`) is the engine the machine runs,
 passed to it as `--micro` or `--rtl`; any other value is refused before
 anything starts. `micro`, the default, is the microinstruction engine; `rtl` is
-the register transfer engine, which quux and cadr pace at the machine's own
+the register transfer engine, which quux paces at the machine's own
 speed, so its setup and checks take longer. A checkpoint is made on one engine
 and resumes only on it, so each engine has its own. The command the machine
-ran with heads its log, `quux.log` or `cadr.log` in the run directory (kept
+ran with heads its log, `quux.log` in the run directory (kept
 with `--keep`):
 
 ```
@@ -132,12 +118,12 @@ tools/lispm-check --engine rtl --keep ... CASES
 ## The network
 
 QUUX has the Ethernet device (QUUX's Ethernet contract, sections 3, 7 and
-8 R1). Every run on it takes a tap of the pool that
+8 R1). Every run takes a tap of the pool that
 muir-sim's `tools/quux-taps` installs, through the fault relay
 (`tools/fault-relay/`), so that the band always has its link, and gives the
 machine the tap's addresses at the setup and at every resume:
 `--ethernet-socket` (the relay's socket), `--ip-address` and `--ip-gateway`,
-as the relay's line names them. The CADR takes no tap.
+as the relay's line names them (all but `--network files`'s).
 
 **One QUUX.** The tools run the QUUX that `quux` runs, revision 16; an
 earlier revision runs from an earlier commit of this tree (revisions 13-15
@@ -152,24 +138,25 @@ that names none, as `quux`'s will once it runs one QUUX alone, is taken. It
 asks with no engine named, so that a wrapper's flags for rtl alone
 (`--memory-timing`, `--cache`) are taken; quux's own engine is rtl.
 
-`--network chaos|tcp|files` (or `LISPM_CHECK_NETWORK`) says what carries the
-session: TELNET over Chaos or over TCP, or no network at all, the session
-going through files on the file device's host ([`files`](#--network-files)):
+`--network tcp|files` (or `LISPM_CHECK_NETWORK`) says what carries the
+session: TELNET over TCP, or no network at all, the session going through
+files on the file device's host ([`files`](#--network-files)):
 
-| `--network` | The session | The machine's Chaos | ozd |
-|---|---|---|---|
-| `chaos` | ozd's TCP gateway to the band's Chaos TELNET server | `--chaos-address 177201` and its cable, `--chaos-udp` to ozd | started |
-| `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | none: no address, no cable and no peer (until R3, `--chaos-address 177201` alone) | not started |
-| `files` | request and answer files in `/home/lispm/` on the file device's host, which HC-SERVE, a loop at the band's listener, reads and writes | none, and no tap | not started |
+| `--network` | The session | The machine's Chaos |
+|---|---|---|
+| `tcp` | the build host's own TCP, from a socket bound to the tap (`SO_BINDTODEVICE`), to the band's TELNET server on port 23 at QUUX's address | none: no address, no cable and no peer (until R3, `--chaos-address 177201` alone) |
+| `files` | request and answer files in `/home/lispm/` on the file device's host, which HC-SERVE, a loop at the band's listener, reads and writes | none, and no tap |
+
+`chaos`, ozd's TCP gateway to the band's Chaos TELNET server, the machine
+given `--chaos-address 177201` and its cable, `--chaos-udp` to ozd, left with
+main's Chaos and ozd path, and is refused by name (above).
 
 **The default** (the contract, section 8 R2): a run that names no network,
-by the flag or the variable, takes `tcp` on QUUX, whose band has the
-network, and `chaos` on the CADR, which keeps its Chaos as released
-(revisions 13-15 took `chaos` too, until they left these tools). So a check
-on QUUX starts no ozd unless it asks for `chaos`. Until R2 every run's
-default was `chaos`. A band without the network (a band from before Ethernet, or a check that wants
+by the flag or the variable, takes `tcp`, the band having the network.
+Until R2 every run's default was `chaos`, and revisions 13-15 took `chaos`
+until they left these tools. A band without the network (a band from before Ethernet, or a check that wants
 the device to itself, as microcode-check's `ethernet-stray`) wants
-`--network chaos`, or `files`: over TCP its setup waits for a TELNET server that never
+`files`: over TCP its setup waits for a TELNET server that never
 answers, until `--setup-limit`, and then ends as a hang (status 3) whose
 message asks whether the band starts its network. The tap line of a run that took the default says so:
 
@@ -181,20 +168,18 @@ The tools that build their own sessions from this tool's classes,
 `tools/system-check/warm-boot` and `tools/cross-build/run`'s sessions (and
 with them `tools/microcode-check/generational-save`), take the tap and the
 network through its helper, `harness_network`: the machine asked and refused
-as above, `LISPM_CHECK_NETWORK` or the default, and on QUUX a tap of
-`LISPM_CHECK_TAPS`. The tools that run this one, as microcode-check,
+as above, `LISPM_CHECK_NETWORK` or the default (`chaos` refused as above), and
+a tap of `LISPM_CHECK_TAPS`. The tools that run this one, as microcode-check,
 system-check, assembler-check and cross-check do, get its default.
 
-`tcp` needs QUUX and a band whose `SYS:` is on the file device's host
-(FILES, or HOST before the rename), its files on the file device: ozd would serve OZ's files over Chaos. So `--file-server auto`
-means `device` under `tcp`, and the setup's check refuses a band whose `SYS:`
-is on OZ. Since the NCP left the band (the contract's section 8, R3),
-`tcp` gives the machine no `--chaos-address`, and each network has a
-checkpoint of its own, `chaos`'s key ending `-chaos` before the
-address: the checkpoint holds the Chaosnet interface's switches and muir
-refuses a resume under others. Until R3 `--chaos-address` was given in both,
-so that one checkpoint served both networks and the band behind the pool
-was LISPM-1; now a band is the unnamed host of its INTERNET address. At the end of a setup over TCP the tool closes cleanly
+`tcp` needs a band whose `SYS:` is on the file device's host (FILES, or HOST
+before the rename), its files on the file device; the setup's check refuses a
+band whose `SYS:` is on OZ. Since the NCP left the band (the contract's
+section 8, R3), `tcp` gives the machine no `--chaos-address`; `chaos` had a
+checkpoint of its own, its key ending `-chaos` before the address, until it
+left these tools. Until R3 `--chaos-address` was given in both, so that one
+checkpoint served both networks and the band behind the pool was LISPM-1;
+now a band is the unnamed host of its INTERNET address. At the end of a setup over TCP the tool closes cleanly
 (section 7): it half-closes the session, reads to the band's EOF, which the
 band's server sends at the client's EOF, and waits 0.5 s for the last ACK, so
 that the checkpoint holds no connection; a band that sends no EOF within 60
@@ -208,7 +193,7 @@ a /30 of their own, since a LAN tap's address is a real one (the contract,
 amendment 3). A checkpoint is made for each tap index on its first use, by
 the run that holds that tap, and its key names QUUX's address behind the tap,
 since muir refuses a resume under other addresses; the key's setup version
-is 4 (3 until R3), and a run over Chaos adds `-chaos` before the address:
+is 4 (3 until R3; a run over Chaos added `-chaos` before the address):
 
 ```
 <band sha256>-<quux sha256>-4-micro-device-169.254.101.2.chk   (each sha256 its first 16 digits; 3 until R3)
@@ -238,11 +223,9 @@ temporary directory when the cache's path is too long for a UNIX socket.
 18, Q-N13 (a)), when the check is to run without a tap (and, until it left
 these tools, on revision 15, whose band had no Chaos and no Ethernet device
 since R3).
-It is never the default; a run names it. It needs a machine with a file
-device, so the CADR is refused, and the files served by the device
-(`--file-server device`; `auto` means `device`, with no probe). No tap is
-taken and `LISPM_CHECK_TAPS` is not used (the run says so);
-ozd is not started. The tools that drive TELNET sessions of their own
+It is never the default; a run names it. No tap is taken and
+`LISPM_CHECK_TAPS` is not used (the run says so). The tools that drive TELNET
+sessions of their own
 through `harness_network` (`tools/system-check/warm-boot`,
 `tools/cross-build/run`'s sessions) refuse `LISPM_CHECK_NETWORK=files`.
 
@@ -311,27 +294,6 @@ answers them: the request gets no answer and the run fails at `--timeout`
 answer. A form is read from a file by `READ`, not typed at a listener, in the
 same package, base and readtable.
 
-## ozd's dates
-
-`--ozd-file-dates mit|utc` and `--ozd-timezone N` are passed to ozd as its
-`--file-dates` and `--timezone`: how FILE writes and reads a file's date.
-Given neither, ozd takes its own defaults, `utc`: plain UTC, as Systems 1002
-and 2000 read FILE dates. A band of Systems 100 to 1001 reads them at its
-site's zone, with MIT's daylight savings time on top, so it wants
-`--ozd-file-dates mit --ozd-timezone` and that zone: `-1` for System 1001's
-release band, `5` for System 100's site. Without them every file date such a
-band reads is off by the zone's offset: on the 1001 band, a file of 12:00 GMT
-on 15 January read as 3600 s early and one on 15 July as 7200 s early, and
-exact with the two flags. ozd refuses a zone under `utc`, and the tool refuses
-`--ozd-timezone` without `--ozd-file-dates mit` before it starts anything.
-They change only what ozd serves, not the checkpoint, whose setup reads no
-file.
-
-```
-tools/lispm-check --band release-1001-pack.img --file-server ozd \
-                  --ozd-file-dates mit --ozd-timezone -1 ... CASES
-```
-
 ## Cases
 
 One case per form; a form may run over several lines. Blank lines and lines
@@ -397,11 +359,10 @@ itself failed: bad arguments, a boot that did not reach the prompt, a file
 that did not load or compile (a compiler heading `<< Error ...` counts, since
 `qc-file` still writes a QFASL after a reader error), or a case with no answer
 within `--timeout` seconds (120 by default). It is 3 when the machine hung in
-the setup's cold boot or the probe's: it got no CPU time for 60 s (a stopped
+the setup's cold boot: it got no CPU time for 60 s (a stopped
 machine), or ran without answering until `--setup-limit` (above). A failed
-run keeps its TELNET,
-machine and ozd logs in its run directory under the cache and prints where;
-`--keep` keeps them always.
+run keeps its TELNET, machine and fault relay logs in its run directory under
+the cache and prints where; `--keep` keeps them always.
 
 ## Defaults
 
@@ -411,24 +372,24 @@ Each is overridden by its flag or an environment variable.
 |---|---|---|
 | `--band` | `LISPM_CHECK_BAND` | `run/check/band.img` in the tree: a band of the line's system, below |
 | `--ubin` | `LISPM_CHECK_UBIN` | `ubin/` beside the band: the `sys/ubin/` the band's microcode was assembled into, whose `ucadr.tbl` the cold boot reads |
-| `--quux` (main) | `LISPM_CHECK_QUUX` | `../muir-sim/target/release/quux` beside the tree |
-| `--cadr` (cadr) | `LISPM_CHECK_CADR` | `../muir-sim/target/release/cadr` beside the tree |
-| `--ozd` | `LISPM_CHECK_OZD` | `../ozd/target/release/ozd` beside the tree |
+| `--quux` | `LISPM_CHECK_QUUX` | `../muir-sim/target/release/quux` beside the tree |
 | `--tree` | `LISPM_CHECK_TREE` | the tree the tool is in |
-| `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: [the file server](#the-file-server) the band's `SYS:` host needs |
+| `--file-server` | `LISPM_CHECK_FILE_SERVER` | `auto`: quux's file device, as `device` ([the file server](#the-file-server)) |
 | `--engine` | `LISPM_CHECK_ENGINE` | `micro` ([the engine](#the-engine)) |
-| `--setup-limit` | `LISPM_CHECK_SETUP_LIMIT` | 1800: the hard limit in seconds on the setup's and the probe's wall clock |
-| `--ozd-file-dates` | `LISPM_CHECK_OZD_FILE_DATES` | none: ozd's own, `utc` ([ozd's dates](#ozds-dates)) |
-| `--ozd-timezone` | `LISPM_CHECK_OZD_TIMEZONE` | none: ozd's own |
-| `--network` | `LISPM_CHECK_NETWORK` | `tcp` on QUUX, `chaos` on the CADR ([the network](#the-network)) |
+| `--setup-limit` | `LISPM_CHECK_SETUP_LIMIT` | 1800: the hard limit in seconds on the setup's wall clock |
+| `--network` | `LISPM_CHECK_NETWORK` | `tcp` ([the network](#the-network)) |
 | | `LISPM_CHECK_PORTS` | the range the ports are taken from, `44000-44999` |
-| | `LISPM_CHECK_TAPS` | the tap indexes taken from on QUUX: the pool's host-only taps |
+| | `LISPM_CHECK_TAPS` | the tap indexes taken from: the pool's host-only taps |
 | | `LISPM_CHECK_RELAY_FLAGS` | none: the fault relay's fault flags (`tools/fault-relay/README.md`), for T4 |
+
+`--ozd` (`LISPM_CHECK_OZD`), `--ozd-file-dates` and `--ozd-timezone`, ozd's
+path and its FILE dates, which a band of Systems 100 to 1001 wanted at its
+site's zone, left with ozd; the `cadr` line's copy keeps them.
 
 `run/` is git-ignored, so `run/check/band.img` (a link to the band to check
 against, or a copy) and `run/check/ubin/` are set up once per clone:
 
-- **`main`:** a band of System 2002 for revision 16, the one QUUX these
+- A band of System 2002 for revision 16, the one QUUX these
   tools run: a read-only copy of the native band of a route of
   `tools/cross-build/run` (`native6`) as `run/check/band.img`, and that
   route's `ubin/` (its assembly's `ucadr.*` and `promh.*`) copied to
@@ -460,30 +421,32 @@ against, or a copy) and `run/check/ubin/` are set up once per clone:
   on quux revision 12 such a band stays in the microcode's
   `DISK-AWAIT-READY` loop (PC 25040) for as long as it runs, with no TELNET
   server, where quux revision 10 boots it to the prompt in about 16 s.
-- **`cadr`:** a band of the CADR's system, run on cadr, with its `SYS:` on
-  OZ. No System 1002 band for the CADR has been built yet, so until one is,
-  `run/check/band.img` is System 1001's release band
-  (`release-1001-pack.img`, microcode 323) and `run/check/ubin/` its
-  `ubin/`; the line's fixes are checked on it (`docs/release-1002.md`). It
-  reads FILE dates at its site's zone, so a check of dates on it wants
-  `--ozd-file-dates mit --ozd-timezone -1` ([ozd's dates](#ozds-dates)). The cache is `$XDG_CACHE_HOME/muir-sys-check`, or
-`~/.cache/muir-sys-check`: the checkpoints, the probes' answers, the run
+
+  The `cadr` line's band is the CADR's, its `SYS:` on OZ; its copy of the
+  tool and of this page say which.
+
+The cache is `$XDG_CACHE_HOME/muir-sys-check`, or
+`~/.cache/muir-sys-check`: the checkpoints, the machines' answers, the run
 directories and the locks, never inside the tree.
 
-Each run takes a block of four ports (ozd's UDP, the machine's UDP, TELNET
-and the machine's RFB display) under a lock, checks that each is free, and connects only
-to a TELNET listener owned by its own ozd, so parallel runs do not meet. It
-stops the machine and ozd on every exit, also on a timeout or a signal.
+Each run takes a block of four ports under a lock and checks that each is
+free: the third is the glass TTY's under `--network files`, the fourth the
+machine's RFB display (the first two were ozd's and the machine's Chaos
+UDP, and the third ozd's TELNET gateway, until ozd left these tools). A
+session over TCP reaches only the band behind the run's own tap, so
+parallel runs do not meet. It stops the machine and the fault relay on
+every exit, also on a timeout or a signal.
 
-Everything that knows how the tree is served (ozd's flags, the copy of the
-tree and its layout, the pathnames of served files, the TELNET listener ozd
-carries and the machine's flags that plug the band into them) is in the classes
-`OzdFileServer` and `DeviceFileServer` in the tool; a third way of serving the
-tree is a class with the same methods, named in `FILE_SERVERS`. The network
-that carries the session is a key of `NETWORKS`, which the same classes
-branch on (`machine_flags`, `_open`, `connect_listener`, `close_session`);
-the third, `files`, is the session through quux's file device for a band
-without its network: `FileSession` beside `Session`, and `setup_files`,
+Everything that knows how the tree is served (the copy of the tree and its
+layout, the pathnames of served files, the TELNET listener and the
+machine's flags that plug the band into them) is in the classes
+`FileServer` and `DeviceFileServer` in the tool (`FileServer` was
+`OzdFileServer`, ozd's, until ozd left these tools); a second way of serving
+the tree is a class with the same methods, named in `FILE_SERVERS`. The
+network that carries the session is one of `NETWORKS`, which the same
+classes branch on (`machine_flags`, `_open`, `connect_listener`,
+`close_session`); `files` is the session through quux's file device for a
+band without its network: `FileSession` beside `Session`, and `setup_files`,
 `take_checkpoint` and `type_at_console` for its setup, with HC-SERVE in
 `tools/lispm-check-lisp/hc-serve.lisp`. `options` and `prepare` are the command line and everything
 before the check (the revision, the file server, the tap, the checkpoint),
@@ -492,7 +455,7 @@ which `tools/tcp-check/run` takes from the tool.
 ## Self-test
 
 `tools/lispm-check-test/run.sh` runs the tool eight times on the files beside
-it, for each file server, and checks each exit status and verdict: the case
+it, with the file device, and checks each exit status and verdict: the case
 file loaded as source and compiled (status 1, with a wrong value, a wrong
 error message and an unexpected error on purpose, and a case that the tree's
 `sys/` is served), a wrong expected value (1), only passing cases (0), and a
@@ -500,18 +463,16 @@ file with an unclosed form, loaded and compiled (2, with the tool's message
 naming the file and the step that failed), the question cases
 (`question.cases`: status 1, each verdict and its text as
 `expected-question.txt`, the cases' time under 40 s with `--timeout 60`); and then the passing cases once
-more with no `--file-server`, where `auto` must choose that mode's server for
-that band. `LISPM_CHECK_TEST_MODES` picks the modes, each run with the
-`ubin/` beside its band:
+more with no `--file-server`, where `auto` must choose the device. Its band
+is `LISPM_CHECK_DEVICE_BAND`, else `LISPM_CHECK_BAND`, else
+`run/check/band.img` (System 2002 for revision 16, `SYS:` on FILES), with the
+`ubin/` beside it; `LISPM_CHECK_TEST_MODES` names `device`, the one mode left
+(`ozd`, a band whose `SYS:` is on OZ served by ozd, left with ozd). A
+stand-in ozd that notes each start is given to every run, as
+`LISPM_CHECK_OZD` and as the first `ozd` on `PATH`, and the last line,
+`no-ozd`, wants it never started.
 
-| Line | Modes by default | `device` band | `ozd` band |
-|---|---|---|---|
-| `main` | `device` | `LISPM_CHECK_DEVICE_BAND`, else `LISPM_CHECK_BAND`, else `run/check/band.img` (System 2002 for revision 16, `SYS:` on FILES) | `LISPM_CHECK_BAND`, else `run/check/band.img`: a band whose `SYS:` is on OZ, of which quux since revision 11 runs none |
-| `cadr` | `ozd` | none: cadr has no file device | `LISPM_CHECK_BAND`, else `run/check/band.img` |
-
-It passes its arguments on to every run (`--quux`, `--cadr`, `--engine` and
-so on), so `tools/lispm-check-test/run.sh --engine rtl` is the self-test on
-rtl.
+It passes its arguments on to every run (`--quux` and so on).
 
 `tools/lispm-check-test/network.sh` is the self-test of [the
 network](#the-network), on QUUX's machine and a band with the network,
@@ -520,11 +481,7 @@ cache of its own, so that its first run sets up over TCP: `tcp` (A held by
 another program, the run takes B, sets up over TCP and resumes; the machine
 has B's addresses and no Chaos peer, ozd is not started, the relay found no
 bad frame, the key names B's address, and the resumed band holds only the
-session's connection; and the machine has no `--chaos-address`), `chaos-own`
-(both free, B alone with tcp's checkpoint: the run over Chaos sets up its own,
-keyed `-chaos`, its machine having `--chaos-address 177201` and its cable;
-until R3 this was `order`, the run taking B with no setup, one checkpoint
-serving both networks),
+session's connection; and the machine has no `--chaos-address`),
 `index` (B held: A, with a setup of its own), `order-both` (both free: A, no
 setup), `wait` (A alone and held for 5 s: the run waits, then takes it),
 `no-tap` (a range with no tap: status 2); then the machine asked what it
@@ -533,25 +490,27 @@ refused, naming it, before any setup), `variable-set`
 (`MUIR_QUUX_REVISION=15` set: status 2, refused) and `no-revision` (a
 wrapper over `--quux`'s machine whose start names no revision, as `quux`'s
 will: taken, over TCP). `rev15-tcp` and `rev15-chaos`, on a revision 15
-machine named by `LISPM_CHECK_TEST_QUUX15`, left with revision 15. Then the
+machine named by `LISPM_CHECK_TEST_QUUX15`, left with revision 15. Then
+Chaos and ozd refused by name, each before the machine is asked anything or
+a tap taken (status 2, "QUUX has no Chaosnet interface"): `chaos-refused`
+(`--network chaos`), `chaos-variable` (`LISPM_CHECK_NETWORK=chaos`),
+`harness-chaos` (the same through `harness_network`), `ozd-refused`
+(`--file-server ozd`), `ozd-variable` (`LISPM_CHECK_FILE_SERVER=ozd`) and
+`ozd-flags` (`--ozd`, `--ozd-file-dates` and `--ozd-timezone`). Then the
 default (section 8 R2), with neither `--network` nor `LISPM_CHECK_NETWORK`:
-`default` (over TCP on a tap, no Chaos cable, and a stand-in ozd, given as `--ozd`,
-that notes each start and exits, never started), `variable`
-(`LISPM_CHECK_NETWORK=chaos`: over Chaos, ozd started), and with `LISPM_CHECK_TEST_CADR` and `LISPM_CHECK_TEST_CADR_BAND`
-naming muir-sim's cadr and a CADR band (its `ubin/` beside it;
-`LISPM_CHECK_TEST_CADR_TREE` its tree) `cadr-default`: a copy of the tool
-whose `MACHINE` line says `cadr`, as the cadr line's differs, runs with no
-tap and over Chaos, ozd serving the files. Last, `rtl-flags`: rtl through a wrapper that adds the soak's rtl-only flags,
+`default` (over TCP on a tap, no Chaos cable, and the stand-in ozd never
+started). Last, `rtl-flags`: rtl through a wrapper that adds the soak's rtl-only flags,
 `--memory-timing kria --cache 65536`, to `--quux`'s machine, still asked
 what it runs (16) and so over TCP, with the stand-in ozd never started; its
-setup is on rtl, about 5 minutes more. Since step R3 the band has no Chaos,
-so the Chaos cases, `chaos-own` and `variable`, run on a band from before
-R3 that has both networks, `LISPM_CHECK_TEST_CHAOS_BAND`, with its `ubin/`
-in `LISPM_CHECK_TEST_CHAOS_UBIN` and its machine in
-`LISPM_CHECK_TEST_CHAOS_QUUX`; without it they are skipped (`rev15-default`,
-on 15 with no tap, left with that revision). `LISPM_CHECK_TEST_TOOL` names
-another copy of the tool to test, a planted one say. About 5 minutes on
-micro. Last it runs `files.sh` with the same arguments.
+setup is on rtl, about 5 minutes more. A stand-in ozd that notes each start
+and exits is given to every run, `files.sh`'s too, as `LISPM_CHECK_OZD` and
+as the first `ozd` on `PATH`, and the last case, `no-ozd`, wants it never
+started. The Chaos cases `chaos-own` and `variable` (on a band from before
+R3, `LISPM_CHECK_TEST_CHAOS_BAND`) and the CADR's `cadr-default` left with
+main's Chaos and ozd path, `rev15-default` with revision 15.
+`LISPM_CHECK_TEST_TOOL` names another copy of the tool to test, a planted
+one say. About 5 minutes on micro. Last it runs `files.sh` with the same
+arguments.
 
 `tools/lispm-check-test/files.sh` is the self-test of
 [`--network files`](#--network-files), which needs no tap and runs alone too:
@@ -565,17 +524,20 @@ lanes ran on revision 15, `LISPM_CHECK_TEST_QUUX15`, as `files-15`,
 holds a file open around its loop (`hc-serve-held.lisp` appended), whose
 setup must fail on the checkpoint refused for a handle open; `early`, a tool
 whose `FileSession` takes `hc-K.ans` without waiting for `hc-K.done`, which
-`files.cases`'s `early-answer` case must catch; then `cadr` (`--network files`
-refused on the CADR's copy of the tool), `ozd-server` (refused with
-`--file-server ozd`) and `harness` (`LISPM_CHECK_NETWORK=files` refused by
-`harness_network`). About 4 minutes on micro, and 10 more for the rtl lane.
+`files.cases`'s `early-answer` case must catch; then `ozd-server`
+(`--file-server ozd` refused by name) and `harness` (`LISPM_CHECK_NETWORK=files` refused by
+`harness_network`); `cadr`, `--network files` refused on the CADR's copy of
+the tool, left when main's tools stopped offering the CADR. About 4 minutes
+on micro, and 10 more for the rtl lane.
 
 `tools/lispm-check-test/harnesses.sh W16 DISK UBIN [ENGINE]` checks
 the default of the tools that take the network through `harness_network`:
 `tools/system-check/warm-boot` and `tools/microcode-check/generational-save`
 (whose session and boot are `tools/cross-build/run`'s), each run over TCP
-with a stand-in ozd never started (and, until revision 15 left these tools,
-once on 15 over Chaos with ozd, `W15` and `OZD`). `DISK` holds a band with the network
+with a stand-in ozd, given as `LISPM_CHECK_OZD` and as the first `ozd` on
+`PATH` (as `--ozd` until ozd left these tools), never started (and, until
+revision 15 left these tools, once on 15 over Chaos with ozd, `W15` and
+`OZD`). `DISK` holds a band with the network
 current in LOD1, LOD2 free for the save; `LISPM_CHECK_TAPS` and
 `LISPM_CHECK_PORTS` must be set; `LISPM_CHECK_TEST_TREE` names another
 tree's tools to test. About 15 minutes on micro.

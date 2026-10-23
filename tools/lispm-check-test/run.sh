@@ -14,18 +14,22 @@
 # (for the two with exit 2, the tool's message must name broken.lisp and the
 # step that failed), and then pass.cases once more with no --file-server,
 # where the default, auto, must choose the mode's server for the mode's band.
-# The eight run in each mode of LISPM_CHECK_TEST_MODES, "device" by default:
+# The eight run in each mode of LISPM_CHECK_TEST_MODES, "device" by default
+# and the one mode left:
 #   device  --file-server device on LISPM_CHECK_DEVICE_BAND, or the tool's
 #           default band run/check/band.img: a band whose SYS: is on the file
 #           device's pathname host, HOST (System 2001, and the bands of 2002
 #           built before the name changed) or FILES (after it), its files
 #           served by quux's file device; the tool takes the name from the band
-#   ozd     --file-server ozd on LISPM_CHECK_BAND, or run/check/band.img: a band
-#           whose SYS: is on OZ, its files served by ozd
+# The mode ozd, --file-server ozd on a band whose SYS: is on OZ, its files
+# served by ozd, left with main's Chaos and ozd path (QUUX has no Chaosnet
+# interface); the tool refuses it by name.  A stand-in ozd that notes each
+# start and exits is given to every run, as LISPM_CHECK_OZD and as the first
+# ozd on PATH, and the last line, no-ozd, wants its log empty.
 # On this line the default band is a band of System 2002 for revision 16,
 # the one QUUX these tools run, built by tools/cross-build/run (a read-only
 # copy of its native6, run/check/band.img, with that build's ubin/ beside
-# it), whose SYS: is on FILES, so only device is run by default.  muir-sim's
+# it), whose SYS: is on FILES, so device is run.  muir-sim's
 # quux has no boot PROM for revision 16 built in, so --quux names a wrapper
 # that gives ubin/'s promh.mcr (--prom) until it has; the tool sets
 # MUIR_QUUX_REVISION=16.  The default was System 2001's band (its hand-over
@@ -34,14 +38,12 @@
 # alone, until quux refused revision 12.  ozd was the default too while the
 # default band was a System 1002 band on OZ; no such band boots on quux since revision
 # 11 (its microcode 1000 waits for block-disk at 17377774, where revision 11
-# has no register), so ozd needs LISPM_CHECK_BAND naming a band on OZ that
-# the quux given runs.
+# has no register), so ozd needed LISPM_CHECK_BAND naming a band on OZ that
+# the quux given ran, until it left.
 # Each band's ubin/ is the one beside it, as the tool's default.  Arguments are
 # passed on to every run after the mode's own (--quux and so on), so a --band
-# given here overrides both: give it with a single mode.  A band of Systems 100
-# to 1001 wants its FILE dates at its site's zone: pass --ozd-file-dates mit
-# --ozd-timezone <zone> (-1 for System 1001's release band); no case here reads
-# a date, but a check on such a band should serve it as it reads.
+# given here overrides it.  (A band of Systems 100 to 1001, the CADR's, wanted
+# --ozd-file-dates mit --ozd-timezone <zone>, which left with ozd.)
 here=$(cd "$(dirname "$0")" && pwd)
 tool=$here/../lispm-check
 # The self-test runs on micro only: its question cases are bounded at 40 s of
@@ -58,7 +60,13 @@ done
 tree=$(dirname "$(dirname "$here")")
 fails=0
 out=$(mktemp)
-trap 'rm -f "$out"' EXIT
+# the stand-in ozd, for every run (above)
+ozdbin=$(mktemp -d) trips=$ozdbin/ozd-stand-in.log
+printf '#!/bin/sh\necho "$*" >> %s\nexit 1\n' "$trips" > "$ozdbin/ozd"
+chmod +x "$ozdbin/ozd"
+export LISPM_CHECK_OZD=$ozdbin/ozd PATH=$ozdbin:$PATH
+# it read: trap 'rm -f "$out"' EXIT
+trap 'rm -f "$out"; rm -rf "$ozdbin"' EXIT
 
 check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-ARGS...
     # TEXT, when given, must appear in the output: a status 2 must be the
@@ -102,7 +110,8 @@ check() {  # check NAME EXPECTED-STATUS VERDICTS-FILE-OR-EMPTY [TEXT] -- TOOL-AR
 
 for mode in ${LISPM_CHECK_TEST_MODES:-device}; do
     case $mode in
-        ozd) band=${LISPM_CHECK_BAND:-$tree/run/check/band.img} ;;
+        # left with main's Chaos and ozd path:
+        #   ozd) band=${LISPM_CHECK_BAND:-$tree/run/check/band.img} ;;
         # the default band, System 2002's for revision 16 (System 2001's
         # before revisions 13-15 left, on HOST; System 2000's before quux
         # refused its revision, 12), is on FILES: run/check/device/ was the
@@ -130,5 +139,11 @@ for mode in ${LISPM_CHECK_TEST_MODES:-device}; do
     within=40 check "$mode question" 1 "$here/expected-question.txt" -- "${m[@]}" --files "$here/selftest.lisp" "$@" --timeout 60 "$here/question.cases"
     check "$mode auto" 0 "" "lispm-check: files served by $mode: " -- --band "$band" --files "$here/selftest.lisp" "$@" "$here/pass.cases"
 done
+# no-ozd: the stand-in never started
+if [ -s "$trips" ]; then
+    echo "FAIL no-ozd: ozd was started $(wc -l < "$trips") times: $(head -3 "$trips")"; fails=$((fails+1))
+else
+    echo "ok   no-ozd"
+fi
 [ "$fails" = 0 ] && echo "self-test passed" || echo "self-test FAILED ($fails)"
 [ "$fails" = 0 ]

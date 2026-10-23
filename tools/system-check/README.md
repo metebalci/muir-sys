@@ -150,11 +150,12 @@ the answer is checked; with `--no-answer` too, the question left
 unanswered, the run fails for want of a banner. The exit status is 0 when every check passes. It needs
 step 2's microcode and band.
 
-On revision 16 the harness takes a tap of `LISPM_CHECK_TAPS` and both
-sessions go over TCP, with no ozd started, unless `LISPM_CHECK_NETWORK`
-says `chaos`; on revisions 13-15 they go over Chaos through ozd (QUUX's
-Ethernet contract, section 8 R2; lispm-check's `harness_network`,
-`docs/lispm-check.md`). Over TCP the first session is closed cleanly, to
+The harness takes a tap of `LISPM_CHECK_TAPS` and both sessions go over
+TCP, with no ozd started (QUUX's Ethernet contract, section 8 R2;
+lispm-check's `harness_network`, `docs/lispm-check.md`); on revisions 13-15
+they went over Chaos through ozd, until those left these tools, and with
+`LISPM_CHECK_NETWORK=chaos` and `--ozd`, until main's Chaos and ozd path
+left them. Over TCP the first session is closed cleanly, to
 the band's EOF, before the warm boot, and the band's network starts again
 at the warm boot. `DIR` then also keeps the fault relay's `relay.json` and
 `relay.err`.

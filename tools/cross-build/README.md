@@ -43,8 +43,8 @@ over TCP, as the route's own bands do. The builder is a band of an earlier
 route, its native6, with that route's `sys/ubin/` as `--builder-ubin`; its
 PROM is that ubin's `promh.mcr` unless `--builder-prom` names one, since
 revision 16 has no built-in boot PROM. `--builder-revision`,
-`--asm-revision` and `--asm-quux` went, and `--ozd` is no longer needed
-(it is passed to lispm-check when given). The guards' old pieces, which the
+`--asm-revision` and `--asm-quux` went, and `--ozd` with main's Chaos and
+ozd path (it was passed to lispm-check when given). The guards' old pieces, which the
 builder supplied while it was the hand-over, are `--rev14-band` and
 `--rev14-ubin` (System 2002's revision-14 hand-over's disk and
 `sys/ubin/`) beside `--previous-band` and `--previous-ubin` (System 2001's);
@@ -67,15 +67,15 @@ pool of taps must be installed (muir-sim's `tools/quux-taps`).
 The network follows the revision each run's machine runs: lispm-check's
 default, and for the sessions its helper `harness_network`
 (`docs/lispm-check.md`, "The network"). Every run, at revision 16, takes a
-tap of `LISPM_CHECK_TAPS` and goes over TCP, with no ozd, unless
-`LISPM_CHECK_NETWORK` says another; the builder's, at its revision 13-15,
+tap of `LISPM_CHECK_TAPS` and goes over TCP, with no ozd (lispm-check
+refuses `LISPM_CHECK_NETWORK=chaos`); the builder's, at its revision 13-15,
 went over Chaos through `--ozd` until step 1. `tools/microcode-check/generational-save` and
 the soak's harnesses take this tool's sessions too, at the revision their
 `--quux` wrapper sets.
 
-A save gives no answer over either network, a refused one neither: over
-Chaos the connection closes, and over TCP the band's network stops as the
-save begins, so the connection goes silent. The save is judged by its
+A save gives no answer, a refused one neither: over TCP the band's network
+stops as the save begins, so the connection goes silent (over Chaos the
+connection closed). The save is judged by its
 partition alone, and a refused one fails as "no band saved", after 30
 minutes; over TCP the silence is waited for 120 s before the partition is
 watched, rather than 600.
@@ -96,7 +96,6 @@ watched, rather than 600.
 | `--rev14-band`, `--rev14-ubin` | revision 14's disk and `sys/ubin/` (System 2002's revision-14 hand-over's), for the guards: its microcode, band and PROM 2002 for revision 14, each given to revision 16 |
 | `--ubin-ref` | a `sys/ubin/` the assembled `.mcr`, `.tbl` and `.locs` must equal |
 | `--quux` | muir-sim's `quux` with revision 16 (the route's machine) and the file device; it runs the builder and the assembly too |
-| `--ozd` | not needed: passed to lispm-check when given (it was the TELNET gateway of the builder's runs over Chaos) |
 | `--ports` | at least 64 ports: lispm-check takes four a run from the range, the QLD and guard runs one each from its top 16 |
 
 ## The steps
@@ -127,8 +126,9 @@ the whole route at revision 16, target 15, took about 9 h 20 min on micro
 
 `test` checks the revisions and the networks of the route's, the
 builder's, the assembly's and the guards' runs, dry, with a stand-in quux and
-ozd: every start at revision 16, and no ozd started (its head gives the
-usage).
+ozd, the ozd given as `LISPM_CHECK_OZD` and as the first `ozd` on `PATH`:
+every start at revision 16, and no ozd started in any case (`no-ozd`; its
+head gives the usage).
 
 ## What it needs on the host
 
