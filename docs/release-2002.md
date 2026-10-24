@@ -2942,3 +2942,35 @@ and then left the band and the microcode (step R3, below).
   `generational-mutants` run catches all 25 partial fixes, and `none`
   passes `generational`, `generational-2mw`, `generational-save`,
   `warm-boot` and the 2010 and missing-bitmap halts.
+- **The driver's totals of 241's counters no longer miss a wrap while
+  nothing wakes the network process** (`NETWORK-WAKEUP-P` and
+  `ETHER-COUNTERS-MOVED-P`, `sys/network/ip/ether.lisp:638`, `:646`). The
+  totals took the change in each counter, modulo its width, only in a pass
+  of the network process or at a reader, and a dropped Ethernet frame takes
+  no receive entry and raises no interrupt: on an idle band nothing read 241
+  between the drops, and on the boards 1,000 frames counted in `<15:9>`
+  raised `IP:IPV4-CHECKS-TOTAL` by 104 and 100 IPv6 frames in `<7:4>` raised
+  `IP:TYPE-FILTER-TOTAL` by 4, each count modulo 128 and 16. The wait
+  predicate now also reads 241, once each time the scheduler runs it, and
+  wakes the process when a counter has moved since the totals were last
+  brought up to date; the pass adds the change. The scheduler runs it at
+  every clock break at the least, once a second with the collector off, so a
+  total is exact while its counter moves less than its modulus in a second.
+  `%%ETHER-STATUS-COUNTERS-ABOVE-8` (`:74`) and the new subst are in
+  `sys/cold/crossdefs.lisp`. `tools/segment-check`'s new `counter-wraps`
+  (`tools/segment-check/scripts.py:733`) sends 320 IPv4 frames with a bad
+  header checksum at 100 a second and 32 IPv6 frames at 10 a second with
+  nothing else between them. Measured on the default band (micro): before
+  the change the totals rose by 64 and 0 (two runs alike, and the same with
+  the file before the change loaded over a session); with it, by 320 and 32;
+  with the look made only every 2 s, by 192 and 16. With the collector off
+  and a compute-bound process, 120 and 14 a second stay exact and 200 and 20
+  a second do not (256 of 640, 16 of 64). The look costs 17 us of machine
+  time each time the predicate reaches it (59.3 against 42.4 us a call),
+  which at the clock's every-tick rate is at most 0.1% of the machine; a
+  compute-bound loop of 9.67 s, five times in a session, averaged 9.6665 s
+  and 9.6622 s in two sessions with the change and 9.6653 s in one without:
+  no difference above the 0.04% between sessions. With the change all 37
+  segment scripts pass on micro, two runs each alike, as do `tcp-check` (6
+  of 6) and `system-check`'s `network-lock-ceiling`, `local-host`,
+  `sb-deferral` and `chaos-census`.

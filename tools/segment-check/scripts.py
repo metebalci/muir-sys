@@ -719,6 +719,55 @@ def checksums_received(s):
             'after them (SYN-ACK at %s)' % at(c.synack.t))
 
 
+# Section 2.4.5's wrap: the driver adds the change in each of 241's counters
+# since its last read to a total of its own, so a total is exact only while
+# no counter wraps between two reads.  A dropped Ethernet frame takes no
+# entry and raises no interrupt, so these frames come with nothing between
+# them that wakes the band.  Each pair is (a second's frames, the frames in
+# all): 2.5 wraps of <15:9>'s 128 and 2 of <7:4>'s 16, each counter moving
+# less than a wrap a second.
+WRAP_IPV4_CHECKS = (100, 320)
+WRAP_TYPE_FILTER = (10, 32)
+
+
+def counter_wraps(s):
+    """Ethernet frames that only move 241's counters, more than a wrap of
+    each and nothing else between them: IPv4 with its header checksum one
+    bit off (<15:9>, the IPv4 checks, mod 128) and IPv6 (<7:4>, the type
+    filter, mod 16), at WRAP_IPV4_CHECKS's and WRAP_TYPE_FILTER's rates.
+    Read on the control session before and after, each of the driver's
+    totals has risen by exactly the frames sent (2.4.5, Wrap; 5.1,
+    Counters)."""
+    p = s.p
+    s.boot()
+    c = control(s)
+    before = ask(s, c, 'totals')
+    quiet_on(s, c, 'the control session')
+    (ipv4_rate, ipv4_n), (type_rate, type_n) = WRAP_IPV4_CHECKS, WRAP_TYPE_FILTER
+    start = s.now
+    events = sorted([(start + i * S // ipv4_rate, 0, i) for i in range(ipv4_n)] +
+                    [(start + i * S // type_rate + S // (2 * ipv4_rate), 1, i) for i in range(type_n)])
+    for t, kind, i in events:
+        s.quiet(t, lambda x: not c.ours(x), 'an answer to a dropped Ethernet frame')
+        if kind == 0:
+            m = F.icmp(F.ICMP_ECHO, 0, 0x0320, i & 0xFFFF, b'counter wrap')
+            h = F.ipv4(p.peer_ip, p.band_ip, F.IP_ICMP, m)
+            s.ether_to_band(F.ETH_IPV4, F.ipv4(p.peer_ip, p.band_ip, F.IP_ICMP, m,
+                                              csum=flip(F.checksum(h[:10] + b'\0\0' + h[12:20]))))
+        else:
+            s.send(ipv6_frame(p, p.band_mac))
+    s.quiet(s.now + 100 * MS, lambda x: not c.ours(x), 'an answer to a dropped Ethernet frame')
+    if c.rst is not None:
+        raise Fail('the control session was reset during the dropped Ethernet frames: %s' % c.rst)
+    after = ask(s, c, 'totals')
+    rose = (after[0] - before[0], after[1] - before[1])
+    if rose != (type_n, ipv4_n):
+        raise Fail('over %s of dropped Ethernet frames the type filter\'s total rose by %d of %d sent and the '
+                   'IPv4 checks\' by %d of %d sent' % (at(s.now - start), rose[0], type_n, rose[1], ipv4_n))
+    return ('%d IPv4-check drops at %d/s and %d type drops at %d/s, each total up by exactly those'
+            % (ipv4_n, ipv4_rate, type_n, type_rate))
+
+
 # IPv4 options: 4 NOPs and a record route of two slots; loose and strict
 # source routes through 192.0.2.1.
 IP_OPT_RR = b'\x01\x01\x01\x01' + bytes([7, 11, 4]) + bytes(8)
@@ -2725,6 +2774,7 @@ SCRIPTS = {
     'data': data,
     'options': options,
     'checksums-received': checksums_received,
+    'counter-wraps': counter_wraps,
     'ip-options': ip_options,
     'rst': rst,
     'syn': syn,

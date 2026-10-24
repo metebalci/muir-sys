@@ -69,6 +69,9 @@ dropped mod 256, <31:24> transmit entries refused mod 256.")
 (defconst %%ether-status-ipv4-checks #o1107)
 (defconst %%ether-status-dropped #o2010)
 (defconst %%ether-status-refused-entries #o3010)
+;; <31:9>, the three counters above <8> at once, for the network process's
+;; look at whether a counter moved (network-wakeup-p).
+(defconst %%ether-status-counters-above-8 #o1127)
 
 ;; feature word 15 <2> says the device is there; it reads 3 on revision 15.
 (defconst %%ether-feature #o0201)
@@ -610,14 +613,46 @@ then, at the outermost hold, the priority restored and NETWORK-YIELD."
 ;  (or (ether-frame-waiting-p)
 ;      (let ((due network-next-timer))
 ;	(and due (network-time-reached-p due)))))
+;; before the counters' look (below) it was a frame waiting or a timer due,
+;; or one due soon:
+;(defun network-wakeup-p ()
+;  "The network process's wait predicate: a frame waiting, a timer due, or a timer due
+;within %NETWORK-FAST-LEAD while the clock's break is not every tick."
+;  (or (ether-frame-waiting-p)
+;      (let ((due network-next-timer))
+;	(and due (or (network-time-reached-p due)
+;		     (and (not network-fast-clock)
+;			  (< (network-time-difference due (network-now)) %network-fast-lead)))))))
+
+;; the counters' look (sections 2.4.5 and 5.1): a dropped frame takes no
+;; receive entry and raises no interrupt, so while no frame or timer woke
+;; the network process nothing read 241, and the totals, brought up to date
+;; only in a pass or by their readers, missed every wrap between two reads:
+;; 1,000 frames counted in <15:9> raised the total by 104, 1000 mod 128.
+;; so the predicate also reads 241, once each time the scheduler runs it,
+;; and wakes the process when one of the four counters has moved since the
+;; totals were last brought up to date; that pass adds the change.  the
+;; scheduler runs the predicate at every clock break at the least, once a
+;; second at the slowest, so a total is exact while its counter moves less
+;; than its modulus in a second: 127 a second for <15:9>, 15 for <7:4>.
+(defsubst ether-counters-moved-p ()
+  "T if one of status 241's four counters has moved since ETHER-UPDATE-TOTALS last read it."
+  (let ((last ether-last-status))
+    (and last
+	 (let ((moved (logxor (ether-register %ether-status) last)))
+	   (not (and (zerop (%logldb %%ether-status-type-filter moved))
+		     (zerop (%logldb %%ether-status-counters-above-8 moved))))))))
+
 (defun network-wakeup-p ()
-  "The network process's wait predicate: a frame waiting, a timer due, or a timer due
-within %NETWORK-FAST-LEAD while the clock's break is not every tick."
+  "The network process's wait predicate: a frame waiting, a timer due, a timer due
+within %NETWORK-FAST-LEAD while the clock's break is not every tick, or one of status
+241's counters moved since the totals were last brought up to date."
   (or (ether-frame-waiting-p)
       (let ((due network-next-timer))
 	(and due (or (network-time-reached-p due)
 		     (and (not network-fast-clock)
-			  (< (network-time-difference due (network-now)) %network-fast-lead)))))))
+			  (< (network-time-difference due (network-now)) %network-fast-lead)))))
+      (ether-counters-moved-p)))
 
 (defun network-clock-rule ()
   "Ask for the clock's break every tick while a timer of the network's is due within
