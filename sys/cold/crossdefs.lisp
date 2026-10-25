@@ -120,6 +120,7 @@
 (setq *cross-specials* '(
   ("SYS: COLD; COLDUT" defvar "AREA-FIRST-OBJECT-TABLE-HEADERS" :special)
   ("SYS: COLD; COLDUT" defvar "AREA-OBJECT-STARTS" :special)
+  ("SYS: COLD; CROSS" defvar "*CROSS-DECLARED-PROPERTIES*" :special)
   ("SYS: COLD; CROSS" defvar "*CROSS-MADE-SPECIAL*" :special)
   ("SYS: COLD; CROSS" defvar "*CROSS-SPECIALS*" :special)
   ("SYS: NETWORK; HOST" defconst "LOCAL-HOST-NAME-FILE" :special)

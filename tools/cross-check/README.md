@@ -29,6 +29,7 @@ band's own tree as the base (`--base-tree`), against which
 tools/cross-check/run all                 # checks 1 and 3 and the native control, at once
 tools/cross-check/run check1              # one of them
 tools/cross-check/run check2              # SYSTEM compiled for the target: about two hours
+tools/cross-check/run structs             # a structure the tree defines or changes: about 17 minutes
 tools/cross-check/run check1 -- --quux PATH   # arguments after -- go to lispm-check
 ```
 
@@ -154,7 +155,9 @@ own floats. The text is compared as tokens, comments
 dropped, case folded outside strings, and a file that does not parse into whole
 forms stops the script. `cold:cross-begin` reads each listed definition from
 its file and evaluates it as the compiler does inside a file it compiles, which
-declares it and defines nothing; every compile for the target starts with
+declares it and defines nothing (a structure or setf method through the
+compiler's top-level driver, its load-time forms left out: `docs/building.md`,
+"The tree's compile-time definitions", and "The tree's structures" below); every compile for the target starts with
 those declarations, and the builder's own definitions do not change. A listed
 name that expands without such a declaration stops the file.
 
@@ -185,6 +188,73 @@ the world that reads it, the builder's; it also lists the new or changed
 constants (`--table` the cross table: those whose form reads a constant the
 target changes). A copy of the tree with `PRODEF`'s old macro, which used
 `#,(1- %%Q-POINTER)`, is listed and fails.
+
+## The tree's structures
+
+`cases/structs.cases`, with `lisp/tree-structs.lisp`, `lisp/tree-srccom.lisp`,
+`lisp/struct-use.lisp` and `lisp/struct-desc.lisp`. A file of the tree being built must be able to
+define a structure with `DEFSTRUCT`, or change one of the builder's, and
+another file compiled for the target must get that structure's accessors,
+constructor, alterant, setf methods and description, while the builder's own
+structures and functions stay as they were. `run` serves the two definition
+files inside the copy's `sys/`, as `SYS: CROSS-CHECK-TREE; STRUCTS` (the
+structure `XS-POINT`, which the builder lacks) and `SYS: CROSS-CHECK-TREE;
+SRCCOM` (`SRCCOM:FILE` with a slot put first, so that `FILE-NAME` reads leader
+slot 2 where the builder's reads 1), and writes the copy's
+`sys/cold/crossdefs.lisp` afresh from its sources, which list them `:new` and
+`:changed` (`sys/cross-check/`, where the other fixtures are served, is not
+the tree's and is not listed). The cases:
+
+- `cold:cross-begin` takes both;
+- the compile of `STRUCT-USE` for the target sees `XS-POINT`'s description
+  (3 slots), `XS-POINT-ID` unsetfable, and each accessor expanded as the
+  tree defines it, `(AREF P 2)` and `(ARRAY-LEADER F 2)`;
+- its QFASL, loaded into the builder (whose word is the target's) and run,
+  gives the tree's layout from the constructor, the accessors' `SETF`, `INCF`
+  and the alterant, an included structure built on `XS-POINT`'s description,
+  and `FILE-NAME`'s index 2;
+- `STRUCT-DESC` reads the changed `FILE` through its description alone: its
+  `XS-FILE2` includes `FILE`, so its own slot follows the tree's 7 slots, at
+  leader 7 (the builder's 6 slots would put it at 6);
+- before, after `cross-begin`, after the compile and after the load, the
+  builder has no `XS-POINT` (no description, no accessor, constructor or
+  alterant), and its `SRCCOM:FILE` has the same description, `FILE-NAME` the
+  same definition and slot property;
+- the controls, fail-closed: with either structure's file left out
+  (`:definitions '(:omit ...)`) but still checked, the compile of
+  `STRUCT-USE` stops, as expanding with the builder's definition or with
+  none, and writes no QFASL; so does `STRUCT-DESC`'s with `FILE` left out,
+  which only the check of `GETDECL` can stop.
+
+Why each expected value is right, from the fixtures: `XS-POINT` is a named
+array, element 0 its name, so `X`, `Y` and `ID` are elements 1, 2 and 3 and
+the array is 4 long; its description's size counts the 3 slots; `ID` is
+`:READ-ONLY`, for which `DEFSTRUCT` declares the setf method `UNSETFABLE`
+(`sys/sys2/struct.lisp:784-786`); an accessor is a `DEFSUBST` whose body is its
+documentation and the reference (`:794-797`), so `XS-POINT-Y`, with none,
+expands to `(PROGN NIL (AREF P 2))`, and `FILE-NAME`, whose documentation
+string is taken as such, to `(ARRAY-LEADER F 2)`. `(MAKE-XS-POINT X 3 Y 4)`
+gives `(4 XS-POINT 3 4 7)`, `ID`'s default 7; `XS-SETF` sets `X` to 11, adds
+5 to `Y`'s 0 and alters `X` to 12: `(12 5 7 12 5)`; `XS-POINT3` adds `Z`
+after the 3, so 5 long, `X` 1, `Y` its default 0, `Z` 2: `(5 1 0 2)`. In an
+array whose leader slot I holds I, the builder's `FILE-NAME` reads 1
+(`sys/io1/srccom.lisp:12-13`, `FILE-LENGTH` first) and the tree's, with
+`FILE-GENERATION` before it, 2; `XS-FILE2-EXTRA` follows `FILE`'s 7 slots,
+0 to 6, so reads 7.
+
+It failed on the cross build before structures were given: `cross-begin`
+stopped ("cannot give the tree's DEFSTRUCT FILE ... without changing this
+world"), and 12 of its then 46 cases failed. Now its 53 pass, in about 17
+minutes. Each of three faults of `sys/cold/cross.lisp` fails it:
+
+| Fault | Cases that fail |
+|---|---|
+| the load-time forms evaluated too (`DEFPROP`, `DEFDECL`'s `PUTPROP`) | 6: the builder has `XS-POINT`'s description, and `SRCCOM:FILE`'s is replaced, after `cross-begin`, the compile and the load |
+| a declared accessor or macro not put in the checked names | 2: with `FILE` left out, `STRUCT-USE` compiles with the builder's `FILE-NAME`, and its QFASL is written |
+| no check of `GETDECL` | 2: with `FILE` left out, `STRUCT-DESC` compiles with the builder's description, and its QFASL is written |
+
+Run it with the builder's own tree as the base (`--base-tree`), against
+which the copy's list is written.
 
 ## Check 3: the 40-bit cold load
 

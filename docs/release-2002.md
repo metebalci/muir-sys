@@ -2521,6 +2521,34 @@ and then left the band and the microcode (step R3, below).
   where it would have started the network: "its Ethernet device has no IPv4
   address (word 255 is 0)". Before, it said nothing.
 
+- **The cross build gives the tree's structures and setf methods**
+  (`sys/cold/cross.lisp`; `docs/building.md`, "The tree's compile-time
+  definitions"). `cold:cross-begin` refused a listed `DEFSTRUCT`, `DEFSETF`,
+  `DEFINE-SETF-METHOD` or `DEFINE-MODIFY-MACRO`, since evaluating one changed
+  the builder: `DEFDECL`'s `(EVAL-WHEN (EVAL LOAD) (PUTPROP ...))` replaced
+  the builder's description of a changed structure while its accessors stayed
+  the builder's; so the network code used arrays with `DEFSUBST` accessors.
+  Such a definition now goes through the compiler's own top-level driver
+  (`CROSS-DECLARE-THROUGH-DRIVER`): accessors and macros are declared, each
+  `PUTDECL` becomes a declared property, a `:SIZE-SYMBOL`'s variable is
+  proclaimed special until `cross-end`, load-time forms are left to the
+  defining file's own compile, and any other form stops `cross-begin`. Every
+  accessor and macro so declared is checked as a listed name is, also for one
+  left out with `:OMIT` (`CROSS-CHECK-DECLARATIONS`), and a declared property
+  read with `GETDECL` while a file compiles for the target must have its
+  declaration, or the file stops (`CROSS-GETDECL`, wrapped in by
+  `cross-begin`); a structure gone from the tree has the builder's
+  description and accessors checked. Measured over the tree's 120
+  structures and 78 setf definitions: 1266 declarations in 578 s on micro,
+  no form refused, and the builder's 953 structure, accessor and
+  access-function symbols keep their property lists and functions. `*CROSS-DECLARED-PROPERTIES*`, a new special
+  of the cross build, is in `sys/cold/crossdefs.lisp`. Left open (building.md):
+  the builder's `DEFSTRUCT` does the expanding, `MAKE-SYSTEM`'s `:FASLOAD`
+  dependencies still load the tree's files into the builder, a `#,` in a
+  listed file is evaluated when `cross-begin` reads it, and a `DEFSTRUCT`
+  inside `EVAL-WHEN (COMPILE)` is evaluated in the builder as natively. The
+  CADR's line has no cross build.
+
 ### The checks
 
 - **`tools/microcode-check`'s `network-stray` runs on revision 15 alone**
@@ -2974,3 +3002,15 @@ and then left the band and the microcode (step R3, below).
   segment scripts pass on micro, two runs each alike, as do `tcp-check` (6
   of 6) and `system-check`'s `network-lock-ceiling`, `local-host`,
   `sb-deferral` and `chaos-census`.
+- **`tools/cross-check/run structs`** (new: `cases/structs.cases`,
+  `lisp/tree-structs.lisp`, `lisp/tree-srccom.lisp`, `lisp/struct-use.lisp`,
+  `lisp/struct-desc.lisp`; `tools/cross-check/README.md`, "The tree's
+  structures"): a structure the tree defines (`XS-POINT`) and one it changes
+  (`SRCCOM:FILE`, a slot put first), served inside the copy's `sys/` so that
+  `crossdefs.py` lists them, must reach a compile for the target, accessors,
+  constructor, alterant, setf methods and description, with the builder's
+  own structures and functions unchanged; the QFASLs are loaded into the
+  builder and run, and two fail-closed controls leave each structure out.
+  Before the cross build gave structures 12 of its then 46 cases failed;
+  now 53 of 53 pass, and each of three planted faults of the change fails
+  it (the README's table).

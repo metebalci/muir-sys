@@ -85,6 +85,10 @@
 ;;; consults before this world's definitions (si:declared-definition), and this
 ;;; world's function cells do not change.  an expansion of a listed name that
 ;;; finds no such declaration stops the file (cross-declared-definition).
+;;; a structure or a setf method is taken through the compiler's own top-level
+;;; driver instead (cross-declare-through-driver), its load-time forms left
+;;; out, and the properties it declares for getdecl are checked as the names
+;;; are (cross-getdecl).
 (defvar *cross-definitions* nil
   "(file kind name status) for each compile-time definition of the tree that is not system 2000's.")
 
@@ -93,6 +97,15 @@
 
 (defvar *cross-declarations* nil
   "The DEF declarations of the tree's definitions given to every compile for the target.")
+
+;;; a structure's description, a setf method and the like are compile-time
+;;; properties that macros read with getdecl (the expanders of defstruct's
+;;; accessors, constructors and alterants, setf, typep): each property that
+;;; a listed definition declares (putdecl) is checked as a function's
+;;; definition is, so that a compile for the target never reads this world's
+;;; property of the tree's structure (cross-getdecl)
+(defvar *cross-declared-properties* nil
+  "Hash table: each symbol a listed definition declares a property of -> those properties.")
 
 (defvar *cross-compiling* nil
   "True while a file compiles for the target (cross-compile-stream).")
@@ -726,6 +739,8 @@ all but FILEs'."
   (cross-wrap 'si:xr-#.-macro #'cross-sharp-dot)
   (cross-wrap 'si:fasload-internal #'cross-fasload-internal)
   (cross-wrap 'si:declared-definition #'cross-declared-definition)
+  ;; a structure's description and a setf method, checked (cross-getdecl)
+  (cross-wrap 'getdecl #'cross-getdecl)
   (cross-wrap 'si:xr-read-flonum #'cross-read-flonum)
   (setq compiler:*cross-target* 'cross-target-value
 	*cross-active* t)
@@ -786,20 +801,31 @@ all but FILEs'."
 ;;; every one but those of FILEs, all still checked (the check's control)
 (defun cross-declare-definitions (definitions)
   (setq *cross-declarations* nil
-	*cross-definition-names* nil)
+	*cross-definition-names* nil
+	*cross-declared-properties* nil)
   (when definitions
     (let ((si:inhibit-fdefine-warnings :just-warn))
       (load "SYS: COLD; CROSSDEFS LISP" "COLD"))
     ;; the tree's special variables, which crossdefs lists too
     (cross-declare-specials)
-    (setq *cross-definition-names* (make-hash-table :test 'eq))
+    (setq *cross-definition-names* (make-hash-table :test 'eq)
+	  *cross-declared-properties* (make-hash-table :test 'eq))
     (let ((omit (and (consp definitions) (eq (car definitions) :omit) (cdr definitions)))
 	  (files nil))
-      ;; a structure or a setf method evaluated so still changes this world
-      ;; (DEFSTRUCT redefines the structure here): such a changed definition
-      ;; stops the cross build until it is given another way
+;      ;; a structure or a setf method evaluated so still changes this world
+;      ;; (DEFSTRUCT redefines the structure here): such a changed definition
+;      ;; stops the cross build until it is given another way
+;      (dolist (d *cross-definitions*)
+;	(unless (or (eq (fourth d) :gone) (cross-checked-kind-p (second d)))
+;	  (ferror nil "The cross build cannot give the tree's ~A ~A (~A) without changing this world"
+;		  (second d) (third d) (first d))))
+      ;; a structure and a setf method are given through the compiler's own
+      ;; driver (cross-driven-kind-p, cross-declare-through-driver), which
+      ;; defines nothing here; only a kind given neither way still stops the
+      ;; cross build, since evaluating it would change this world
       (dolist (d *cross-definitions*)
-	(unless (or (eq (fourth d) :gone) (cross-checked-kind-p (second d)))
+	(unless (or (eq (fourth d) :gone) (cross-checked-kind-p (second d))
+		    (cross-driven-kind-p (second d)))
 	  (ferror nil "The cross build cannot give the tree's ~A ~A (~A) without changing this world"
 		  (second d) (third d) (first d))))
       (dolist (d *cross-definitions*)
@@ -828,24 +854,124 @@ all but FILEs'."
 	      do (dolist (def (cross-definition-forms form))
 		   (let* ((name (cross-definition-name def))
 			  (entry (and name (ass #'string= (symbol-name name) names))))
-		     (when entry
-		       (when (cross-checked-kind-p (third entry))
-			 (puthash name t *cross-definition-names*))
-		       (when (second entry)
-			 ;; as inside a compile: functions-referenced is what macro and
-			 ;; defsubst-1 look at when undo-declarations-flag is set
-			 (let ((sys:undo-declarations-flag t)
-			       (sys:file-local-declarations nil)
-			       (compiler:functions-referenced nil)
-			       (si:inhibit-fdefine-warnings :just-warn))
-			   (eval def)
-			   (setq *cross-declarations*
-				 (append sys:file-local-declarations *cross-declarations*))))))))))
+;		     (when entry
+;		       (when (cross-checked-kind-p (third entry))
+;			 (puthash name t *cross-definition-names*))
+;		       (when (second entry)
+;			 ;; as inside a compile: functions-referenced is what macro and
+;			 ;; defsubst-1 look at when undo-declarations-flag is set
+;			 (let ((sys:undo-declarations-flag t)
+;			       (sys:file-local-declarations nil)
+;			       (compiler:functions-referenced nil)
+;			       (si:inhibit-fdefine-warnings :just-warn))
+;			   (eval def)
+;			   (setq *cross-declarations*
+;				 (append sys:file-local-declarations *cross-declarations*))))))))))
+		     ;; a structure or a setf method through the compiler's driver,
+		     ;; also when not wanted, so that the names it declares are
+		     ;; checked; a macro or defsubst evaluated, as before
+		     (cond ((null entry))
+			   ((cross-driven-kind-p (car def))
+			    (let ((decls (cross-declare-through-driver def)))
+			      (cross-check-declarations decls)
+			      (when (second entry)
+				(setq *cross-declarations* (append decls *cross-declarations*)))))
+			   (t
+			    (when (cross-checked-kind-p (third entry))
+			      (puthash name t *cross-definition-names*))
+			    (when (second entry)
+			      ;; as inside a compile: functions-referenced is what macro and
+			      ;; defsubst-1 look at when undo-declarations-flag is set
+			      (let ((sys:undo-declarations-flag t)
+				    (sys:file-local-declarations nil)
+				    (compiler:functions-referenced nil)
+				    (si:inhibit-fdefine-warnings :just-warn))
+				(eval def)
+				(setq *cross-declarations*
+				      (append sys:file-local-declarations *cross-declarations*)))))))))))
     ;; a listed name the file no longer defines, or that is gone, is checked too
     (dolist (entry names)
       (let ((sym (and (cross-checked-kind-p (third entry))
 		      (cross-definition-symbol file (car entry)))))
-	(when sym (puthash sym t *cross-definition-names*))))))
+	(when sym (puthash sym t *cross-definition-names*))))
+    ;; and a structure gone from the tree: its description and the accessors
+    ;; this world's description names, so that a compile for the target that
+    ;; still uses them stops rather than taking this world's
+    (dolist (entry names)
+      (let* ((sym (and (eq (third entry) 'defstruct) (not (second entry))
+		       (cross-definition-symbol file (car entry))))
+	     (d (and sym (get sym 'si:defstruct-description))))
+	(when d
+	  (cross-check-declarations
+	    (cons (list 'si:defstruct-description sym d)
+		  (loop for s in (si:defstruct-description-slot-alist d)
+			collect (list 'def (si:defstruct-slot-description-ref-macro-name (cdr s)))))))))))
+
+;;; the kinds of definition given through the compiler's driver: a structure, a
+;;; setf method, a modify macro.  each expands into definitions of other names
+;;; (a structure's accessors, constructors and alterant; the setf-method
+;;; property of a name) and into load-time forms (DEFPROP, PUTPROP, DEFUN),
+;;; and evaluated here they changed this world: DEFDECL's (eval-when (eval
+;;; load) (putprop ...)) put the tree's structure's description and properties
+;;; on this world's symbols (measured: SRCCOM:FILE's description replaced
+;;; while its accessors stayed this world's)
+(defun cross-driven-kind-p (kind)
+  (memq kind '(defstruct defsetf define-setf-method define-modify-macro)))
+
+;;; DEF's compile-time definitions as declarations, as qc-file has them: the
+;;; compiler's own top-level driver (compiler:compile-driver) expands DEF and
+;;; hands on each form with what a file compile does with it.  a macro or
+;;; defsubst (MACRO) and a deff-macro (SPECIAL) are evaluated with
+;;; undo-declarations-flag on, which declares them; a PUTDECL of quoted
+;;; arguments (DECLARE, DEFDECL's compile part) declares a property; a
+;;; proclamation of special variables (DECLARE, a :size-symbol's
+;;; DEFPARAMETER) is made as the tree's special variables are
+;;; (cross-declare-specials), undone by cross-end; DEFUN and RANDOM forms are
+;;; load-time and are left to the defining file's own compile.  any other form
+;;; of the first three types stops the cross build, since evaluating it could
+;;; change this world.  the declarations made
+(defun cross-declare-through-driver (def)
+  (let ((sys:undo-declarations-flag t)
+	(sys:file-local-declarations nil)
+	(compiler:functions-referenced nil)
+	(si:inhibit-fdefine-warnings :just-warn))
+    (compiler:compile-driver
+      def
+      #'(lambda (form type)
+	  (let ((kind (symbol-name type)))
+	    (cond ((mem #'string= kind '("DEFUN" "RANDOM")))
+		  ((and (string= kind "MACRO") (memq (car-safe form) '(macro defsubst)))
+		   (eval form))
+		  ((and (string= kind "SPECIAL") (eq (car-safe form) 'deff-macro))
+		   (eval form))
+		  ((and (string= kind "DECLARE") (eq (car-safe form) 'putdecl)
+			(= (length form) 4)
+			(loop for x in (cdr form) always (eq (car-safe x) 'quote)))
+		   (eval form))
+		  ((and (string= kind "DECLARE") (eq (car-safe form) 'proclaim)
+			(= (length form) 2) (eq (car-safe (cadr form)) 'quote)
+			(eq (car-safe (cadadr form)) 'special))
+		   (dolist (sym (cdr (cadadr form)))
+		     (unless (get sym 'special)
+		       (putprop sym t 'special)
+		       (push sym *cross-made-special*))))
+		  (t (ferror nil "The cross build cannot give ~S's ~A form ~S without changing this world"
+			     (cross-definition-name def) kind form)))))
+      nil)
+    sys:file-local-declarations))
+
+;;; every name DECLS declare is checked: a DEF of a symbol by
+;;; cross-declared-definition, any other declaration (property name value), a
+;;; property for getdecl, by cross-getdecl
+(defun cross-check-declarations (decls)
+  (dolist (d decls)
+    (cond ((eq (car d) 'def)
+	   (when (symbolp (cadr d))
+	     (puthash (cadr d) t *cross-definition-names*)))
+	  ((symbolp (cadr d))
+	   (unless (memq (car d) (gethash (cadr d) *cross-declared-properties*))
+	     (puthash (cadr d) (cons (car d) (gethash (cadr d) *cross-declared-properties*))
+		      *cross-declared-properties*))))))
 
 ;;; the kinds of definition that define a symbol's own function, which the
 ;;; compiler finds through si:declared-definition: a defsetf or a setf method
@@ -898,6 +1024,27 @@ all but FILEs'."
 
 (defun cross-declared-p (function-spec)
   (flet ((has (list) (dolist (l list) (and (eq (car-safe l) 'def) (equal (cadr l) function-spec)
+					     (return t)))))
+    (or (has local-declarations) (has sys:file-local-declarations))))
+
+;;; getdecl, checked: while a file compiles for the target, a property that a
+;;; listed definition declares (*cross-declared-properties*: a structure's
+;;; description, a constructor's structure name, a setf method) must be
+;;; declared, by the tree's definition given at cross-begin or by the file's
+;;; own; else the compile would read this world's property, or none, and the
+;;; file stops
+(defun cross-getdecl (name prop)
+  (when (and *cross-compiling* *cross-declared-properties*
+	     (symbolp name)
+	     (memq prop (gethash name *cross-declared-properties*))
+	     (not (cross-property-declared-p name prop)))
+    (cross-note "D" (cross-function) (list name prop))
+    (push (cons name :definition) *cross-misses*)
+    (ferror nil "~S's ~S would be this world's, not the tree's" name prop))
+  (funcall (cross-original 'getdecl) name prop))
+
+(defun cross-property-declared-p (name prop)
+  (flet ((has (list) (dolist (l list) (and (eq (car-safe l) prop) (eq (cadr l) name)
 					     (return t)))))
     (or (has local-declarations) (has sys:file-local-declarations))))
 

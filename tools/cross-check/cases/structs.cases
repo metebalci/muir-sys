@@ -1,0 +1,59 @@
+; The structure check (README, "The tree's structures"): a structure the tree
+; defines (XS-POINT, SYS: CROSS-CHECK-TREE; STRUCTS, listed :new) and one it
+; changes (SRCCOM:FILE, SYS: CROSS-CHECK-TREE; SRCCOM, listed :changed), given
+; to a compile for the target by cold:cross-begin; the compile of
+; SYS: CROSS-CHECK; STRUCT-USE must get each one's accessors, constructor,
+; alterant, setf methods and description, and the builder's own structures
+; and functions must stay as they were.  The builder's word is the target's,
+; so the target's QFASL is loaded here and run.
+;
+; the builder before: no XS-POINT, and SRCCOM:FILE as its system has it
+(progn (defvar xs-compile-record nil) (defvar xs-saved nil) (setq xs-saved (list (get 'srccom::file 'si:defstruct-description) (fdefinition 'srccom::file-name) (get 'srccom::file-name 'si:defstruct-slot))) (not (null (first xs-saved)))) => T
+(list (get 'xs-point 'si:defstruct-description) (fboundp 'xs-point-x) (fboundp 'make-xs-point) (fboundp 'alter-xs-point)) => (NIL NIL NIL NIL)
+; the builder's FILE-NAME reads leader slot 1; the tree's FILE puts a slot before it
+(let ((f (make-array 0 :leader-length 10.))) (dotimes (i 10.) (setf (array-leader f i) i)) (srccom::file-name f)) => 1
+; the cross build gives both structures
+(let ((r (cold:cross-begin :log-directory "FILES: //home//lispm//xs-"))) (plusp (getf r :definitions))) => T
+(list (get 'xs-point 'si:defstruct-description) (fboundp 'xs-point-x) (fboundp 'make-xs-point) (fboundp 'alter-xs-point)) => (NIL NIL NIL NIL)
+(list (eq (get 'srccom::file 'si:defstruct-description) (first xs-saved)) (eq (fdefinition 'srccom::file-name) (second xs-saved)) (equal (get 'srccom::file-name 'si:defstruct-slot) (third xs-saved))) => (T T T)
+(progn (qc-file "SYS: CROSS-CHECK; STRUCT-USE LISP" "FILES: //home//lispm//xs-struct-use.qfasl") t) => T
+; what the compile saw: XS-POINT's size (its slots), ID unsetfable, each
+; accessor's expansion (the subst's, which MACROEXPAND wraps in a PROGN)
+xs-compile-record => (3 SI::UNSETFABLE (PROGN NIL (AREF P 2)) (ARRAY-LEADER F 2))
+(cold:cross-end)
+; the builder after the compile
+(list (get 'xs-point 'si:defstruct-description) (fboundp 'xs-point-x) (fboundp 'make-xs-point) (fboundp 'alter-xs-point)) => (NIL NIL NIL NIL)
+(list (eq (get 'srccom::file 'si:defstruct-description) (first xs-saved)) (eq (fdefinition 'srccom::file-name) (second xs-saved)) (equal (get 'srccom::file-name 'si:defstruct-slot) (third xs-saved))) => (T T T)
+; the target's code: the constructor, the accessors' setf and the alterant,
+; the description (an included structure), and the changed structure's index
+; (a missing QFASL is not loaded: LOAD of one waits for another name)
+(and (probe-file "FILES: //home//lispm//xs-struct-use.qfasl") (let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//xs-struct-use.qfasl") t)) => T
+(xs-layout) => (4 XS-POINT 3 4 7)
+(xs-setf) => (12 5 7 12 5)
+(xs-include) => (5 1 0 2)
+(xs-file-name-index) => 2
+; the changed structure's description alone: XS-FILE2 includes FILE, whose
+; tree's 7 slots put XS-FILE2's own slot at leader 7 (the builder's 6 slots, 6)
+(let ((r (cold:cross-begin :log-directory "FILES: //home//lispm//xd-"))) (plusp (getf r :definitions))) => T
+(progn (qc-file "SYS: CROSS-CHECK; STRUCT-DESC LISP" "FILES: //home//lispm//xd-struct-desc.qfasl") t) => T
+(cold:cross-end)
+(and (probe-file "FILES: //home//lispm//xd-struct-desc.qfasl") (let ((si:inhibit-fdefine-warnings :just-warn)) (load "FILES: //home//lispm//xd-struct-desc.qfasl") t)) => T
+(xs-file2-extra-index) => 7
+; the builder after the load, which defines STRUCT-USE's own XS-POINT3 alone
+(list (get 'xs-point 'si:defstruct-description) (fboundp 'xs-point-x) (fboundp 'make-xs-point) (fboundp 'alter-xs-point)) => (NIL NIL NIL NIL)
+(list (eq (get 'srccom::file 'si:defstruct-description) (first xs-saved)) (eq (fdefinition 'srccom::file-name) (second xs-saved)) (equal (get 'srccom::file-name 'si:defstruct-slot) (third xs-saved))) => (T T T)
+; the controls, fail-closed: a structure's definitions left out but still
+; checked, the compile of STRUCT-USE stops and no QFASL is written; for the
+; new structure, which the builder lacks, and for the changed one, which the
+; builder would give
+(progn (cold:cross-begin :log-directory "FILES: //home//lispm//xo-" :definitions '(:omit "SYS: CROSS-CHECK-TREE; STRUCTS")) t) => T
+(qc-file "SYS: CROSS-CHECK; STRUCT-USE LISP" "FILES: //home//lispm//xo-struct-use.qfasl") =>! not the tree's
+(probe-file "FILES: //home//lispm//xo-struct-use.qfasl") => NIL
+(cold:cross-end)
+(progn (cold:cross-begin :log-directory "FILES: //home//lispm//xc-" :definitions '(:omit "SYS: CROSS-CHECK-TREE; SRCCOM")) t) => T
+(qc-file "SYS: CROSS-CHECK; STRUCT-USE LISP" "FILES: //home//lispm//xc-struct-use.qfasl") =>! not the tree's
+(probe-file "FILES: //home//lispm//xc-struct-use.qfasl") => NIL
+; and STRUCT-DESC, which reads FILE's description and no accessor of FILE's
+(qc-file "SYS: CROSS-CHECK; STRUCT-DESC LISP" "FILES: //home//lispm//xc-struct-desc.qfasl") =>! not the tree's
+(probe-file "FILES: //home//lispm//xc-struct-desc.qfasl") => NIL
+(cold:cross-end)

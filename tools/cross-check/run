@@ -6,7 +6,9 @@ Usage:
   tools/cross-check/run [--out DIR] [--base-tree TARBALL] [--system NAME]
                         [--fresh] [--skip-definitions-check] CHECK...
                         [-- LISPM-CHECK-ARGS...]
-CHECK is check1, check3, native or check2; all is check1, check3 and native.
+CHECK is check1, check3, native, check2 or structs; all is check1, check3 and
+native.  structs: a structure the tree defines or changes, given to the
+compile for the target (README, "The tree's structures").
 The checks given run at once, each in its own lispm-check run with its own
 ports.  Each gets a copy of this tree's sys/ and site/ (native: the builder's
 own tree, from TARBALL) with the files of lisp/ served as SYS: CROSS-CHECK;, runs
@@ -62,8 +64,15 @@ FIXTURES = {
     'check3': [],
     'check2': ['planted.lisp', 'uncovered-sharp.lisp'],
     'native': ['copy-partition.lisp'],
+    'structs': ['struct-use.lisp', 'struct-desc.lisp'],
 }
-TIMEOUT = {'check1': 1800, 'check3': 7200, 'native': 3600, 'check2': 40000}
+# the structure check's definitions, served inside the tree's sys/ where
+# crossdefs.py lists them (sys/cross-check/ is not the tree's, and is not
+# listed): lisp/FILE -> sys/cross-check-tree/NAME
+TREE_FIXTURES = {
+    'structs': [('tree-structs.lisp', 'structs.lisp'), ('tree-srccom.lisp', 'srccom.lisp')],
+}
+TIMEOUT = {'check1': 1800, 'check3': 7200, 'native': 3600, 'check2': 40000, 'structs': 3600}
 # the files of the cross build whose digests each run records
 SOURCES = ['sys/cold/cross.lisp', 'sys/cold/target40.lisp', 'sys/cold/coldut.lisp',
            'sys/cold/coldld.lisp', 'sys/sys/qcdefs.lisp', 'sys/sys/qcfasd.lisp',
@@ -175,6 +184,9 @@ def prepare(check, out, source, all_qfasls):
     os.makedirs(os.path.join(tree, SERVED), exist_ok=True)
     for f in FIXTURES[check]:
         shutil.copy2(os.path.join(HERE, 'lisp', f), os.path.join(tree, SERVED, f))
+    for f, name in TREE_FIXTURES.get(check, []):
+        os.makedirs(os.path.join(tree, 'sys', 'cross-check-tree'), exist_ok=True)
+        shutil.copy2(os.path.join(HERE, 'lisp', f), os.path.join(tree, 'sys', 'cross-check-tree', name))
     if check == 'native':
         for f in ('coldut', 'coldld'):
             shutil.copy2(os.path.join(TREE, 'sys', 'cold', f + '.lisp'),
@@ -198,6 +210,12 @@ def run_check(check, out, args, extra):
     # a cross build takes the tree's compile-time definitions from
     # sys/cold/crossdefs.lisp, which must be what the sources give, and no #,
     # may sit in a macro's or defsubst's body (crossdefs.py)
+    # the structure check's copy holds definitions the tree does not, so its
+    # list is written afresh from the copy's sources, against the builder's tree
+    if check in TREE_FIXTURES:
+        base = tree_2000(os.path.dirname(out), args['tree_2000'])
+        analyse([os.path.join(HERE, 'crossdefs.py'), tree, base, '--lisp',
+                 os.path.join(tree, 'sys', 'cold', 'crossdefs.lisp')], lines)
     if check != 'native' and not args['skip_definitions_check']:
         base = tree_2000(os.path.dirname(out), args['tree_2000'])
         cd = os.path.join(HERE, 'crossdefs.py')

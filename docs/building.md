@@ -254,7 +254,10 @@ into the builder first, after `SYSDCL` and before `MAKE-SYSTEM`:
   `(qc-file-load "SYS: SYS2; LMMAC LISP")`, or build twice: the second
   build's builder has the change. Loading a new definition of something the
   builder itself runs (the disk code's constants, for example) changes the
-  running builder as well, so prefer the second build then.
+  running builder as well, so prefer the second build then. The cross build
+  needs neither for a macro, `DEFSUBST`, structure or setf method: it gives
+  the compile the tree's own ("The tree's compile-time definitions",
+  below).
 - A constant referred to as a special variable is not folded: disk.lisp's
   `%DISK-STATUS-HIGH-ERROR` is compiled as a reference to the symbol, and
   the built world uses its own value.
@@ -301,9 +304,45 @@ encodings. So:
   (`:DEFINITIONS`: check 1's identity control and 32-bit target pass `NIL`).
   The list also holds every macro or defsubst of System 2000's text that
   holds a float literal, which the builder read with its own floats.
-  Macros and defsubsts are given so; a changed structure or setf method
-  would still change the builder when evaluated, so `cross-begin` refuses
-  one until it is given another way.
+  Macros and defsubsts are given so. A structure, a setf method and a
+  modify macro (`DEFSTRUCT`, `DEFSETF`, `DEFINE-SETF-METHOD`,
+  `DEFINE-MODIFY-MACRO`) are given through the compiler's own top-level
+  driver (`compiler:compile-driver`, `cold:cross-declare-through-driver`):
+  of what it expands into, the accessors and macros are declared as above,
+  each `PUTDECL` (a structure's description, a constructor's structure
+  name, a setf method) becomes a declared property, a `:SIZE-SYMBOL`'s
+  special variable is proclaimed as the tree's specials are, and the
+  load-time forms (`DEFUN`, `DEFPROP`, `PUTPROP`, the printer) are left to
+  the defining file's own compile; any other form stops `cross-begin`.
+  Evaluated whole, as before, `DEFDECL`'s `(EVAL-WHEN (EVAL LOAD) (PUTPROP
+  ...))` put the tree's description on the builder's symbol (measured:
+  `SRCCOM:FILE`'s description replaced while its accessors stayed the
+  builder's), so `cross-begin` refused such a definition. Every accessor and
+  macro so declared is checked as a listed name is, also for a structure
+  left out with `:OMIT`, and each declared property is checked when a
+  compile for the target reads it with `GETDECL`
+  (`cold:cross-getdecl`): one read without its declaration stops the file.
+  Declared so, the tree's 120 structures and 78 setf definitions (57
+  files) gave 1266 declarations in 578 s on micro, most of it reading the
+  files (517 s of a prototype's 530 for the structures' 53 files), with no
+  form refused, and changed none of the builder's 953 structure, accessor
+  and access-function symbols (property lists and functions;
+  `tools/cross-check/README.md`, "The tree's structures"). What this leaves
+  open:
+  - the builder's `DEFSTRUCT` expands the tree's definition, so a change to
+    `DEFSTRUCT` itself (`SYS2; STRUCT`'s functions) is not seen, as a
+    macro's helper functions are not;
+  - `MAKE-SYSTEM` loads the files a compile depends on (`:FASLOAD`) into
+    the builder, on a builder of the target's word the target's QFASLs
+    themselves, so a structure in such a file reaches the builder there, as
+    natively: `(make-system 'internet :compile :noload)` defined
+    `ETHER-COUNTERS-MOVED-P` in the builder with no load replaced;
+  - a `#,` in any form of a listed definition's file is evaluated when
+    `cross-begin` reads the file (`NETWORK; CHAOS; CHSNCP`'s `#,RFC-OP`
+    stops the read, being no special variable there);
+  - a `DEFSTRUCT` inside `EVAL-WHEN (COMPILE ...)` is evaluated in the
+    builder when its own file compiles for the target, as natively; the
+    tree has none.
   No `#,` may sit in a compile-time definition: it puts in the value of the
   world that reads it.
 - **The target's system constants.** Every symbol of the target's
@@ -412,6 +451,10 @@ methods, `CLMAC`'s alternate macros) and must be told apart; and the loads
 also give `DEFVAR`, `DEFFLAVOR` and package declarations, which would need
 their own way in. Several days of work; it is left for the next contract
 that needs a cross build, as it was decided to do it now only if cheap.
+Structures and setf methods are now given through the compiler's driver
+("The tree's compile-time definitions", above), which the full fix would
+take as it is; the tree now has 1370 compile-time definitions, 120 of them
+structures (`crossdefs.py --all`).
 
 ### Checking the cross build
 
