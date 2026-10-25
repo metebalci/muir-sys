@@ -154,11 +154,22 @@ ACK_DEFINE = ('(progn (defvar *ma-n* nil) (defvar *ma-t* nil) (defvar *ma-sink* 
               ' (defun ma-loop (f seconds) (let ((t0 (ip::network-now)) (n 0))'
               ' (do () ((>= (ip::network-time-difference (ip::network-now) t0) (* seconds 1000000)) n)'
               ' (funcall f) (setq n (1+ n)))))'
+              # --loop-process: the loop in a process of its own at priority 0,
+              # made by process-run-function after the echo connection, so that
+              # the test echo service is ahead of it in the scheduler's list;
+              # the listener waits for its count
+              ' (defvar *ma-r* nil)'
+              ' (defun ma-loop-to (f seconds) (setq *ma-r* (ma-loop f seconds)))'
+              ' (defun ma-r-p () *ma-r*)'
+              ' (defun ma-in-process (f seconds) (setq *ma-r* nil)'
+              ' (process-run-function "MA Loop" (function ma-loop-to) f seconds)'
+              ' (process-wait "MA Loop" (function ma-r-p)) *ma-r*)'
               ' (compile (quote ma-cons)) (compile (quote ma-fix)) (compile (quote ma-loop))'
+              ' (compile (quote ma-loop-to)) (compile (quote ma-r-p)) (compile (quote ma-in-process))'
               ' (format t "~%{ma-~a}~%" "ready"))')
 ACK_READY = r'\{ma-(ready)\}'
 ACK_RUN = ('(progn (%s) (process-sleep 60) (setq *ma-flips* nil) (let ((t0 (ip::network-now))'
-           ' (n (ma-loop (quote ma-%s) %d)))'
+           ' (n (%s (quote ma-%s) %d)))'
            ' (format t "~%%{ma-done ~d ~d ~a}~%%" n t0 (reverse *ma-flips*))))')
 ACK_DONE = r'\{ma-done (\d+) (\d+) (\(.*?\)|NIL)\}'
 ACK_IDLE_DOWN = ('(progn (%s) (ip:network-stop) %s(setq *ma-n* (ma-loop (quote ma-%s) %d))'
@@ -182,12 +193,44 @@ def percentile(xs, q):
     return xs[min(len(xs) - 1, int(q * len(xs)))]
 
 
+# The echo service's latency: the ACK is the
+# network process's, at priority 25, but the echoed byte is sent by the test
+# echo service, a process at priority 0 that competes with the loop.  The
+# link loses nothing and the segments arrive in order, so the band's byte I
+# is the echo of the segment delivered I-th; its echo is the band's first
+# data segment on the connection whose sequence range covers byte I, at
+# FIRST + I, and the latency is that segment's time less the delivery.
+# The bound for the default quantum of 6 (SYS2; PRODEF), in ms, the p99 and
+# the max, by engine: rtl, the Kria's model, 200 and 500; micro 300 and 500,
+# since a scheduler pass and a switch cost micro about three times rtl's
+# machine time (2.25 against 0.65 ms a clock break and its pass at 19 ns), and a turn at
+# priority 0 waits for passes.
+ECHO_BOUNDS = {'rtl': (200, 500), 'micro': (300, 500)}
+
+
+def echo_latencies(deliveries, segments, first):
+    """DELIVERIES the machine times of the one-byte segments in order;
+    SEGMENTS (time, seq, length) of the band's data segments in the order
+    sent; FIRST the band's first data sequence number.  The latency of each
+    in ms, None where no echo covers the byte."""
+    out = []
+    for i, when in enumerate(deliveries):
+        b = (first + i) & 0xFFFFFFFF
+        hit = next((t for t, seq, n in segments if ((b - seq) & 0xFFFFFFFF) < n), None)
+        out.append(None if hit is None else (hit - when) / MS)
+    return out
+
+
 def m_ack(s, a):
     """Section 2.6's M-ack: with the compute-bound loop running, --segments
     one-byte data segments on a connection to the test echo service at
     random machine times (gaps uniform between --gap-min and --gap-max ms,
     seeded), each delay the machine time from its delivery to the first
-    segment of the band's that acknowledges it.  With --idle-check, the
+    segment of the band's that acknowledges it, and each echo latency the
+    machine time from its delivery to the band's first data segment that
+    carries its byte back (ECHO_BOUNDS the bound, by engine); with
+    --loop-process the loop runs in a process made after the echo
+    connection.  With --idle-check, the
     loop's iterations in --idle-seconds with the network up and idle, then
     with it stopped, instead."""
     p = s.p
@@ -198,7 +241,7 @@ def m_ack(s, a):
     gc = 'si:gc-on t' if a.gc == 'on' else 'si:gc-off'
     loop = 'cons' if a.gc == 'on' else 'fix'
     if a.idle_check:
-        up = int(type_form(s, c, ACK_RUN % (gc, loop, a.idle_seconds), ACK_DONE, s.now + (a.idle_seconds + 120) * S,
+        up = int(type_form(s, c, ACK_RUN % (gc, 'ma-loop', loop, a.idle_seconds), ACK_DONE, s.now + (a.idle_seconds + 120) * S,
                            group=False)[0])
         mark = len(c.received)
         c.write((ACK_IDLE_DOWN % (gc, TICK if a.idle_tick else '', loop, a.idle_seconds)).encode() + b'\r')
@@ -250,7 +293,7 @@ def m_ack(s, a):
     gaps = [rng.uniform(a.gap_min, a.gap_max) * MS for _ in range(a.segments)]
     seconds = int((sum(gaps) / S) + 3)
     mark = len(c.received)
-    c.write((ACK_RUN % (gc, loop, seconds)).encode() + b'\r')
+    c.write((ACK_RUN % (gc, 'ma-in-process' if a.loop_process else 'ma-loop', loop, seconds)).encode() + b'\r')
     # the segments start once the loop has: after the form's 1 s sleep
     t = s.now + 1500 * MS
     sends = []
@@ -283,6 +326,12 @@ def m_ack(s, a):
         raise Fail('the loop did not end by %s' % at(s.now))
     if k < len(sends):
         raise Fail('the loop ended before the segments: %d of %d sent' % (k, len(sends)))
+    # the echoes still owed when the loop ends: the echo service, no longer
+    # behind the loop, sends them within a pass or two; up to 10 s more
+    first = (e.irs + 1) & 0xFFFFFFFF
+    drain = s.now + 10 * S
+    while s.now < drain and ((e.rcv_nxt - first) & 0xFFFFFFFF) < len(queued):
+        s.run(s.now + p.step)
     acks = [(x.t, x.tcp.ack) for x in e.segments if x.tcp.flags & F.ACK]
     delays, j = [], 0
     for when, edge in queued:
@@ -291,14 +340,28 @@ def m_ack(s, a):
             raise Fail('no ACK of the segment delivered at %s' % at(when))
         delays.append((hit - when) / MS)
     worst, p99, mean = max(delays), percentile(delays, 0.99), sum(delays) / len(delays)
+    echoes = echo_latencies([w for w, _ in queued],
+                            [(x.t, x.tcp.seq, len(x.tcp.data)) for x in e.data_segments], first)
+    got = [x for x in echoes if x is not None]
+    missing = len(echoes) - len(got)
     if a.delays:
         with open(a.delays, 'w') as f:
-            f.write('# delivery (machine s) and delay (ms) of each segment; the flips during the loop, network clock: %s\n'
-                    % flips)
-            f.write('\n'.join('%.6f %.3f' % (w / S, d) for (w, _), d in zip(queued, delays)) + '\n')
+            f.write('# delivery (machine s), delay (ms) of its ACK and latency (ms) of its echo (- for none) of each'
+                    ' segment; the flips during the loop, network clock: %s\n' % flips)
+            f.write('\n'.join('%.6f %.3f %s' % (w / S, d, '-' if x is None else '%.3f' % x)
+                               for (w, _), d, x in zip(queued, delays, echoes)) + '\n')
     verdict = 'within' if worst <= 200 and p99 <= 40 else 'OVER'
-    return 'gc=%s segments=%d max=%.3fms p99=%.3fms mean=%.3fms loop=%d %s machine=%.3f' % (
-        a.gc, len(delays), worst, p99, mean, done, verdict, s.now / S)
+    if got:
+        e50, e99, emax, emean = percentile(got, 0.5), percentile(got, 0.99), max(got), sum(got) / len(got)
+    else:
+        e50 = e99 = emax = emean = float('nan')
+    b99, bmax = ECHO_BOUNDS[a.engine]
+    everdict = 'within' if got and not missing and e99 <= b99 and emax <= bmax else 'OVER'
+    return ('gc=%s%s segments=%d max=%.3fms p99=%.3fms mean=%.3fms loop=%d %s'
+            ' echo-p50=%.3fms echo-p99=%.3fms echo-max=%.3fms echo-mean=%.3fms echo-missing=%d echo-segments=%d'
+            ' echo-%s machine=%.3f') % (
+        a.gc, ' loop-process' if a.loop_process else '', len(delays), worst, p99, mean, done, verdict,
+        e50, e99, emax, emean, missing, len(e.data_segments), everdict, s.now / S)
 
 
 def main():
@@ -328,7 +391,10 @@ def main():
                     help='m-ack, an experiment: the stopped network\'s loop with the clock\'s break every tick')
     ap.add_argument('--echo-priority', type=int, default=None,
                     help="m-ack, an experiment: the test echo service's process at this priority")
-    ap.add_argument('--delays', default=None, help='m-ack: each delay in ms, a line each')
+    ap.add_argument('--loop-process', action='store_true',
+                    help='m-ack: the loop in a process of its own, made after the echo connection, so that the'
+                    ' test echo service is ahead of it at priority 0 (the reverse order)')
+    ap.add_argument('--delays', default=None, help='m-ack: each delay and echo latency in ms, a line each')
     ap.add_argument('--frames', default=None, help='every frame the band sent, with the machine time')
     ap.add_argument('--microcycle-ns', default=None, help="the board's period unless given")
     ap.add_argument('--terminal', default=None, help="quux's --terminal, an address:port of the run's own")

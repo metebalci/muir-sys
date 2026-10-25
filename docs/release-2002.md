@@ -2548,6 +2548,46 @@ and then left the band and the microcode (step R3, below).
   listed file is evaluated when `cross-begin` reads it, and a `DEFSTRUCT`
   inside `EVAL-WHEN (COMPILE)` is evaluated in the builder as natively. The
   CADR's line has no cross build.
+- **The default quantum is 6 TIME units, about 0.1 s, in place of MIT's 60**
+  (`DEFAULT-QUANTUM`, `sys/sys2/prodef.lisp:43`; `PROCESS-RUN-FUNCTION-1`,
+  `sys/sys2/proces.lisp:902`, which wrote 60 itself and now takes
+  `DEFAULT-QUANTUM`). The scheduler gives the processor to the first
+  runnable process of the highest level that has quantum left, so a process
+  at priority 0 waited up to a whole quantum, a second, behind another at 0
+  that computed: a TELNET session, a server or a wait on the file device
+  answered about once a second while a loop ran beside it. Measured with
+  M-ack (below), the band of the hand-over at 2999694 with this tree's
+  `ether.lisp`, at 25 ns, the test echo service's echo latency p50 / p99 /
+  max: on rtl 534 / 1083 / 1153 ms with the collector on and 525 / 1111 /
+  1732 ms with it off, now 56 / 173 / 318 and 55 / 157 / 461; with the loop
+  in a process made after the echo connection, so that the echo service is
+  ahead of it in the list, 525 / 1092 / 1191 and 520 / 1131 / 1351, now 46 /
+  176 / 242 and 39 / 189 / 395. On micro, likewise 563 / 2083 / 2305 and 532
+  / 1240 / 1774, now 66 / 239 / 306 and 62 / 175 / 208, and in the other
+  order 534 / 1174 / 1193 and 543 / 2262 / 2864, now 52 / 186 / 203 and 44
+  / 194 / 255. The ACKs (max 3.6-42.4 ms, p99 3.4-9.2 ms, within M-ack's bound) and the idle
+  check (rtl 0.36% with the collector on, 0.01% off) are as before. The
+  bounds, by engine since a pass costs micro about three and a half times
+  rtl's machine time: on rtl, the Kria's model, echo p99 at most 200 ms and
+  max 500 ms; on micro 300 ms and 500 ms (micro with the collector on and
+  the loop ahead gives p99 239 ms, and 262 and 216 ms with seeds 2 and 3).
+  All eight runs hold them. The loop does 3.3-3.8% fewer iterations on rtl
+  and 7.1-8.1% on micro under M-ack, because the echo service now sends
+  387-440 segments for the 1,000 bytes rather than 55-96, and its own work
+  grows with them: the loss per added segment is within 10% of the band
+  before's own cost per segment, taken from it with the echo service at
+  priority 25, which sends 997-1,000 (on rtl 292-313 iterations a segment
+  against 292 with the collector on, 30-33 against 30 with it off, about
+  5 ms of machine time; on micro 188-201 against 199, and 30-31 against
+  29). With the network idle the loop is within 0.3% of before on both
+  engines. A yield that keeps its quantum (`NETWORK-YIELD`,
+  `sys/network/ip/ether.lisp`, calling the scheduler without
+  `PROCESS-ALLOW-SCHEDULE`) was measured and not taken: it brought micro's
+  p99 to 179-187 ms, but a TELNET session reading a typed form, one lock
+  section a character, then held the processor from the echo service for
+  up to 554 ms, the yield's forfeit having given equal processes a turn
+  after each section; and an echo service ahead of the loop then echoed
+  nearly every byte alone, the loop paying 10% on rtl.
 
 ### The checks
 
@@ -2692,6 +2732,23 @@ and then left the band and the microcode (step R3, below).
 - **`tools/segment-check/measure`** (new; `tools/segment-check/README.md`,
   "The measurements"): section 15's M-refill (`m_refill`, `:110`; the boards,
   `BOARDS`, `:56`) and M-ack (`m_ack`, `:183`) on the clocked socket.
+- **M-ack measures the test echo service's echo latency**
+  (`tools/segment-check/measure`, `echo_latencies`, `:211`; `m_ack`,
+  `:224`): the ACK it bounds is the network process's, at priority 25, but
+  the echoed byte is the echo service's, a process at priority 0 beside the
+  loop. Each segment's echo is the band's first data segment whose sequence
+  range covers its byte, and the line gives the latency's p50, p99, max and
+  mean, the echoes missing and the band's data segments, against the
+  engine's bound (`ECHO_BOUNDS`, `:208`): 200 ms for the p99 and 500 ms for
+  the max on rtl, 300 ms and 500 ms on micro, whose passes cost about three
+  and a half times rtl's. The run waits up to 10 s after the loop for echoes
+  still owed (`:332`). `--loop-process` (`:394`) runs the loop in a process
+  made after the echo connection, so that the echo service is ahead of it
+  in the scheduler's list. The README gives the two checks of the loop's
+  iterations across runs: with the network idle, within 2% of the band
+  before; under M-ack, the loss per echo segment within 10% of the band
+  before's own cost per segment. On M-ack's earlier records the pairing
+  gives the same figures as a separate reading of their frames.
 - **`tools/gtcp/run`** (new; its README): the gate G-TCP (QUUX's Ethernet
   contract, section 8 R2). Each unit of a units file (`read_units`,
   `tools/gtcp/run:100`), a lispm-check case file or a check of system-check,

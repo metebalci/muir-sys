@@ -88,7 +88,7 @@ If :FLAVOR and :SIMPLE-P are NIL, the flavor SI:PROCESS is used.
  or :FLUSH meaning flush the process.  The default is to restart it.
  SI:PROCESS-WARM-BOOT-RESET kills the process.
  SI:PROCESS-WARM-BOOT-RESTART restarts at an earlier stage of booting.
-:QUANTUM is in 60'ths and defaults to one second.
+:QUANTUM is in 60'ths and defaults to DEFAULT-QUANTUM, 6 (about 0.1 s).
 :PRIORITY defaults to 0; larger numbers run more often.
 :STACK-GROUP specifies the stack group for this process to run in.
 If that is omitted, the keyword arguments :SG-AREA,
@@ -895,7 +895,11 @@ alternating keywords and values.  The keywords allowed are:
 (DEFUN PROCESS-RUN-FUNCTION-1 (NAME-OR-KEYS FUNCTION ARGS LOCAL-KEYS)
   (LET ((NAME (IF (STRINGP NAME-OR-KEYS) NAME-OR-KEYS NIL))
 	(PRIORITY 0)
-	(QUANTUM 60.)
+	;; DEFAULT-QUANTUM, 6, in place of MIT's 60 written here, which gave every
+	;; process made by PROCESS-RUN-FUNCTION (TELNET sessions, servers) a
+	;; quantum of one second whatever DEFAULT-QUANTUM said (SYS2; PRODEF).
+	;(QUANTUM 60.)
+	(quantum default-quantum)
 	RESTART-AFTER-RESET RESTART-AFTER-BOOT PROCESS WARM-BOOT-ACTION)
     (KEYWORD-EXTRACT (IF (STRINGP NAME-OR-KEYS) LOCAL-KEYS (APPEND LOCAL-KEYS NAME-OR-KEYS))
 		     KEYWORDS

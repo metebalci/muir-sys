@@ -356,10 +356,38 @@ a loop that conses nothing, `--segments` one-byte data segments go to the
 test echo service at seeded random machine times (gaps of 10 to 90 ms), and
 each delay is the machine time from its delivery to the band's first segment
 that acknowledges it: `max`, `p99` and `mean` against 200 ms and 40 ms.
+The ACK is the network process's, at priority 25; the echoed byte is the
+test echo service's, a process at priority 0 beside the loop, so each
+segment's echo latency is also measured: the machine time from its delivery
+to the band's first data segment on the connection whose sequence range
+covers its byte (the link loses nothing and the bytes arrive in order, so
+the I-th byte is the I-th segment's echo). The line gives `echo-p50`,
+`echo-p99`, `echo-max`, `echo-mean`, the echoes missing and the band's data
+segments, and `echo-within` or `echo-OVER`, every echo there, against the
+engine's bound (`ECHO_BOUNDS`): on rtl, the Kria's model, 200 ms for the p99
+and 500 ms for the max; on micro 300 ms and 500 ms. Each engine has its own
+bound because a turn at priority 0 waits for the scheduler's passes, and a
+pass with its switches costs micro about three and a half times rtl's
+machine time (a clock break and its pass 2.25 ms against 0.65 ms at 19 ns),
+so the same scheduler gives micro a longer tail. The run waits up to 10 s
+after the loop for echoes still owed.
+
+The loop's iterations are judged across runs, against the band before a
+change, in two checks. With the network idle (`--idle-check`'s `up`), the
+loop within 2% of the band before. Under M-ack the loop loses iterations to
+the echo service's own work, which grows with the segments it sends (a
+prompt echo service sends one for nearly every byte, a late one batches
+them): the loss per segment, (loop before - loop) / (segments - segments
+before), within 10% of the band before's own cost per segment, taken from
+two runs of it, M-ack and M-ack with `--echo-priority 25` (which sends about
+one for every byte): (loop - loop at 25) / (segments at 25 - segments). `--loop-process` runs the loop in a process of
+its own, made by `PROCESS-RUN-FUNCTION` after the echo connection, so that
+the echo service is ahead of it in the scheduler's list (the reverse order);
+by default it runs in the control session's listener, made before.
 `--idle-check` instead counts the loop's iterations in `--idle-seconds` with
 the network up and idle, then stopped (`ip:network-stop`), and gives how much
 slower the first is, against 1%. Two experiments, not the measurement:
 `--echo-priority N` puts the test echo service's process at priority N, and
 `--idle-tick` keeps the clock's break every tick in the stopped loop.
-`--delays`, `--frames` and `--session-log` keep each delay, every frame the
-band sent and what the band sent on each connection.
+`--delays`, `--frames` and `--session-log` keep each delay and echo latency,
+every frame the band sent and what the band sent on each connection.

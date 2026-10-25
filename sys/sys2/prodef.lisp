@@ -29,7 +29,18 @@
 (DEFVAR SCHEDULER-EXISTS NIL)		;T if the scheduler and processes are set up.
 (DEFVAR INHIBIT-IDLE-SCAVENGING-FLAG NIL) ;If NIL scavenger runs when no processes runnable
 (DEFVAR GC-IDLE-SCAVENGE-QUANTUM 10.)	;Argument to %GC-SCAVENGE used in that case
-(DEFVAR DEFAULT-QUANTUM 60.)		;Defaultly run each process for at least one second
+;;; The default quantum is 6 TIME units, about 0.1 s, in place of MIT's 60,
+;;; one second.  A process at priority 0 waited up to a whole quantum behind
+;;; another at 0 that computed: a TELNET session, a server or a wait on the
+;;; file device answered about once a second while a loop ran beside it (the
+;;; test echo service's echoes went out in batches every 1.0-1.2 s).  The
+;;; scheduler acts at each pass, which the collector's clock break gives every
+;;; 6 ticks and each received frame gives at once, so with a quantum of 6 an
+;;; equal process takes its turn within one or two tenths of a second (the
+;;; echoes' p99 157-189 ms on rtl at 25 ns).  PROCESS-RUN-FUNCTION's
+;;; default is this variable too (SYS2; PROCES).
+;(DEFVAR DEFAULT-QUANTUM 60.)		;Defaultly run each process for at least one second
+(defvar default-quantum 6.)		;Run each process for at least 6 TIME units, ~0.1 s
 
 (DEFVAR SYSTEM-BEING-INITIALIZED-FLAG T) ;T while coming up, mainly for error-handler
 
