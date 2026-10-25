@@ -3009,6 +3009,16 @@ BEG06	(CALL-NOT-EQUAL MICRO-STACK-PNTR-AND-DATA 	;CLEAR THE MICRO STACK PNTR (TO
 	((md) (a-constant 401))
 	((vma-start-write) (a-constant quux-timer-0-control-virtual-address))
 	(check-page-write-no-interrupt)
+	;; the scheduler's timer (QUUX's timer-driven scheduler, TS-3): timer 1,
+	;; word 112, gets 405: on, one-shot (<2>, taken at this turn-on), and its
+	;; interrupt enable <8>.  reset-devices has left its period at 0, and a
+	;; timer on at period 0 never rises (contract q11), so nothing rises
+	;; until the scheduler writes a period, word 113.  every start of the
+	;; microcode comes through here, a %disk-restore and a warm boot too, so
+	;; each sets it again.  intr-timer-1 (uc-interrupt) takes its rise.
+	((md) (a-constant 405))
+	((vma-start-write) (a-constant quux-timer-1-control-virtual-address))
+	(check-page-write-no-interrupt)
 	(JUMP-XCT-NEXT QLENX)			;CALL INITIAL FUNCTION, NEVER RETURNS
        ((M-ERROR-SUBSTATUS) M-ZERO)
 

@@ -1,0 +1,30 @@
+; The scheduler's timer, timer 1 (QUUX's timer-driven scheduler, TS-3 and
+; TS-4): BEG06 turns it on, one-shot, with its interrupt enable, at period 0
+; (sys/ucadr/uc-cold-disk.lisp), and INTR-TIMER-1 takes its rise: word 112
+; written with 403 (the flag cleared, the timer left on and one-shot), and a
+; sequence break asked for while :clock is enabled
+; (sys/ucadr/uc-interrupt.lisp).  Load lisp/scheduler-timer.lisp first; run
+; it with --network files, so that no Ethernet frame gives a pass
+; (README.md).  Microcode before it leaves timer 1 off, so 112 reads 0 and
+; the first pass after the write is the clock's, about 0.9 s later.
+;
+; After the boot, 112 reads 405 (octal, as every value of word 112 here):
+; on, one-shot, interrupt enable.
+(st-control) => "405"
+; Its period is 0, and the counting process sees passes.
+(st-word #o113) => 0
+(st-setup) => T
+; A period of 5,000 us written while the listener computes: a pass within
+; 10 ms of the write, the loop not starved after the rise (a flag never
+; cleared would interrupt for ever), and 112 back at 405, twice.
+(st-pass-check 5000 10000) => (T T "405")
+(st-pass-check 5000 10000) => (T T "405")
+; The latency of the last, in us, and the loop's rounds in 50 ms before the
+; write and after the rise.
+*st-last*
+; With sequence breaks off, (sb-on nil), the rise asks for none: no pass in
+; 300 ms, the loop not starved, 112 at 405.
+(st-sb-off-check 5000) => (NIL T "405")
+*st-last*
+; Breaks back on: the timer serves again.
+(st-pass-check 2000 10000) => (T T "405")

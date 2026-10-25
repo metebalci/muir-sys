@@ -787,6 +787,34 @@ file carries a comment in that file saying why.
   `tools/assembler-check/run`). The profile was not measured again on the
   changed microcode: its other records are as measured, and a fresh
   measurement belongs to the later work on performance.
+- **Timer 1 is the scheduler's timer: turned on at boot, its rise asks for a
+  sequence break** (QUUX's timer-driven scheduler, TS-3 and TS-4; its slice
+  S1, the microcode alone). `BEG06` writes word 112 with 405 after the tick's
+  turn-on: on, one-shot and its interrupt enable, at the period 0 that
+  `RESET-DEVICES` left, so nothing rises until a period is written to word
+  113 (`sys/ucadr/uc-cold-disk.lisp:3012-3021`); every start of the
+  microcode passes there, a `%DISK-RESTORE` and a warm boot too. Word 100
+  `<1>` goes to `INTR-TIMER-1` in place of `INTR-TIMER-1-STRAY`, which is
+  commented out (`sys/ucadr/uc-interrupt.lisp:95-99`, `:403-433`): it
+  writes 112 with 403, which clears the flag and leaves the timer on and
+  one-shot (the mode is taken only at a turn-on), asks for a sequence break
+  while `:clock` is enabled, as the tick's handler does, and dismisses the
+  interrupt; the break is taken in `SBSER`, as every break is. Before, a
+  reset left timer 1 off and its stray turned it off with a write of 0.
+  Nothing in Lisp writes word 113 yet, so a band runs as before: the
+  scheduler's arming is the next slice. `tools/microcode-check`'s
+  `scheduler-timer` (new, `cases-16/scheduler-timer.cases` with
+  `lisp/scheduler-timer.lisp`, run with `--network files`) checks it: 112
+  reads 405 after the boot, a period of 5,000 us written while the listener
+  computes gives a pass within 10 ms (6.5 ms on micro, 5.3 ms on rtl), and
+  with `(sb-on nil)` none comes. The microcode before it fails 5 of its 9 cases (112
+  reads 0, the first pass 576 ms after the write, the clock's), and each of
+  four planted faults fails it: no break asked for, no flag cleared (the
+  timer interrupts for ever and the case gets no answer), no `:clock` gate,
+  no turn-on. The microcode's number stays 2002; its `ucadr.mcr` is
+  `11b0cb67`, assembled twice alike by `tools/cross-build/run`'s `assemble`
+  on the hand-over band of 2999694, the PROM unchanged (`3d93319a`). The
+  CADR's line has no timer 1.
 - **The file device's pathname host is FILES** (`sys/io/file/hostfs.lisp:168-173`,
   `site/sys.translations:33`, `site/site.lisp:32`, `site/lmlocs.lisp:17-27`).
   With QUUX's network on Ethernet, "host" means a host of the network, as the

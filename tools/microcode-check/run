@@ -9,8 +9,9 @@
 # instead.  The checks of
 # cases-2mw/ want a machine of 2 M words of main memory and run only when
 # named (README.md).
-# The checks of cases-16/ want revision 16, with ethernet-peer behind its
-# Ethernet device, and also run only when named (README.md).
+# The checks of cases-16/ want revision 16, and also run only when named
+# (README.md): ethernet-stray with ethernet-peer behind its Ethernet device,
+# scheduler-timer with --network files.
 # The checks of cases-15/ wanted revision 15 and ran only when named, each
 # skipped on another revision: network-stray, whose Chaosnet interface is gone
 # from revision 16 (QUUX's Ethernet contract, section 8, step R4).  They left

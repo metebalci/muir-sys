@@ -92,7 +92,11 @@ INTR	(CALL-IF-BIT-SET M-INTERRUPT-FLAG ILLOP);Recursive interrupt!
 	;; a stray enable costs one interrupt, not a storm.
 	;; quux revision 11 (contract q13): timer 2 is <2>, and the mouse, <5>,
 	;; and the file device, <7>, which the system polls, have strays too.
-	(jump-if-bit-set (byte-field 1 1) md intr-timer-1-stray)
+	;; timer 1 is the scheduler's timer (QUUX's timer-driven scheduler, TS-3,
+	;; TS-4): its rise asks for a sequence break, so it has a handler, not a
+	;; stray.
+;	(jump-if-bit-set (byte-field 1 1) md intr-timer-1-stray)
+	(jump-if-bit-set (byte-field 1 1) md intr-timer-1)
 ;	(jump-if-bit-set (byte-field 1 7) md intr-timer-2-stray)
 	(jump-if-bit-set (byte-field 1 2) md intr-timer-2-stray)
 	(jump-if-bit-set (byte-field 1 5) md intr-mouse-stray)
@@ -398,11 +402,36 @@ intr-kbd
 
 ;; quux revision 10 (contract q11): timer 1 or 2 interrupted, though no one
 ;; uses them: turn it off, and dismiss the interrupt (see intr).
-intr-timer-1-stray
-	((md) setz)
+;; timer 1's stray is replaced by intr-timer-1 below: timer 1 became the
+;; scheduler's timer.
+;intr-timer-1-stray
+;	((md) setz)
+;	((vma-start-write) (a-constant quux-timer-1-control-virtual-address))
+;	(check-page-write-no-interrupt)
+;	(jump intrx1)
+
+;; the scheduler's timer (QUUX's timer-driven scheduler, TS-3 and TS-4):
+;; timer 1, one-shot with its interrupt enable, turned on at beg06 at period
+;; 0; the scheduler writes its period, word 113, with the microseconds to its
+;; earliest due time before it resumes a process, so its rise is a pass of
+;; the scheduler at that time rather than at the clock's next break.  word
+;; 112 gets 403: on (so the mode, taken only at a turn-on, stays one-shot),
+;; the flag cleared, which drops word 100 <1> (a one-shot then counts
+;; nothing until the next period write), and the interrupt enable.  a
+;; sequence break is then asked for, as the tick's handler asks for its own,
+;; only while :clock is enabled (m-sbs-clock): the break is the clock's, and
+;; sb-on turns the clock off so that nothing time-slices the process that
+;; asked.  the break is taken in sbser, as every break is.  before it, timer
+;; 1 had no user, and its stray turned it off with a write of 0.
+intr-timer-1
+	((md) (a-constant 403))
 	((vma-start-write) (a-constant quux-timer-1-control-virtual-address))
 	(check-page-write-no-interrupt)
+	(jump-if-bit-clear m-sbs-clock intrx1)
+;; quux revision 13 (appendix a1.6): interrupt-control's sequence.break is bit 34.
+	((interrupt-control) ior location-counter (a-constant 1_34.))
 	(jump intrx1)
+
 intr-timer-2-stray
 	((md) setz)
 	((vma-start-write) (a-constant quux-timer-2-control-virtual-address))
