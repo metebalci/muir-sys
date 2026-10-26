@@ -131,11 +131,19 @@ NIL, MIT's free-space rule alone.")
 it starts a young collection at the next scheduling pass once eden is full, rather than
 when the running process's quantum (one second) ends; below the system's processes.")
 
+;(defvar gc-sequence-break-ticks 6
+;  "While automatic collection is on, the clock's sequence break every this many 60ths of a
+;second (GC-ON; GC-OFF gives back the microcode's 60, once a second).  The scheduler runs
+;only at a sequence break or when the running process waits, so at once a second the GC
+;process, whatever its priority, waited up to a second after eden filled.")
+;; the bound is in TIME units since the scheduler's timer (TS-9): 6 of them,
+;; 98.3 ms, in place of 6 ticks of 16.7 ms
 (defvar gc-sequence-break-ticks 6
-  "While automatic collection is on, the clock's sequence break every this many 60ths of a
-second (GC-ON; GC-OFF gives back the microcode's 60, once a second).  The scheduler runs
-only at a sequence break or when the running process waits, so at once a second the GC
-process, whatever its priority, waited up to a second after eden filled.")
+  "While automatic collection is on, a pass of the scheduler at least every this many TIME
+units of 16,384 microseconds while a process runs (GC-ON asks for it through
+REQUEST-CLOCK-RATE; GC-OFF withdraws it).  The scheduler runs only at a pass, so without
+the bound a process with a long quantum held the GC process, whatever its priority, after
+eden filled.")
 
 ;;; quux revision 16 (QUUX's Ethernet contract, 2.6): the clock's rate,
 ;;; %tv-clock-rate, has one owner.  gc-on wrote 6 and gc-off 60 into it
@@ -147,23 +155,45 @@ process, whatever its priority, waited up to a second after eden filled.")
   "Elements (USER . TICKS): the clock's sequence break every TICKS 60ths of a second, as
 USER (:GC, :NETWORK) asked for it through REQUEST-CLOCK-RATE.")
 
-(defun request-clock-rate (user ticks)
-  "Ask for the clock's sequence break every TICKS 60ths of a second on USER's behalf, or
-with TICKS NIL withdraw USER's request; the clock then runs at the smallest rate asked for,
-or the microcode's 60 if none."
+;(defun request-clock-rate (user ticks)
+;  "Ask for the clock's sequence break every TICKS 60ths of a second on USER's behalf, or
+;with TICKS NIL withdraw USER's request; the clock then runs at the smallest rate asked for,
+;or the microcode's 60 if none."
+;  (without-interrupts
+;    (setq clock-rate-requests (delq (assq user clock-rate-requests) clock-rate-requests))
+;    (when ticks (push (cons user ticks) clock-rate-requests))
+;    (write-meter '%tv-clock-rate
+;		 (do ((l clock-rate-requests (cdr l))
+;		      (rate 60. (min rate (cdar l))))
+;		     ((null l) rate))))
+;  ticks)
+;; QUUX's timer-driven scheduler (TS-9): a request is a bound on the time
+;; between two passes of the scheduler while a process runs, in TIME units of
+;; 16,384 us, which the scheduler arms on timer 1 (SYS2; PROCES,
+;; SCHEDULER-ARM); it no longer sets the clock's rate, which stays the
+;; microcode's 60, a break once a second, the floor.  the clock's break every
+;; 6 ticks made a pass for every process, the collector's purpose or not.
+(defun request-clock-rate (user units)
+  "Ask, on USER's behalf, for a pass of the scheduler at least every UNITS TIME units
+/(16,384 microseconds each) while a process runs, or with UNITS NIL withdraw USER's request.
+CLOCK-RATE-BOUND is then the smallest asked for, or NIL if none; the clock's own sequence
+break stays once a second."
   (without-interrupts
     (setq clock-rate-requests (delq (assq user clock-rate-requests) clock-rate-requests))
-    (when ticks (push (cons user ticks) clock-rate-requests))
-    (write-meter '%tv-clock-rate
-		 (do ((l clock-rate-requests (cdr l))
-		      (rate 60. (min rate (cdar l))))
-		     ((null l) rate))))
-  ticks)
+    (when units (push (cons user units) clock-rate-requests))
+    (setq clock-rate-bound
+	  (do ((l clock-rate-requests (cdr l))
+	       (bound nil (if bound (min bound (cdar l)) (cdar l))))
+	      ((null l) bound))))
+  units)
 
 ;; a boot starts with nobody asking: the users that want a rate ask again from
 ;; their warm initializations (gc-boot's gc-on, the network's start), which
 ;; run after the system list.
-(add-initialization "Clock rate" '(progn (setq clock-rate-requests nil)
+;(add-initialization "Clock rate" '(progn (setq clock-rate-requests nil)
+;					  (write-meter '%tv-clock-rate 60.))
+;; and the scheduler's bound with them (TS-9)
+(add-initialization "Clock rate" '(progn (setq clock-rate-requests nil clock-rate-bound nil)
 					  (write-meter '%tv-clock-rate 60.))
 		    '(:system :normal))
 

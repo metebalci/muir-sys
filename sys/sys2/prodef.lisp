@@ -42,6 +42,19 @@
 ;(DEFVAR DEFAULT-QUANTUM 60.)		;Defaultly run each process for at least one second
 (defvar default-quantum 6.)		;Run each process for at least 6 TIME units, ~0.1 s
 
+;;; The scheduler's timer (QUUX's timer-driven scheduler, TS-3 to TS-9): timer
+;;; 1, armed by the scheduler before each resume (SYS2; PROCES,
+;;; SCHEDULER-ARM), so that a process's quantum ends at a pass of the scheduler
+;;; rather than at the clock's next sequence break, once a second with the
+;;; collector off.
+(defvar scheduler-passes 0
+  "The scheduler's resumes of a process's stack group since boot, modulo 2^31.")
+(defvar scheduler-pass-due nil
+  "The microsecond of the network's 31-bit clock at which timer 1 is armed to rise, or NIL.")
+(defvar clock-rate-bound nil
+  "The smallest interval, in TIME units, asked for through REQUEST-CLOCK-RATE, or NIL: the
+longest a process runs without a pass of the scheduler, whatever its quantum (SYS2; GC).")
+
 (DEFVAR SYSTEM-BEING-INITIALIZED-FLAG T) ;T while coming up, mainly for error-handler
 
 

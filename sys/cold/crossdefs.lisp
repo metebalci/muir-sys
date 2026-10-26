@@ -310,4 +310,7 @@
   ("SYS: SYS2; GC" defvar "GC-WAIT-EDEN-WORDS" :special)
   ("SYS: SYS2; GC" defvar "GC-YOUNG-COLLECTION-COUNT" :special)
   ("SYS: SYS2; HASH" defvar "%GC-TENURED-FLIP-GENERATION" :special)
+  ("SYS: SYS2; PRODEF" defvar "CLOCK-RATE-BOUND" :special)
+  ("SYS: SYS2; PRODEF" defvar "SCHEDULER-PASS-DUE" :special)
+  ("SYS: SYS2; PRODEF" defvar "SCHEDULER-PASSES" :special)
   ))

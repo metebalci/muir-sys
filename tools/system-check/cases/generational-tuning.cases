@@ -42,7 +42,13 @@
 ; a revision 16 machine (QUUX's Ethernet contract, 2.6; SI:REQUEST-CLOCK-RATE).
 ; Fails if GC-ON leaves the process at the default priority or the clock at
 ; once a second.
-(progn (si:gc-on t) (list (send si:gc-process :priority) (send current-process :priority) (= (read-meter 'si:%tv-clock-rate) (if (boundp 'si:clock-rate-requests) (min 6 (or (cdr (assq :network si:clock-rate-requests)) 60)) 6)))) => (5 0 T)
+; Since QUUX's timer-driven scheduler (TS-9) the request is the scheduler's
+; bound, SI:CLOCK-RATE-BOUND, 6 TIME units or the network's smaller one (read
+; with the requests under WITHOUT-INTERRUPTS, since the network asks and
+; withdraws by itself over TCP), and the clock's rate stays 60, once a second;
+; before it the case read the rate:
+;(progn (si:gc-on t) (list (send si:gc-process :priority) (send current-process :priority) (= (read-meter 'si:%tv-clock-rate) (if (boundp 'si:clock-rate-requests) (min 6 (or (cdr (assq :network si:clock-rate-requests)) 60)) 6)))) => (5 0 T)
+(progn (si:gc-on t) (list (send si:gc-process :priority) (send current-process :priority) (= (read-meter 'si:%tv-clock-rate) 60) (without-interrupts (eql si:clock-rate-bound (min 6 (or (cdr (assq :network si:clock-rate-requests)) 6)))))) => (5 0 T T)
 ; a young collection comes when eden is full: eden 128 K words, lists consed
 ; in a loop until three flips have come, at most 1.2 M words (6000 lists of
 ; 200), and three flips; the words consed at each are recorded below, not
@@ -66,7 +72,10 @@
 ; GC-OFF gives the clock back its once a second, or the rate another user asks
 ; for (the network's every tick while it is up, as above), and the process its
 ; priority 0
-(progn (si:gc-off) (prog1 (list (= (read-meter 'si:%tv-clock-rate) (if (boundp 'si:clock-rate-requests) (or (cdr (assq :network si:clock-rate-requests)) 60) 60)) (send si:gc-process :priority)) (si:gc-on t))) => (T 0)
+; since the scheduler's timer: the bound withdrawn, or the network's, and the
+; rate still 60; before it the case read the rate:
+;(progn (si:gc-off) (prog1 (list (= (read-meter 'si:%tv-clock-rate) (if (boundp 'si:clock-rate-requests) (or (cdr (assq :network si:clock-rate-requests)) 60) 60)) (send si:gc-process :priority)) (si:gc-on t))) => (T 0)
+(progn (si:gc-off) (prog1 (list (= (read-meter 'si:%tv-clock-rate) 60) (without-interrupts (eql si:clock-rate-bound (cdr (assq :network si:clock-rate-requests)))) (send si:gc-process :priority)) (si:gc-on t))) => (T T 0)
 
 ; (4) C31 (contract G3 step 2, amendment 8): one cons scavenges at most a
 ; page's units while the backlog is at most the backlog limit, 1,048,576

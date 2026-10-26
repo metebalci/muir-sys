@@ -1,0 +1,77 @@
+; The scheduler arms timer 1, the scheduler's timer, before each resume, for the
+; earliest due time (QUUX's timer-driven scheduler, TS-5 to TS-9;
+; sys/sys2/proces.lisp, SCHEDULER-ARM-PERIOD and SCHEDULER-ARM; sys/sys2/gc.lisp,
+; REQUEST-CLOCK-RATE).  Load lisp/scheduler-arming.lisp first; run it with
+; --network files and --compile, and --timeout 600 (README.md).  Before the
+; change a pass came only at a wait, a frame or the clock's break: the pure
+; function's cases fail (it is undefined), two loops take turns about a
+; second long, a loop sees about one pass a second, and the clock's rate is 6
+; with the collector on.
+;
+; (1) The pure function, the pass 100 us into its unit, now at the pass but
+; where DELTA says.  The quantum's end: the remaining quantum (3), not the
+; quantum (6); 3 units less the 100 us gone in this one.
+(sa-period 1000 100 0 :quantum 6 :remaining 3) => 49052
+(sa-period 1000 100 0 :quantum 6 :remaining 6) => 98204
+; a quantum of 0, reached before the pass began: not armed, period 0
+(sa-period 1000 100 0 :quantum 0 :remaining 0) => 0
+; a quantum reached since the pass began, a unit later: 1, a pass at once
+(sa-period 1000 100 16384 :quantum 6 :remaining 1) => 1
+; long sleeps: 2^16 - 1, 2^16 + 1 and 2^17 + 5 units, each clamped to 1,023
+; units, never mapped to an instant of the 31-bit clock, which aliases
+; beyond 2^16 units (F2)
+(sa-period 1000 100 0 :sleep-start 1000 :sleep-interval 65535) => 16760732
+(sa-period 1000 100 0 :sleep-start 1000 :sleep-interval 65537) => 16760732
+(sa-period 1000 100 0 :sleep-start 1000 :sleep-interval 131077) => 16760732
+; a sleep's start and interval across TIME's 2^18 soft carry, and across its
+; 2^23 wrap
+(sa-period 262142 100 0 :sleep-start 262140 :sleep-interval 5) => 49052
+(sa-period 1 100 0 :sleep-start 8388606 :sleep-interval 5) => 32668
+; a sleep reached before the pass began, and one reached since
+(sa-period 1000 100 0 :sleep-start 995 :sleep-interval 5) => 0
+(sa-period 1000 100 16384 :sleep-start 996 :sleep-interval 5) => 1
+; the network's due across the 2^31 us wrap; reached before the pass, and
+; since; clamped at 2^24 - 1 us
+(sa-net-period 2147482648 0 3000) => 3000
+(sa-net-period 5000 0 -10) => 0
+(sa-net-period 5000 20 10) => 1
+(sa-net-period 5000 0 33554432) => 16777215
+; the bound clamped at 1,023 units; the bound below the quantum; the earliest
+; of two; nothing due
+(sa-period 1000 100 0 :bound 2000) => 16760732
+(sa-period 1000 100 0 :quantum 100 :remaining 100 :bound 6) => 98204
+(sa-period 1000 100 0 :quantum 6 :remaining 3 :net-from-pass 10000) => 10000
+(sa-period 1000 100 0) => 0
+;
+; The counting process, the collector off.
+(sa-setup) => T
+; (2) Two loops at priority 0, the collector off, no traffic, 5 s: each loop's
+; longest wait within two quanta and a unit, 215 ms, which allows MIT's level
+; reset (the last runnable entry gets the next quantum).  About a second
+; before the change.
+(let ((r (sa-turns 5))) (list (<= (first r) 215000) (<= (second r) 215000))) => (T T)
+(list (aref *sa-max* 0) (aref *sa-max* 1))
+; (3) Passes a second (F1): one loop, the collector off, about 11 (a pass at
+; each quantum's end and the clock's floor), within 5 to 30; a loop of
+; quantum 600, about 1, the floor; and a loop in a process of quantum 0, alone
+; at its level, which the level's reset runs again and again with its quantum
+; spent: its due time is reached before each pass begins, so it is not armed,
+; and it sees the floor alone, within 30 (armed at once, it gives a pass storm).
+; Beside a loop of quantum 6 such a process is rarely the one resumed, so it
+; is a record only.  The figures follow, with SI:SCHEDULER-PASSES' count.
+(let ((r (sa-passes 5 6))) (and (>= (car r) 5) (<= (car r) 30))) => T
+(let ((r (sa-passes 5 600))) (<= (car r) 3)) => T
+(let ((r (sa-passes 5 0))) (<= (car r) 30)) => T
+(list (sa-passes 3 6) (sa-passes 3 600) (sa-passes 3 0) (sa-passes 3 6 0))
+; (4) With the collector on the clock's rate stays 60, once a second, and the
+; collector's 6 is the scheduler's bound, in TIME units (6 before the change).
+(progn (gc-on t) (read-meter 'si:%tv-clock-rate)) => 60
+si:clock-rate-bound => 6
+(progn (gc-off) (list (read-meter 'si:%tv-clock-rate) si:clock-rate-bound)) => (60 NIL)
+; (5) A consing loop of quantum 60, the collector on, eden at 200,000 words:
+; the GC process takes the processor within 7 units, 114,688 us, of the
+; loop's first sight of eden full, at each of 3 collections (the loop's first
+; stop after it); its figures follow.
+(let ((w (sa-gc-wake 60 3))) (list (length w) (not (dolist (x w) (when (> x 114688) (return t)))))) => (3 T)
+(sa-gc-wake 60 3)
+(progn (gc-off) (setq si:gc-eden-size nil) t) => T

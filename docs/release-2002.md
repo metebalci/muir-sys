@@ -815,6 +815,49 @@ file carries a comment in that file saying why.
   `11b0cb67`, assembled twice alike by `tools/cross-build/run`'s `assemble`
   on the hand-over band of 2999694, the PROM unchanged (`3d93319a`). The
   CADR's line has no timer 1.
+- **The scheduler arms timer 1 before each resume, so that a quantum ends at
+  a pass** (QUUX's timer-driven scheduler, TS-5 to TS-9; its slice S2). A
+  pass came only when the running process waited, at a received Ethernet
+  frame, or at the clock's sequence break, every 6 ticks with the collector
+  on and once a second with it off: a process whose quantum had ended ran on
+  to that break, so two loops at priority 0 took turns 1.005 s long with the
+  collector off (on micro, 25 ns), and a loop saw one pass a second. Now the
+  last step before `STACK-GROUP-RESUME` writes timer 1's period, word 113,
+  with the microseconds to the earliest due time (`SCHEDULER-ARM`,
+  `sys/sys2/proces.lisp:793`, called at `:906`), and the microcode's
+  `INTR-TIMER-1` asks for a break at its rise (S1, above). The due times are
+  computed by a pure function, `SCHEDULER-ARM-PERIOD` (`:745`), which conses
+  nothing: the resumed process's remaining quantum and the bound asked for
+  through `REQUEST-CLOCK-RATE`, each a distance in TIME units from the pass's
+  start, clamped to 1,023 units and converted from the current unit's
+  boundary, never mapped to an instant of the 31-bit clock, which aliases
+  beyond 2^16 units; it also takes the network's due time and a sleep's,
+  which the next slices give it. A due time reached before the pass began is
+  not armed, since the pass has seen its waiter (armed at once it would break
+  every resume, a storm); one reached since gives 1 us; with nothing due the
+  period is 0. The pass's start is read on the microsecond clock beside
+  `THIS-TIME` (`:820`). A pass that finds nothing to run writes 0 once
+  (`SCHEDULER-DISARM`, `:806`, `:884`), and `PROCESS-INITIALIZE` forgets the
+  armed due time (`:1136`). `SI:SCHEDULER-PASSES` counts the resumes and
+  `SI:SCHEDULER-PASS-DUE` holds the armed rise (`sys/sys2/prodef.lisp:50`).
+  `REQUEST-CLOCK-RATE` keeps its users, but its argument is now TIME units
+  and the smallest asked for is `SI:CLOCK-RATE-BOUND` (`prodef.lisp:54`),
+  the longest a process runs without a pass; it no longer writes
+  `%TV-CLOCK-RATE`, which stays the microcode's 60, a break once a second,
+  the floor (`sys/sys2/gc.lisp:176`, `:196`; the old definition commented
+  out). The collector's 6 is now 6 units, 98.3 ms (`:141`). The network's
+  request of 1 while one of its timers is due within 2 s becomes a bound of
+  1 unit until the network's due times go through the timer (S3).
+  `sys/cold/crossdefs.lisp` lists the three new specials.
+  `tools/system-check`'s `scheduler-arming` (new) checks it: two loops'
+  longest waits 100-103 ms on micro and 197 ms on rtl (two quanta, MIT's
+  level reset), 1.005 s before; 12 passes a second beside one loop, 1
+  before; 1 at quantum 600 and at quantum 0; `%TV-CLOCK-RATE` 60 with the
+  collector on, 6 before; the GC process woken 11-81 ms after eden fills
+  with a loop of quantum 60. It fails on the band before the change, and
+  each of its five planted faults fails it.
+  `generational-tuning` checks the bound in place of the clock's rate. The
+  CADR's line keeps MIT's scheduler.
 - **The file device's pathname host is FILES** (`sys/io/file/hostfs.lisp:168-173`,
   `site/sys.translations:33`, `site/site.lisp:32`, `site/lmlocs.lisp:17-27`).
   With QUUX's network on Ethernet, "host" means a host of the network, as the
